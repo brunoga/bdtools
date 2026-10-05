@@ -31,8 +31,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   conversion needs no tool but the encoder. Its output matches mkvmerge's
   packet for packet (checked on a whole film); `--muxer mkvmerge` keeps
   mkvmerge.
+- `mvctools` drives NVENC, VAAPI and VideoToolbox in process through their
+  system libraries, loaded at run time (no cgo, no ffmpeg): the frames go
+  from the decoder straight into the encoder's buffers, half-SBS squeezed on
+  the way. `auto` tries them before ffmpeg; `--gpu-api ffmpeg` keeps ffmpeg.
+  With NVENC a minute of film converts in 7.0 s instead of 7.9 s (full SBS)
+  and 5.0 s instead of 7.5 s (half SBS).
 
 ### Fixed
+
+- `--crf` with VideoToolbox no longer runs backwards: it was passed as
+  ffmpeg's `-q:v`, where higher is better, so the default 18 asked for low
+  quality. It now maps onto VideoToolbox's scale with lower better.
 
 - Audio and subtitles before the playlist's IN time (or a loose stream's
   first picture) and after its OUT time are no longer muxed. tsMuxeR's demux

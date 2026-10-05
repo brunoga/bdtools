@@ -3,7 +3,10 @@ package convert
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"github.com/brunoga/mvc/internal/hwenc"
 )
 
 // Layout is how the two eyes are arranged in the output frame.
@@ -77,6 +80,12 @@ type Options struct {
 	// Muxer writes the MKV: the built-in one (the default; empty means it
 	// too), or mkvmerge.
 	Muxer Muxer
+	// GPUAPI says how a hardware encoder is driven: through its system
+	// library in process (the default; empty means it too), or ffmpeg.
+	GPUAPI GPUAPI
+	// NativeGPU is set by ResolveGPU when the hardware encoder runs in
+	// process.
+	NativeGPU bool
 }
 
 // Muxer names which muxer writes the output.
@@ -220,6 +229,9 @@ func (o Options) NeedsFilters() bool {
 // EncodesViaFFmpeg reports whether ffmpeg runs the encode: always for a
 // hardware encoder, and for software encoding that needs a filter.
 func (o Options) EncodesViaFFmpeg() bool {
+	if o.NativeGPU {
+		return false
+	}
 	return o.Encoder.UsesFFmpeg() || (o.Encoder == EncoderSoftware && o.NeedsFilters())
 }
 
@@ -318,12 +330,25 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 	})
 
 	// 3. Encode.
-	p.Steps = append(p.Steps, encodeStep(opts, videoOut))
+	if opts.NativeGPU {
+		p.Steps = append(p.Steps, nativeEncodeStep(opts, videoOut))
+	} else {
+		p.Steps = append(p.Steps, encodeStep(opts, videoOut))
+	}
 
 	// 4. Mux. Audio, subtitle and chapter arguments are appended by the runner
 	//    from what the demux actually produced.
 	p.Steps = append(p.Steps, muxStep(opts, videoOut))
 	return p, nil
+}
+
+// nativeEncodeStep is the encode with the GPU driven in process.
+func nativeEncodeStep(opts Options, out string) Step {
+	argv := []string{string(opts.Encoder), string(opts.Codec), "qp", strconv.Itoa(opts.CRF)}
+	if opts.Layout == LayoutHalfSBS {
+		argv = append(argv, "half-SBS")
+	}
+	return Step{Name: "encode", Builtin: true, Argv: append(argv, "->", out)}
 }
 
 // muxStep is the final step: mkvmerge, or the built-in muxer.
@@ -350,9 +375,13 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 	}
 	decode = append(decode, "(audio, subtitles and chapters to "+tmp+")")
 	p := &Plan{Intermediates: []string{videoOut}}
+	enc := encodeStep(opts, videoOut)
+	if opts.NativeGPU {
+		enc = nativeEncodeStep(opts, videoOut)
+	}
 	p.Steps = append(p.Steps,
 		Step{Name: "demux and decode", Argv: decode, Builtin: true, PipeTo: "encode"},
-		encodeStep(opts, videoOut),
+		enc,
 		muxStep(opts, videoOut),
 	)
 	return p
@@ -384,7 +413,9 @@ func encodeStep(opts Options, out string) Step {
 			"-c:v", name, "-qp", fmt.Sprint(opts.CRF),
 		}, out)}
 	case EncoderVideoToolbox:
-		return ff([]string{"-c:v", name, "-q:v", fmt.Sprint(opts.CRF)}, "")
+		// VideoToolbox's quality runs the other way, 1 to 100 with higher
+		// better; -q:v takes it, and the in-process encoder maps the same.
+		return ff([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
 	case EncoderNVENC:
 		return ff([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(opts.CRF)}, "")
 	default:

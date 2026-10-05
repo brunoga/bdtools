@@ -11,6 +11,7 @@ import (
 
 	"github.com/brunoga/mvc"
 	"github.com/brunoga/mvc/internal/bdmv"
+	"github.com/brunoga/mvc/internal/hwenc"
 	"github.com/brunoga/mvc/m2ts"
 )
 
@@ -352,4 +353,102 @@ func mustPlan(t *testing.T, o Options) *Plan {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// With the GPU's library working in process, auto picks it before trying
+// ffmpeg, and the conversion then needs no encoder program.
+func TestNativeGPUIsPreferred(t *testing.T) {
+	origNative, origLook := ProbeNative, LookPath
+	t.Cleanup(func() { ProbeNative, LookPath = origNative, origLook })
+	ProbeNative = func(e Encoder, c Codec, _ string) bool { return e == EncoderVAAPI && c == CodecH265 }
+	LookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	if got := DefaultEncoder(context.Background(), "linux", CodecH265, ""); got != EncoderVAAPI {
+		t.Errorf("auto = %s, want vaapi", got)
+	}
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, ""); got != EncoderSoftware {
+		t.Errorf("auto for h264 = %s, want software", got)
+	}
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.Codec = "/in/a.iso", "/out/a.mkv", EncoderVAAPI, CodecH265
+	ResolveGPU(&o)
+	if !o.NativeGPU || len(RequiredFor("linux", o)) != 0 {
+		t.Errorf("native %v, required %v", o.NativeGPU, RequiredFor("linux", o))
+	}
+	if s := mustPlan(t, o).String(); strings.Contains(s, "ffmpeg") || !strings.Contains(s, "vaapi h265 qp") {
+		t.Errorf("plan:\n%s", s)
+	}
+	o.GPUAPI = GPUFFmpeg
+	ResolveGPU(&o)
+	if o.NativeGPU {
+		t.Error("--gpu-api ffmpeg must not run the encoder in process")
+	}
+}
+
+// Half-SBS squeezes each view to half width; a flat view stays flat and a
+// left/right split lands in the right halves.
+func TestDrawSBS(t *testing.T) {
+	mk := func(v byte) *mvc.Frame {
+		f := &mvc.Frame{Width: 8, Height: 4, StrideY: 8, StrideC: 4}
+		f.Y, f.Cb, f.Cr = bytes.Repeat([]byte{v}, 32), bytes.Repeat([]byte{v + 1}, 8), bytes.Repeat([]byte{v + 2}, 8)
+		return f
+	}
+	sf := &mvc.StereoFrame{Base: mk(10), Dependent: mk(200)}
+	for _, half := range []bool{false, true} {
+		w := 16
+		if half {
+			w = 8
+		}
+		p := &hwenc.Picture{Y: make([]byte, 32*4), UV: make([]byte, 32*2), Pitch: 32}
+		drawSBS(p, sf, false, half)
+		for y := 0; y < 4; y++ {
+			for x := 0; x < w; x++ {
+				want := byte(10)
+				if x >= w/2 {
+					want = 200
+				}
+				if p.Y[y*32+x] != want {
+					t.Fatalf("half=%v: Y(%d,%d) = %d, want %d", half, x, y, p.Y[y*32+x], want)
+				}
+			}
+		}
+		for x := 0; x < w; x += 2 {
+			wantU, wantV := byte(11), byte(12)
+			if x >= w/2 {
+				wantU, wantV = 201, 202
+			}
+			if p.UV[x] != wantU || p.UV[x+1] != wantV {
+				t.Fatalf("half=%v: UV at %d = %d,%d", half, x, p.UV[x], p.UV[x+1])
+			}
+		}
+		drawSBS(p, sf, true, half)
+		if p.Y[0] != 200 || p.Y[w-1] != 10 {
+			t.Errorf("swap: %d .. %d", p.Y[0], p.Y[w-1])
+		}
+	}
+}
+
+// VideoToolbox's quality runs the other way from --crf: a lower --crf must
+// ask ffmpeg for a higher -q:v.
+func TestVideoToolboxQualityFollowsCRF(t *testing.T) {
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.GPUAPI = "/in/a.iso", "/out/a.mkv", EncoderVideoToolbox, GPUFFmpeg
+	q := func(crf int) string {
+		o.CRF = crf
+		p, err := BuildPlan("darwin", o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := p.String()
+		i := strings.Index(s, "-q:v ")
+		if i < 0 {
+			t.Fatalf("no -q:v in:\n%s", s)
+		}
+		return strings.Fields(s[i:])[1]
+	}
+	if got := q(18); got != "65" {
+		t.Errorf("--crf 18: -q:v %s, want 65", got)
+	}
+	if got := q(0); got != "100" {
+		t.Errorf("--crf 0: -q:v %s, want 100", got)
+	}
 }

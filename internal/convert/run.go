@@ -486,6 +486,9 @@ func pluralExtras(sel Selection) string {
 // a feature film that is hundreds of gigabytes. keep, when set, decides by
 // timestamp which decoded pictures are output.
 func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(int64) bool, out string) error {
+	if r.Opts.NativeGPU {
+		return r.encodeNative(ctx, src, keep, out)
+	}
 	encStep := encodeStep(r.Opts, out)
 	encBin, err := r.resolve(encoderTool(r.Opts.Encoder, r.Opts.Codec, r.Opts.EncodesViaFFmpeg()))
 	if err != nil {
