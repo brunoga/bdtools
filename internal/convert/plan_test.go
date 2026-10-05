@@ -11,6 +11,9 @@ func opts(goos string, mut func(*Options)) Options {
 	o.Output = "/media/out/Life of Pi (2012).mkv"
 	o.TempDir = "/tmp/work"
 	o.Encoder = EncoderSoftware
+	// The plan tests describe the tsMuxeR pipeline; builtin_test.go has the
+	// built-in demuxer's.
+	o.Demuxer = DemuxerTSMuxeR
 	if mut != nil {
 		mut(&o)
 	}

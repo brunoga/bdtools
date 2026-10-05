@@ -25,6 +25,8 @@ func runnerOpts(t *testing.T) Options {
 	o.Output = filepath.Join(dir, "out.mkv")
 	o.TempDir = t.TempDir()
 	o.Encoder = EncoderSoftware
+	// These describe the tsMuxeR pipeline's tool handling.
+	o.Demuxer = DemuxerTSMuxeR
 	return o
 }
 
@@ -180,38 +182,42 @@ func TestRunnerConvertsARealSource(t *testing.T) {
 		}
 	}
 
-	work := t.TempDir()
-	source := buildTestSource(t, work, fixtures)
+	source := buildTestSource(t, t.TempDir(), fixtures)
+	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
+		t.Run(string(dm), func(t *testing.T) {
+			work := t.TempDir()
+			// A name with spaces and brackets, as a real library uses.
+			out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = source, out, work
+			o.Encoder = EncoderSoftware
+			o.CRF, o.Preset = 25, "ultrafast"
+			o.Demuxer = dm
 
-	// A name with spaces and brackets, as a real library uses.
-	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
-	o := DefaultOptions()
-	o.Input, o.Output, o.TempDir = source, out, work
-	o.Encoder = EncoderSoftware
-	o.CRF, o.Preset = 25, "ultrafast"
+			r := NewRunner(CurrentGOOS, o, nil)
+			if err := r.Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v", err)
+			}
 
-	r := NewRunner(CurrentGOOS, o, nil)
-	if err := r.Run(context.Background()); err != nil {
-		t.Fatalf("conversion failed: %v", err)
-	}
-
-	st, err := os.Stat(out)
-	if err != nil {
-		t.Fatalf("no output: %v", err)
-	}
-	if st.Size() == 0 {
-		t.Fatal("output is empty")
-	}
-	// The stacked frame must be double the single-view width.
-	if w, h := probeSize(t, out); w != 1280 || h != 480 {
-		t.Errorf("output is %dx%d, want 1280x480 side-by-side", w, h)
-	}
-	// And nothing may be left behind.
-	entries, _ := os.ReadDir(work)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "mvctools-") {
-			t.Errorf("work directory left behind: %s", e.Name())
-		}
+			st, err := os.Stat(out)
+			if err != nil {
+				t.Fatalf("no output: %v", err)
+			}
+			if st.Size() == 0 {
+				t.Fatal("output is empty")
+			}
+			// The stacked frame must be double the single-view width.
+			if w, h := probeSize(t, out); w != 1280 || h != 480 {
+				t.Errorf("output is %dx%d, want 1280x480 side-by-side", w, h)
+			}
+			// And nothing may be left behind.
+			entries, _ := os.ReadDir(work)
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), "mvctools-") {
+					t.Errorf("work directory left behind: %s", e.Name())
+				}
+			}
+		})
 	}
 }
 
@@ -228,15 +234,18 @@ func TestRunnerRefusesA2DSource(t *testing.T) {
 		"-f", "lavfi", "-i", "testsrc2=s=320x240:d=1", "-c:v", "libx264", src); err != nil {
 		t.Skipf("could not build a 2D source: %v", err)
 	}
-	o := DefaultOptions()
-	o.Input, o.Output, o.TempDir = src, filepath.Join(work, "x.mkv"), work
-	o.Encoder = EncoderSoftware
-	err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
-	if err == nil {
-		t.Fatal("a 2D source must be refused")
-	}
-	if !strings.Contains(err.Error(), "not 3D") {
-		t.Errorf("error should say the source is not 3D, got: %v", err)
+	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
+		o := DefaultOptions()
+		o.Input, o.Output, o.TempDir = src, filepath.Join(work, "x.mkv"), work
+		o.Encoder = EncoderSoftware
+		o.Demuxer = dm
+		err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
+		if err == nil {
+			t.Fatalf("%s: a 2D source must be refused", dm)
+		}
+		if !strings.Contains(err.Error(), "not 3D") {
+			t.Errorf("%s: error should say the source is not 3D, got: %v", dm, err)
+		}
 	}
 }
 
@@ -316,38 +325,42 @@ func TestRunnerConvertsADiscImage(t *testing.T) {
 			t.Skipf("%s not installed", n)
 		}
 	}
+	iso := buildTestISO(t, t.TempDir(), fixtures)
+	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
+		t.Run(string(dm), func(t *testing.T) {
+			work := t.TempDir()
+			out := filepath.Join(work, "From Image (2012) 3D.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = iso, out, work
+			o.Encoder, o.CRF, o.Preset = EncoderSoftware, 25, "ultrafast"
+			o.Demuxer = dm
 
-	work := t.TempDir()
-	iso := buildTestISO(t, work, fixtures)
-
-	out := filepath.Join(work, "From Image (2012) 3D.mkv")
-	o := DefaultOptions()
-	o.Input, o.Output, o.TempDir = iso, out, work
-	o.Encoder, o.CRF, o.Preset = EncoderSoftware, 25, "ultrafast"
-
-	var lines []string
-	r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
-	if err := r.Run(context.Background()); err != nil {
-		t.Fatalf("converting the image failed: %v\n%s", err, strings.Join(lines, "\n"))
-	}
-	if w, h := probeSize(t, out); w != 1280 || h != 480 {
-		t.Errorf("output is %dx%d, want 1280x480", w, h)
-	}
-	// It must say it read the image and which title it picked, since on a real
-	// disc both are decisions the operator would otherwise have had to make.
-	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"disc image", "chose "} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("progress should mention %q, got:\n%s", want, joined)
-		}
-	}
-	// Nothing extracted from the image may be left behind — on a real disc
-	// that is tens of gigabytes.
-	entries, _ := os.ReadDir(work)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "mvctools-") {
-			t.Errorf("work directory left behind: %s", e.Name())
-		}
+			var lines []string
+			r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+			if err := r.Run(context.Background()); err != nil {
+				t.Fatalf("converting the image failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			if w, h := probeSize(t, out); w != 1280 || h != 480 {
+				t.Errorf("output is %dx%d, want 1280x480", w, h)
+			}
+			// It must say it read the image and which title it picked, since
+			// on a real disc both are decisions the operator would otherwise
+			// have had to make.
+			joined := strings.Join(lines, "\n")
+			for _, want := range []string{"disc image", "chose "} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("progress should mention %q, got:\n%s", want, joined)
+				}
+			}
+			// Nothing extracted from the image may be left behind — on a real
+			// disc that is tens of gigabytes.
+			entries, _ := os.ReadDir(work)
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), "mvctools-") {
+					t.Errorf("work directory left behind: %s", e.Name())
+				}
+			}
+		})
 	}
 }
 
@@ -378,9 +391,6 @@ func buildTestISO(t *testing.T, work, fixtures string) string {
 
 // An image with no Blu-ray structure must say so rather than fail obscurely.
 func TestRunnerRefusesAnImageWithNoBDMV(t *testing.T) {
-	if _, err := LookPath("tsMuxeR"); err != nil {
-		t.Skip("tsMuxeR not installed")
-	}
 	work := t.TempDir()
 	iso := filepath.Join(work, "empty.iso")
 	// Not a UDF image at all: the failure should name the image, not panic.
@@ -390,7 +400,9 @@ func TestRunnerRefusesAnImageWithNoBDMV(t *testing.T) {
 	o := DefaultOptions()
 	o.Input, o.Output, o.TempDir = iso, filepath.Join(work, "x.mkv"), work
 	o.Encoder = EncoderSoftware
-	err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
+	r := NewRunner(CurrentGOOS, o, nil)
+	r.tool = func(string) (string, error) { return "/bin/true", nil }
+	err := r.Run(context.Background())
 	if err == nil {
 		t.Fatal("a non-UDF image must be refused")
 	}

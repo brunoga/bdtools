@@ -69,8 +69,25 @@ type Options struct {
 	// involved and any encoder will do.
 	SwapLR bool
 	// DecodeThreads is how many pictures the decoder works on at once; 0 uses
-	// every CPU. The decode is the one stage that runs in this process.
+	// every CPU.
 	DecodeThreads int
+	// Demuxer reads the source: the built-in one (the default; empty means
+	// it too) reads a disc image or folder in place, or tsMuxeR.
+	Demuxer Demuxer
+}
+
+// builtin reports whether the built-in demuxer is in use. It reads Blu-ray
+// sources; a Matroska, MP4 or VOB input goes to tsMuxeR whatever was asked.
+func (o Options) builtin() bool { return o.Demuxer != DemuxerTSMuxeR && !foreignContainer(o.Input) }
+
+// foreignContainer reports whether a source is a container the built-in
+// demuxer does not read.
+func foreignContainer(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mkv", ".mk3d", ".mp4", ".m4v", ".mov", ".vob":
+		return true
+	}
+	return false
 }
 
 // Step is one external command in the conversion.
@@ -111,6 +128,7 @@ func DefaultOptions() Options {
 		CRF:         18,
 		Preset:      "slow",
 		VAAPIDevice: "/dev/dri/renderD128",
+		Demuxer:     DemuxerBuiltin,
 	}
 }
 
@@ -236,6 +254,9 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 		videoOut = filepath.Join(tmp, "stacked"+opts.Codec.streamExt())
 	)
 
+	if opts.builtin() {
+		return builtinPlan(opts, tmp, videoOut), nil
+	}
 	if opts.Remux {
 		// One step: tsMuxeR reads the source and writes the selected tracks
 		// straight out. No decode, no encode, no interleave, and nothing
@@ -286,6 +307,29 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 		Argv: []string{"mkvmerge", "-o", opts.Output, videoOut},
 	})
 	return p, nil
+}
+
+// builtinPlan is the plan with the built-in demuxer: the source is read
+// once, in place — no extraction from an image, no demuxed copy of either
+// view — with the video decoded on the way and the other tracks written to
+// the work directory for the mux.
+func builtinPlan(opts Options, tmp, videoOut string) *Plan {
+	if opts.Remux {
+		return &Plan{Steps: []Step{{Name: "remux", Builtin: true,
+			Argv: []string{"copy", opts.Input, "->", opts.Output, "(selected tracks, packets untouched)"}}}}
+	}
+	decode := []string{"read", opts.Input, "->", "mvcdec", "-y4m", "-", "-layout", "sbs"}
+	if opts.SwapLR {
+		decode = append(decode, "-swap")
+	}
+	decode = append(decode, "(audio, subtitles and chapters to "+tmp+")")
+	p := &Plan{Intermediates: []string{videoOut}}
+	p.Steps = append(p.Steps,
+		Step{Name: "demux and decode", Argv: decode, Builtin: true, PipeTo: "encode"},
+		encodeStep(opts, videoOut),
+		Step{Name: "mux", Argv: []string{"mkvmerge", "-o", opts.Output, videoOut}},
+	)
+	return p
 }
 
 // encodeStep builds the encoder invocation. Every variant reads Y4M on stdin,
@@ -356,7 +400,7 @@ func (p *Plan) String() string {
 	for i, s := range p.Steps {
 		fmt.Fprintf(&b, "# step %d: %s", i+1, s.Name)
 		if s.Builtin {
-			b.WriteString(" (built in; runs in this process, shown as the equivalent command)")
+			b.WriteString(" (built in, in this process)")
 		}
 		b.WriteString("\n")
 		b.WriteString(strings.Join(s.Argv, " "))

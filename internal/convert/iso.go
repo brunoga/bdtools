@@ -97,7 +97,12 @@ func ExtractBDMV(ctx context.Context, isoPath, dest string, report Reporter) (st
 			return nil
 		}
 		out := filepath.Join(dest, filepath.FromSlash(strings.TrimPrefix(path, "/")))
-		if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
+		// A crafted image could name a file with a separator or "..": nothing
+		// may be written outside the destination.
+		if rel, err := filepath.Rel(dest, out); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("the image names a file outside its own tree: %q", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil { //nolint:gosec // contained: checked above
 			return err
 		}
 		n, err := copyISOFile(file, out)
@@ -170,7 +175,7 @@ func copyISOFile(file *udf.File, dest string) (int64, error) {
 		err = cerr
 	}
 	if err != nil {
-		_ = os.Remove(dest)
+		_ = os.Remove(dest) //nolint:gosec // the file this function created
 		return 0, err
 	}
 	return n, nil

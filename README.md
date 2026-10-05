@@ -7,8 +7,9 @@ view and the dependent view — ready to be consumed by other code.
 
 It ships two commands: `mvcdec`, which decodes a stream to raw YUV or Y4M,
 and [`mvctools`](cmd/mvctools/README.md), which turns a Blu-ray 3D disc,
-image or playlist into a side-by-side MKV (or remuxes it) using the decoder
-plus tsMuxeR, x264/x265 or ffmpeg, and mkvmerge.
+image or playlist into a side-by-side MKV (or remuxes it), reading the disc in
+place with its own demuxer and decoder and handing the frames to x264/x265 or
+ffmpeg, and mkvmerge.
 
 - Bit-exact: verified against the ITU-T/JVT conformance suite (2D and MVC)
   and against a complete 3D Blu-ray feature (all 110,162 access units, both
@@ -127,9 +128,12 @@ mvctools --remux --input disc.iso --output film.m2ts --audio-lang eng --audio-be
 
 Converts a Blu-ray 3D disc image, BDMV folder, playlist or m2ts into a
 side-by-side MKV with the audio and subtitles you choose, or remuxes the
-disc's own MVC video with just those tracks. The decode runs in process; the
-demux, encode and mux use tsMuxeR, x264/x265 or ffmpeg (for hardware
-encoding and half-SBS), and mkvmerge. See [cmd/mvctools](cmd/mvctools/README.md).
+disc's own MVC video with just those tracks. The disc is read once and in
+place — an image is not extracted, the views are not demuxed to disk — and
+decoded in process; the encode and mux use x264/x265 or ffmpeg (for hardware
+encoding and half-SBS) and mkvmerge, and a remux needs no tools at all.
+tsMuxeR remains available with `--demuxer tsmuxer`. See
+[cmd/mvctools](cmd/mvctools/README.md).
 A container with the whole toolchain is published as
 `ghcr.io/brunoga/mvctools` for amd64 and arm64.
 
@@ -183,9 +187,11 @@ go test -tags purego ./...                     # the pure-Go decoder every other
 MVC_BENCH_FILE=clip.264 go test -bench File -run X
 ```
 
-The `mvctools` end-to-end tests build a real 3D m2ts and a UDF disc image
-from the committed MVC fixtures with tsMuxeR and convert them; they skip when
-tsMuxeR, x264, mkvmerge or ffmpeg are not on `PATH`.
+`testdata/bluray` is a synthetic Blu-ray 3D (a folder and a UDF image) the
+built-in demuxer is tested on with no tools installed. The `mvctools`
+end-to-end tests also build a real 3D m2ts and image with tsMuxeR and convert
+them with both demuxers; they skip when tsMuxeR, x264, mkvmerge or ffmpeg are
+not on `PATH`.
 
 `testdata/conformance` holds the ITU-T/JVT conformance bitstreams with
 per-view output hashes (from edge264-mvc). `tools/refdump` is a small C
@@ -203,7 +209,9 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `mvpred.go`, `inter.go`, `intra.go`, `transform.go`, `deblock.go` | prediction and reconstruction |
 | `*_amd64.s`, `*_amd64.go` | assembly kernels and their dispatch; `*_noasm.go`, `*_generic.go` the Go fallbacks |
 | `*_simd_amd64.go` | AVX2 kernels (`GOEXPERIMENT=simd`) |
-| `aureader.go`, `m2ts/` | access unit splitting, transport stream demuxing |
+| `aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
 | `stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/mvctools` | the commands |
-| `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools |
+| `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer |
+| `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
+| `internal/esinfo` | audio and video stream headers, for track listings |

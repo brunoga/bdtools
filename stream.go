@@ -21,6 +21,9 @@ const (
 	// FormatSplit is a pair of Annex B streams: the base view and, separately,
 	// the dependent view, as a demuxer writes them.
 	FormatSplit
+	// FormatAccessUnits takes paired access units from a function, for a
+	// caller doing its own demultiplexing.
+	FormatAccessUnits
 )
 
 // FormatByName guesses the format from a file name: transport streams by
@@ -40,6 +43,11 @@ type Source struct {
 	R io.Reader
 	// Dependent is the dependent view for FormatSplit.
 	Dependent io.Reader
+	// AccessUnits returns the next access unit for FormatAccessUnits: the
+	// base view's NAL units, the dependent view's (nil for a 2D picture),
+	// both Annex B, and a timestamp carried through to the frame. io.EOF
+	// ends the stream.
+	AccessUnits func() (base, dep []byte, pts int64, err error)
 }
 
 // DecodeOptions control DecodeStream.
@@ -125,6 +133,25 @@ func (d *Decoder) DecodeStream(src Source, opts DecodeOptions, emit func(*Stereo
 					}
 					report(d.DecodeAU(dd, int64(n)))
 				}
+			}
+			drain()
+		}
+	case FormatAccessUnits:
+		for n := 0; more(n); n++ {
+			b, dd, pts, err := src.AccessUnits()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				readErr = err
+				break
+			}
+			if err := errors.Join(mux(b), mux(dd)); err != nil {
+				readErr = err
+				break
+			}
+			report(d.DecodeAU(b, pts))
+			if !d.opts.BaseOnly && len(dd) > 0 {
+				report(d.DecodeAU(dd, pts))
 			}
 			drain()
 		}
