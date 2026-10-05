@@ -1,0 +1,338 @@
+package convert
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/brunoga/mvc"
+	"github.com/brunoga/mvc/internal/bdmv"
+	"github.com/brunoga/mvc/m2ts"
+)
+
+// The built-in demuxer is tested on a synthetic Blu-ray (testdata/bluray):
+// the same MVC pair as the other fixtures, with AC-3, LPCM and E-AC-3
+// tracks, as a folder (two clip files) and as a UDF image (an SSIF).
+
+func bluray(name string) string {
+	p, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "bluray", name))
+	return p
+}
+
+var bothForms = []string{"folder", "disc.iso"}
+
+func TestBuiltinListsTheDisc(t *testing.T) {
+	for _, form := range bothForms {
+		src, err := resolveGo(bluray(form), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tracks, err := probeGo(context.Background(), src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, tr := range tracks {
+			got = append(got, tr.StreamID+"/"+tr.Type+"/"+tr.Lang)
+		}
+		want := []string{"V_MPEG4/ISO/AVC/H.264/", "V_MPEG4/ISO/MVC/MVC/", "A_AC3/AC3/eng", "A_LPCM/LPCM/fra",
+			"A_AC3/E-AC3 (DD+)/deu"}
+		if strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("%s: tracks\n %v\nwant\n %v", form, got, want)
+		}
+		if _, err := SelectTracks(tracks); err != nil {
+			t.Errorf("%s: %v", form, err)
+		}
+	}
+}
+
+// decodeBuiltin decodes a source through the built-in demuxer into
+// side-by-side Y4M, writing the selected other tracks to dir.
+func decodeBuiltin(t *testing.T, input, dir string, filter func(*Selection)) ([]byte, []extra) {
+	t.Helper()
+	src, err := resolveGo(input, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks, err := probeGo(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, err := SelectTracks(tracks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filter != nil {
+		filter(&sel)
+	}
+	g := newGoDemux(src, sel, dir, nil)
+	if err := g.start(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	y4m := mvc.NewY4MWriter(&out, mvc.LayoutSideBySide)
+	st, err := mvc.NewDecoder(mvc.Options{}).DecodeStream(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next},
+		mvc.DecodeOptions{}, func(sf *mvc.StereoFrame) error {
+			if !g.KeepFrame(sf.Base.PTS) {
+				return nil
+			}
+			return y4m.Write(sf)
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := y4m.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if st.Errors != 0 || st.DependentFrames != st.Frames {
+		t.Errorf("%d errors, %d of %d frames with a dependent view", st.Errors, st.DependentFrames, st.Frames)
+	}
+	extras, err := g.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes(), extras
+}
+
+// Reading the disc in place gives exactly the pictures of the combined
+// stream the clips were made from, whether the views are two files or an
+// interleaved SSIF.
+func TestBuiltinDecodeMatchesTheCombinedStream(t *testing.T) {
+	dir := fixtureDir(t)
+	want := decodeSource(t, mvc.Source{Format: mvc.FormatAnnexB, R: bytes.NewReader(readFixture(t, dir, "mvc_combined.264"))}, false)
+	for _, form := range bothForms {
+		got, _ := decodeBuiltin(t, bluray(form), t.TempDir(), func(s *Selection) { s.Audio, s.Subtitles = nil, nil })
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: %d bytes of Y4M differ from the combined stream's %d", form, len(got), len(want))
+		}
+	}
+}
+
+// The audio is written as tsMuxeR writes it — the PES payloads, untouched —
+// but only for the stretch the playlist plays: a player never plays what is
+// past OUT_time (here the 1 s tone outlasts the 9-frame video).
+func TestBuiltinAudioIsTheSourceCutToThePlaylist(t *testing.T) {
+	for _, form := range bothForms {
+		_, extras := decodeBuiltin(t, bluray(form), t.TempDir(), nil)
+		if len(extras) != 3 {
+			t.Fatalf("%s: %d tracks written, want 3", form, len(extras))
+		}
+		for _, e := range extras {
+			got, err := os.ReadFile(e.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case strings.HasSuffix(e.path, ".ac3"), strings.HasSuffix(e.path, ".eac3"):
+				srcName := map[bool]string{true: "a.ac3", false: "c.eac3"}[strings.HasSuffix(e.path, ".ac3")]
+				src, _ := os.ReadFile(bluray("src/" + srcName))
+				if len(got) == 0 || !bytes.HasPrefix(src, got) {
+					t.Errorf("%s %s: not a prefix of the source (%d of %d bytes)", form, filepath.Base(e.path), len(got), len(src))
+				}
+				// 0.375 s of video: the cut is within one frame of it.
+				if len(got) >= len(src)/2 {
+					t.Errorf("%s %s: %d of %d bytes kept; the audio past OUT_time should be cut", form, filepath.Base(e.path), len(got), len(src))
+				}
+			case strings.HasSuffix(e.path, ".wav"):
+				src, _ := os.ReadFile(bluray("src/b.wav"))
+				samples := src[bytes.Index(src, []byte("data"))+8:]
+				if string(got[:4]) != "RIFF" || binary.LittleEndian.Uint16(got[22:]) != 2 ||
+					binary.LittleEndian.Uint32(got[24:]) != 48000 || binary.LittleEndian.Uint16(got[34:]) != 16 {
+					t.Errorf("%s: WAV header % x", form, got[:44])
+				}
+				data := got[68:]
+				if int(binary.LittleEndian.Uint32(got[64:])) != len(data) || len(data) == 0 ||
+					!bytes.HasPrefix(samples, data) {
+					t.Errorf("%s: WAV samples are not the source's (%d bytes)", form, len(data))
+				}
+			default:
+				t.Errorf("unexpected track file %s", e.path)
+			}
+		}
+	}
+}
+
+// The remux copies packets untouched and rewrites only the tables: the
+// result decodes to exactly the same pictures, lists only the kept tracks
+// (base view, dependent view, then the rest), and says their languages.
+func TestBuiltinRemux(t *testing.T) {
+	dir := fixtureDir(t)
+	want := decodeSource(t, mvc.Source{Format: mvc.FormatAnnexB, R: bytes.NewReader(readFixture(t, dir, "mvc_combined.264"))}, false)
+	for _, form := range bothForms {
+		out := filepath.Join(t.TempDir(), "remux.m2ts")
+		o := DefaultOptions()
+		o.Input, o.Output, o.Remux = bluray(form), out, true
+		o.Audio = TrackFilter{Langs: []string{"deu"}}
+		r := NewRunner(CurrentGOOS, o, nil)
+		r.tool = func(string) (string, error) { return "", os.ErrNotExist } // needs no tools
+		if err := r.Run(context.Background()); err != nil {
+			t.Fatalf("%s: %v", form, err)
+		}
+		f, err := os.Open(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rd := m2ts.NewReader(f)
+		prog, err := rd.ReadProgram()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pids []uint16
+		for _, s := range prog.Streams {
+			pids = append(pids, s.PID)
+		}
+		if len(pids) != 3 || pids[0] != 0x1011 || pids[1] != 0x1012 || pids[2] != 0x1102 || prog.Streams[2].Lang != "deu" {
+			t.Errorf("%s: program %+v", form, prog.Streams)
+		}
+		seen := map[uint16]bool{}
+		for {
+			p, err := rd.Next()
+			if err != nil {
+				break
+			}
+			seen[p.PID] = true
+		}
+		_ = f.Close()
+		if seen[0x1100] || seen[0x1101] || !seen[0x1102] {
+			t.Errorf("%s: PIDs carried %v", form, seen)
+		}
+		in, _ := os.Open(out)
+		got := decodeSource(t, mvc.Source{Format: mvc.FormatM2TS, R: in}, false)
+		_ = in.Close()
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: the remux decodes differently (%d vs %d bytes)", form, len(got), len(want))
+		}
+	}
+}
+
+// Pictures outside a clip's IN/OUT window are decoded but not output, and a
+// frame is placed in its clip by the tag on its timestamp.
+func TestKeepFrameWindow(t *testing.T) {
+	g := &goDemux{ins: []int64{1000, 50}, outs: []int64{2000, 400}}
+	for _, c := range []struct {
+		clip int
+		pts  int64
+		keep bool
+	}{{0, 999, false}, {0, 1000, true}, {0, 1999, true}, {0, 2000, false}, {1, 50, true}, {1, 1000, false}, {1, 49, false}} {
+		g.clip = c.clip
+		if got := g.KeepFrame(g.tag(c.pts)); got != c.keep {
+			t.Errorf("clip %d pts %d: keep %v, want %v", c.clip, c.pts, got, c.keep)
+		}
+	}
+	if !g.KeepFrame(-1) {
+		t.Error("a picture without a timestamp is kept")
+	}
+}
+
+func TestBetterTitlePrefersContentThenChapters(t *testing.T) {
+	item := func(clip string, secs uint32) bdmv.PlayItem {
+		return bdmv.PlayItem{Clip: clip, InTime: 45000, OutTime: 45000 + secs*45000}
+	}
+	loop := cand{"00020.mpls", &bdmv.Playlist{}}
+	for i := 0; i < 152; i++ {
+		loop.pl.Items = append(loop.pl.Items, item("00240", 80))
+	}
+	bare := cand{"00001.mpls", &bdmv.Playlist{Items: []bdmv.PlayItem{item("00272", 5283)}}}
+	withChapters := cand{"00800.mpls", &bdmv.Playlist{Items: []bdmv.PlayItem{item("00272", 5283)},
+		Marks: []bdmv.Mark{{Type: 1, Time: 45000}, {Type: 1, Time: 45000 * 600}}}}
+	if betterTitle(loop, bare) || !betterTitle(bare, loop) {
+		t.Error("a 152-item loop of one clip must lose to the feature")
+	}
+	if !betterTitle(withChapters, bare) || betterTitle(bare, withChapters) {
+		t.Error("between equal features, the one with chapters wins")
+	}
+}
+
+// Blu-ray LPCM is big-endian, pads an odd channel count, and stores 7.1's
+// back pair before its side pair; the WAV is little-endian and in WAVE
+// order.
+func TestWAVWriterReordersAndSwapsBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.wav")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := newWAVWriter(f)
+	// 7.1 (assignment 11), 48 kHz, 16 bits: one frame of eight samples
+	// numbered by their position on the disc.
+	payload := []byte{0, 0, 11<<4 | 1, 1 << 6}
+	for ch := 0; ch < 8; ch++ {
+		payload = append(payload, 0x10, byte(ch))
+	}
+	if err := w.write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	b, _ := os.ReadFile(path)
+	if binary.LittleEndian.Uint16(b[22:]) != 8 || binary.LittleEndian.Uint32(b[40:]) != 0x63f {
+		t.Errorf("header: %d channels, mask %#x", binary.LittleEndian.Uint16(b[22:]), binary.LittleEndian.Uint32(b[40:]))
+	}
+	data := b[68:]
+	var order []byte
+	for i := 0; i+1 < len(data); i += 2 {
+		if data[i+1] != 0x10 {
+			t.Fatalf("sample %d not byte-swapped: % x", i/2, data[i:i+2])
+		}
+		order = append(order, data[i])
+	}
+	if !bytes.Equal(order, []byte{0, 1, 2, 3, 6, 7, 4, 5}) {
+		t.Errorf("channel order %v", order)
+	}
+}
+
+// A PES of presentation graphics can hold several segments; each gets its
+// own "PG" header, on the output's timeline.
+func TestPGSSegmentsGetHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.sup")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &goDemux{ins: []int64{90000}, outs: []int64{1 << 40}, offsets: []int64{0}}
+	w := &esWriter{track: Track{StreamID: "S_HDMV/PGS"}, f: f, w: f}
+	seg := func(typ byte, body ...byte) []byte { return append([]byte{typ, 0, byte(len(body))}, body...) }
+	payload := append(seg(0x16, 1, 2, 3), seg(0x80)...)
+	if err := g.emitES(w, m2ts.PES{PTS: 90000 + 4500, DTS: -1, Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	b, _ := os.ReadFile(path)
+	want := []byte{'P', 'G', 0, 0, 0x11, 0x94, 0, 0, 0x11, 0x94, 0x16, 0, 3, 1, 2, 3,
+		'P', 'G', 0, 0, 0x11, 0x94, 0, 0, 0x11, 0x94, 0x80, 0, 0}
+	if !bytes.Equal(b, want) {
+		t.Errorf("got  % x\nwant % x", b, want)
+	}
+}
+
+// The built-in plan names no demuxing tool and reads the input in place.
+func TestBuiltinPlan(t *testing.T) {
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = "/in/disc.iso", "/out/a.mkv", "/tmp/w"
+	o.Encoder = EncoderSoftware
+	p, err := BuildPlan("linux", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := p.String()
+	if strings.Contains(s, "tsMuxeR") || !strings.Contains(s, "built in") || !strings.Contains(s, "/in/disc.iso") {
+		t.Errorf("plan:\n%s", s)
+	}
+	if names := RequiredFor("linux", o); len(names) != 2 || names[0].Name != "x264" || names[1].Name != "mkvmerge" {
+		t.Errorf("required %v", names)
+	}
+	o.Remux, o.Output = true, "/out/a.m2ts"
+	if len(RequiredFor("linux", o)) != 0 {
+		t.Error("a built-in remux needs no tools")
+	}
+	o.Demuxer = DemuxerTSMuxeR
+	if names := RequiredFor("linux", o); len(names) != 1 || names[0].Name != "tsmuxer" {
+		t.Errorf("a tsMuxeR remux needs tsMuxeR alone, got %v", names)
+	}
+}

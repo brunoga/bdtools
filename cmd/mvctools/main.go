@@ -62,9 +62,10 @@ func run(argv []string, stdout, stderr *os.File) int {
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
+		demuxer  = fs.String("demuxer", string(convert.DemuxerBuiltin), "builtin (reads a disc image or folder in place) or tsmuxer (the external tsMuxeR)")
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
 		swapLR   = fs.Bool("swap-lr", false, "exchange the eyes (default: taken from the disc's own base-view marking)")
-		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select; for a disc image this reads the image, so pass --temp")
+		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select (with --demuxer tsmuxer a disc image is read first, so pass --temp)")
 		audioLng = fs.String("audio-lang", "", "keep only audio in these languages, e.g. eng or eng,fra (default: every track)")
 		audioCdc = fs.String("audio-codec", "", "keep only audio matching these codecs, e.g. truehd or dts,ac3 (default: every track)")
 		audioBst = fs.Bool("audio-best", false, "of the audio tracks that match, keep only the highest quality one (lossless, then channels, then bitrate)")
@@ -109,7 +110,14 @@ func run(argv []string, stdout, stderr *os.File) int {
 		enc = convert.DefaultEncoder(ctx, goos, cod, *vaapi)
 	}
 
+	dmx := convert.Demuxer(*demuxer)
+	if !dmx.Valid() {
+		fmt.Fprintf(stderr, "mvctools: unknown demuxer %q (want builtin or tsmuxer)\n", dmx)
+		return 2
+	}
+
 	o := convert.DefaultOptions()
+	o.Demuxer = dmx
 	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
@@ -122,7 +130,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	// given: half-SBS or an eye swap moves software encoding onto ffmpeg,
 	// which is a different tool to look for.
 	if *check {
-		rep := convert.Detect(ctx, goos, enc, cod, o.EncodesViaFFmpeg())
+		rep := convert.DetectFor(ctx, goos, o)
 		fmt.Fprint(stdout, rep.String())
 		if !rep.OK() {
 			return 1
@@ -140,7 +148,10 @@ func run(argv []string, stdout, stderr *os.File) int {
 			fmt.Fprintf(stderr, "mvctools: --list needs --input\n")
 			return 2
 		}
-		if rep := convert.Detect(ctx, goos, enc, cod, o.EncodesViaFFmpeg()); !rep.OK() {
+		// Listing needs only the demuxer: a remux's requirements.
+		lo := o
+		lo.Remux = true
+		if rep := convert.DetectFor(ctx, goos, lo); !rep.OK() {
 			fmt.Fprint(stderr, rep.String())
 			fmt.Fprintf(stderr, "\nmvctools: cannot list a source without the toolchain; see --check\n")
 			return 1
@@ -169,7 +180,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	// Refuse to start rather than fail hours in. A conversion is long enough
 	// that a missing tool discovered at step three is a wasted evening.
-	if rep := convert.Detect(ctx, goos, enc, cod, o.EncodesViaFFmpeg()); !rep.OK() {
+	if rep := convert.DetectFor(ctx, goos, o); !rep.OK() {
 		fmt.Fprint(stderr, rep.String())
 		fmt.Fprintf(stderr, "\nmvctools: refusing to start with tools missing; see --check\n")
 		return 1

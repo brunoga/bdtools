@@ -66,6 +66,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 	defer cleanup()
+	if r.Opts.builtin() {
+		return r.runBuiltin(ctx, tmp)
+	}
+	if r.Opts.Demuxer != DemuxerTSMuxeR {
+		r.Report.Report("reading %s with tsMuxeR: the built-in demuxer reads Blu-ray sources", filepath.Ext(r.Opts.Input))
+	}
 
 	// An image or a disc folder is resolved to a concrete playlist first, so
 	// everything after this works on one file as before.
@@ -98,12 +104,73 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
+	baseF, err := os.Open(demuxed.base) //nolint:gosec // our own demuxed file in the work directory
+	if err != nil {
+		return fmt.Errorf("reading the base view: %w", err)
+	}
+	defer func() { _ = baseF.Close() }()
+	depF, err := os.Open(demuxed.dependent) //nolint:gosec // our own demuxed file in the work directory
+	if err != nil {
+		return fmt.Errorf("reading the dependent view: %w", err)
+	}
+	defer func() { _ = depF.Close() }()
+
 	video := filepath.Join(tmp, "stacked"+r.Opts.Codec.streamExt())
-	if err := r.decodeAndEncode(ctx, demuxed.base, demuxed.dependent, video); err != nil {
+	src := mvc.Source{Format: mvc.FormatSplit, R: bufio.NewReaderSize(baseF, 4<<20), Dependent: bufio.NewReaderSize(depF, 4<<20)}
+	if err := r.decodeAndEncode(ctx, src, nil, video); err != nil {
 		return err
 	}
 
-	return r.mux(ctx, video, demuxed.extras)
+	return r.mux(ctx, video, demuxed.extras, "")
+}
+
+// runBuiltin is Run with the built-in demuxer: the source is read once, in
+// place, with the video going straight into the decoder and the other
+// tracks to their files on the way.
+func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
+	src, err := resolveGo(r.Opts.Input, r.Report)
+	if err != nil {
+		return err
+	}
+	// Take the eye order from the disc unless it was given explicitly.
+	if src.knownEye && !r.SwapLRSet {
+		r.Opts.SwapLR = src.baseViewIsRight
+	}
+	r.Report.Report("probing %s", src.clips[0].path)
+	tracks, err := probeGo(ctx, src)
+	if err != nil {
+		return err
+	}
+	sel, err := SelectTracks(tracks)
+	if err != nil {
+		return err
+	}
+	if sel, err = sel.Apply(r.Opts.Audio, r.Opts.Subs); err != nil {
+		return err
+	}
+	r.Selected = sel
+	if r.Opts.Remux {
+		return r.remuxBuiltin(ctx, src, sel)
+	}
+	r.Report.Report("source: base view track %d, dependent view track %d, %d audio, %d subtitle",
+		sel.Base.ID, sel.Dependent.ID, len(sel.Audio), len(sel.Subtitles))
+	for _, a := range sel.Audio {
+		r.Report.Report("audio: %s", DescribeAudio(a))
+	}
+	g := newGoDemux(src, sel, tmp, r.Report)
+	if err := g.start(); err != nil {
+		return err
+	}
+	video := filepath.Join(tmp, "stacked"+r.Opts.Codec.streamExt())
+	decErr := r.decodeAndEncode(ctx, mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, g.KeepFrame, video)
+	extras, finErr := g.finish()
+	if decErr != nil {
+		return decErr
+	}
+	if finErr != nil {
+		return finErr
+	}
+	return r.mux(ctx, video, extras, g.chapters)
 }
 
 // workDir returns the scratch directory and a cleanup. A conversion writes tens
@@ -231,6 +298,15 @@ func (r *Runner) probe(ctx context.Context, source string) (Selection, error) {
 // without extracting the playlist first. That is worth knowing before running
 // it against a 40 GB image over a network share.
 func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
+	if r.Opts.builtin() {
+		// Reading the playlists and the first megabytes of the feature's
+		// stream is enough, wherever the disc is: nothing is extracted.
+		src, err := resolveGo(r.Opts.Input, r.Report)
+		if err != nil {
+			return nil, err
+		}
+		return probeGo(ctx, src)
+	}
 	tmp, cleanup, err := r.workDir()
 	if err != nil {
 		return nil, err
@@ -402,25 +478,16 @@ func pluralExtras(sel Selection) string {
 	return fmt.Sprintf(" and %d other track(s)", n)
 }
 
-// decodeAndEncode decodes the two demuxed views in process and streams the
-// stacked frames into the encoder as Y4M. The raw frames never touch the
-// disk: for a feature film that is hundreds of gigabytes.
-func (r *Runner) decodeAndEncode(ctx context.Context, base, dependent, out string) error {
+// decodeAndEncode decodes the source in process and streams the stacked
+// frames into the encoder as Y4M. The raw frames never touch the disk: for
+// a feature film that is hundreds of gigabytes. keep, when set, decides by
+// timestamp which decoded pictures are output.
+func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(int64) bool, out string) error {
 	encStep := encodeStep(r.Opts, out)
 	encBin, err := r.resolve(encoderTool(r.Opts.Encoder, r.Opts.Codec, r.Opts.EncodesViaFFmpeg()))
 	if err != nil {
 		return err
 	}
-	baseF, err := os.Open(base) //nolint:gosec // our own demuxed file in the work directory
-	if err != nil {
-		return fmt.Errorf("reading the base view: %w", err)
-	}
-	defer func() { _ = baseF.Close() }()
-	depF, err := os.Open(dependent) //nolint:gosec // our own demuxed file in the work directory
-	if err != nil {
-		return fmt.Errorf("reading the dependent view: %w", err)
-	}
-	defer func() { _ = depF.Close() }()
 
 	enc := exec.CommandContext(ctx, encBin, encStep.Argv[1:]...) //nolint:gosec // encBin came from LookPath
 	stdin, err := enc.StdinPipe()
@@ -443,8 +510,8 @@ func (r *Runner) decodeAndEncode(ctx context.Context, base, dependent, out strin
 		lastReport = started
 		frames     int
 	)
-	st, decErr := dec.DecodeStream(mvc.Source{Format: mvc.FormatSplit, R: bufio.NewReaderSize(baseF, 4<<20),
-		Dependent: bufio.NewReaderSize(depF, 4<<20)}, mvc.DecodeOptions{
+	var skipped int
+	st, decErr := dec.DecodeStream(src, mvc.DecodeOptions{
 		OnError: func(err error) {
 			// A damaged access unit is concealed and the decode goes on; a
 			// few are worth a line, a flood is not.
@@ -454,6 +521,13 @@ func (r *Runner) decodeAndEncode(ctx context.Context, base, dependent, out strin
 			}
 		},
 	}, func(sf *mvc.StereoFrame) error {
+		if keep != nil && !keep(sf.Base.PTS) {
+			skipped++
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if frames == 0 {
 			if num, den := dec.FrameRate(); num > 0 {
 				y4m.FPSNum, y4m.FPSDen = num, den
@@ -487,16 +561,19 @@ func (r *Runner) decodeAndEncode(ctx context.Context, base, dependent, out strin
 	case st.DependentFrames == 0:
 		return fmt.Errorf("the dependent view decoded to nothing: the source does not look like 3D")
 	}
+	if skipped > 0 {
+		r.Report.Report("left out %d pictures outside the playlist's IN/OUT times", skipped)
+	}
 	if decodeErrs > 0 {
-		r.Report.Report("decoded %d frames, %d access units had errors and were concealed", st.Frames, decodeErrs)
+		r.Report.Report("decoded %d frames, %d access units had errors and were concealed", frames, decodeErrs)
 	} else {
-		r.Report.Report("decoded %d frames", st.Frames)
+		r.Report.Report("decoded %d frames", frames)
 	}
 	return nil
 }
 
-// mux assembles the final file.
-func (r *Runner) mux(ctx context.Context, video string, extras []extra) error {
+// mux assembles the final file, with chapters when a chapter file is given.
+func (r *Runner) mux(ctx context.Context, video string, extras []extra, chapters string) error {
 	bin, err := r.resolve(toolMkvmerge)
 	if err != nil {
 		return err
@@ -506,6 +583,9 @@ func (r *Runner) mux(ctx context.Context, video string, extras []extra) error {
 		r.Report.Report("dropping %s embedded in the %s track", d.codec, d.of)
 	}
 	argv := muxArgv(r.Opts.Output, video, extraArgs)
+	if chapters != "" {
+		argv = append([]string{"--chapters", chapters}, argv...)
+	}
 	r.Report.Report("muxing %s", r.Opts.Output)
 	if out, err := exec.CommandContext(ctx, bin, argv...).CombinedOutput(); err != nil { //nolint:gosec // bin came from LookPath
 		return fmt.Errorf("muxing: %w\n%s", err, strings.TrimSpace(string(out)))

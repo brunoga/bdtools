@@ -240,8 +240,33 @@ var (
 // needs none, being built in. Only the encode step varies: a hardware encoder
 // is ffmpeg either way, and software encoding is whichever of x264 / x265
 // matches the codec.
+//
+// This is the set for a conversion with tsMuxeR as the demuxer; RequiredFor
+// answers for any options.
 func Required(goos string, enc Encoder, codec Codec, viaFFmpeg bool) []Tool {
-	return []Tool{toolTSMuxeR, encoderTool(enc, codec, viaFFmpeg), toolMkvmerge}
+	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false)
+}
+
+// RequiredFor returns the tools a run with these options needs. With the
+// built-in demuxer a remux needs none at all, and a conversion only the
+// encoder and the muxer.
+func RequiredFor(goos string, o Options) []Tool {
+	demux := DemuxerBuiltin
+	if !o.builtin() {
+		demux = DemuxerTSMuxeR
+	}
+	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux)
+}
+
+func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool) []Tool {
+	var tools []Tool
+	if demux == DemuxerTSMuxeR {
+		tools = append(tools, toolTSMuxeR)
+	}
+	if remux {
+		return tools
+	}
+	return append(tools, encoderTool(enc, codec, viaFFmpeg), toolMkvmerge)
 }
 
 // encoderTool is the program that runs the encode. The runner resolves the
@@ -304,8 +329,17 @@ var LookPath = exec.LookPath
 // when asked for one, and tsMuxeR has no version flag at all, so a tool that
 // was found but would not report a version is still reported as present.
 func Detect(ctx context.Context, goos string, enc Encoder, codec Codec, viaFFmpeg bool) Report {
+	return detect(ctx, goos, enc, codec, Required(goos, enc, codec, viaFFmpeg))
+}
+
+// DetectFor locates the tools a run with these options needs.
+func DetectFor(ctx context.Context, goos string, o Options) Report {
+	return detect(ctx, goos, o.Encoder, o.Codec, RequiredFor(goos, o))
+}
+
+func detect(ctx context.Context, goos string, enc Encoder, codec Codec, tools []Tool) Report {
 	rep := Report{GOOS: goos, Encoder: enc, Codec: codec}
-	for _, t := range Required(goos, enc, codec, viaFFmpeg) {
+	for _, t := range tools {
 		f := Found{Tool: t}
 		for _, bin := range t.Binaries {
 			if p, err := LookPath(bin); err == nil {
@@ -362,9 +396,12 @@ func (r Report) String() string {
 			}
 		}
 	}
-	if r.OK() {
+	switch {
+	case len(r.Tools) == 0:
+		b.WriteString("  no external tools needed\n")
+	case r.OK():
 		fmt.Fprintf(&b, "\nall %d required tools present\n", len(r.Tools))
-	} else {
+	default:
 		fmt.Fprintf(&b, "\n%d of %d tools missing\n", len(r.Missing()), len(r.Tools))
 	}
 	return b.String()

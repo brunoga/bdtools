@@ -55,10 +55,19 @@ func TestDryRunNeedsNoTools(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	for _, want := range []string{"tsMuxeR", "mvcdec", "x264", "mkvmerge", "built in"} {
+	for _, want := range []string{"read /media/Life of Pi (2012)/disc.iso", "mvcdec", "x264", "mkvmerge", "built in"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run should mention %q, got:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "tsMuxeR") {
+		t.Errorf("the built-in demuxer is the default:\n%s", out)
+	}
+	// And tsMuxeR is still there when asked for.
+	tsm, _, code := capture(t, "--dry-run", "--encoder", "x264", "--demuxer", "tsmuxer",
+		"--input", "/media/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(tsm, "tsMuxeR") {
+		t.Errorf("--demuxer tsmuxer: exit %d\n%s", code, tsm)
 	}
 	// The decoder stacks the eyes itself, so nothing else should.
 	for _, unwanted := range []string{"StackHorizontal", "vspipe", "vapoursynth"} {
@@ -154,5 +163,20 @@ func TestCheckReportsAndExitsNonZeroWhenIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(out, "MISSING") && code != 0 {
 		t.Error("exit must be zero when every tool is present")
+	}
+}
+
+func TestUnknownDemuxerIsRefused(t *testing.T) {
+	_, errOut, code := capture(t, "--dry-run", "--demuxer", "ffmpeg", "--input", "/in/a.iso", "--output", "/out/a.mkv")
+	if code != 2 || !strings.Contains(errOut, "demuxer") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+// A built-in remux runs nothing external, and --check says so.
+func TestCheckForABuiltinRemux(t *testing.T) {
+	out, _, code := capture(t, "--check", "--remux")
+	if code != 0 || !strings.Contains(out, "no external tools needed") {
+		t.Errorf("exit %d\n%s", code, out)
 	}
 }

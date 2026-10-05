@@ -18,18 +18,26 @@ Complete, and tested end to end against a real MVC source — see
 ## The pipeline
 
 ```
-tsMuxeR    demux the base (AVC) and dependent (MVC) views, audio, subs, chapters
-decoder    decode both eyes and stack them side by side, as Y4M — built in  ─┐
-encoder    x264 or x265, or ffmpeg with a platform hardware encoder          ─┘ piped
+demuxer    read the disc in place; the video goes to the decoder, audio,   ─┐
+           subtitles and chapters to the work directory — built in         │
+decoder    decode both eyes and stack them side by side, as Y4M — built in ─┤ one pass,
+encoder    x264 or x265, or ffmpeg with a platform hardware encoder        ─┘ piped
 mkvmerge   mux the result back together
 ```
 
-The decoder is this repository's own MVC decoder, running in process: it reads
-the demuxed pair exactly as tsMuxeR writes it (its documentation is explicit
-that it **always splits** a combined AVC/MVC track into a base `.264` and a
-dependent `.mvc`) and streams the stacked frames straight into the encoder.
-Nothing is spooled between the stages: raw frames for a feature film are
-hundreds of gigabytes.
+The disc is read **once and in place**: a `.iso` straight out of the image, a
+folder straight from its files. Nothing is extracted and neither view is
+demuxed to disk — the access units go from the disc to this repository's MVC
+decoder, and the stacked frames straight into the encoder. The only files
+written are the audio and subtitle tracks the mux needs, and the encoded
+video. For a feature film that is the difference between a scratch directory
+the size of the disc (twice over: the extracted stream, then the demuxed
+views) and one the size of its soundtrack.
+
+`--demuxer tsmuxer` uses [tsMuxeR](#tsmuxer) instead, as before: the image's
+streams are extracted, tsMuxeR demuxes them, and the decoder reads the
+demuxed pair. A Matroska, MP4 or VOB source always goes that way, since the
+built-in demuxer reads Blu-ray sources.
 
 ## Usage
 
@@ -45,52 +53,43 @@ mvctools --input 00800.m2ts --output "Life of Pi (2012).mkv"
 |---|---|---|
 | A `.iso` disc image | the `.iso` | **it does** |
 | A ripped BDMV folder | the folder, or its `BDMV` | **it does** |
+| An AVCHD 3D recording | the folder holding `PRIVATE/AVCHD` | **it does** |
 | A specific playlist | `BDMV/PLAYLIST/00800.mpls` | you |
-| Loose streams | the feature's `.m2ts` | you |
-| An MKV from MakeMKV | the `.mkv` | you |
+| Loose streams | the feature's `.m2ts`, or its `STREAM/SSIF/*.ssif` | you |
+| An MKV from MakeMKV | the `.mkv` (read with tsMuxeR) | you |
 
-**A disc image needs no mounting.** Mounting one requires root, which rules it
-out for an unattended conversion, so the image is read directly — a Blu-ray is a
-UDF 2.50 filesystem and a pure-Go reader handles it on every platform. Only the
-files a conversion needs come out of it:
-
-```
-BDMV/PLAYLIST/*.mpls     which clips make up a title; tiny
-BDMV/CLIPINF/*.clpi      stream metadata; tiny
-BDMV/STREAM/SSIF/*.ssif  base and dependent views interleaved — the 3D stream
-```
-
-The base-view `BDMV/STREAM/*.m2ts` is **skipped**: on the disc it shares extents
-with the matching SSIF, so copying both would write the base view twice, and
-tsMuxeR reads a playlist perfectly well without it. `BACKUP`, `AUXDATA`,
-`CERTIFICATE`, `JAR`, `BDJO` and `META` are skipped outright.
+**A disc image needs no mounting and no extraction.** Mounting one requires
+root, which rules it out for an unattended conversion, so the image is read
+directly — a Blu-ray is a UDF 2.50 filesystem and a pure-Go reader handles it on
+every platform — and the feature's stream is decoded straight out of it.
 
 ### Choosing the title
 
-Given an image or a folder, every playlist is probed and **the longest 3D one
-wins**. A disc holds a playlist per title — the feature, its trailers, the
-menus, and often several near-duplicates of the feature — so picking by filename
-or number gets a trailer as often as the film. Length is the signal that works:
-a feature is tens of times longer than anything else on the disc.
+Given an image or a folder, the playlists themselves are read — instantly, and
+without touching a stream — and the 3D one holding **the most distinct content**
+wins. A disc holds a playlist per title: the feature, its trailers, the menus,
+and often several near-duplicates of the feature. Some also carry playlists
+that loop one short clip a hundred times (menus, demo loops, decoys meant to
+confuse rippers) and so run *longer* than the film; counting each stretch of a
+clip once sees through those. Between copies of the feature the one with
+chapters wins, then the one in fewer pieces.
 
 ```
-mvctools: reading the disc image (no mount needed)
-mvctools: extracted 142 of 1206 files from the image (31.4 GiB)
-mvctools: chose 00800.mpls (1h58m12s) from 37 playlists, 3 of them 3D
+mvctools: reading the disc image in place (no mount, no extraction)
+mvctools: chose 00800.mpls (1h28m3s) from 46 playlists, 24 of them 3D
 ```
 
-**The eye order comes from the disc too.** tsMuxeR reports whether the base view
-is the left or the right eye, and the decoder stacks the views the other way
-round when it is the right — most discs are left, some are not, and the
+**The eye order comes from the disc too.** The playlist says whether the base
+view is the left or the right eye, and the decoder stacks the views the other
+way round when it is the right — most discs are left, some are not, and the
 difference is the difference between 3D and a headache. `--swap-lr` overrides
 it when given explicitly.
 
 It reports as it goes, because a feature film takes hours:
 
 ```
-mvctools: probing /media/3d-staging/disc.m2ts
+mvctools: probing STREAM/SSIF/00272.ssif
 mvctools: source: base view track 4113, dependent view track 4114, 2 audio, 4 subtitle
-mvctools: demuxing both views and 6 other track(s)
 mvctools: decoding and encoding (h264, nvenc)
 mvctools: frame rate 24000/1001
 mvctools: 1800 frames decoded (61.2 fps)
@@ -127,6 +126,7 @@ scheduler such as pipeliner retry it.
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
+| `--demuxer` | `builtin` | `builtin` reads the disc in place; `tsmuxer` uses tsMuxeR — see [The pipeline](#the-pipeline) |
 
 `--layout full` is almost always what a 3D library wants: it is the only layout
 that keeps the disc's resolution, and it is what the decoder emits natively, so
@@ -170,7 +170,7 @@ The codec is independent of the encoder: every encoder below produces either.
 ## Choosing tracks
 
 By default every audio and subtitle track the disc carries is passed through
-untouched, each tagged with the language tsMuxeR reported for it, so a player
+untouched, each tagged with the language the disc gives it, so a player
 can tell them apart.
 
 That default is often not what you want, because **lossless audio dominates the
@@ -219,12 +219,13 @@ Notes on the matching:
   defeat the request, and dropping all audio would produce a film nobody can
   watch, discovered hours later.
 - Filtering happens **before the demux**, so a narrowed selection means fewer
-  tracks to extract and less scratch space, not merely a smaller output.
+  tracks written and less scratch space, not merely a smaller output.
 
-`--list` needs the toolchain, and for a disc image it reads the image to get at
-a playlist — there is no way to ask tsMuxeR what a source holds without
-extracting it first. Pass `--temp` somewhere with room, and expect it to cost
-what a conversion's first stage costs.
+`--list` reads the playlists and the first few megabytes of the feature's
+stream, wherever they are, so it is instant even on an image over a network
+share. (With `--demuxer tsmuxer` it has to extract the image first, which
+costs what a conversion's first stage costs: pass `--temp` somewhere with
+room.)
 
 ### The best track, rather than a named one
 
@@ -286,6 +287,30 @@ until the source has been probed, and probing a disc image twice to decide a
 filename would cost as much as the conversion's first stage. The final path is
 printed to stdout either way, so a script driving this need not guess at it.
 
+## Remuxing instead of converting
+
+`--remux` keeps the disc's own MVC video, bit for bit, and drops only the
+tracks the filters leave out:
+
+```sh
+mvctools --remux --input disc.iso --output "Film (2012) 3D.m2ts" \
+         --audio-lang eng --audio-best --subs-lang eng
+```
+
+The transport packets are copied untouched, arrival timestamps and all; only
+the program tables are rewritten to list what is kept (base view, dependent
+view, then the rest in the disc's order, each with its language). A pressed
+disc keeps the two views in separate clips interleaved in the SSIF, so their
+packets are merged back into arrival order — both clips run on one clock —
+giving one transport stream with both views, which is what a player that
+decodes MVC expects. Nothing is decoded or re-timed, so the result plays
+exactly as the disc does, and it needs no tools at all.
+
+The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
+has no home in Matroska that players agree on. Nothing about the picture can
+change, so `--layout half` and `--swap-lr` are refused. A title made of
+several clips joined together is remuxed with `--demuxer tsmuxer`.
+
 ## What plays the result, and at what resolution
 
 The output declares its layout in the Matroska `StereoMode` element
@@ -316,15 +341,16 @@ that will only take that, and costs half the horizontal detail by definition.
 
 ## Tools, and why each is needed
 
-Three, and one of them is either/or. The decode itself needs nothing: the MVC
-decoder is built in (libavcodec drops the dependent view outright, so ffmpeg
-could not stand in for it).
+Two, and one of them is either/or. The demux and the decode need nothing: both
+are built in (libavcodec drops the MVC dependent view outright, so ffmpeg could
+stand in for neither).
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
-| **tsMuxeR** | Gets the base and dependent views out of the disc, plus audio, subtitles and chapters | ffmpeg cannot: libavcodec drops the MVC dependent view outright |
 | **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead, for GPU encoding or the half-SBS filter |
 | **mkvmerge** | Muxes the video back with the audio, subtitles and chapters | — |
+
+A `--remux` needs nothing at all.
 
 Installing them is left to you; `--check` says what is missing, what each one
 does, and where to start:
@@ -332,28 +358,21 @@ does, and where to start:
 ```
 platform: linux   encoder: software   codec: h264
 
-  ok       tsmuxer    /usr/local/bin/tsMuxeR
   ok       x264       /usr/bin/x264
   ok       mkvmerge   /usr/bin/mkvmerge
 
-all 3 required tools present
+all 2 required tools present
 ```
 
 `--check` exits non-zero when anything is missing, so it works as a preflight.
+It answers for the options given, so `--check --demuxer tsmuxer` looks for
+tsMuxeR too.
 
-### Architectures
+### tsMuxeR
 
-Everything here works on 64-bit Arm — Apple Silicon, a Raspberry Pi 4/5 — as
-well as x86_64:
-
-| | x86_64 | arm64 |
-|---|---|---|
-| **tsMuxeR** | prebuilt (Linux, Windows) | prebuilt on macOS; **build the CLI** on Arm Linux |
-| **the decoder** | assembly kernels (AVX2) | pure Go |
-| **x264 / ffmpeg / mkvmerge** | packaged | packaged |
-
-The one gap is that upstream publishes a single Linux tsMuxeR binary and it is
-x86_64. That is a packaging gap, not a portability one: its **CLI needs no Qt** —
+[tsMuxeR](https://github.com/justdan96/tsMuxer) is only needed for
+`--demuxer tsmuxer`, and for Matroska, MP4 or VOB sources. Upstream's release
+binaries demux MVC; the Linux one is x86_64 only, but its **CLI needs no Qt** —
 that is the GUI alone — so on Arm Linux it is
 
 ```sh
@@ -361,8 +380,33 @@ apt install build-essential cmake ninja-build zlib1g-dev libfreetype-dev
 cmake -S . -B build -G Ninja && ninja -C build tsmuxer
 ```
 
-about a minute. `Dockerfile.mvctools` does exactly that, which is what makes the
-image multi-architecture.
+about a minute. `Dockerfile.mvctools` does exactly that, so the image has it.
+
+### What the built-in demuxer handles
+
+It does what tsMuxeR does with a Blu-ray where that matters — the audio and
+subtitle files it writes are **byte-identical to tsMuxeR's** on the discs it
+was checked against (TrueHD with its AC-3 core, E-AC-3 7.1 with its AC-3 core,
+DTS, DTS-HD High Resolution and Master Audio, AC-3, PGS) — and handles the
+same disc layouts:
+
+- **The SSIF** a pressed 3D disc interleaves its views in, or the two `.m2ts`
+  files of a folder rip without one, or one `.m2ts` holding both views (a
+  remux, an AVCHD recording).
+- **Playlists of several clips**, joined, with each clip's IN and OUT times.
+- **Multi-angle titles**: the first angle.
+- **Languages** from the playlist, or from the clip info when a loose stream
+  file is given; AVCHD's 8.3 names (`.MPL`, `.CPI`, `.MTS`).
+- **LPCM** is written as WAV (byte order and 7.1 channel order converted,
+  20-bit samples padded to 24), as tsMuxeR does.
+- **Chapters** from the playlist marks, which tsMuxeR's demux leaves out.
+
+Where it deliberately differs, it is to play as the disc does: audio and
+subtitles **before the playlist's IN time** (or the first picture of a loose
+stream) and after its OUT time are not written, nor are pictures outside
+them. A disc whose sound starts before its picture — The Wild Robot's starts
+1.16 s early — otherwise comes out with the sound that much ahead, because a
+demuxed elementary stream has no timestamps left to say so.
 
 ## What it does with the rest of the disc
 
@@ -370,13 +414,13 @@ Audio and subtitle tracks are demuxed alongside the two views and muxed into the
 output in the order the source listed them, so the first audio track stays
 first. One output track per disc track: a Blu-ray TrueHD stream carries an
 embedded AC-3 core for players that cannot decode TrueHD, and DTS-HD carries a
-plain DTS core the same way, which tsMuxeR writes as a single file named
-`.ac3+thd`. mkvmerge presents that as two tracks, so each demuxed file is
+plain DTS core the same way, and the demux writes the pair as a single file
+(tsMuxeR names it `.ac3+thd`). mkvmerge presents that as two tracks, so each demuxed file is
 identified and only the track the disc listed is kept — the core is the same
 audio, lossily, and an extra track the probe never reported would be a
 surprise. The match is on the codec rather than the position, since the two
 tools spell codecs differently (`TRUE-HD` against `TrueHD Atmos`) and the
-primary is not promised to come first. Each is tagged with the language tsMuxeR reported for it; a track the
+primary is not promised to come first. Each is tagged with the language the disc gives it; a track the
 disc gave no language for is passed untagged rather than guessed at, since an
 absent tag already means undetermined in Matroska and claiming a language the
 disc never stated would be worse than saying nothing. Use
@@ -399,11 +443,14 @@ stream handed in where a container was expected.
 
 ## Testing without a disc
 
-tsMuxeR muxes as well as demuxes, which makes an end-to-end test possible with
-no 3D Blu-ray: mux a pair of MVC elementary streams into a real 3D m2ts (and
-into a real UDF disc image), then convert it. `TestRunnerConvertsARealSource`
-and `TestRunnerConvertsADiscImage` do exactly that and check the output is
-1280×480 with its audio intact.
+`testdata/bluray` is a synthetic Blu-ray 3D, as a folder and as a UDF image,
+muxed by tsMuxeR from the MVC fixtures below and generated audio. The built-in
+demuxer is tested on it with no tools installed: the listing, the decoded
+pictures (identical to the combined stream's), the audio cut to the playlist,
+and the remux. tsMuxeR also builds a real 3D m2ts and image on the fly;
+`TestRunnerConvertsARealSource` and `TestRunnerConvertsADiscImage` convert
+those with both demuxers and check the output is 1280×480 with its audio
+intact.
 
 The MVC streams are
 [mvc-source](https://github.com/jens-duttke/mvc-source)'s `tests/fixtures`,
@@ -452,10 +499,11 @@ docker build -f Dockerfile.mvctools -t mvctools .
 docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t mvctools .
 ```
 
-tsMuxeR is built rather than downloaded so the arm64 image is a real arm64 image
-— upstream publishes a single Linux binary and it is x86_64. The decoder needs
-no such care: it is part of the `mvctools` binary, with its assembly kernels
-chosen at run time by what the CPU supports.
+tsMuxeR (for `--demuxer tsmuxer`) is built rather than downloaded so the arm64
+image is a real arm64 image — upstream publishes a single Linux binary and it
+is x86_64. The demuxer and decoder need no such care: they are part of the
+`mvctools` binary, with the decoder's assembly kernels chosen at run time by
+what the CPU supports.
 
 ### Running the conversion out of the image
 
