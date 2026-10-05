@@ -1,0 +1,19 @@
+# Build artifacts
+/mvcdec
+/mvctools
+*.test
+*.prof
+
+# Dev / test artefacts
+.git
+.github
+testdata/
+*_test.go
+
+# Documentation
+*.md
+
+# IDE / tool metadata
+.claude/
+.vscode/
+.idea/

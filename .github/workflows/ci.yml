@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        # The end-to-end conversion tests skip when tsMuxeR, x264 and
+        # mkvmerge are not installed, which they are not here.
+        run: go test -race -timeout 300s ./...
+
+      - name: Test the pure-Go decoder
+        # Every assembly kernel has a Go fallback selected by this tag (and
+        # on every non-amd64 platform); the conformance corpus must pass
+        # through it too.
+        run: go test -tags purego -timeout 300s ./...
+
+  build:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - {goos: linux,   goarch: amd64}
+          - {goos: linux,   goarch: arm64}
+          - {goos: linux,   goarch: arm,   goarm: "7"}
+          # Windows
+          - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: arm64}
+          # macOS
+          - {goos: darwin,  goarch: amd64}
+          - {goos: darwin,  goarch: arm64}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile
+        env:
+          GOOS:        ${{ matrix.goos }}
+          GOARCH:      ${{ matrix.goarch }}
+          GOARM:       ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "dev")
+          go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mvcdec
+          # mvctools reasons about the platform it runs on, so it has to build
+          # for every platform it claims to support, not just the host.
+          go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mvctools
+          go vet ./...
+
+      - name: Verify go.mod is tidy
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: golangci-lint run --timeout 5m
+
+  # Summary job so branch-protection can require a single "Build" check
+  # instead of one entry per matrix combination.
+  build-summary:
+    name: Build
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all builds passed
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "One or more cross-compile jobs failed"
+            exit 1
+          fi

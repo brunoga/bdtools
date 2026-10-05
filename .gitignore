@@ -1,0 +1,19 @@
+# compiled binaries
+/mvcdec
+/mvctools
+/cmd/mvcdec/mvcdec
+/cmd/mvctools/mvctools
+*.test
+*.prof
+
+# editor and tool metadata
+.claude/
+CLAUDE.md
+.vscode/
+.idea/
+
+# GoReleaser output
+/dist/
+
+# tools/refdump is a C program built locally against edge264
+/tools/refdump/refdump
