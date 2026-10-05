@@ -22,7 +22,7 @@ demuxer    read the disc in place; the video goes to the decoder, audio,   ─�
            subtitles and chapters to the work directory — built in         │
 decoder    decode both eyes and stack them side by side, as Y4M — built in ─┤ one pass,
 encoder    x264 or x265, or ffmpeg with a platform hardware encoder        ─┘ piped
-mkvmerge   mux the result back together
+muxer      write the MKV: video, audio, subtitles, chapters — built in
 ```
 
 The disc is read **once and in place**: a `.iso` straight out of the image, a
@@ -37,7 +37,18 @@ views) and one the size of its soundtrack.
 `--demuxer tsmuxer` uses [tsMuxeR](#tsmuxer) instead, as before: the image's
 streams are extracted, tsMuxeR demuxes them, and the decoder reads the
 demuxed pair. A Matroska, MP4 or VOB source always goes that way, since the
-built-in demuxer reads Blu-ray sources.
+built-in demuxer reads Blu-ray sources. `--muxer mkvmerge` writes the MKV
+with mkvmerge instead of the built-in muxer. Any combination works.
+
+The built-in muxer writes what mkvmerge writes from the same streams: on a
+whole film (The Wild Robot, re-muxed from an mkvmerge-made MKV) every one of
+the 146,237 video packets is identical — timestamp, size, keyframe flag and
+content — and so are the subtitles; the TrueHD packets are identical but for
+sub-millisecond timestamp rounding. It reads the encoder's raw output (an
+H.264 or HEVC stream has no timestamps, so each frame's display time comes
+from its picture order count, B-frames and open GOPs included) and the
+audio and subtitle files frame by frame, and a whole film takes about a
+minute and a half.
 
 ## Usage
 
@@ -127,6 +138,7 @@ scheduler such as pipeliner retry it.
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--demuxer` | `builtin` | `builtin` reads the disc in place; `tsmuxer` uses tsMuxeR — see [The pipeline](#the-pipeline) |
+| `--muxer` | `builtin` | `builtin` writes the MKV in process; `mkvmerge` uses mkvmerge |
 
 `--layout full` is almost always what a 3D library wants: it is the only layout
 that keeps the disc's resolution, and it is what the decoder emits natively, so
@@ -341,16 +353,16 @@ that will only take that, and costs half the horizontal detail by definition.
 
 ## Tools, and why each is needed
 
-Two, and one of them is either/or. The demux and the decode need nothing: both
-are built in (libavcodec drops the MVC dependent view outright, so ffmpeg could
-stand in for neither).
+One: the encoder. The demux, the decode and the mux are built in
+(libavcodec drops the MVC dependent view outright, so ffmpeg could not stand
+in for the first two).
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
 | **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead, for GPU encoding or the half-SBS filter |
-| **mkvmerge** | Muxes the video back with the audio, subtitles and chapters | — |
 
-A `--remux` needs nothing at all.
+A `--remux` needs nothing at all. **mkvmerge** is needed only for
+`--muxer mkvmerge`.
 
 Installing them is left to you; `--check` says what is missing, what each one
 does, and where to start:
@@ -359,14 +371,13 @@ does, and where to start:
 platform: linux   encoder: software   codec: h264
 
   ok       x264       /usr/bin/x264
-  ok       mkvmerge   /usr/bin/mkvmerge
 
-all 2 required tools present
+all 1 required tools present
 ```
 
 `--check` exits non-zero when anything is missing, so it works as a preflight.
 It answers for the options given, so `--check --demuxer tsmuxer` looks for
-tsMuxeR too.
+tsMuxeR too, and `--check --muxer mkvmerge` for mkvmerge.
 
 ### tsMuxeR
 
@@ -412,18 +423,21 @@ demuxed elementary stream has no timestamps left to say so.
 
 Audio and subtitle tracks are demuxed alongside the two views and muxed into the
 output in the order the source listed them, so the first audio track stays
-first. One output track per disc track: a Blu-ray TrueHD stream carries an
-embedded AC-3 core for players that cannot decode TrueHD, and DTS-HD carries a
-plain DTS core the same way, and the demux writes the pair as a single file
-(tsMuxeR names it `.ac3+thd`). mkvmerge presents that as two tracks, so each demuxed file is
-identified and only the track the disc listed is kept — the core is the same
-audio, lossily, and an extra track the probe never reported would be a
-surprise. The match is on the codec rather than the position, since the two
-tools spell codecs differently (`TRUE-HD` against `TrueHD Atmos`) and the
-primary is not promised to come first. Each is tagged with the language the disc gives it; a track the
-disc gave no language for is passed untagged rather than guessed at, since an
-absent tag already means undetermined in Matroska and claiming a language the
-disc never stated would be worse than saying nothing. Use
+first, and the first audio track is the default one. One output track per disc
+track: a Blu-ray TrueHD stream carries an embedded AC-3 core for players that
+cannot decode TrueHD, and DTS-HD carries a plain DTS core the same way, and the
+demux writes each pair as a single file (tsMuxeR names it `.ac3+thd`). The
+muxer takes the main stream and leaves the core out — it is the same audio,
+lossily, and an extra track the probe never reported would be a surprise —
+unless `--keep-fallback` asks for it as its own track. (A 7.1 E-AC-3 track's
+AC-3 part is not a separate core: it is half of every E-AC-3 frame, and
+stays.) With `--muxer mkvmerge` the same choice is made by identifying each
+file with mkvmerge and matching on the codec, since the tools spell codecs
+differently (`TRUE-HD` against `TrueHD Atmos`).
+
+Each track is tagged with the language the disc gives it; a track the disc gave
+no language for is tagged `und`, undetermined, rather than guessed at — and
+rather than left untagged, which Matroska reads as English. Use
 [the track filters](#choosing-tracks) to carry fewer of them. A track the demux
 failed to produce is reported and skipped — that costs a language, not the
 film.

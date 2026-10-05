@@ -324,9 +324,17 @@ func TestBuiltinPlan(t *testing.T) {
 	if strings.Contains(s, "tsMuxeR") || !strings.Contains(s, "built in") || !strings.Contains(s, "/in/disc.iso") {
 		t.Errorf("plan:\n%s", s)
 	}
-	if names := RequiredFor("linux", o); len(names) != 2 || names[0].Name != "x264" || names[1].Name != "mkvmerge" {
-		t.Errorf("required %v", names)
+	if names := RequiredFor("linux", o); len(names) != 1 || names[0].Name != "x264" {
+		t.Errorf("with the built-in muxer only the encoder is needed, got %v", names)
 	}
+	o.Muxer = MuxerMkvmerge
+	if names := RequiredFor("linux", o); len(names) != 2 || names[1].Name != "mkvmerge" {
+		t.Errorf("--muxer mkvmerge needs mkvmerge, got %v", names)
+	}
+	if s := mustPlan(t, o).String(); !strings.Contains(s, "mkvmerge -o /out/a.mkv") {
+		t.Errorf("plan:\n%s", s)
+	}
+	o.Muxer = MuxerBuiltin
 	o.Remux, o.Output = true, "/out/a.m2ts"
 	if len(RequiredFor("linux", o)) != 0 {
 		t.Error("a built-in remux needs no tools")
@@ -335,4 +343,13 @@ func TestBuiltinPlan(t *testing.T) {
 	if names := RequiredFor("linux", o); len(names) != 1 || names[0].Name != "tsmuxer" {
 		t.Errorf("a tsMuxeR remux needs tsMuxeR alone, got %v", names)
 	}
+}
+
+func mustPlan(t *testing.T, o Options) *Plan {
+	t.Helper()
+	p, err := BuildPlan("linux", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

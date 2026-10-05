@@ -244,7 +244,7 @@ var (
 // This is the set for a conversion with tsMuxeR as the demuxer; RequiredFor
 // answers for any options.
 func Required(goos string, enc Encoder, codec Codec, viaFFmpeg bool) []Tool {
-	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false)
+	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false, MuxerMkvmerge)
 }
 
 // RequiredFor returns the tools a run with these options needs. With the
@@ -255,10 +255,14 @@ func RequiredFor(goos string, o Options) []Tool {
 	if !o.builtin() {
 		demux = DemuxerTSMuxeR
 	}
-	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux)
+	mux := MuxerBuiltin
+	if !o.builtinMux() {
+		mux = MuxerMkvmerge
+	}
+	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux, mux)
 }
 
-func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool) []Tool {
+func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool, mux Muxer) []Tool {
 	var tools []Tool
 	if demux == DemuxerTSMuxeR {
 		tools = append(tools, toolTSMuxeR)
@@ -266,7 +270,11 @@ func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux boo
 	if remux {
 		return tools
 	}
-	return append(tools, encoderTool(enc, codec, viaFFmpeg), toolMkvmerge)
+	tools = append(tools, encoderTool(enc, codec, viaFFmpeg))
+	if mux == MuxerMkvmerge {
+		tools = append(tools, toolMkvmerge)
+	}
+	return tools
 }
 
 // encoderTool is the program that runs the encode. The runner resolves the

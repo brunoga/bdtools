@@ -55,13 +55,18 @@ func TestDryRunNeedsNoTools(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	for _, want := range []string{"read /media/Life of Pi (2012)/disc.iso", "mvcdec", "x264", "mkvmerge", "built in"} {
+	for _, want := range []string{"read /media/Life of Pi (2012)/disc.iso", "mvcdec", "x264", "write /out/Life of Pi (2012).mkv", "built in"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run should mention %q, got:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "tsMuxeR") {
-		t.Errorf("the built-in demuxer is the default:\n%s", out)
+	if strings.Contains(out, "tsMuxeR") || strings.Contains(out, "mkvmerge") {
+		t.Errorf("the built-in demuxer and muxer are the default:\n%s", out)
+	}
+	mkv, _, code := capture(t, "--dry-run", "--encoder", "x264", "--muxer", "mkvmerge",
+		"--input", "/media/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(mkv, "mkvmerge -o /out/a.mkv") {
+		t.Errorf("--muxer mkvmerge: exit %d\n%s", code, mkv)
 	}
 	// And tsMuxeR is still there when asked for.
 	tsm, _, code := capture(t, "--dry-run", "--encoder", "x264", "--demuxer", "tsmuxer",
@@ -178,5 +183,12 @@ func TestCheckForABuiltinRemux(t *testing.T) {
 	out, _, code := capture(t, "--check", "--remux")
 	if code != 0 || !strings.Contains(out, "no external tools needed") {
 		t.Errorf("exit %d\n%s", code, out)
+	}
+}
+
+func TestUnknownMuxerIsRefused(t *testing.T) {
+	_, errOut, code := capture(t, "--dry-run", "--muxer", "ffmpeg", "--input", "/in/a.iso", "--output", "/out/a.mkv")
+	if code != 2 || !strings.Contains(errOut, "muxer") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 }

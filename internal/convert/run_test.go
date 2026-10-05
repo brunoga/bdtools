@@ -183,8 +183,12 @@ func TestRunnerConvertsARealSource(t *testing.T) {
 	}
 
 	source := buildTestSource(t, t.TempDir(), fixtures)
-	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
-		t.Run(string(dm), func(t *testing.T) {
+	for _, c := range []struct {
+		dm Demuxer
+		mx Muxer
+	}{{DemuxerBuiltin, MuxerBuiltin}, {DemuxerBuiltin, MuxerMkvmerge}, {DemuxerTSMuxeR, MuxerBuiltin}, {DemuxerTSMuxeR, MuxerMkvmerge}} {
+		dm := c.dm
+		t.Run(string(c.dm)+"+"+string(c.mx), func(t *testing.T) {
 			work := t.TempDir()
 			// A name with spaces and brackets, as a real library uses.
 			out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
@@ -193,6 +197,7 @@ func TestRunnerConvertsARealSource(t *testing.T) {
 			o.Encoder = EncoderSoftware
 			o.CRF, o.Preset = 25, "ultrafast"
 			o.Demuxer = dm
+			o.Muxer = c.mx
 
 			r := NewRunner(CurrentGOOS, o, nil)
 			if err := r.Run(context.Background()); err != nil {
@@ -326,14 +331,19 @@ func TestRunnerConvertsADiscImage(t *testing.T) {
 		}
 	}
 	iso := buildTestISO(t, t.TempDir(), fixtures)
-	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
-		t.Run(string(dm), func(t *testing.T) {
+	for _, c := range []struct {
+		dm Demuxer
+		mx Muxer
+	}{{DemuxerBuiltin, MuxerBuiltin}, {DemuxerBuiltin, MuxerMkvmerge}, {DemuxerTSMuxeR, MuxerBuiltin}, {DemuxerTSMuxeR, MuxerMkvmerge}} {
+		dm := c.dm
+		t.Run(string(c.dm)+"+"+string(c.mx), func(t *testing.T) {
 			work := t.TempDir()
 			out := filepath.Join(work, "From Image (2012) 3D.mkv")
 			o := DefaultOptions()
 			o.Input, o.Output, o.TempDir = iso, out, work
 			o.Encoder, o.CRF, o.Preset = EncoderSoftware, 25, "ultrafast"
 			o.Demuxer = dm
+			o.Muxer = c.mx
 
 			var lines []string
 			r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })

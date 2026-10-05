@@ -8,8 +8,8 @@ view and the dependent view — ready to be consumed by other code.
 It ships two commands: `mvcdec`, which decodes a stream to raw YUV or Y4M,
 and [`mvctools`](cmd/mvctools/README.md), which turns a Blu-ray 3D disc,
 image or playlist into a side-by-side MKV (or remuxes it), reading the disc in
-place with its own demuxer and decoder and handing the frames to x264/x265 or
-ffmpeg, and mkvmerge.
+place with its own demuxer and decoder, handing the frames to x264/x265 or
+ffmpeg, and writing the MKV with its own muxer.
 
 - Bit-exact: verified against the ITU-T/JVT conformance suite (2D and MVC)
   and against a complete 3D Blu-ray feature (all 110,162 access units, both
@@ -130,9 +130,10 @@ Converts a Blu-ray 3D disc image, BDMV folder, playlist or m2ts into a
 side-by-side MKV with the audio and subtitles you choose, or remuxes the
 disc's own MVC video with just those tracks. The disc is read once and in
 place — an image is not extracted, the views are not demuxed to disk — and
-decoded in process; the encode and mux use x264/x265 or ffmpeg (for hardware
-encoding and half-SBS) and mkvmerge, and a remux needs no tools at all.
-tsMuxeR remains available with `--demuxer tsmuxer`. See
+decoded in process, and the MKV is written in process too; the only external
+tool is the encoder, x264/x265 or ffmpeg (for hardware encoding and
+half-SBS), and a remux needs no tools at all. tsMuxeR and mkvmerge remain
+available with `--demuxer tsmuxer` and `--muxer mkvmerge`. See
 [cmd/mvctools](cmd/mvctools/README.md).
 A container with the whole toolchain is published as
 `ghcr.io/brunoga/mvctools` for amd64 and arm64.
@@ -215,3 +216,4 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
+| `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, audio and PGS framing |

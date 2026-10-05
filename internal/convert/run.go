@@ -40,6 +40,9 @@ type Runner struct {
 	// stops the disc's own base-view marking from overriding them.
 	SwapLRSet bool
 
+	// fpsNum and fpsDen are the frame rate the decode found, for the mux.
+	fpsNum, fpsDen int
+
 	// tool resolves a program name to a path. Indirected for tests.
 	tool func(string) (string, error)
 
@@ -121,7 +124,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	return r.mux(ctx, video, demuxed.extras, "")
+	return r.mux(ctx, video, demuxed.extras, nil)
 }
 
 // runBuiltin is Run with the built-in demuxer: the source is read once, in
@@ -170,7 +173,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if finErr != nil {
 		return finErr
 	}
-	return r.mux(ctx, video, extras, g.chapters)
+	return r.mux(ctx, video, extras, g.src.chapters)
 }
 
 // workDir returns the scratch directory and a cleanup. A conversion writes tens
@@ -531,6 +534,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 		if frames == 0 {
 			if num, den := dec.FrameRate(); num > 0 {
 				y4m.FPSNum, y4m.FPSDen = num, den
+				r.fpsNum, r.fpsDen = num, den
 				r.Report.Report("frame rate %d/%d", num, den)
 			} else {
 				r.Report.Report("warning: the stream carries no frame rate; assuming 24000/1001")
@@ -572,8 +576,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 	return nil
 }
 
-// mux assembles the final file, with chapters when a chapter file is given.
-func (r *Runner) mux(ctx context.Context, video string, extras []extra, chapters string) error {
+// mux assembles the final file, with the chapters given.
+func (r *Runner) mux(ctx context.Context, video string, extras []extra, chapters []time.Duration) error {
+	if r.Opts.builtinMux() {
+		return r.muxBuiltin(ctx, video, extras, chapters)
+	}
 	bin, err := r.resolve(toolMkvmerge)
 	if err != nil {
 		return err
@@ -583,8 +590,12 @@ func (r *Runner) mux(ctx context.Context, video string, extras []extra, chapters
 		r.Report.Report("dropping %s embedded in the %s track", d.codec, d.of)
 	}
 	argv := muxArgv(r.Opts.Output, video, extraArgs)
-	if chapters != "" {
-		argv = append([]string{"--chapters", chapters}, argv...)
+	if len(chapters) > 1 {
+		path := filepath.Join(filepath.Dir(video), "chapters.txt")
+		if err := os.WriteFile(path, []byte(chapterFile(chapters)), 0o600); err != nil { //nolint:gosec // our work directory
+			return err
+		}
+		argv = append([]string{"--chapters", path}, argv...)
 	}
 	r.Report.Report("muxing %s", r.Opts.Output)
 	if out, err := exec.CommandContext(ctx, bin, argv...).CombinedOutput(); err != nil { //nolint:gosec // bin came from LookPath
@@ -595,10 +606,9 @@ func (r *Runner) mux(ctx context.Context, video string, extras []extra, chapters
 
 // StereoMode is the Matroska StereoMode keyword every output carries.
 //
-// The left eye is always on the left: the decoder emits base-view-left, and a
-// disc that marks its base view as the right eye is corrected by the swap
-// filter before the mux — or the conversion is refused, since that filter
-// needs an ffmpeg encoder. So the arrangement never varies.
+// The left eye is always on the left: a disc that marks its base view as the
+// right eye has its views swapped by the decoder as it stacks them. So the
+// arrangement never varies.
 //
 // Both layouts are side-by-side. Half-SBS differs only in each eye being
 // squeezed to half width, which is the same arrangement and so the same flag;
