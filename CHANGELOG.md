@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--remux` joins a title made of several clips again, now in process: each
+  clip is cut to its play item's window (from the GOP that opens at or
+  before IN, while pictures decode before OUT) and moved onto one
+  continuous timeline — PTS, DTS, PCR and arrival times — so the result is
+  a single stream that plays and seeks like one clip.
+
 ## [0.2.0] - 2026-10-06
 
 ### Added
