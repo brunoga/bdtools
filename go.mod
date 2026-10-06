@@ -1,6 +1,6 @@
 module github.com/brunoga/mvc
 
-go 1.27
+go 1.26.2
 
 require (
 	github.com/ebitengine/purego v0.11.1
