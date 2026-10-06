@@ -72,7 +72,10 @@ type Result struct {
 type VideoTrack struct {
 	Codec         string // "H.264", "MVC", "HEVC", … or the raw CodecID
 	Width, Height int    // zero when unstated
-	BitDepth      int    // zero when unstated
+	// BitDepth is the luma bit depth: on a disc, the one the format allows
+	// the coding (8, or 10 for Ultra HD Blu-ray's HEVC); in Matroska, the
+	// Colour element's or the codec configuration's. Zero when unstated.
+	BitDepth int
 }
 
 // AudioTrack is an audio stream.
@@ -239,7 +242,7 @@ func probeDisc(d bdmv.Disc, label string) (res *Result, err error) {
 		switch name, kind := codingName(s.Coding); kind {
 		case kindVideo:
 			w, h := videoSize(s.Format)
-			res.Video = append(res.Video, VideoTrack{Codec: name, Width: w, Height: h})
+			res.Video = append(res.Video, VideoTrack{Codec: name, Width: w, Height: h, BitDepth: discBitDepth(s.Coding)})
 		case kindAudio:
 			audioPIDs[s.PID] = len(res.Audio)
 			res.Audio = append(res.Audio, AudioTrack{Codec: name, Language: s.Lang,
@@ -249,10 +252,23 @@ func probeDisc(d bdmv.Disc, label string) (res *Result, err error) {
 		}
 	}
 	if item.DependentClip != "" {
-		// The playlist names the dependent view's MVC stream; a disc
-		// describes it in its clip info's 3D extension, which is not read
-		// here, so its size is left unstated.
-		res.Video = append(res.Video, VideoTrack{Codec: "MVC"})
+		// The playlist names the dependent view's clip, whose clip info
+		// describes its MVC stream in its 3D extension. Without that file
+		// the track is still listed, its size unstated.
+		mvc := VideoTrack{Codec: "MVC", BitDepth: discBitDepth(bdmv.CodingMVC)}
+		b, err := d.ReadFile(bdmv.ClipInfo(d, item.DependentClip))
+		if err != nil {
+			return nil, fmt.Errorf("probe: %s: clip info of %s (%s): %w", label, item.DependentClip, bestName, err)
+		}
+		if ss, err := bdmv.ParseCLPI(b); err == nil {
+			for _, s := range ss {
+				if s.Coding == bdmv.CodingMVC {
+					mvc.Width, mvc.Height = videoSize(s.Format)
+					break
+				}
+			}
+		}
+		res.Video = append(res.Video, mvc)
 	}
 	sampleAudio(d, item, streams, audioPIDs, res)
 	return res, nil
@@ -399,6 +415,19 @@ func codingName(c byte) (string, int) {
 	return fmt.Sprintf("0x%02x", c), kindOther // interactive graphics (menus) and the unknown
 }
 
+// discBitDepth is the bit depth a Blu-ray video coding is held to: the
+// format allows only 8-bit 4:2:0 for MPEG-2, VC-1, AVC and MVC, and Ultra HD
+// Blu-ray only 10-bit (Main 10) HEVC.
+func discBitDepth(coding byte) int {
+	switch coding {
+	case 0x02, bdmv.CodingAVC, bdmv.CodingMVC, 0xea:
+		return 8
+	case bdmv.CodingHEVC:
+		return 10
+	}
+	return 0
+}
+
 // videoSize is the frame size a clip info's video_format states.
 func videoSize(format byte) (int, int) {
 	switch format {
@@ -461,7 +490,8 @@ func probeMatroska(r io.Reader, label string) (*Result, error) {
 	for _, t := range m.Tracks {
 		switch t.Type {
 		case mkv.TypeVideo:
-			res.Video = append(res.Video, VideoTrack{Codec: videoCodec(t.CodecID), Width: t.Width, Height: t.Height})
+			res.Video = append(res.Video, VideoTrack{Codec: videoCodec(t.CodecID), Width: t.Width, Height: t.Height,
+				BitDepth: mkvBitDepth(t)})
 			if stereo == 0 {
 				stereo = t.StereoMode
 			}
@@ -584,6 +614,78 @@ func hasMVC(b []byte) bool {
 		b = b[4+n:]
 	}
 	return false
+}
+
+// mkvBitDepth is a video track's bit depth: the Colour element's, or what
+// the codec's configuration record states. Zero when neither says.
+func mkvBitDepth(t mkv.ReadTrack) int {
+	if t.BitsPerChannel > 0 {
+		return t.BitsPerChannel
+	}
+	p := t.CodecPrivate
+	switch t.CodecID {
+	case "V_MPEG4/ISO/AVC", "V_MPEG4/ISO/MVC":
+		// avcC: version, profile_idc, … The profiles up to High allow
+		// 8-bit only; the others carry the depth after the parameter sets.
+		if len(p) < 2 || p[0] != 1 {
+			return 0
+		}
+		switch p[1] {
+		case 66, 77, 88, 100, 118, 128:
+			return 8
+		}
+		return avcCBitDepth(p)
+	case "V_MPEGH/ISO/HEVC":
+		// hvcC: bitDepthLumaMinus8 in the low bits of byte 17.
+		if len(p) < 23 || p[0] != 1 {
+			return 0
+		}
+		return 8 + int(p[17]&7)
+	case "V_AV1":
+		// av1C: high_bitdepth and twelve_bit in byte 2.
+		if len(p) < 4 || p[0] != 0x81 {
+			return 0
+		}
+		switch {
+		case p[2]&0x40 == 0:
+			return 8
+		case p[2]&0x20 != 0:
+			return 12
+		}
+		return 10
+	}
+	return 0
+}
+
+// avcCBitDepth reads bit_depth_luma_minus8 from the fields a High 10 (and
+// higher) avcC carries after its parameter sets, zero when it has none.
+func avcCBitDepth(p []byte) int {
+	if len(p) < 6 {
+		return 0
+	}
+	i := 6
+	for range int(p[5] & 0x1f) { // SPS
+		if i+2 > len(p) {
+			return 0
+		}
+		i += 2 + (int(p[i])<<8 | int(p[i+1]))
+	}
+	if i >= len(p) {
+		return 0
+	}
+	n := int(p[i]) // PPS
+	i++
+	for range n {
+		if i+2 > len(p) {
+			return 0
+		}
+		i += 2 + (int(p[i])<<8 | int(p[i+1]))
+	}
+	// chroma_format, bit_depth_luma_minus8, bit_depth_chroma_minus8, …
+	if i+2 > len(p) {
+		return 0
+	}
+	return 8 + int(p[i+1]&7)
 }
 
 func videoCodec(id string) string {

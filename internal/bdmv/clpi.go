@@ -22,12 +22,50 @@ type ClipStream struct {
 
 // ParseCLPI reads the streams of a clip info (.clpi) file: the program's
 // PIDs, coding types and languages, which a bare stream file does not carry
-// in its own tables.
+// in its own tables. A dependent view's clip lists its MVC stream in the
+// file's 3D extension (ProgramInfo_SS) rather than its program, and that
+// stream comes after the program's.
 func ParseCLPI(b []byte) ([]ClipStream, error) {
 	if len(b) < 40 || string(b[:4]) != "HDMV" {
 		return nil, errors.New("clpi: not a clip info file")
 	}
-	pos := int(binary.BigEndian.Uint32(b[12:]))
+	out, err := parseProgramInfo(b, int(binary.BigEndian.Uint32(b[12:])))
+	if err != nil {
+		return out, err
+	}
+	if at, ok := clpiExtension(b, 2, 5); ok {
+		ss, err := parseProgramInfo(b, at)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, ss...)
+	}
+	return out, nil
+}
+
+// clpiExtension finds the ExtensionData entry id1/id2 and returns where its
+// data starts, if the file has one.
+func clpiExtension(b []byte, id1, id2 uint16) (int, bool) {
+	ext := int(binary.BigEndian.Uint32(b[24:]))
+	if ext == 0 || ext+12 > len(b) {
+		return 0, false
+	}
+	n := int(b[ext+11])
+	for i := range n {
+		e := ext + 12 + 12*i
+		if e+12 > len(b) {
+			return 0, false
+		}
+		if binary.BigEndian.Uint16(b[e:]) == id1 && binary.BigEndian.Uint16(b[e+2:]) == id2 {
+			at := ext + int(binary.BigEndian.Uint32(b[e+4:]))
+			return at, at < len(b)
+		}
+	}
+	return 0, false
+}
+
+// parseProgramInfo reads a ProgramInfo structure at pos.
+func parseProgramInfo(b []byte, pos int) ([]ClipStream, error) {
 	c := &cursor{b: b, pos: pos}
 	c.u32() // length
 	c.skip(1)

@@ -55,6 +55,9 @@ type ReadTrack struct {
 	// Video.
 	Width, Height int
 	StereoMode    int
+	// BitsPerChannel is the Colour element's bit depth, zero when the file
+	// does not say.
+	BitsPerChannel int
 	// Audio.
 	SampleRate float64
 	Channels   int
@@ -263,6 +266,13 @@ func parseTrack(b []byte) (ReadTrack, error) {
 					t.Height = int(readUint(v)) //nolint:gosec // a frame size
 				case idStereoMode:
 					t.StereoMode = int(readUint(v)) //nolint:gosec // a small enum
+				case idColour:
+					return eachChild(v, func(id uint32, v []byte) error {
+						if id == idBitsPerChannel {
+							t.BitsPerChannel = int(readUint(v)) //nolint:gosec // a bit depth
+						}
+						return nil
+					})
 				}
 				return nil
 			})
