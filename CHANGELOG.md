@@ -12,6 +12,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and about 4% smaller at equal quality on NVENC HEVC, at no cost in speed.
   `--name-details` adds `10bit`.
 - `mvc.Y4MWriter.Depth` writes 10-bit Y4M (C420p10).
+- An interrupted conversion resumes: the video is encoded in segments of
+  2,500 frames into a work directory named after the output, and the same
+  command run again encodes only what no finished segment holds, giving
+  the same file an uninterrupted run would. Other settings or another
+  source start over, as does `--restart`. Ctrl-C now stops a conversion
+  cleanly.
+
+### Changed
+
+- The work directory is `.<output name>.mvctools` beside the output (or
+  under `--temp`) rather than a random `mvctools-*` one.
 
 ## [0.4.1] - 2026-10-06
 

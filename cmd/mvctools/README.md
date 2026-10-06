@@ -123,11 +123,12 @@ scheduler such as pipeliner retry it.
 | `--check` | — | Report which external tools are present and which are missing, then exit |
 | `--dry-run` | — | Print the commands that would run, without running them |
 | `--keep-temp` | — | Leave the work directory's files behind instead of deleting them |
+| `--restart` | — | Encode from the start, ignoring the video an interrupted run left — see [Resuming](#resuming-an-interrupted-conversion) |
 | `--quiet` | — | Only report errors |
 | `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
 | `--output` | — | Destination `.mkv` |
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
-| `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
+| `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |
 | `--codec` | `h264` | `h264`, `h265` or `av1` — see [Codec](#codec) |
@@ -362,6 +363,31 @@ offer. The rename happens after the conversion, because the codec is not known
 until the source has been probed, and probing a disc image twice to decide a
 filename would cost as much as the conversion's first stage. The final path is
 printed to stdout either way, so a script driving this need not guess at it.
+
+## Resuming an interrupted conversion
+
+A conversion that stops partway — Ctrl-C, a reboot, a network share that
+went away — continues where it left off when the same command is run
+again. The video is encoded in segments of 2,500 frames (ten keyframe
+intervals, under two minutes of film), each a complete stream from its own
+encoder run, into a work directory beside the output named after it
+(`.Film (2016).mkv.mvctools`, or under `--temp`). A manifest there lists
+the segments that finished.
+
+Run again, mvctools decodes from the start, since a picture cannot be
+decoded without the ones before it, but encodes only from the first frame
+no segment holds; the decoder alone runs at several times an encoder's
+speed, so catching up an hour of film takes a minute or two. The audio and
+subtitles are demuxed again on the way, from the same read. The result is
+the file an uninterrupted run makes, frame for frame.
+
+What is kept is only ever whole segments: one cut short is discarded, so an
+interruption costs at most one segment of encoding (seconds on a GPU,
+minutes in software). The segments belong to the source and the settings
+that made them. A run with another source, codec, encoder, quality, layout,
+eye order, bit depth or title starts over, and says so; `--restart` starts
+over regardless. A run that succeeds removes the work directory; one that
+fails keeps only the segments, and says how many frames they hold.
 
 ## Remuxing instead of converting
 

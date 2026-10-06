@@ -26,19 +26,33 @@ func (r *Runner) newProgress(verb string) *progress {
 }
 
 // begin learns the frame rate (at the first picture) and, with the
-// source's length, announces the total.
-func (p *progress) begin(num, den int) {
+// source's length, announces the total: what is left of it after the done
+// pictures an earlier run encoded.
+func (p *progress) begin(num, den, done int) {
 	if p.r.length <= 0 || num <= 0 || den <= 0 {
 		return
 	}
-	p.total = int((p.r.length.Seconds() * float64(num) / float64(den)) + 0.5)
-	p.r.Report.Report("about %d frames to %s (%s at %.3f fps)", p.total,
-		map[string]string{"decoded": "decode", "encoded": "encode"}[p.verb],
+	all := int((p.r.length.Seconds() * float64(num) / float64(den)) + 0.5)
+	p.total = all - done
+	verb := map[string]string{"decoded": "decode", "encoded": "encode"}[p.verb]
+	if done > 0 {
+		p.r.Report.Report("about %d of %d frames left to %s (%s at %.3f fps)", p.total, all, verb,
+			p.r.length.Round(time.Second), float64(num)/float64(den))
+		return
+	}
+	p.r.Report.Report("about %d frames to %s (%s at %.3f fps)", p.total, verb,
 		p.r.length.Round(time.Second), float64(num)/float64(den))
 }
 
-// frame counts a picture done, reporting every progressEvery.
+// frame counts the n-th picture done, reporting every progressEvery. The
+// clock starts at the first, so a resumed run's rate leaves out the decode
+// up to it.
 func (p *progress) frame(n int) {
+	if n == 1 {
+		p.started = p.now()
+		p.last = p.started
+		return
+	}
 	if t := p.now(); t.Sub(p.last) >= progressEvery {
 		p.last = t
 		p.r.Report.Report("%s", p.line(n, t))

@@ -93,7 +93,7 @@ func TestRunnerCleansUpItsWorkDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "mvctools-") {
+		if strings.HasSuffix(e.Name(), ".mvctools") {
 			t.Errorf("left a work directory behind: %s", e.Name())
 		}
 	}
@@ -218,7 +218,7 @@ func checkConverted(t *testing.T, out, work string, names ...string) {
 	}
 	entries, _ := os.ReadDir(work)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "mvctools-") {
+		if strings.HasSuffix(e.Name(), ".mvctools") {
 			t.Errorf("work directory left behind: %s", e.Name())
 		}
 	}
