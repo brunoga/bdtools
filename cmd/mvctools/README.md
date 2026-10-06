@@ -336,11 +336,27 @@ giving one transport stream with both views, which is what a player that
 decodes MVC expects. Nothing is decoded or re-timed, so the result plays
 exactly as the disc does, and it needs no tools at all.
 
+A title made of several clips — a playlist of several play items, as
+seamless-branching and some long films are — is joined into one stream:
+
+- Each clip is cut to its play item's window. A remux cannot re-encode, so a
+  clip starts at the picture that opens the GOP at or before its IN time
+  (the pictures before IN are a fraction of a second at most), and keeps
+  pictures while they decode before OUT, so none loses a picture it is
+  predicted from. Audio and subtitles are kept by their presentation time,
+  IN to OUT.
+- Every later clip is moved onto the first one's timeline: its PTS, DTS,
+  clock references and arrival timestamps, so the result has one clock and
+  plays and seeks like a single clip, rather than marking a discontinuity
+  that many players handle badly. Where a clip's opening GOP would overlap
+  the end of the clip before it, it moves just far enough not to.
+- Continuity counters are renumbered across the cuts, and the clips must
+  carry the kept tracks on the same PIDs (discs do); if not, the remux says
+  so rather than guessing.
+
 The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
 has no home in Matroska that players agree on. Nothing about the picture can
-change, so `--layout half` and `--swap-lr` are refused. A title made of
-several clips joined together cannot be remuxed: the remux copies one
-clip's packets.
+change, so `--layout half` and `--swap-lr` are refused.
 
 ## What plays the result, and at what resolution
 
