@@ -51,7 +51,9 @@ func TestDiscImage(t *testing.T) {
 	if r.Kind != KindDisc || !r.Is3D || r.Layout != LayoutMVC || r.Duration < 300*time.Millisecond {
 		t.Errorf("result %+v", r)
 	}
-	if len(r.Video) != 2 || r.Video[0].Codec != "H.264" || r.Video[0].Height != 480 || r.Video[1].Codec != "MVC" {
+	// The MVC view's size comes from the dependent clip's 3D extension; the
+	// depth from what Blu-ray allows these codings.
+	if len(r.Video) != 2 || r.Video[0] != (VideoTrack{"H.264", 720, 480, 8}) || r.Video[1] != (VideoTrack{"MVC", 720, 480, 8}) {
 		t.Errorf("video %+v", r.Video)
 	}
 	var langs []string
@@ -420,5 +422,65 @@ func TestMatroskaPrefixEndsInsideAnAttachment(t *testing.T) {
 	}
 	if got, want := header(r), header(whole); asJSON(t, &got) != asJSON(t, &want) {
 		t.Errorf("got\n%s\nwant\n%s", asJSON(t, &got), asJSON(t, &want))
+	}
+}
+
+// A Matroska video track's depth comes from its Colour element or, failing
+// that, from the codec's configuration record.
+func TestMatroskaBitDepth(t *testing.T) {
+	record := func(c mkv.Codec, file string) []byte {
+		v, err := mkv.NewVideoSource(bytes.NewReader(readFixture(t, "mkv", file)), c, 24000, 1001, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Create(filepath.Join(t.TempDir(), "x.mkv"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		if err := mkv.Mux(f, []mkv.Source{v}, mkv.Options{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		m, err := mkv.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.Tracks[0].CodecPrivate
+	}
+	avc, hevc, av1 := record(mkv.H264, "bframes.264"), record(mkv.HEVC, "bframes.265"), record(mkv.AV1, "av1.obu")
+	with := func(b []byte, i int, v byte) []byte {
+		b = append([]byte(nil), b...)
+		b[i] = v
+		return b
+	}
+	// The High profile record ends with chroma format, luma and chroma depth
+	// and the SPS extension count; make it High 10 with a luma depth of 10.
+	if avc[1] != 100 || avc[len(avc)-3] != 0xf8 {
+		t.Fatalf("expected a High profile avcC with its depth fields, got % x", avc)
+	}
+	high10 := with(with(avc, 1, 110), len(avc)-3, 0xfa)
+	for _, c := range []struct {
+		name string
+		t    mkv.ReadTrack
+		want int
+	}{
+		{"avcC", mkv.ReadTrack{CodecID: "V_MPEG4/ISO/AVC", CodecPrivate: avc}, 8},
+		{"avcC High 10", mkv.ReadTrack{CodecID: "V_MPEG4/ISO/AVC", CodecPrivate: high10}, 10},
+		{"avcC High 10, cut", mkv.ReadTrack{CodecID: "V_MPEG4/ISO/AVC", CodecPrivate: high10[:len(avc)-4]}, 0},
+		{"hvcC", mkv.ReadTrack{CodecID: "V_MPEGH/ISO/HEVC", CodecPrivate: hevc}, 8},
+		{"hvcC Main 10", mkv.ReadTrack{CodecID: "V_MPEGH/ISO/HEVC", CodecPrivate: with(hevc, 17, 0xfa)}, 10},
+		{"av1C", mkv.ReadTrack{CodecID: "V_AV1", CodecPrivate: av1}, 8},
+		{"av1C 10-bit", mkv.ReadTrack{CodecID: "V_AV1", CodecPrivate: with(av1, 2, av1[2]|0x40)}, 10},
+		{"av1C 12-bit", mkv.ReadTrack{CodecID: "V_AV1", CodecPrivate: with(av1, 2, av1[2]|0x60)}, 12},
+		{"Colour", mkv.ReadTrack{CodecID: "V_MPEGH/ISO/HEVC", CodecPrivate: hevc, BitsPerChannel: 10}, 10},
+		{"nothing stated", mkv.ReadTrack{CodecID: "V_VP9"}, 0},
+		{"short record", mkv.ReadTrack{CodecID: "V_MPEGH/ISO/HEVC", CodecPrivate: hevc[:10]}, 0},
+	} {
+		if got := mkvBitDepth(c.t); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
 	}
 }

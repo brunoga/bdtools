@@ -159,6 +159,32 @@ func TestNotAPlaylist(t *testing.T) {
 	}
 }
 
+// A dependent view's clip lists its MVC stream in the clip info's 3D
+// extension, not in its program.
+func TestCLPIDependentView(t *testing.T) {
+	d, err := Open(fixture("folder"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := d.ReadFile("CLIPINF/00001.clpi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParseCLPI(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s) != 1 || s[0] != (ClipStream{PID: 0x1012, Coding: CodingMVC, Format: 3, Rate: 1}) {
+		t.Errorf("streams %+v", s)
+	}
+	// The extension's entries are bounds-checked: a table running off the
+	// end of the file is no extension.
+	ext := int(b[24])<<24 | int(b[25])<<16 | int(b[26])<<8 | int(b[27])
+	if _, ok := clpiExtension(b[:ext+20], 2, 5); ok {
+		t.Error("a cut extension table was read")
+	}
+}
+
 func FuzzParseMPLS(f *testing.F) {
 	d, err := Open(fixture("folder"))
 	if err != nil {
@@ -166,6 +192,10 @@ func FuzzParseMPLS(f *testing.F) {
 	}
 	b, err := d.ReadFile("PLAYLIST/00000.mpls")
 	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(b)
+	if b, err = d.ReadFile("CLIPINF/00001.clpi"); err != nil {
 		f.Fatal(err)
 	}
 	f.Add(b)

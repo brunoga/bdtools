@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `probe` reports video bit depth: on a disc, the depth Blu-ray allows the
+  coding; in Matroska, the Colour element's or the codec configuration's.
+- `probe` reports the MVC view's frame size, from the dependent clip's clip
+  info, which lists the MVC stream in its 3D extension.
+
 ## [0.4.1] - 2026-10-06
 
 ### Fixed
