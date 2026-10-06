@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/brunoga/mvc/internal/mkv"
 )
 
 func runnerOpts(t *testing.T) Options {
@@ -25,8 +27,6 @@ func runnerOpts(t *testing.T) Options {
 	o.Output = filepath.Join(dir, "out.mkv")
 	o.TempDir = t.TempDir()
 	o.Encoder = EncoderSoftware
-	// These describe the tsMuxeR pipeline's tool handling.
-	o.Demuxer = DemuxerTSMuxeR
 	return o
 }
 
@@ -46,16 +46,18 @@ func TestRunnerReportsAMissingSource(t *testing.T) {
 }
 
 // A missing tool must name itself and what it is for. "executable file not
-// found in $PATH" tells someone nothing about which of five programs to go and
+// found in $PATH" tells someone nothing about which program to go and
 // install.
 func TestRunnerNamesAMissingTool(t *testing.T) {
-	r := NewRunner("linux", runnerOpts(t), nil)
+	o := runnerOpts(t)
+	o.Input = bluray("folder")
+	r := NewRunner("linux", o, nil)
 	r.tool = func(string) (string, error) { return "", errors.New("nope") }
 	err := r.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, want := range []string{"tsmuxer", "is not installed", "demux", "try:"} {
+	for _, want := range []string{"x264", "is not installed", "encode", "try:"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should contain %q, got:\n%s", want, err)
 		}
@@ -78,8 +80,9 @@ func TestRunnerValidatesBeforeTouchingTheSource(t *testing.T) {
 	}
 }
 
-// The work directory is created under TempDir and removed afterwards. Demuxed
-// views are tens of gigabytes, so leaving them behind is not a small mistake.
+// The work directory is created under TempDir and removed afterwards. A
+// film's audio and encoded video are tens of gigabytes, so leaving them
+// behind is not a small mistake.
 func TestRunnerCleansUpItsWorkDirectory(t *testing.T) {
 	o := runnerOpts(t)
 	r := NewRunner("linux", o, nil)
@@ -164,74 +167,67 @@ func TestRunnerAndPlanAgreeOnTheVideoPath(t *testing.T) {
 	}
 }
 
-// The end-to-end test: build a real 3D m2ts by muxing MVC elementary streams,
-// convert it, and check the result. This is the only way to know the meta file,
-// the demuxed filenames and the stream plumbing are all right at once.
+// The end-to-end test: convert a Matroska remux of the MVC fixtures, as a
+// MakeMKV rip of a 3D disc is, and check the result: the whole pipeline at
+// once, demux to mux.
 //
-// Skips unless the toolchain is present.
-func TestRunnerConvertsARealSource(t *testing.T) {
-	fixtures := fixtureDir(t)
-	for _, n := range []string{"tsMuxeR", "x264", "mkvmerge"} {
-		if _, err := LookPath(n); err != nil {
-			t.Skipf("%s not installed", n)
+// Skips without x264.
+func TestRunnerConvertsAMatroskaSource(t *testing.T) {
+	if _, err := LookPath("x264"); err != nil {
+		t.Skip("x264 not installed")
+	}
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	// A name with spaces and brackets, as a real library uses.
+	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder = EncoderSoftware
+	o.CRF, o.Preset = 25, "ultrafast"
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v", err)
+	}
+	checkConverted(t, out, work, "Surround", "Signs")
+}
+
+// checkConverted checks a conversion's output: side by side at double the
+// view width, the named tracks there, and no work directory left behind.
+func checkConverted(t *testing.T, out, work string, names ...string) {
+	t.Helper()
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatalf("no output: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := rd.Tracks[0]
+	if v.Type != mkv.TypeVideo || v.Width != 1280 || v.Height != 480 || v.StereoMode != 1 {
+		t.Errorf("video track %+v, want 1280x480 side by side", v)
+	}
+	have := map[string]bool{}
+	for _, tr := range rd.Tracks {
+		have[tr.Name] = true
+	}
+	for _, n := range names {
+		if !have[n] {
+			t.Errorf("no track named %q in %+v", n, rd.Tracks)
 		}
 	}
-	for _, f := range []string{"mvc_base.264", "mvc_dependent.mvc"} {
-		if _, err := os.Stat(filepath.Join(fixtures, f)); err != nil {
-			t.Skipf("fixture %s missing", f)
+	entries, _ := os.ReadDir(work)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "mvctools-") {
+			t.Errorf("work directory left behind: %s", e.Name())
 		}
-	}
-
-	source := buildTestSource(t, t.TempDir(), fixtures)
-	for _, c := range []struct {
-		dm Demuxer
-		mx Muxer
-	}{{DemuxerBuiltin, MuxerBuiltin}, {DemuxerBuiltin, MuxerMkvmerge}, {DemuxerTSMuxeR, MuxerBuiltin}, {DemuxerTSMuxeR, MuxerMkvmerge}} {
-		dm := c.dm
-		t.Run(string(c.dm)+"+"+string(c.mx), func(t *testing.T) {
-			work := t.TempDir()
-			// A name with spaces and brackets, as a real library uses.
-			out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
-			o := DefaultOptions()
-			o.Input, o.Output, o.TempDir = source, out, work
-			o.Encoder = EncoderSoftware
-			o.CRF, o.Preset = 25, "ultrafast"
-			o.Demuxer = dm
-			o.Muxer = c.mx
-
-			r := NewRunner(CurrentGOOS, o, nil)
-			if err := r.Run(context.Background()); err != nil {
-				t.Fatalf("conversion failed: %v", err)
-			}
-
-			st, err := os.Stat(out)
-			if err != nil {
-				t.Fatalf("no output: %v", err)
-			}
-			if st.Size() == 0 {
-				t.Fatal("output is empty")
-			}
-			// The stacked frame must be double the single-view width.
-			if w, h := probeSize(t, out); w != 1280 || h != 480 {
-				t.Errorf("output is %dx%d, want 1280x480 side-by-side", w, h)
-			}
-			// And nothing may be left behind.
-			entries, _ := os.ReadDir(work)
-			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), "mvctools-") {
-					t.Errorf("work directory left behind: %s", e.Name())
-				}
-			}
-		})
 	}
 }
 
 // A 2D source has to be refused by name, not fail obscurely partway through.
 func TestRunnerRefusesA2DSource(t *testing.T) {
-	for _, n := range []string{"tsMuxeR", "ffmpeg"} {
-		if _, err := LookPath(n); err != nil {
-			t.Skipf("%s not installed", n)
-		}
+	if _, err := LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
 	}
 	work := t.TempDir()
 	src := filepath.Join(work, "2d.m2ts")
@@ -239,48 +235,19 @@ func TestRunnerRefusesA2DSource(t *testing.T) {
 		"-f", "lavfi", "-i", "testsrc2=s=320x240:d=1", "-c:v", "libx264", src); err != nil {
 		t.Skipf("could not build a 2D source: %v", err)
 	}
-	for _, dm := range []Demuxer{DemuxerBuiltin, DemuxerTSMuxeR} {
-		o := DefaultOptions()
-		o.Input, o.Output, o.TempDir = src, filepath.Join(work, "x.mkv"), work
-		o.Encoder = EncoderSoftware
-		o.Demuxer = dm
-		err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
-		if err == nil {
-			t.Fatalf("%s: a 2D source must be refused", dm)
-		}
-		if !strings.Contains(err.Error(), "not 3D") {
-			t.Errorf("%s: error should say the source is not 3D, got: %v", dm, err)
-		}
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = src, filepath.Join(work, "x.mkv"), work
+	o.Encoder = EncoderSoftware
+	err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
+	if err == nil {
+		t.Fatal("a 2D source must be refused")
+	}
+	if !strings.Contains(err.Error(), "not 3D") {
+		t.Errorf("error should say the source is not 3D, got: %v", err)
 	}
 }
 
 // --- helpers for the end-to-end tests ---------------------------------------
-
-// buildTestSource muxes the MVC fixtures into a real 3D m2ts with an audio
-// track, which is what makes an end-to-end test possible without a disc: the
-// demuxer's own muxer builds the source it will later take apart.
-func buildTestSource(t *testing.T, work, fixtures string) string {
-	t.Helper()
-	audio := filepath.Join(work, "audio.ac3")
-	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-		"-c:a", "ac3", "-b:a", "192k", audio); err != nil {
-		t.Skipf("could not build an audio track: %v", err)
-	}
-	meta := filepath.Join(work, "mux.meta")
-	content := "MUXOPT --no-pcr-on-video-pid --new-audio-pes --vbr --vbv-len=500\n" +
-		`V_MPEG4/ISO/AVC, "` + filepath.Join(fixtures, "mvc_base.264") + `", fps=23.976, insertSEI, contSPS` + "\n" +
-		`V_MPEG4/ISO/MVC, "` + filepath.Join(fixtures, "mvc_dependent.mvc") + `", fps=23.976, insertSEI, contSPS` + "\n" +
-		`A_AC3, "` + audio + `", lang=eng` + "\n"
-	if err := os.WriteFile(meta, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	src := filepath.Join(work, "source.m2ts")
-	if err := runCmd(t, "tsMuxeR", meta, src); err != nil {
-		t.Skipf("could not mux a 3D source: %v", err)
-	}
-	return src
-}
 
 func runCmd(t *testing.T, name string, args ...string) error {
 	t.Helper()
@@ -295,25 +262,6 @@ func runCmd(t *testing.T, name string, args ...string) error {
 	return nil
 }
 
-// probeSize returns a file's video dimensions via ffprobe.
-func probeSize(t *testing.T, path string) (int, int) {
-	t.Helper()
-	bin, err := LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe not installed")
-	}
-	out, err := execCommand(bin, "-v", "error", "-select_streams", "v:0",
-		"-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", path)
-	if err != nil {
-		t.Fatalf("ffprobe: %v\n%s", err, out)
-	}
-	var w, h int
-	if _, err := fmt.Sscanf(strings.TrimSpace(out), "%dx%d", &w, &h); err != nil {
-		t.Fatalf("could not read dimensions from %q", out)
-	}
-	return w, h
-}
-
 func execCommand(bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(context.Background(), bin, args...) //nolint:gosec // test helper
 	b, err := cmd.CombinedOutput()
@@ -321,82 +269,42 @@ func execCommand(bin string, args ...string) (string, error) {
 }
 
 // The point of reading the image directly: mounting one needs root, which
-// rules it out for an unattended conversion. This builds a real UDF Blu-ray
-// image from the MVC fixtures and converts it without touching a mount.
+// rules it out for an unattended conversion. The Blu-ray fixture converts as
+// a folder and as a UDF image, read in place, with the feature chosen and
+// reported.
 func TestRunnerConvertsADiscImage(t *testing.T) {
-	fixtures := fixtureDir(t)
-	for _, n := range []string{"tsMuxeR", "x264", "mkvmerge", "ffmpeg"} {
-		if _, err := LookPath(n); err != nil {
-			t.Skipf("%s not installed", n)
-		}
+	if _, err := LookPath("x264"); err != nil {
+		t.Skip("x264 not installed")
 	}
-	iso := buildTestISO(t, t.TempDir(), fixtures)
-	for _, c := range []struct {
-		dm Demuxer
-		mx Muxer
-	}{{DemuxerBuiltin, MuxerBuiltin}, {DemuxerBuiltin, MuxerMkvmerge}, {DemuxerTSMuxeR, MuxerBuiltin}, {DemuxerTSMuxeR, MuxerMkvmerge}} {
-		dm := c.dm
-		t.Run(string(c.dm)+"+"+string(c.mx), func(t *testing.T) {
+	for _, form := range bothForms {
+		t.Run(form, func(t *testing.T) {
 			work := t.TempDir()
 			out := filepath.Join(work, "From Image (2012) 3D.mkv")
 			o := DefaultOptions()
-			o.Input, o.Output, o.TempDir = iso, out, work
+			o.Input, o.Output, o.TempDir = bluray(form), out, work
 			o.Encoder, o.CRF, o.Preset = EncoderSoftware, 25, "ultrafast"
-			o.Demuxer = dm
-			o.Muxer = c.mx
 
 			var lines []string
 			r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
 			if err := r.Run(context.Background()); err != nil {
-				t.Fatalf("converting the image failed: %v\n%s", err, strings.Join(lines, "\n"))
+				t.Fatalf("converting failed: %v\n%s", err, strings.Join(lines, "\n"))
 			}
-			if w, h := probeSize(t, out); w != 1280 || h != 480 {
-				t.Errorf("output is %dx%d, want 1280x480", w, h)
-			}
-			// It must say it read the image and which title it picked, since
-			// on a real disc both are decisions the operator would otherwise
-			// have had to make.
+			checkConverted(t, out, work)
+			// It must say which title it picked, and that an image was read
+			// in place: on a real disc both are decisions the operator would
+			// otherwise have had to make.
 			joined := strings.Join(lines, "\n")
-			for _, want := range []string{"disc image", "chose "} {
+			wants := []string{"chose "}
+			if form == "disc.iso" {
+				wants = append(wants, "disc image")
+			}
+			for _, want := range wants {
 				if !strings.Contains(joined, want) {
 					t.Errorf("progress should mention %q, got:\n%s", want, joined)
 				}
 			}
-			// Nothing extracted from the image may be left behind — on a real
-			// disc that is tens of gigabytes.
-			entries, _ := os.ReadDir(work)
-			for _, e := range entries {
-				if strings.HasPrefix(e.Name(), "mvctools-") {
-					t.Errorf("work directory left behind: %s", e.Name())
-				}
-			}
 		})
 	}
-}
-
-// buildTestISO muxes the MVC fixtures into a real UDF Blu-ray image, which is
-// what makes an image test possible without a disc.
-func buildTestISO(t *testing.T, work, fixtures string) string {
-	t.Helper()
-	audio := filepath.Join(work, "iso-audio.ac3")
-	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-		"-c:a", "ac3", "-b:a", "192k", audio); err != nil {
-		t.Skipf("could not build an audio track: %v", err)
-	}
-	meta := filepath.Join(work, "bd.meta")
-	content := "MUXOPT --blu-ray --no-pcr-on-video-pid --new-audio-pes --vbr --vbv-len=500\n" +
-		`V_MPEG4/ISO/AVC, "` + filepath.Join(fixtures, "mvc_base.264") + `", fps=23.976, insertSEI, contSPS` + "\n" +
-		`V_MPEG4/ISO/MVC, "` + filepath.Join(fixtures, "mvc_dependent.mvc") + `", fps=23.976, insertSEI, contSPS` + "\n" +
-		`A_AC3, "` + audio + `", lang=eng` + "\n"
-	if err := os.WriteFile(meta, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	iso := filepath.Join(work, "disc.iso")
-	if err := runCmd(t, "tsMuxeR", meta, iso); err != nil {
-		t.Skipf("could not build a Blu-ray image: %v", err)
-	}
-	return iso
 }
 
 // An image with no Blu-ray structure must say so rather than fail obscurely.

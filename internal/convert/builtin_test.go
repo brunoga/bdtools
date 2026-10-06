@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brunoga/mvc"
 	"github.com/brunoga/mvc/internal/bdmv"
@@ -326,23 +328,14 @@ func TestBuiltinPlan(t *testing.T) {
 		t.Errorf("plan:\n%s", s)
 	}
 	if names := RequiredFor("linux", o); len(names) != 1 || names[0].Name != "x264" {
-		t.Errorf("with the built-in muxer only the encoder is needed, got %v", names)
+		t.Errorf("only the encoder is needed, got %v", names)
 	}
-	o.Muxer = MuxerMkvmerge
-	if names := RequiredFor("linux", o); len(names) != 2 || names[1].Name != "mkvmerge" {
-		t.Errorf("--muxer mkvmerge needs mkvmerge, got %v", names)
+	if s := mustPlan(t, o).String(); !strings.Contains(s, "write /out/a.mkv") {
+		t.Errorf("the mux is built in:\n%s", s)
 	}
-	if s := mustPlan(t, o).String(); !strings.Contains(s, "mkvmerge -o /out/a.mkv") {
-		t.Errorf("plan:\n%s", s)
-	}
-	o.Muxer = MuxerBuiltin
 	o.Remux, o.Output = true, "/out/a.m2ts"
 	if len(RequiredFor("linux", o)) != 0 {
-		t.Error("a built-in remux needs no tools")
-	}
-	o.Demuxer = DemuxerTSMuxeR
-	if names := RequiredFor("linux", o); len(names) != 1 || names[0].Name != "tsmuxer" {
-		t.Errorf("a tsMuxeR remux needs tsMuxeR alone, got %v", names)
+		t.Error("a remux needs no tools")
 	}
 }
 
@@ -450,5 +443,88 @@ func TestVideoToolboxQualityFollowsCRF(t *testing.T) {
 	}
 	if got := q(0); got != "100" {
 		t.Errorf("--crf 0: -q:v %s, want 100", got)
+	}
+}
+
+// With the source's length known the progress line says how far along the
+// conversion is and how long it has left; without it, just the count.
+func TestProgressLine(t *testing.T) {
+	var lines []string
+	r := NewRunner(CurrentGOOS, DefaultOptions(), func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	r.length = 2*time.Hour + 14*time.Minute + 32*time.Second
+	p := r.newProgress("encoded")
+	p.begin(24000, 1001)
+	if len(lines) != 1 || lines[0] != "about 193534 frames to encode (2h14m32s at 23.976 fps)" {
+		t.Errorf("announced %q", lines)
+	}
+	at := p.started.Add(1000 * time.Second)
+	if got, want := p.line(97100, at), "97100 of 193534 frames encoded (50.2%), 97.1 fps, 16m33s left"; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	// Past the estimate (the length was a little short): no percentage.
+	if got := p.line(200000, p.started.Add(2000*time.Second)); got != "200000 frames encoded (100.0 fps)" {
+		t.Errorf("past the end: %q", got)
+	}
+	r.length = 0
+	q := r.newProgress("decoded")
+	q.begin(24000, 1001)
+	if got := q.line(50, q.started.Add(time.Second)); got != "50 frames decoded (50.0 fps)" {
+		t.Errorf("no length: %q", got)
+	}
+	// Reports come every progressEvery, not every frame.
+	lines = nil
+	clock := q.started
+	q.now = func() time.Time { return clock }
+	for i := 1; i <= 100; i++ {
+		clock = clock.Add(time.Second)
+		q.frame(i)
+	}
+	if len(lines) != 3 {
+		t.Errorf("%d reports over 100 s", len(lines))
+	}
+}
+
+// Sync points are kept sparse: the first, one a second, and every jump.
+func TestSyncPointSampling(t *testing.T) {
+	w := &esWriter{}
+	at := time.Duration(0)
+	for i := 0; i < 3000; i++ { // 3 s of 1 ms payloads
+		w.mark(at)
+		w.n += 100
+		at += time.Millisecond
+	}
+	w.mark(at + 500*time.Millisecond) // a gap
+	w.n += 100
+	w.mark(at + 501*time.Millisecond)
+	var got []time.Duration
+	for _, s := range w.sync {
+		got = append(got, s.At)
+	}
+	want := []time.Duration{0, time.Second, 2 * time.Second, 3500 * time.Millisecond}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("sync points at %v, want %v", got, want)
+	}
+	if w.sync[3].Offset != 300000 {
+		t.Errorf("the gap's point is at offset %d", w.sync[3].Offset)
+	}
+}
+
+// The first kept picture's place on the output's timeline becomes the
+// video's delay: a disc whose picture starts after its sound keeps that gap.
+func TestFirstPictureDelay(t *testing.T) {
+	g := &goDemux{ins: []int64{552600, 900000}, outs: []int64{1000000000, 1000000000}, offsets: []int64{0, 3600 * 90000}}
+	r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
+	r.timeline = g.timeline
+	r.noteFirstPicture(639450) // 0.965 s after IN, in clip 0
+	if r.videoDelay != 965*time.Millisecond {
+		t.Errorf("delay %v", r.videoDelay)
+	}
+	r.videoDelay = 0
+	r.noteFirstPicture(552600) // at IN
+	if r.videoDelay != 0 {
+		t.Errorf("a picture at IN delays by %v", r.videoDelay)
+	}
+	if got := g.timeline(int64(1)<<ptsTagShift | 900000 + 90000); got != time.Hour+time.Second {
+		t.Errorf("second clip: %v", got)
 	}
 }

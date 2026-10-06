@@ -25,9 +25,9 @@ const (
 
 // Options configure a conversion.
 type Options struct {
-	Input   string // .iso, a BDMV directory, or an MKV from MakeMKV
+	Input   string // .iso, a BDMV directory, a playlist or m2ts, or an MKV remux
 	Output  string // destination .mkv
-	TempDir string // scratch space for the demuxed streams
+	TempDir string // scratch space for the audio, subtitles and encoded video
 	Layout  Layout
 	Encoder Encoder
 	// Codec is the output video codec. H.264 plays on anything; HEVC is
@@ -74,12 +74,6 @@ type Options struct {
 	// DecodeThreads is how many pictures the decoder works on at once; 0 uses
 	// every CPU.
 	DecodeThreads int
-	// Demuxer reads the source: the built-in one (the default; empty means
-	// it too) reads a disc image or folder in place, or tsMuxeR.
-	Demuxer Demuxer
-	// Muxer writes the MKV: the built-in one (the default; empty means it
-	// too), or mkvmerge.
-	Muxer Muxer
 	// GPUAPI says how a hardware encoder is driven: through its system
 	// library in process (the default; empty means it too), or ffmpeg.
 	GPUAPI GPUAPI
@@ -88,31 +82,12 @@ type Options struct {
 	NativeGPU bool
 }
 
-// Muxer names which muxer writes the output.
-type Muxer string
-
-const (
-	// MuxerBuiltin writes the Matroska file in process.
-	MuxerBuiltin Muxer = "builtin"
-	// MuxerMkvmerge runs mkvmerge.
-	MuxerMkvmerge Muxer = "mkvmerge"
-)
-
-// Valid reports whether m is a known muxer.
-func (m Muxer) Valid() bool { return m == MuxerBuiltin || m == MuxerMkvmerge }
-
-// builtinMux reports whether the built-in muxer is in use.
-func (o Options) builtinMux() bool { return o.Muxer != MuxerMkvmerge }
-
-// builtin reports whether the built-in demuxer is in use. It reads Blu-ray
-// sources; a Matroska, MP4 or VOB input goes to tsMuxeR whatever was asked.
-func (o Options) builtin() bool { return o.Demuxer != DemuxerTSMuxeR && !foreignContainer(o.Input) }
-
-// foreignContainer reports whether a source is a container the built-in
-// demuxer does not read.
-func foreignContainer(path string) bool {
+// unsupportedContainer reports whether a source is a container nothing
+// here reads. MVC travels on Blu-rays and in Matroska remuxes of them; a VOB
+// is a DVD's, which is never 3D.
+func unsupportedContainer(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mkv", ".mk3d", ".mp4", ".m4v", ".mov", ".vob":
+	case ".mp4", ".m4v", ".mov", ".vob":
 		return true
 	}
 	return false
@@ -138,10 +113,6 @@ type Step struct {
 // Plan is the full sequence for one conversion.
 type Plan struct {
 	Steps []Step
-	// BaseView and DependentView are where the demux puts the two views, and
-	// what the decoder reads.
-	BaseView      string
-	DependentView string
 	// Intermediates are the files the steps create, for cleanup.
 	Intermediates []string
 }
@@ -156,8 +127,6 @@ func DefaultOptions() Options {
 		CRF:         18,
 		Preset:      "slow",
 		VAAPIDevice: "/dev/dri/renderD128",
-		Demuxer:     DemuxerBuiltin,
-		Muxer:       MuxerBuiltin,
 	}
 }
 
@@ -173,6 +142,10 @@ func (o Options) Validate(goos string) error {
 	}
 	if strings.EqualFold(o.Input, o.Output) {
 		return fmt.Errorf("input and output are the same file")
+	}
+	if unsupportedContainer(o.Input) {
+		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
+			"a playlist or an m2ts) or a Matroska remux of one", filepath.Base(o.Input))
 	}
 	if o.Remux {
 		// MVC has no home in Matroska that players agree on, so a remux
@@ -279,67 +252,8 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 	if tmp == "" {
 		tmp = filepath.Dir(opts.Output)
 	}
-	var (
-		meta     = filepath.Join(tmp, "demux.meta")
-		baseView = filepath.Join(tmp, "base.264")
-		depView  = filepath.Join(tmp, "dependent.mvc")
-		videoOut = filepath.Join(tmp, "stacked"+opts.Codec.streamExt())
-	)
-
-	if opts.builtin() {
-		return builtinPlan(opts, tmp, videoOut), nil
-	}
-	if opts.Remux {
-		// One step: tsMuxeR reads the source and writes the selected tracks
-		// straight out. No decode, no encode, no interleave, and nothing
-		// intermediate beyond the meta file describing what to keep.
-		remuxMeta := filepath.Join(tmp, "remux.meta")
-		return &Plan{
-			Steps:         []Step{{Name: "remux", Argv: []string{"tsMuxeR", remuxMeta, opts.Output}}},
-			Intermediates: []string{remuxMeta},
-		}, nil
-	}
-
-	p := &Plan{
-		BaseView:      baseView,
-		DependentView: depView,
-		Intermediates: []string{meta, baseView, depView, videoOut},
-	}
-
-	// 1. Demux. tsMuxeR reads a meta file describing what to extract; writing
-	//    it is the runner's job, since it depends on the source's track list.
-	p.Steps = append(p.Steps, Step{
-		Name: "demux",
-		Argv: []string{"tsMuxeR", meta, tmp},
-	})
-
-	// 2. Decode. The built-in decoder reads the two demuxed views as a pair
-	//    and stacks the eyes side by side as it decodes, so there is no
-	//    combined stream and no separate stacking pass. Y4M goes straight into
-	//    the encoder rather than to disk: raw frames for a feature film are
-	//    hundreds of gigabytes.
-	decode := []string{"mvcdec", "-y4m", "-", "-layout", "sbs"}
-	if opts.SwapLR {
-		decode = append(decode, "-swap")
-	}
-	p.Steps = append(p.Steps, Step{
-		Name:    "decode",
-		Argv:    append(decode, baseView, depView),
-		Builtin: true,
-		PipeTo:  "encode",
-	})
-
-	// 3. Encode.
-	if opts.NativeGPU {
-		p.Steps = append(p.Steps, nativeEncodeStep(opts, videoOut))
-	} else {
-		p.Steps = append(p.Steps, encodeStep(opts, videoOut))
-	}
-
-	// 4. Mux. Audio, subtitle and chapter arguments are appended by the runner
-	//    from what the demux actually produced.
-	p.Steps = append(p.Steps, muxStep(opts, videoOut))
-	return p, nil
+	videoOut := filepath.Join(tmp, "stacked"+opts.Codec.streamExt())
+	return builtinPlan(opts, tmp, videoOut), nil
 }
 
 // nativeEncodeStep is the encode with the GPU driven in process.
@@ -351,17 +265,13 @@ func nativeEncodeStep(opts Options, out string) Step {
 	return Step{Name: "encode", Builtin: true, Argv: append(argv, "->", out)}
 }
 
-// muxStep is the final step: mkvmerge, or the built-in muxer.
+// muxStep is the final step: the built-in muxer.
 func muxStep(opts Options, videoOut string) Step {
-	if opts.builtinMux() {
-		return Step{Name: "mux", Builtin: true,
-			Argv: []string{"write", opts.Output, "(with the audio, subtitles and chapters) from", videoOut}}
-	}
-	return Step{Name: "mux", Argv: []string{"mkvmerge", "-o", opts.Output, videoOut}}
+	return Step{Name: "mux", Builtin: true,
+		Argv: []string{"write", opts.Output, "(with the audio, subtitles and chapters) from", videoOut}}
 }
 
-// builtinPlan is the plan with the built-in demuxer: the source is read
-// once, in place — no extraction from an image, no demuxed copy of either
+// builtinPlan is the plan: the source is read once, in place — no extraction from an image, no demuxed copy of either
 // view — with the video decoded on the way and the other tracks written to
 // the work directory for the mux.
 func builtinPlan(opts Options, tmp, videoOut string) *Plan {

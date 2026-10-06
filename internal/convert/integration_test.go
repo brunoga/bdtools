@@ -69,8 +69,8 @@ func decodePair(t *testing.T, base, dep []byte, swap bool) []byte {
 	return decodeSource(t, mvc.Source{Format: mvc.FormatSplit, R: bytes.NewReader(base), Dependent: bytes.NewReader(dep)}, swap)
 }
 
-// The decoder must take the demuxed pair as tsMuxeR writes it — the whole
-// pipeline depends on it, since tsMuxeR always splits the views.
+// The decoder takes a demuxed pair, the base and dependent views as two
+// elementary streams, which is what mvcdec reads from a split source.
 func TestDecoderTakesTheDemuxedPair(t *testing.T) {
 	dir := fixtureDir(t)
 	got := decodePair(t, readFixture(t, dir, "mvc_base.264"), readFixture(t, dir, "mvc_dependent.mvc"), false)

@@ -39,21 +39,22 @@ video. For a feature film that is the difference between a scratch directory
 the size of the disc (twice over: the extracted stream, then the demuxed
 views) and one the size of its soundtrack.
 
-`--demuxer tsmuxer` uses [tsMuxeR](#tsmuxer) instead, as before: the image's
-streams are extracted, tsMuxeR demuxes them, and the decoder reads the
-demuxed pair. A Matroska, MP4 or VOB source always goes that way, since the
-built-in demuxer reads Blu-ray sources. `--muxer mkvmerge` writes the MKV
-with mkvmerge instead of the built-in muxer. Any combination works.
+A Matroska remux of a 3D disc (MakeMKV's, or mkvmerge's from a disc) is
+read the same way: its video track carries each MVC access unit whole, both
+views, and goes to the decoder as it is read; the audio and subtitle tracks
+keep their names and forced flags. MP4 and VOB sources are not read: MVC
+does not travel in them (a VOB is a DVD's, which is never 3D).
 
-The built-in muxer writes what mkvmerge writes from the same streams: on a
-whole film (The Wild Robot, re-muxed from an mkvmerge-made MKV) every one of
-the 146,237 video packets is identical — timestamp, size, keyframe flag and
-content — and so are the subtitles; the TrueHD packets are identical but for
-sub-millisecond timestamp rounding. It reads the encoder's raw output (an
-H.264 or HEVC stream has no timestamps, so each frame's display time comes
-from its picture order count, B-frames and open GOPs included) and the
-audio and subtitle files frame by frame, and a whole film takes about a
-minute and a half.
+tsMuxeR and mkvmerge were used for the demux and the mux before these were
+built in, and are not used any more. The muxer writes what mkvmerge writes
+from the same streams: on a whole film (The Wild Robot, re-muxed from an
+mkvmerge-made MKV) every one of the 146,237 video packets is identical —
+timestamp, size, keyframe flag and content — and so are the subtitles; the
+TrueHD packets are identical but for sub-millisecond timestamp rounding. It
+reads the encoder's raw output (an H.264 or HEVC stream has no timestamps, so
+each frame's display time comes from its picture order count, B-frames and
+open GOPs included) and the audio and subtitle files frame by frame, and a
+whole film takes about a minute and a half.
 
 ## Usage
 
@@ -72,7 +73,7 @@ mvctools --input 00800.m2ts --output "Life of Pi (2012).mkv"
 | An AVCHD 3D recording | the folder holding `PRIVATE/AVCHD` | **it does** |
 | A specific playlist | `BDMV/PLAYLIST/00800.mpls` | you |
 | Loose streams | the feature's `.m2ts`, or its `STREAM/SSIF/*.ssif` | you |
-| An MKV from MakeMKV | the `.mkv` (read with tsMuxeR) | you |
+| An MKV remux (MakeMKV, mkvmerge) | the `.mkv` | you |
 
 **A disc image needs no mounting and no extraction.** Mounting one requires
 root, which rules it out for an unattended conversion, so the image is read
@@ -121,9 +122,9 @@ scheduler such as pipeliner retry it.
 |---|---|---|
 | `--check` | — | Report which external tools are present and which are missing, then exit |
 | `--dry-run` | — | Print the commands that would run, without running them |
-| `--keep-temp` | — | Leave the demuxed streams behind instead of deleting them |
+| `--keep-temp` | — | Leave the work directory's files behind instead of deleting them |
 | `--quiet` | — | Only report errors |
-| `--input` | — | An `.m2ts`, a `.mpls` playlist from a BDMV, or an MKV — see [What you can point it at](#what-you-can-point-it-at) |
+| `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
 | `--output` | — | Destination `.mkv` |
 | `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
@@ -142,8 +143,6 @@ scheduler such as pipeliner retry it.
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
-| `--demuxer` | `builtin` | `builtin` reads the disc in place; `tsmuxer` uses tsMuxeR — see [The pipeline](#the-pipeline) |
-| `--muxer` | `builtin` | `builtin` writes the MKV in process; `mkvmerge` uses mkvmerge |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
 | `--vaapi-device` | `/dev/dri/renderD128` | The render node VAAPI encodes on |
 
@@ -242,9 +241,7 @@ Notes on the matching:
 
 `--list` reads the playlists and the first few megabytes of the feature's
 stream, wherever they are, so it is instant even on an image over a network
-share. (With `--demuxer tsmuxer` it has to extract the image first, which
-costs what a conversion's first stage costs: pass `--temp` somewhere with
-room.)
+share.
 
 ### The best track, rather than a named one
 
@@ -328,7 +325,8 @@ exactly as the disc does, and it needs no tools at all.
 The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
 has no home in Matroska that players agree on. Nothing about the picture can
 change, so `--layout half` and `--swap-lr` are refused. A title made of
-several clips joined together is remuxed with `--demuxer tsmuxer`.
+several clips joined together cannot be remuxed: the remux copies one
+clip's packets.
 
 ## What plays the result, and at what resolution
 
@@ -369,8 +367,7 @@ process.
 |---|---|---|
 | **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead for software half-SBS (its scaler), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
 
-A `--remux` needs nothing at all. **mkvmerge** is needed only for
-`--muxer mkvmerge`.
+A `--remux` needs nothing at all.
 
 Installing them is left to you; `--check` says what is missing, what each one
 does, and where to start:
@@ -386,30 +383,16 @@ all 1 required tools present
 With a GPU that encodes in process it says so: `no external tools needed`.
 
 `--check` exits non-zero when anything is missing, so it works as a preflight.
-It answers for the options given, so `--check --demuxer tsmuxer` looks for
-tsMuxeR too, and `--check --muxer mkvmerge` for mkvmerge.
-
-### tsMuxeR
-
-[tsMuxeR](https://github.com/justdan96/tsMuxer) is only needed for
-`--demuxer tsmuxer`, and for Matroska, MP4 or VOB sources. Upstream's release
-binaries demux MVC; the Linux one is x86_64 only, but its **CLI needs no Qt** —
-that is the GUI alone — so on Arm Linux it is
-
-```sh
-apt install build-essential cmake ninja-build zlib1g-dev libfreetype-dev
-cmake -S . -B build -G Ninja && ninja -C build tsmuxer
-```
-
-about a minute. `Dockerfile.mvctools` does exactly that, so the image has it.
+It answers for the options given, so `--check --layout half` looks for
+ffmpeg rather than x264.
 
 ### What the built-in demuxer handles
 
-It does what tsMuxeR does with a Blu-ray where that matters — the audio and
-subtitle files it writes are **byte-identical to tsMuxeR's** on the discs it
-was checked against (TrueHD with its AC-3 core, E-AC-3 7.1 with its AC-3 core,
-DTS, DTS-HD High Resolution and Master Audio, AC-3, PGS) — and handles the
-same disc layouts:
+It does what tsMuxeR, which it replaced, did with a Blu-ray where that matters
+— the audio and subtitle files it writes were checked **byte-identical to
+tsMuxeR's** on the discs tried (TrueHD with its AC-3 core, E-AC-3 7.1 with its
+AC-3 core, DTS, DTS-HD High Resolution and Master Audio, AC-3, PGS) — and
+handles the same disc layouts:
 
 - **The SSIF** a pressed 3D disc interleaves its views in, or the two `.m2ts`
   files of a folder rip without one, or one `.m2ts` holding both views (a
@@ -419,8 +402,8 @@ same disc layouts:
 - **Languages** from the playlist, or from the clip info when a loose stream
   file is given; AVCHD's 8.3 names (`.MPL`, `.CPI`, `.MTS`).
 - **LPCM** is written as WAV (byte order and 7.1 channel order converted,
-  20-bit samples padded to 24), as tsMuxeR does.
-- **Chapters** from the playlist marks, which tsMuxeR's demux leaves out.
+  20-bit samples padded to 24), as tsMuxeR did.
+- **Chapters** from the playlist marks, which tsMuxeR's demux left out.
 
 Where it deliberately differs, it is to play as the disc does: audio and
 subtitles **before the playlist's IN time** (or the first picture of a loose
@@ -436,14 +419,12 @@ output in the order the source listed them, so the first audio track stays
 first, and the first audio track is the default one. One output track per disc
 track: a Blu-ray TrueHD stream carries an embedded AC-3 core for players that
 cannot decode TrueHD, and DTS-HD carries a plain DTS core the same way, and the
-demux writes each pair as a single file (tsMuxeR names it `.ac3+thd`). The
-muxer takes the main stream and leaves the core out — it is the same audio,
+demux writes each pair as a single file. The muxer takes the main stream and leaves the core out — it is the same audio,
 lossily, and an extra track the probe never reported would be a surprise —
 unless `--keep-fallback` asks for it as its own track. (A 7.1 E-AC-3 track's
 AC-3 part is not a separate core: it is half of every E-AC-3 frame, and
-stays.) With `--muxer mkvmerge` the same choice is made by identifying each
-file with mkvmerge and matching on the codec, since the tools spell codecs
-differently (`TRUE-HD` against `TrueHD Atmos`).
+stays.) A Matroska remux keeps a TrueHD track's AC-3 as a track of its own,
+which is an ordinary audio track here, chosen or not by the filters.
 
 Each track is tagged with the language the disc gives it; a track the disc gave
 no language for is tagged `und`, undetermined, rather than guessed at — and
@@ -468,21 +449,19 @@ stream handed in where a container was expected.
 ## Testing without a disc
 
 `testdata/bluray` is a synthetic Blu-ray 3D, as a folder and as a UDF image,
-muxed by tsMuxeR from the MVC fixtures below and generated audio. The built-in
+muxed (once, by tsMuxeR) from the MVC fixtures below and generated audio. The
 demuxer is tested on it with no tools installed: the listing, the decoded
 pictures (identical to the combined stream's), the audio cut to the playlist,
-and the remux. tsMuxeR also builds a real 3D m2ts and image on the fly;
-`TestRunnerConvertsARealSource` and `TestRunnerConvertsADiscImage` convert
-those with both demuxers and check the output is 1280×480 with its audio
-intact.
+and the remux. A Matroska remux is built from the same fixtures on the fly;
+`TestRunnerConvertsADiscImage` and `TestRunnerConvertsAMatroskaSource`
+convert both and check the output is 1280×480 side by side with its tracks.
 
 The MVC streams are
 [mvc-source](https://github.com/jens-duttke/mvc-source)'s `tests/fixtures`,
 committed under `testdata/mvc-source`: `mvc_base.264`, `mvc_dependent.mvc` and
 `mvc_combined.264` at 35, 23 and 57 KB — the exact shape a demux produces. The
-decode stage is tested on them directly; the end-to-end tests also need
-tsMuxeR, x264, mkvmerge and ffmpeg on `PATH` and skip without them, so CI stays
-green without the toolchain:
+decode stage is tested on them directly; the end-to-end tests also need x264
+on `PATH` and skip without it, so CI stays green without the toolchain:
 
 ```sh
 go test ./internal/convert/
@@ -565,11 +544,9 @@ docker build -f Dockerfile.mvctools -t mvctools .
 docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t mvctools .
 ```
 
-tsMuxeR (for `--demuxer tsmuxer`) is built rather than downloaded so the arm64
-image is a real arm64 image — upstream publishes a single Linux binary and it
-is x86_64. The demuxer and decoder need no such care: they are part of the
-`mvctools` binary, with the decoder's assembly kernels chosen at run time by
-what the CPU supports.
+The demuxer, decoder and muxer are part of the `mvctools` binary, with the
+decoder's assembly kernels chosen at run time by what the CPU supports; the
+image adds x264, x265 and ffmpeg.
 
 ### Running the conversion out of the image
 

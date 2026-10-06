@@ -26,6 +26,13 @@ func NewPGSSource(r io.Reader, lang string) *PGSSource {
 // Track describes the track.
 func (p *PGSSource) Track() Track { return p.track }
 
+// SetName names the track.
+func (p *PGSSource) SetName(n string) { p.track.Name = n }
+
+// SetForced marks the track forced: shown even with subtitles off, as for
+// dialogue in another language.
+func (p *PGSSource) SetForced(f bool) { p.track.Forced = f }
+
 // Next returns the next display set.
 func (p *PGSSource) Next() (Frame, error) {
 	var (

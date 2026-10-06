@@ -252,3 +252,78 @@ func FuzzSources(f *testing.F) {
 		}
 	})
 }
+
+// Sync points start a late track late and carry it across a gap, while a
+// point that agrees with the sample count (or lags it) changes nothing.
+func TestAudioSyncPoints(t *testing.T) {
+	read := func(sp []SyncPoint) ([]time.Duration, *AudioSource) {
+		a, err := NewAudioSource(fixture(t, "bluray", "src", "a.ac3"), AC3, false, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.SetSyncPoints(sp)
+		var pts []time.Duration
+		for {
+			f, err := a.Next()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			pts = append(pts, f.PTS)
+		}
+		return pts, a
+	}
+	plain, _ := read(nil)
+	if len(plain) < 12 || plain[0] != 0 {
+		t.Fatalf("plain timing %v", plain[:3])
+	}
+	b, _ := os.ReadFile(filepath.Join("..", "..", "testdata", "bluray", "src", "a.ac3"))
+	h, _ := ac3Header(b)
+	frame := int64(h.size)
+	pts, a := read([]SyncPoint{
+		{Offset: 0, At: 300 * time.Millisecond},                  // a late start
+		{Offset: 5 * frame, At: 300*time.Millisecond + plain[5]}, // agrees: nothing
+		{Offset: 10 * frame, At: 2 * time.Second},                // a gap
+		{Offset: 11 * frame, At: time.Second},                    // behind: ignored
+	})
+	for i, p := range pts {
+		want := plain[i] + 300*time.Millisecond
+		if i >= 10 {
+			want = 2*time.Second + plain[i] - plain[10]
+		}
+		if d := p - want; d > time.Microsecond || d < -time.Microsecond {
+			t.Fatalf("frame %d at %v, want %v", i, p, want)
+		}
+	}
+	if a.Delay() != 300*time.Millisecond || len(a.Gaps()) != 1 || a.Gaps()[0] != 2*time.Second-(300*time.Millisecond+plain[10]) {
+		t.Errorf("delay %v, gaps %v", a.Delay(), a.Gaps())
+	}
+}
+
+// A delayed picture keeps its frame spacing, shifted.
+func TestVideoDelay(t *testing.T) {
+	read := func(d time.Duration) []time.Duration {
+		v, err := NewVideoSource(fixture(t, "mkv", "bframes.264"), H264, 24000, 1001, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.SetDelay(d)
+		var pts []time.Duration
+		for {
+			f, err := v.Next()
+			if err == io.EOF {
+				return pts
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			pts = append(pts, f.PTS, f.Order)
+		}
+	}
+	plain, late := read(0), read(965*time.Millisecond)
+	for i := range plain {
+		if late[i]-plain[i] != 965*time.Millisecond {
+			t.Fatalf("time %d: %v vs %v", i, late[i], plain[i])
+		}
+	}
+}

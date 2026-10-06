@@ -125,15 +125,14 @@ mvctools --input "Life of Pi (2012).iso" --output "Life of Pi (2012) 3D.mkv"
 mvctools --remux --input disc.iso --output film.m2ts --audio-lang eng --audio-best
 ```
 
-Converts a Blu-ray 3D disc image, BDMV folder, playlist or m2ts into a
-side-by-side MKV with the audio and subtitles you choose, or remuxes the
+Converts a Blu-ray 3D disc image, BDMV folder, playlist or m2ts — or a
+Matroska remux of one — into a side-by-side MKV with the audio and subtitles you choose, or remuxes the
 disc's own MVC video with just those tracks. The disc is read once and in
 place — an image is not extracted, the views are not demuxed to disk — and
 decoded in process, and the MKV is written in process too. A GPU encodes in
 process as well, through its own system library, so with one the conversion
 needs no tools at all; otherwise the only external tool is x264/x265 (or
-ffmpeg, for software half-SBS), and a remux needs none. tsMuxeR and mkvmerge remain
-available with `--demuxer tsmuxer` and `--muxer mkvmerge`. See
+ffmpeg, for software half-SBS), and a remux needs none. See
 [cmd/mvctools](cmd/mvctools/README.md).
 A container with the whole toolchain is published as
 `ghcr.io/brunoga/mvctools` for amd64 and arm64.
@@ -189,9 +188,8 @@ MVC_BENCH_FILE=clip.264 go test -bench File -run X
 
 `testdata/bluray` is a synthetic Blu-ray 3D (a folder and a UDF image) the
 built-in demuxer is tested on with no tools installed. The `mvctools`
-end-to-end tests also build a real 3D m2ts and image with tsMuxeR and convert
-them with both demuxers; they skip when tsMuxeR, x264, mkvmerge or ffmpeg are
-not on `PATH`.
+end-to-end tests convert it, and a Matroska remux built from the MVC
+fixtures, through x264; they skip when x264 is not on `PATH`.
 
 `testdata/conformance` holds the ITU-T/JVT conformance bitstreams with
 per-view output hashes (from edge264-mvc). `tools/refdump` is a small C

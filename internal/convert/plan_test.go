@@ -11,21 +11,18 @@ func opts(goos string, mut func(*Options)) Options {
 	o.Output = "/media/out/Life of Pi (2012).mkv"
 	o.TempDir = "/tmp/work"
 	o.Encoder = EncoderSoftware
-	// The plan tests describe the tsMuxeR pipeline; builtin_test.go has the
-	// built-in demuxer's.
-	o.Demuxer = DemuxerTSMuxeR
 	if mut != nil {
 		mut(&o)
 	}
 	return o
 }
 
-func TestBuildPlanHasTheFourStagesInOrder(t *testing.T) {
+func TestBuildPlanHasTheThreeStagesInOrder(t *testing.T) {
 	p, err := BuildPlan("linux", opts("linux", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"demux", "decode", "encode", "mux"}
+	want := []string{"demux and decode", "encode", "mux"}
 	if len(p.Steps) != len(want) {
 		t.Fatalf("got %d steps, want %d", len(p.Steps), len(want))
 	}
@@ -42,7 +39,7 @@ func TestDecodeStreamsIntoTheEncoder(t *testing.T) {
 	p, _ := BuildPlan("linux", opts("linux", nil))
 	var decode Step
 	for _, s := range p.Steps {
-		if s.Name == "decode" {
+		if s.Name == "demux and decode" {
 			decode = s
 		}
 	}
@@ -55,24 +52,22 @@ func TestDecodeStreamsIntoTheEncoder(t *testing.T) {
 	if !contains(decode.Argv, "sbs") {
 		t.Errorf("decode must ask for the stacked side-by-side output, got %v", decode.Argv)
 	}
-	if !contains(decode.Argv, p.BaseView) || !contains(decode.Argv, p.DependentView) {
-		t.Errorf("decode must read the two demuxed views, got %v", decode.Argv)
+	if !contains(decode.Argv, "/media/in/Life of Pi (2012).iso") {
+		t.Errorf("decode must read the source in place, got %v", decode.Argv)
 	}
 	if contains(decode.Argv, "-swap") {
 		t.Errorf("no swap was asked for, got %v", decode.Argv)
 	}
 }
 
-// Nothing in the plan may route the two views through a file: the decoder
-// reads the demuxed pair, so a multi-gigabyte combined stream is never made.
-func TestNoThirdCopyOfTheStreams(t *testing.T) {
+// Nothing in the plan may route the views through a file: the decoder reads
+// the source in place, so no demuxed or combined stream is ever made.
+func TestNoCopyOfTheStreams(t *testing.T) {
 	p, _ := BuildPlan("linux", opts("linux", nil))
-	if p.BaseView == "" || p.DependentView == "" {
-		t.Fatal("the plan must say where the demux puts the two views")
-	}
 	for _, s := range p.Steps {
 		for _, a := range s.Argv {
-			if a == "combined.264" || strings.HasSuffix(a, "interleaved.264") {
+			if strings.HasSuffix(a, ".mvc") || strings.HasSuffix(a, "base.264") ||
+				a == "combined.264" || strings.HasSuffix(a, "interleaved.264") {
 				t.Errorf("step %q writes a combined stream to disk: %v", s.Name, s.Argv)
 			}
 		}
@@ -148,6 +143,8 @@ func TestValidateRejectsIncoherentOptions(t *testing.T) {
 		{"no output", func(o *Options) { o.Output = "" }, "no output"},
 		{"same file", func(o *Options) { o.Output = o.Input }, "same file"},
 		{"not an mkv", func(o *Options) { o.Output = "/out/x.mp4" }, "must be a .mkv"},
+		{"an mp4 source", func(o *Options) { o.Input = "/in/film.mp4" }, "Blu-ray"},
+		{"a dvd", func(o *Options) { o.Input = "/in/VTS_01_1.VOB" }, "Blu-ray"},
 		{"unknown layout", func(o *Options) { o.Layout = "sbs3d" }, "unknown layout"},
 		{"crf out of range", func(o *Options) { o.CRF = 99 }, "out of range"},
 	}
@@ -226,7 +223,7 @@ func TestSwapIsDoneByTheDecoder(t *testing.T) {
 	}
 	var decode Step
 	for _, s := range p.Steps {
-		if s.Name == "decode" {
+		if s.Name == "demux and decode" {
 			decode = s
 		}
 	}

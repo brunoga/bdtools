@@ -2,14 +2,12 @@
 #
 # Multi-architecture: everything here is built from source or packaged for every
 # architecture, so this image works on amd64 and on arm64 (Apple Silicon, a
-# Raspberry Pi 4/5). tsMuxeR is built rather than downloaded for exactly that
-# reason — upstream publishes one Linux binary and it is x86_64, but its CLI
-# needs no Qt and compiles anywhere.
+# Raspberry Pi 4/5).
 #
-# The Blu-ray demuxer, the MVC decoder and the Matroska muxer are part of
-# mvctools itself (pure Go, with assembly kernels on amd64), so the toolchain
-# is the encoders — plus tsMuxeR and mkvmerge, for --demuxer tsmuxer (and
-# Matroska/MP4/VOB sources) and --muxer mkvmerge.
+# The demuxer (Blu-ray and Matroska), the MVC decoder and the Matroska muxer
+# are part of mvctools itself (pure Go, with assembly kernels on amd64), and a
+# GPU is driven through its own library, so the toolchain is the software
+# encoders and ffmpeg (software half-SBS, and GPUs without their library).
 
 # ── Go build ──────────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS gobuild
@@ -23,31 +21,13 @@ COPY . .
 RUN GOARM="${TARGETVARIANT#v}" CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
     go build -ldflags="-s -w -X main.version=${VERSION}" -o mvctools ./cmd/mvctools
 
-# ── tsMuxeR ───────────────────────────────────────────────────────────────────
-FROM alpine:latest AS demuxer
-# Built rather than downloaded: upstream's release binaries demux MVC but the
-# Linux one is x86_64 only, and this image runs on arm64 too. The CLI needs no
-# Qt — that is only the GUI — so it is cmake plus zlib and freetype, about a
-# minute. The policy flag is for Alpine's cmake 4, which refuses the old minimum
-# tsMuxeR's CMakeLists declares.
-ARG TSMUXER_REF=master
-RUN apk --no-cache add build-base cmake samurai git ca-certificates \
-      zlib-dev freetype-dev linux-headers
-RUN git clone -q https://github.com/justdan96/tsMuxer.git /src/tsmuxer \
-    && cd /src/tsmuxer && git checkout -q ${TSMUXER_REF} \
-    && cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    && ninja -C build tsmuxer \
-    && install -m755 build/tsMuxer/tsmuxer /out-tsmuxer
-
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM alpine:latest
 
 # x264 and x265 are both installed: the codec is chosen per run (--codec), and
 # an image that carried only one would fail --check for the other.
-RUN apk --no-cache add ca-certificates tzdata ffmpeg x264 x265 mkvtoolnix
+RUN apk --no-cache add ca-certificates tzdata ffmpeg x264 x265
 
-COPY --from=demuxer /out-tsmuxer /usr/local/bin/tsMuxeR
 COPY --from=gobuild /build/mvctools /usr/local/bin/mvctools
 
 # Where a caller mounts the source and the destination library.

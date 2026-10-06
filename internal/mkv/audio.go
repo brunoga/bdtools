@@ -31,15 +31,49 @@ type AudioSource struct {
 	track  Track
 	t      time.Duration // presentation time of the next frame
 	rate   int
+	// The frames are timed by counting samples from base; sync points move
+	// base to where the source's timestamps put a frame when the count
+	// falls behind them (a track that starts late, a gap).
+	base    time.Duration
+	cr      *countingReader
+	sync    []SyncPoint
+	started bool
+	delay   time.Duration   // the first frame's time, when the source starts late
+	gaps    []time.Duration // how far each later resync moved the track
 	// For WAV.
 	wavFrame int // bytes per sample frame
 	wavLeft  int64
 	samples  int64
 }
 
+// SyncPoint says when the byte at Offset of a demuxed audio file is
+// presented, on the output's timeline.
+type SyncPoint struct {
+	Offset int64
+	At     time.Duration
+}
+
+// resyncThreshold is how far behind the source's timestamps the sample
+// count may fall before the track moves to them: well above timestamp
+// jitter, well below anything audible.
+const resyncThreshold = 10 * time.Millisecond
+
+// countingReader counts what has been read through it.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	c.n += int64(n)
+	return n, err
+}
+
 // NewAudioSource probes the file. lang is the track's ISO 639-2 language.
 func NewAudioSource(r io.Reader, format AudioFormat, core bool, lang string) (*AudioSource, error) {
-	a := &AudioSource{format: format, core: core, r: bufio.NewReaderSize(r, 1<<20)}
+	cr := &countingReader{r: r}
+	a := &AudioSource{format: format, core: core, r: bufio.NewReaderSize(cr, 1<<20), cr: cr}
 	a.track = Track{Type: TypeAudio, Language: lang}
 	switch format {
 	case WAV:
@@ -76,6 +110,24 @@ func (a *AudioSource) Track() Track { return a.track }
 
 // SetDefault marks the track as the one a player picks by default.
 func (a *AudioSource) SetDefault(d bool) { a.track.Default = d }
+
+// SetName names the track.
+func (a *AudioSource) SetName(n string) { a.track.Name = n }
+
+// SetSyncPoints gives the source's timestamps, in file order. Without them
+// the track starts at zero and runs by its sample count.
+func (a *AudioSource) SetSyncPoints(sp []SyncPoint) { a.sync = sp }
+
+// Delay is when the track starts, if the source starts it after the
+// picture; Gaps is how far each later move to the source's timestamps
+// shifted it.
+func (a *AudioSource) Delay() time.Duration { return a.delay }
+
+// Gaps reports the gaps in the source the track was moved across.
+func (a *AudioSource) Gaps() []time.Duration { return a.gaps }
+
+// pos is the file offset of the next unread byte.
+func (a *AudioSource) pos() int64 { return a.cr.n - int64(a.r.Buffered()) }
 
 func (a *AudioSource) describe(head []byte) error {
 	switch a.format {
@@ -136,10 +188,27 @@ func (a *AudioSource) Next() (Frame, error) {
 	return a.nextAC3()
 }
 
-func (a *AudioSource) emit(data []byte, samples int) Frame {
+// emit times a frame that started at file offset start.
+func (a *AudioSource) emit(data []byte, samples int, start int64) Frame {
+	// The last sync point at or before the frame says where the source
+	// puts it; the count only ever moves forward to it.
+	var sp *SyncPoint
+	for len(a.sync) > 0 && a.sync[0].Offset <= start {
+		sp = &a.sync[0]
+		a.sync = a.sync[1:]
+	}
+	if sp != nil && sp.At-a.t > resyncThreshold {
+		if a.started {
+			a.gaps = append(a.gaps, sp.At-a.t)
+		} else {
+			a.delay = sp.At
+		}
+		a.base, a.samples, a.t = sp.At, 0, sp.At
+	}
+	a.started = true
 	f := Frame{PTS: a.t, Order: a.t, Keyframe: true, Data: data}
 	a.samples += int64(samples)
-	a.t = time.Duration(a.samples * int64(time.Second) / int64(a.rate))
+	a.t = a.base + time.Duration(a.samples*int64(time.Second)/int64(a.rate))
 	return f
 }
 
@@ -290,6 +359,7 @@ func (a *AudioSource) nextAC3() (Frame, error) {
 			}
 			continue // resynchronise
 		}
+		start := a.pos()
 		data, err := a.read(h.size)
 		if err != nil {
 			return Frame{}, err
@@ -315,7 +385,7 @@ func (a *AudioSource) nextAC3() (Frame, error) {
 				data = append(data, dep...)
 			}
 		}
-		return a.emit(data, samples), nil
+		return a.emit(data, samples, start), nil
 	}
 }
 
@@ -374,6 +444,7 @@ func (a *AudioSource) nextTrueHD() (Frame, error) {
 		if err != nil {
 			return Frame{}, io.EOF
 		}
+		start := a.pos()
 		if head[0] == 0x0b && head[1] == 0x77 {
 			if h, ok := ac3Header(head); ok && a.plausibleNext(h.size) {
 				data, err := a.read(h.size)
@@ -381,7 +452,7 @@ func (a *AudioSource) nextTrueHD() (Frame, error) {
 					return Frame{}, err
 				}
 				if a.core {
-					return a.emit(data, h.samples), nil
+					return a.emit(data, h.samples, start), nil
 				}
 				continue
 			}
@@ -405,7 +476,7 @@ func (a *AudioSource) nextTrueHD() (Frame, error) {
 		if a.rate%44100 == 0 {
 			samples = 40 * max(a.rate/44100, 1)
 		}
-		return a.emit(data, samples), nil
+		return a.emit(data, samples, start), nil
 	}
 }
 
@@ -504,6 +575,7 @@ func (a *AudioSource) nextDTS() (Frame, error) {
 			continue
 		}
 		size, samples := dtsCore(head)
+		start := a.pos()
 		data, err := a.read(size)
 		if err != nil {
 			return Frame{}, err
@@ -516,7 +588,7 @@ func (a *AudioSource) nextDTS() (Frame, error) {
 				}
 			}
 		}
-		return a.emit(data, samples), nil
+		return a.emit(data, samples, start), nil
 	}
 }
 
@@ -574,6 +646,7 @@ func (a *AudioSource) nextWAV() (Frame, error) {
 	if n <= 0 {
 		return Frame{}, io.EOF
 	}
+	start := a.pos()
 	b := make([]byte, n)
 	m, _ := io.ReadFull(a.r, b)
 	m -= m % a.wavFrame
@@ -581,5 +654,5 @@ func (a *AudioSource) nextWAV() (Frame, error) {
 		return Frame{}, io.EOF
 	}
 	a.wavLeft -= int64(m)
-	return a.emit(b[:m], m/a.wavFrame), nil
+	return a.emit(b[:m], m/a.wavFrame, start), nil
 }

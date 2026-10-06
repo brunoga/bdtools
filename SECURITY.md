@@ -22,7 +22,8 @@ of which read untrusted input: a video stream is attacker-controlled data.
   (`FuzzDecode`) and recovers from panics in slice decoding. A reproducible
   panic, hang, or unbounded memory growth on any input is a bug we want to
   hear about.
-- **mvctools** runs external programs (tsMuxeR, x264/x265, ffmpeg, mkvmerge)
-  with arguments built from file paths and the probe output; nothing is passed
-  through a shell. It reads disc images in place and writes only under the
+- **mvctools** runs at most one external program, the encoder (x264/x265 or
+  ffmpeg), with arguments built from file paths and options; nothing is
+  passed through a shell. With a GPU it runs none, loading the GPU's own
+  library instead. It reads disc images in place and writes only under the
   output and temp directories it is given.

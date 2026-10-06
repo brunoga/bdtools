@@ -24,7 +24,7 @@ const (
 // Matching is by substring over the stream ID and the human type together,
 // because the two spell codecs differently and neither spelling is promised:
 // a disc's TrueHD track may read A_TRUEHD, "TRUE-HD" or "TrueHD Atmos"
-// depending on the source and the tsMuxeR build.
+// depending on the source.
 var audioTiers = []struct {
 	match string
 	tier  int
@@ -61,13 +61,13 @@ func audioTier(t Track) int {
 }
 
 var (
-	// tsMuxeR writes "Channels: 7.1", "Channels: 5.1" or "Channels: 2" — a
+	// The listing writes "Channels: 7.1", "Channels: 5.1" or "Channels: 2" — a
 	// layout, not a count.
 	reChannels = regexp.MustCompile(`(?i)Channels:\s*(\d+)(?:\.(\d+))?`)
 	reBitrate  = regexp.MustCompile(`(?i)Bitrate:\s*(\d+)\s*Kbps`)
 )
 
-// channelCount is how many channels a track carries, from tsMuxeR's layout
+// channelCount is how many channels a track carries, from the listing's layout
 // string: "7.1" is eight, "5.1" is six, "2" is two. Zero when not stated.
 func channelCount(t Track) int {
 	m := reChannels.FindStringSubmatch(t.Info)

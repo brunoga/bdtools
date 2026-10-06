@@ -6,8 +6,8 @@ Thanks for your interest in contributing.
 
 - Go (version specified in `go.mod`)
 - [`golangci-lint`](https://golangci-lint.run/welcome/install/) for linting
-- For the end-to-end conversion tests only: tsMuxeR, x264, mkvmerge and
-  ffmpeg on `PATH` (the tests skip without them)
+- For the end-to-end conversion tests only: x264 and ffmpeg on `PATH` (the
+  tests skip without them)
 
 ## Building
 

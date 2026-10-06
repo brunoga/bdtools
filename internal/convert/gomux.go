@@ -14,8 +14,7 @@ import (
 // muxBuiltin writes the MKV in process: the encoded video, then each audio
 // and subtitle track in the order the disc lists them, with the chapters.
 //
-// It does what the mkvmerge path does with the same files: the video is
-// flagged side by side, left eye first; each track carries the language the
+// The video is flagged side by side, left eye first; each track carries the language the
 // disc gives it ("und" when it gives none); and a lossy core packed with a
 // lossless track (the AC-3 inside a TrueHD stream, the AC-3 of a 7.1 E-AC-3
 // track, the DTS of DTS-HD) is left out unless --keep-fallback asks for it,
@@ -50,7 +49,12 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
 	}
+	if r.videoDelay > 0 {
+		v.SetDelay(r.videoDelay)
+		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
+	}
 	sources := []mkv.Source{v}
+	var timed []timedAudio
 	firstAudio := true
 	for _, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
@@ -59,7 +63,10 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			if err != nil {
 				return err
 			}
-			sources = append(sources, mkv.NewPGSSource(f, lang))
+			p := mkv.NewPGSSource(f, lang)
+			p.SetName(e.track.Name)
+			p.SetForced(e.track.Forced)
+			sources = append(sources, p)
 			continue
 		}
 		format := audioFormat(e)
@@ -72,6 +79,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			r.Report.Report("warning: leaving out %s track %d: %v", e.track.Type, e.track.ID, err)
 			continue
 		}
+		a.SetName(e.track.Name)
+		a.SetSyncPoints(e.sync)
+		timed = append(timed, timedAudio{a, e.track, ""})
 		if firstAudio {
 			a.SetDefault(true)
 			firstAudio = false
@@ -98,6 +108,8 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			r.Report.Report("warning: could not keep the %s core of track %d: %v", coreName, e.track.ID, err)
 			continue
 		}
+		core.SetSyncPoints(e.sync)
+		timed = append(timed, timedAudio{core, e.track, coreName + " core of "})
 		sources = append(sources, core)
 	}
 	var chs []mkv.Chapter
@@ -132,12 +144,25 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		_ = os.Remove(tmp)
 		return fmt.Errorf("muxing: %w", err)
 	}
+	for _, t := range timed {
+		what := fmt.Sprintf("%s%s track %d", t.prefix, t.track.Type, t.track.ID)
+		if d := t.a.Delay(); d > 0 {
+			r.Report.Report("%s starts %.3f s after the picture, as on the source", what, d.Seconds())
+		}
+		if gaps := t.a.Gaps(); len(gaps) > 0 {
+			var total time.Duration
+			for _, g := range gaps {
+				total += g
+			}
+			r.Report.Report("%s has %d gaps (%.3f s in all), kept in step with the picture", what, len(gaps), total.Seconds())
+		}
+	}
 	return os.Rename(tmp, r.Opts.Output)
 }
 
-// audioFormat says how a demuxed file's frames are laid out. tsMuxeR and the
-// built-in demuxer name the files differently, and tsMuxeR's stream ID for a
-// TrueHD track is A_AC3, so the type and the extension are both consulted.
+// audioFormat says how a demuxed file's frames are laid out. A TrueHD
+// track's stream ID is A_AC3 (tsMuxeR's spelling, which the listing keeps),
+// so the type and the extension are both consulted.
 func audioFormat(e extra) mkv.AudioFormat {
 	ext := strings.ToLower(filepath.Ext(e.path))
 	typ := strings.ToUpper(e.track.Type)
@@ -152,11 +177,9 @@ func audioFormat(e extra) mkv.AudioFormat {
 	return mkv.AC3
 }
 
-// chapterFile renders chapters in the simple format mkvmerge reads.
-func chapterFile(chapters []time.Duration) string {
-	var b strings.Builder
-	for i, c := range chapters {
-		fmt.Fprintf(&b, "CHAPTER%02d=%s\nCHAPTER%02dNAME=Chapter %d\n", i+1, chapterTime(c), i+1, i+1)
-	}
-	return b.String()
+// timedAudio is an audio source whose timing the mux reports on.
+type timedAudio struct {
+	a      *mkv.AudioSource
+	track  Track
+	prefix string
 }

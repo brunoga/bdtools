@@ -28,8 +28,8 @@ import (
 // carrying both views (as a 3D remux is) needs.
 func (r *Runner) remuxBuiltin(ctx context.Context, src *goSource, sel Selection) error {
 	if len(src.clips) > 1 {
-		return fmt.Errorf("the title is %d clips joined together; the built-in remux copies a single "+
-			"clip (use --demuxer tsmuxer for this one)", len(src.clips))
+		return fmt.Errorf("the title is %d clips joined together; a remux copies a single clip's "+
+			"packets and cannot join clips", len(src.clips))
 	}
 	c := src.clips[0]
 	prog, pmtPIDs, err := readProgram(ctx, c)

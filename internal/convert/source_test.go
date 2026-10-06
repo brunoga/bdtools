@@ -5,91 +5,15 @@ import (
 	"testing"
 )
 
-// A real listing, from tsMuxeR 2.7.0 on a 3D m2ts carrying both views and an
-// audio track.
-const realListing = `tsMuxeR version 2.7.0. github.com/justdan96/tsMuxer
-Track ID:    4113
-Stream type: H.264
-Stream ID:   V_MPEG4/ISO/AVC
-Stream info: Profile: High@3.0  Resolution: 640:480p  Frame rate: 23.976
-Stream lang: 
-
-Track ID:    4114
-Stream type: MVC
-Stream ID:   V_MPEG4/ISO/MVC
-Stream info: H.264/MVC Views: 2 Profile: High@3.0  Resolution: 640:480p  Frame rate: 23.976
-Stream lang: 
-
-Track ID:    4352
-Stream type: AC3
-Stream ID:   A_AC3
-Stream info: Bitrate: 192Kbps Sample Rate: 44KHz Channels: 1
-Stream lang: eng
-
-Duration: 00:00:01.065
-`
-
-func TestParseListingOnARealSource(t *testing.T) {
-	tracks, err := ParseListing(realListing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tracks) != 3 {
-		t.Fatalf("got %d tracks, want 3: %+v", len(tracks), tracks)
-	}
-	want := []struct {
-		id       int
-		streamID string
-		lang     string
-		kind     Kind
-	}{
-		{4113, "V_MPEG4/ISO/AVC", "", KindBaseView},
-		{4114, "V_MPEG4/ISO/MVC", "", KindDependentView},
-		{4352, "A_AC3", "eng", KindAudio},
-	}
-	for i, w := range want {
-		got := tracks[i]
-		if got.ID != w.id || got.StreamID != w.streamID || got.Lang != w.lang || got.Kind() != w.kind {
-			t.Errorf("track %d = %+v (kind %v), want id=%d id=%q lang=%q kind=%v",
-				i, got, got.Kind(), w.id, w.streamID, w.lang, w.kind)
-		}
-	}
-	// The banner and the trailing Duration line must not become tracks.
-	if tracks[2].Info == "" {
-		t.Error("the audio track's info line should be captured")
-	}
-}
-
-// An elementary stream has no Track ID lines: tsMuxeR describes it but has
-// nothing to demux, and the conversion needs the views as separate tracks.
-func TestParseListingRejectsAnElementaryStream(t *testing.T) {
-	const es = `tsMuxeR version 2.7.0. github.com/justdan96/tsMuxer
-Stream type: H.264
-Stream ID:   V_MPEG4/ISO/AVC
-Stream info: Profile: High@3.0  Resolution: 640:480p  Frame rate: not found
-Stream lang: 
-`
-	_, err := ParseListing(es)
-	if err == nil {
-		t.Fatal("an elementary stream must be refused")
-	}
-	if !strings.Contains(err.Error(), "elementary stream") {
-		t.Errorf("the error should say what the source looks like, got %q", err)
-	}
-}
-
-func TestParseListingOnEmptyOutput(t *testing.T) {
-	if _, err := ParseListing(""); err == nil {
-		t.Error("empty output must be an error, not an empty selection")
-	}
+// The tracks of the Blu-ray fixture, as the probe lists them.
+var fixtureTracks = []Track{
+	{ID: 4113, Type: "H.264", StreamID: "V_MPEG4/ISO/AVC"},
+	{ID: 4114, Type: "MVC", StreamID: "V_MPEG4/ISO/MVC"},
+	{ID: 4352, Type: "AC3", StreamID: "A_AC3", Lang: "eng"},
 }
 
 func TestSelectTracksOnARealSource(t *testing.T) {
-	tracks, err := ParseListing(realListing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sel, err := SelectTracks(tracks)
+	sel, err := SelectTracks(fixtureTracks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,45 +97,6 @@ func TestNotThreeDErrorNamesWhatItFound(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "V_MPEGH/ISO/HEVC") || !strings.Contains(err.Error(), "track 7") {
 		t.Errorf("error should name the video it found, got %q", err)
-	}
-}
-
-func TestDemuxMetaNamesEveryTrack(t *testing.T) {
-	tracks, _ := ParseListing(realListing)
-	sel, _ := SelectTracks(tracks)
-	meta := DemuxMeta("/media/Life of Pi (2012)/disc.m2ts", sel)
-
-	if !strings.HasPrefix(meta, "MUXOPT --demux\n") {
-		t.Errorf("meta must open with the demux option, got:\n%s", meta)
-	}
-	for _, want := range []string{
-		`V_MPEG4/ISO/AVC, "/media/Life of Pi (2012)/disc.m2ts", track=4113`,
-		`V_MPEG4/ISO/MVC, "/media/Life of Pi (2012)/disc.m2ts", track=4114`,
-		`A_AC3, "/media/Life of Pi (2012)/disc.m2ts", track=4352, lang=eng`,
-	} {
-		if !strings.Contains(meta, want) {
-			t.Errorf("meta should contain:\n  %s\ngot:\n%s", want, meta)
-		}
-	}
-	// A path with spaces is quoted, which is why the meta file exists rather
-	// than tracks being passed as arguments.
-	if strings.Count(meta, `"`) != 6 {
-		t.Errorf("every path should be quoted, got:\n%s", meta)
-	}
-}
-
-// The base view is rebuilt with picture timing and repeated parameter sets so
-// the extracted stream stands on its own.
-func TestDemuxMetaRebuildsTheViews(t *testing.T) {
-	tracks, _ := ParseListing(realListing)
-	sel, _ := SelectTracks(tracks)
-	for _, line := range strings.Split(DemuxMeta("x.m2ts", sel), "\n") {
-		if !strings.HasPrefix(line, "V_MPEG4") {
-			continue
-		}
-		if !strings.Contains(line, "insertSEI") || !strings.Contains(line, "contSPS") {
-			t.Errorf("view line should rebuild SEI and SPS: %s", line)
-		}
 	}
 }
 
