@@ -24,11 +24,11 @@ func DetailTags(o Options, audio []Track, height int) string {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}
 	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC"}[o.Codec])
-	switch {
-	case o.Encoder == EncoderVideoToolbox:
+	switch o.Encoder {
+	case EncoderVideoToolbox:
 		// VideoToolbox takes a quality, not a quantiser: name what it got.
 		tags = append(tags, fmt.Sprintf("Q%d", qualityPercent(o.CRF)))
-	case o.Encoder == EncoderSoftware:
+	case EncoderSoftware:
 		tags = append(tags, fmt.Sprintf("CRF%d", o.CRF))
 	default:
 		tags = append(tags, fmt.Sprintf("QP%d", o.CRF))
