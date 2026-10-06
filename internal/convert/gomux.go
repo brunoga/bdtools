@@ -50,6 +50,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		return fmt.Errorf("muxing: %w", err)
 	}
 	sources := []mkv.Source{v}
+	var timed []timedAudio
 	firstAudio := true
 	for _, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
@@ -75,6 +76,8 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			continue
 		}
 		a.SetName(e.track.Name)
+		a.SetSyncPoints(e.sync)
+		timed = append(timed, timedAudio{a, e.track, ""})
 		if firstAudio {
 			a.SetDefault(true)
 			firstAudio = false
@@ -101,6 +104,8 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			r.Report.Report("warning: could not keep the %s core of track %d: %v", coreName, e.track.ID, err)
 			continue
 		}
+		core.SetSyncPoints(e.sync)
+		timed = append(timed, timedAudio{core, e.track, coreName + " core of "})
 		sources = append(sources, core)
 	}
 	var chs []mkv.Chapter
@@ -135,6 +140,19 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		_ = os.Remove(tmp)
 		return fmt.Errorf("muxing: %w", err)
 	}
+	for _, t := range timed {
+		what := fmt.Sprintf("%s%s track %d", t.prefix, t.track.Type, t.track.ID)
+		if d := t.a.Delay(); d > 0 {
+			r.Report.Report("%s starts %.3f s after the picture, as on the source", what, d.Seconds())
+		}
+		if gaps := t.a.Gaps(); len(gaps) > 0 {
+			var total time.Duration
+			for _, g := range gaps {
+				total += g
+			}
+			r.Report.Report("%s has %d gaps (%.3f s in all), kept in step with the picture", what, len(gaps), total.Seconds())
+		}
+	}
 	return os.Rename(tmp, r.Opts.Output)
 }
 
@@ -153,4 +171,11 @@ func audioFormat(e extra) mkv.AudioFormat {
 		return mkv.DTS
 	}
 	return mkv.AC3
+}
+
+// timedAudio is an audio source whose timing the mux reports on.
+type timedAudio struct {
+	a      *mkv.AudioSource
+	track  Track
+	prefix string
 }

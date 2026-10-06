@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brunoga/mvc"
+	"github.com/brunoga/mvc/internal/mkv"
 )
 
 // Reporter receives progress. A conversion runs for hours, so it has to say
@@ -208,6 +209,9 @@ func DescribeTracks(tracks []Track) string {
 type extra struct {
 	path  string
 	track Track
+	// sync are the source's timestamps for an audio file, so the mux can
+	// keep it in step with the picture (nil: start at zero, count samples).
+	sync []mkv.SyncPoint
 }
 
 // decodeAndEncode decodes the source in process and streams the stacked

@@ -365,6 +365,7 @@ func (g *mkvDemux) write(p mkv.Packet) error {
 		err = w.wav.write(p.Data)
 		w.n += int64(len(p.Data))
 	default:
+		w.mark(p.Time - g.t0)
 		_, err = w.w.Write(p.Data)
 		w.n += int64(len(p.Data))
 	}
@@ -402,7 +403,7 @@ func (g *mkvDemux) finish() ([]extra, error) {
 			g.report.Report("warning: %s track %d holds nothing; it will be missing from the output", t.StreamID, t.ID)
 			continue
 		}
-		extras = append(extras, extra{path: w.path, track: t})
+		extras = append(extras, extra{path: w.path, track: t, sync: w.sync})
 	}
 	if len(g.dropped) > 0 {
 		g.report.Report("dropped the audio and subtitles before the first picture")

@@ -483,3 +483,28 @@ func TestProgressLine(t *testing.T) {
 		t.Errorf("%d reports over 100 s", len(lines))
 	}
 }
+
+// Sync points are kept sparse: the first, one a second, and every jump.
+func TestSyncPointSampling(t *testing.T) {
+	w := &esWriter{}
+	at := time.Duration(0)
+	for i := 0; i < 3000; i++ { // 3 s of 1 ms payloads
+		w.mark(at)
+		w.n += 100
+		at += time.Millisecond
+	}
+	w.mark(at + 500*time.Millisecond) // a gap
+	w.n += 100
+	w.mark(at + 501*time.Millisecond)
+	var got []time.Duration
+	for _, s := range w.sync {
+		got = append(got, s.At)
+	}
+	want := []time.Duration{0, time.Second, 2 * time.Second, 3500 * time.Millisecond}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("sync points at %v, want %v", got, want)
+	}
+	if w.sync[3].Offset != 300000 {
+		t.Errorf("the gap's point is at offset %d", w.sync[3].Offset)
+	}
+}

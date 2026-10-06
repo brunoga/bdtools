@@ -17,6 +17,7 @@ import (
 	"github.com/brunoga/mvc"
 	"github.com/brunoga/mvc/internal/bdmv"
 	"github.com/brunoga/mvc/internal/esinfo"
+	"github.com/brunoga/mvc/internal/mkv"
 	"github.com/brunoga/mvc/m2ts"
 )
 
@@ -538,7 +539,29 @@ type esWriter struct {
 	lpcm  *wavWriter
 	wav   *rawWAV // PCM already in WAV's layout (from Matroska)
 	err   error
+	// sync pairs offsets in the file with the source's timestamps, for the
+	// mux to keep the track in step with the picture.
+	sync     []mkv.SyncPoint
+	lastAt   time.Duration
+	lastSync time.Duration
 }
+
+// syncEvery is how often a sync point is recorded when the timestamps run
+// smoothly; a jump between two payloads is always recorded.
+const syncEvery = time.Second
+
+// mark notes that the next byte written is presented at at.
+func (w *esWriter) mark(at time.Duration) {
+	jump := at-w.lastAt > 100*time.Millisecond || at < w.lastAt
+	if len(w.sync) == 0 || jump || at-w.lastSync >= syncEvery {
+		w.sync = append(w.sync, mkv.SyncPoint{Offset: w.n, At: at})
+		w.lastSync = at
+	}
+	w.lastAt = at
+}
+
+// ticks90k turns 90 kHz ticks into a duration.
+func ticks90k(t int64) time.Duration { return time.Duration(t) * time.Second / 90000 }
 
 // auPES is a video PES waiting for its other view.
 type auPES struct {
@@ -800,6 +823,9 @@ func (g *goDemux) emitES(w *esWriter, p m2ts.PES) error {
 		}
 		err = writeSup(w, pts, dts, p.Payload)
 	default:
+		if p.PTS >= 0 {
+			w.mark(ticks90k(p.PTS + g.offsets[g.clip] - g.ins[g.clip]))
+		}
 		_, err = w.w.Write(p.Payload)
 		w.n += int64(len(p.Payload))
 	}
@@ -919,7 +945,7 @@ func (g *goDemux) finish() ([]extra, error) {
 			g.report.Report("warning: %s track %d demuxed to nothing; it will be missing from the output", t.StreamID, t.ID)
 			continue
 		}
-		g.extras = append(g.extras, extra{path: w.path, track: t})
+		g.extras = append(g.extras, extra{path: w.path, track: t, sync: w.sync})
 	}
 	if len(g.dropped) > 0 {
 		var most int64
