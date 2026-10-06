@@ -14,8 +14,8 @@ ffmpeg, and mkvmerge.
 - Bit-exact: verified against the ITU-T/JVT conformance suite (2D and MVC)
   and against a complete 3D Blu-ray feature (all 110,162 access units, both
   views byte-identical to the edge264 reference decoder).
-- Fast: frame-parallel multithreading plus AVX2 SIMD kernels written with
-  Go's `simd/archsimd` package.
+- Fast: frame-parallel multithreading plus AVX2 kernels in Go assembly
+  (assembled by the Go toolchain, no cgo), with pure-Go fallbacks.
 - Realtime friendly: access units in, display-ordered stereo pairs out, with
   presentation timestamps carried through; zero-copy frame buffers.
 - Includes a Blu-ray M2TS demuxer (`m2ts`), an Annex B access-unit splitter,
@@ -39,9 +39,7 @@ CPUs and architectures use the equivalent Go code, which can also be forced
 with `-tags purego`. Every assembly routine has a randomized test against
 its Go counterpart (`TestCabac*Asm`, `TestSIMD*`).
 
-The `GOEXPERIMENT=simd` build (Go's experimental `simd/archsimd` package)
-is still supported but no longer needed on amd64: the assembly kernels are
-at least as fast. Releases are built with `CGO_ENABLED=0` for Linux, macOS
+Releases are built with `CGO_ENABLED=0` for Linux, macOS
 and Windows on amd64, arm64 and arm/v7 (see `.goreleaser.yml`).
 
 ## Library usage
@@ -139,8 +137,7 @@ A container with the whole toolchain is published as
 
 ## Performance
 
-Measured on an Intel Core Ultra 9 285K (24 cores), Go 1.27.1,
-`GOEXPERIMENT=simd`:
+Measured on an Intel Core Ultra 9 285K (24 cores), Go 1.27.1:
 
 | stream | single thread | all cores |
 |---|---|---|
@@ -208,7 +205,6 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `cabac*.go`, `cavlc.go`, `mb*.go`, `recon.go` | entropy decoding, macroblock layer |
 | `mvpred.go`, `inter.go`, `intra.go`, `transform.go`, `deblock.go` | prediction and reconstruction |
 | `*_amd64.s`, `*_amd64.go` | assembly kernels and their dispatch; `*_noasm.go`, `*_generic.go` the Go fallbacks |
-| `*_simd_amd64.go` | AVX2 kernels (`GOEXPERIMENT=simd`) |
 | `aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
 | `stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/mvctools` | the commands |
