@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-06
+
 ### Added
 
 - `probe`: identifies a Blu-ray image or Matroska file from a pre-download
@@ -163,7 +165,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/mvc/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/brunoga/mvc/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/brunoga/mvc/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/brunoga/mvc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/brunoga/mvc/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/brunoga/mvc/compare/v0.1.0...v0.2.0
