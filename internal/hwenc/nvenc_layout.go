@@ -43,15 +43,28 @@ const (
 	nvSizePresetConfig = 5128
 	nvPCPresetCfg      = 8
 
-	nvSizeConfig            = 3584
-	nvCfgGOPLength          = 20
-	nvCfgFrameIntervalP     = 24
-	nvCfgRCParams           = 40
-	nvCfgCodecConfig        = 168
-	nvRCRateControlMode     = 4
-	nvRCConstQP             = 8
-	nvH264IDRPeriod         = 8
-	nvHEVCIDRPeriod         = 20
+	nvSizeConfig        = 3584
+	nvCfgGOPLength      = 20
+	nvCfgFrameIntervalP = 24
+	nvCfgRCParams       = 40
+	nvCfgCodecConfig    = 168
+	nvRCRateControlMode = 4
+	nvRCConstQP         = 8
+	nvH264IDRPeriod     = 8
+	nvHEVCIDRPeriod     = 20
+	nvAV1Level          = 0
+	nvAV1Tier           = 4
+	nvAV1Flags          = 16 // the bitfield word after maxPartSize
+	nvAV1IDRPeriod      = 20
+
+	nvAV1AnnexBBit          = 0
+	nvAV1DisableSeqHdrBit   = 4
+	nvAV1RepeatSeqHdrBit    = 5
+	nvAV1ChromaFormatBit    = 7
+	nvAV1InputBitDepthBit   = 12
+	nvAV1PixelBitDepthBit   = 15
+	nvLevelAV1Auto          = 24
+	nvTierAV1Main           = 0
 	nvSizeInitializeParams  = 1808
 	nvIPEncodeGUID          = 4
 	nvIPPresetGUID          = 20
@@ -105,5 +118,6 @@ const (
 var (
 	nvCodecH264GUID = guid(0x6bc82762, 0x4e63, 0x4ca4, [8]byte{0xaa, 0x85, 0x1e, 0x50, 0xf3, 0x21, 0xf6, 0xbf})
 	nvCodecHEVCGUID = guid(0x790cdc88, 0x4522, 0x4d7b, [8]byte{0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03})
+	nvCodecAV1GUID  = guid(0x0a352289, 0x0aa7, 0x4759, [8]byte{0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54})
 	nvPresetP4GUID  = guid(0x90a7b826, 0xdf06, 0x4862, [8]byte{0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81})
 )

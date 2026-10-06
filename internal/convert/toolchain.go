@@ -29,6 +29,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/brunoga/mvc/internal/hwenc"
 )
 
 // Tool is an external program the conversion depends on.
@@ -65,14 +67,20 @@ const (
 	EncoderVideoToolbox Encoder = "videotoolbox"
 	// EncoderNVENC is ffmpeg NVENC — NVIDIA, Linux and Windows.
 	EncoderNVENC Encoder = "nvenc"
+	// EncoderMediaFoundation is the encoder a Windows GPU driver installs as
+	// a Media Foundation transform: Intel Quick Sync, AMD AMF. Windows only.
+	EncoderMediaFoundation Encoder = "mediafoundation"
 )
 
 // ParseEncoder resolves the name an operator typed. "x264" is accepted for
 // EncoderSoftware: it was the name of this setting when H.264 was the only
 // output, and it would otherwise silently become an unknown encoder.
 func ParseEncoder(s string) Encoder {
-	if s == "x264" || s == "x265" {
+	switch s {
+	case "x264", "x265":
 		return EncoderSoftware
+	case "mf":
+		return EncoderMediaFoundation
 	}
 	return Encoder(s)
 }
@@ -92,10 +100,15 @@ const (
 	// that has to transcode a 3840x1080 stream is worse off than one
 	// direct-playing H.264.
 	CodecH265 Codec = "h265"
+	// CodecAV1 is AV1: smaller again than HEVC at the same quality, and
+	// royalty-free, but the newest to decode in hardware. NVENC (RTX 40 and
+	// later), VAAPI on recent Intel and AMD GPUs, and SVT-AV1 in software
+	// encode it; VideoToolbox does not.
+	CodecAV1 Codec = "av1"
 )
 
 // Codecs returns the supported codecs, H.264 first.
-func Codecs() []Codec { return []Codec{CodecH264, CodecH265} }
+func Codecs() []Codec { return []Codec{CodecH264, CodecH265, CodecAV1} }
 
 // Valid reports whether c is a codec this package knows.
 func (c Codec) Valid() bool {
@@ -112,9 +125,15 @@ func (c Codec) Valid() bool {
 // ffmpeg.
 func (c Codec) ffmpegEncoder(enc Encoder) string {
 	family := "h264"
-	if c == CodecH265 {
+	switch c {
+	case CodecH265:
 		// ffmpeg spells the HEVC encoders "hevc_*", not "h265_*".
 		family = "hevc"
+	case CodecAV1:
+		if enc == EncoderVideoToolbox || enc == EncoderMediaFoundation {
+			return "" // Apple has no AV1 encoder; this Media Foundation path does H.264/HEVC
+		}
+		family = "av1"
 	}
 	switch enc {
 	case EncoderVAAPI:
@@ -123,6 +142,8 @@ func (c Codec) ffmpegEncoder(enc Encoder) string {
 		return family + "_nvenc"
 	case EncoderVideoToolbox:
 		return family + "_videotoolbox"
+	case EncoderMediaFoundation:
+		return family + "_mf"
 	default:
 		return ""
 	}
@@ -133,19 +154,58 @@ func (c Codec) ffmpegEncoder(enc Encoder) string {
 // the output is equivalent; what differs is that ffmpeg can filter on the way
 // in, which is why this route exists at all.
 func (c Codec) ffmpegSoftwareEncoder() string {
-	if c == CodecH265 {
+	switch c {
+	case CodecH265:
 		return "libx265"
+	case CodecAV1:
+		return "libsvtav1"
 	}
 	return "libx264"
 }
 
 // streamExt is the extension for the raw elementary stream the encoder
-// writes.
+// writes: Annex B for H.264 and HEVC, low-overhead OBUs for AV1 (or IVF,
+// from SvtAv1EncApp, which the muxer reads too).
 func (c Codec) streamExt() string {
-	if c == CodecH265 {
+	switch c {
+	case CodecH265:
 		return ".265"
+	case CodecAV1:
+		return ".obu"
 	}
 	return ".264"
+}
+
+// svtCRF maps --crf onto SVT-AV1's 0-63 CRF: a quarter of the AV1
+// quantiser index the GPU encoders use, which is how SVT relates the two,
+// so a --crf value means about the same in every AV1 encoder.
+func svtCRF(crf int) int { return max(1, min(63, (hwenc.AV1QIndex(crf)+2)/4)) }
+
+// svtPreset maps the x264/x265 preset names --preset takes onto SVT-AV1's
+// numbered presets (0 slowest, 13 fastest). SVT's slow end is far slower
+// than x264's, so "slow" lands on 5, about where its speed per frame is.
+func svtPreset(p string) int {
+	switch p {
+	case "ultrafast":
+		return 12
+	case "superfast":
+		return 11
+	case "veryfast":
+		return 10
+	case "faster":
+		return 9
+	case "fast":
+		return 8
+	case "medium":
+		return 6
+	case "slower":
+		return 4
+	case "veryslow":
+		return 3
+	case "placebo":
+		return 2
+	}
+	return 5 // slow, and anything unknown
 }
 
 // Encoders returns the encoders that make sense on this platform, best first.
@@ -158,7 +218,7 @@ func Encoders(goos string) []Encoder {
 	case "darwin":
 		return []Encoder{EncoderVideoToolbox, EncoderSoftware}
 	case "windows":
-		return []Encoder{EncoderNVENC, EncoderSoftware}
+		return []Encoder{EncoderNVENC, EncoderMediaFoundation, EncoderSoftware}
 	default:
 		return []Encoder{EncoderSoftware}
 	}
@@ -189,6 +249,17 @@ var (
 			"linux":   "install x265",
 			"darwin":  "brew install x265",
 			"windows": "https://www.videolan.org/developers/x265.html",
+		},
+	}
+	toolSvtAv1 = Tool{
+		Name:        "SvtAv1EncApp",
+		Binaries:    []string{"SvtAv1EncApp"},
+		Purpose:     "encode the stacked frames in software as AV1",
+		VersionArgs: []string{"--version"},
+		Install: map[string]string{
+			"linux":   "install svt-av1 (or an ffmpeg built with libsvtav1)",
+			"darwin":  "brew install svt-av1",
+			"windows": "https://gitlab.com/AOMediaCodec/SVT-AV1/-/releases",
 		},
 	}
 	toolFFmpeg = Tool{
@@ -233,6 +304,8 @@ func encoderTool(enc Encoder, codec Codec, viaFFmpeg bool) Tool {
 		return toolFFmpeg
 	case codec == CodecH265:
 		return toolX265
+	case codec == CodecAV1:
+		return toolSvtAv1
 	default:
 		return toolX264
 	}
@@ -245,10 +318,13 @@ type Found struct {
 	Path string
 	// Version is the first line the tool printed when asked, best-effort.
 	Version string
+	// Unusable says why a tool that is there cannot do the job: an ffmpeg
+	// built without the GPU encoder asked for, say.
+	Unusable string
 }
 
-// OK reports whether the tool was located.
-func (f Found) OK() bool { return f.Path != "" }
+// OK reports whether the tool was located and can do its job.
+func (f Found) OK() bool { return f.Path != "" && f.Unusable == "" }
 
 // Report is the result of a toolchain check.
 type Report struct {
@@ -286,9 +362,21 @@ func Detect(ctx context.Context, goos string, enc Encoder, codec Codec, viaFFmpe
 	return detect(ctx, goos, enc, codec, Required(goos, enc, codec, viaFFmpeg))
 }
 
-// DetectFor locates the tools a run with these options needs.
+// DetectFor locates the tools a run with these options needs. A GPU
+// encoder reached through ffmpeg is also tried there, with a short encode:
+// an ffmpeg can be present and still lack it (Alpine's has no NVENC), which
+// would otherwise only show at the encode, after the demux.
 func DetectFor(ctx context.Context, goos string, o Options) Report {
-	return detect(ctx, goos, o.Encoder, o.Codec, RequiredFor(goos, o))
+	rep := detect(ctx, goos, o.Encoder, o.Codec, RequiredFor(goos, o))
+	if _, hw := hwKind(o.Encoder); hw && !o.NativeGPU {
+		for i, f := range rep.Tools {
+			if f.Name == toolFFmpeg.Name && f.Path != "" && !ProbeEncoder(ctx, o.Encoder, o.Codec, o.VAAPIDevice, true) {
+				rep.Tools[i].Unusable = fmt.Sprintf("this ffmpeg cannot encode %s with %s (no %s, or no GPU it can use)",
+					o.Codec, o.Encoder, o.Codec.ffmpegEncoder(o.Encoder))
+			}
+		}
+	}
+	return rep
 }
 
 func detect(ctx context.Context, goos string, enc Encoder, codec Codec, tools []Tool) Report {
@@ -343,6 +431,8 @@ func (r Report) String() string {
 			fmt.Fprintf(&b, "  ok       %-10s %s\n           %s\n", f.Name, f.Path, f.Version)
 		case f.OK():
 			fmt.Fprintf(&b, "  ok       %-10s %s\n", f.Name, f.Path)
+		case f.Path != "":
+			fmt.Fprintf(&b, "  UNUSABLE %-10s %s\n           %s\n", f.Name, f.Path, f.Unusable)
 		default:
 			fmt.Fprintf(&b, "  MISSING  %-10s %s\n", f.Name, f.Purpose)
 			if h := f.InstallHint(r.GOOS); h != "" {
@@ -356,7 +446,7 @@ func (r Report) String() string {
 	case r.OK():
 		fmt.Fprintf(&b, "\nall %d required tools present\n", len(r.Tools))
 	default:
-		fmt.Fprintf(&b, "\n%d of %d tools missing\n", len(r.Missing()), len(r.Tools))
+		fmt.Fprintf(&b, "\n%d of %d tools missing or unusable\n", len(r.Missing()), len(r.Tools))
 	}
 	return b.String()
 }

@@ -34,6 +34,8 @@ func hwKind(e Encoder) (hwenc.Kind, bool) {
 		return hwenc.VAAPI, true
 	case EncoderVideoToolbox:
 		return hwenc.VideoToolbox, true
+	case EncoderMediaFoundation:
+		return hwenc.MediaFoundation, true
 	}
 	return "", false
 }
@@ -43,17 +45,24 @@ func hwKind(e Encoder) (hwenc.Kind, bool) {
 // GPU that encodes. A variable, so tests can decide what the machine has.
 var ProbeNative = probeNative
 
+// hw is the codec as the GPU encoders name it.
+func (c Codec) hw() hwenc.Codec {
+	switch c {
+	case CodecH265:
+		return hwenc.HEVC
+	case CodecAV1:
+		return hwenc.AV1
+	}
+	return hwenc.H264
+}
+
 func probeNative(enc Encoder, codec Codec, device string) bool {
 	k, ok := hwKind(enc)
 	if !ok {
 		return false
 	}
-	hc := hwenc.H264
-	if codec == CodecH265 {
-		hc = hwenc.HEVC
-	}
 	const w, h = 256, 128
-	e, err := hwenc.Open(k, hwenc.Config{Codec: hc, Width: w, Height: h, FPSNum: 24, FPSDen: 1, QP: 30, Device: device}, io.Discard)
+	e, err := hwenc.Open(k, hwenc.Config{Codec: codec.hw(), Width: w, Height: h, FPSNum: 24, FPSDen: 1, QP: 30, Device: device}, io.Discard)
 	if err != nil {
 		return false
 	}
@@ -123,6 +132,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 		}
 		if enc == nil {
 			r.noteFirstPicture(sf.Base.PTS)
+			r.Height = sf.Base.Height
 			num, den := dec.FrameRate()
 			if num <= 0 {
 				num, den = 24000, 1001
@@ -136,12 +146,8 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 			if half {
 				w = sf.Base.Width
 			}
-			hc := hwenc.H264
-			if r.Opts.Codec == CodecH265 {
-				hc = hwenc.HEVC
-			}
 			var err error
-			enc, err = hwenc.Open(k, hwenc.Config{Codec: hc, Width: w, Height: h, FPSNum: num, FPSDen: den,
+			enc, err = hwenc.Open(k, hwenc.Config{Codec: r.Opts.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
 				QP: r.Opts.CRF, Device: r.Opts.VAAPIDevice}, f)
 			if err != nil {
 				return fmt.Errorf("opening the %s encoder: %w", r.Opts.Encoder, err)

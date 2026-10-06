@@ -266,3 +266,25 @@ func TestMatroskaRemuxIsRefused(t *testing.T) {
 		t.Error("remuxing a Matroska source must fail")
 	}
 }
+
+// --keep-fallback on a remux keeps the lossy track that stands in for the
+// TrueHD core, in the same language, and nothing for DTS-HD, whose core is
+// inside it.
+func TestMatroskaFallbackTrack(t *testing.T) {
+	thd := Track{ID: 2, Type: "TRUE-HD", StreamID: "A_AC3", Lang: "eng", Info: "AC3 core + TRUE-HD + ATMOS. Channels: 7.1"}
+	compat := Track{ID: 3, Type: "E-AC3 (DD+)", StreamID: "A_AC3", Lang: "eng", Info: "EAC3 Bitrate: 1024Kbps Channels: 5.1"}
+	stereo := Track{ID: 4, Type: "AC3", StreamID: "A_AC3", Lang: "eng", Info: "Bitrate: 192Kbps Channels: 2.0"}
+	french := Track{ID: 5, Type: "AC3", StreamID: "A_AC3", Lang: "fre", Info: "Bitrate: 640Kbps Channels: 5.1"}
+	ma := Track{ID: 6, Type: "DTS-HD Master Audio", StreamID: "A_DTS", Lang: "spa", Info: "Channels: 7.1"}
+	all := []Track{thd, compat, stereo, french, ma}
+	got := withFallbacks([]Track{thd}, all, nil)
+	if len(got) != 2 || got[1].ID != 3 {
+		t.Errorf("TrueHD fallback: %+v", got)
+	}
+	if got := withFallbacks([]Track{ma}, all, nil); len(got) != 1 {
+		t.Errorf("DTS-HD needs none: %+v", got)
+	}
+	if got := withFallbacks([]Track{compat}, all, nil); len(got) != 1 {
+		t.Errorf("a lossy track needs none: %+v", got)
+	}
+}

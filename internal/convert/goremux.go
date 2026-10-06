@@ -27,10 +27,6 @@ import (
 // merged back into arrival order, which is what a single transport stream
 // carrying both views (as a 3D remux is) needs.
 func (r *Runner) remuxBuiltin(ctx context.Context, src *goSource, sel Selection) error {
-	if len(src.clips) > 1 {
-		return fmt.Errorf("the title is %d clips joined together; a remux copies a single clip's "+
-			"packets and cannot join clips", len(src.clips))
-	}
 	c := src.clips[0]
 	prog, pmtPIDs, err := readProgram(ctx, c)
 	if err != nil {
@@ -39,6 +35,20 @@ func (r *Runner) remuxBuiltin(ctx context.Context, src *goSource, sel Selection)
 	keep := map[uint16]bool{}
 	for _, t := range append(append([]Track{sel.Base, sel.Dependent}, sel.Audio...), sel.Subtitles...) {
 		keep[uint16(t.ID)] = true //nolint:gosec // track ids are PIDs
+	}
+	// A title of several clips must carry the kept tracks on the same PIDs
+	// in every clip, as discs do: one program table describes the result.
+	for _, later := range src.clips[1:] {
+		lp, lpmts, err := readProgram(ctx, later)
+		if err != nil {
+			return err
+		}
+		if err := sameStreams(prog, lp, keep, c.path, later.path); err != nil {
+			return err
+		}
+		for pid := range lpmts {
+			pmtPIDs[pid] = true
+		}
 	}
 	out := &m2ts.Program{Number: prog.Number, PCRPID: prog.PCRPID, Version: prog.Version, Info: prog.Info}
 	langs := map[uint16]string{}
@@ -67,9 +77,14 @@ func (r *Runner) remuxBuiltin(ctx context.Context, src *goSource, sel Selection)
 		return err
 	}
 	w := bufio.NewWriterSize(f, 4<<20)
-	rm := &remuxer{w: w, prog: out, pcr: prog.PCRPID, keep: keep, dep: uint16(sel.Dependent.ID), pmts: pmtPIDs, //nolint:gosec // a PID
+	rm := &remuxer{w: w, prog: out, pcr: prog.PCRPID, keep: keep, pmts: pmtPIDs,
+		base: uint16(sel.Base.ID), dep: uint16(sel.Dependent.ID), //nolint:gosec // PIDs
 		ts188: strings.EqualFold(filepath.Ext(r.Opts.Output), ".ts"), report: r.Report, started: time.Now()}
-	err = rm.run(ctx, c)
+	if len(src.clips) == 1 {
+		err = rm.run(ctx, c)
+	} else {
+		err = rm.runClips(ctx, src.clips)
+	}
 	if ferr := w.Flush(); err == nil {
 		err = ferr
 	}
@@ -151,12 +166,18 @@ type packet struct {
 
 // remuxer filters and merges packets into the output.
 type remuxer struct {
-	w      io.Writer
-	prog   *m2ts.Program
-	pcr    uint16
-	keep   map[uint16]bool
-	pmts   map[uint16]bool
-	dep    uint16
+	w    io.Writer
+	prog *m2ts.Program
+	pcr  uint16
+	keep map[uint16]bool
+	pmts map[uint16]bool
+	base uint16
+	dep  uint16
+	// win, for a title of several clips, cuts the clip being read to its
+	// window and moves it onto one continuous timeline (see join.go); nil
+	// copies a single clip untouched.
+	win    *clipWindow
+	join   *joinState
 	ts188  bool
 	report Reporter
 
@@ -195,7 +216,10 @@ func (m *remuxer) run(ctx context.Context, c clipRef) error {
 		depReader = newPacketReader(df)
 	}
 	m.lastA, m.lastB = -1<<62, -1<<62
-	m.lastRep = m.started
+	m.unwrap = 0 // each clip runs on its own arrival clock
+	if m.lastRep.IsZero() {
+		m.lastRep = m.started
+	}
 	mainDone, depDone := false, depReader == nil
 	for !mainDone || !depDone {
 		if err := ctx.Err(); err != nil {
@@ -313,6 +337,14 @@ func (m *remuxer) drain(final, single bool) error {
 }
 
 func (m *remuxer) write(p *packet) error {
+	if m.win != nil {
+		return m.win.handle(m, p)
+	}
+	return m.emit(p)
+}
+
+// emit writes a packet, with the tables ahead of it when they are due.
+func (m *remuxer) emit(p *packet) error {
 	if !m.psiWritten || p.ats-m.psiAt >= psiInterval {
 		if err := m.writeTables(p.b[:4]); err != nil {
 			return err

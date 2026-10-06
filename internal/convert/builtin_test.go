@@ -30,7 +30,7 @@ var bothForms = []string{"folder", "disc.iso"}
 
 func TestBuiltinListsTheDisc(t *testing.T) {
 	for _, form := range bothForms {
-		src, err := resolveGo(bluray(form), nil)
+		src, err := resolveGo(bluray(form), "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestBuiltinListsTheDisc(t *testing.T) {
 // side-by-side Y4M, writing the selected other tracks to dir.
 func decodeBuiltin(t *testing.T, input, dir string, filter func(*Selection)) ([]byte, []extra) {
 	t.Helper()
-	src, err := resolveGo(input, nil)
+	src, err := resolveGo(input, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,18 +489,20 @@ func TestSyncPointSampling(t *testing.T) {
 	w := &esWriter{}
 	at := time.Duration(0)
 	for i := 0; i < 3000; i++ { // 3 s of 1 ms payloads
-		w.mark(at)
+		w.mark(at, nil)
 		w.n += 100
 		at += time.Millisecond
 	}
-	w.mark(at + 500*time.Millisecond) // a gap
+	w.mark(at+500*time.Millisecond, nil) // a gap
 	w.n += 100
-	w.mark(at + 501*time.Millisecond)
+	w.mark(at+501*time.Millisecond, []byte{0x0b, 0x77}) // the first AC-3 frame
+	w.n += 100
+	w.mark(at+502*time.Millisecond, []byte{0x0b, 0x77}) // and the next: nothing
 	var got []time.Duration
 	for _, s := range w.sync {
 		got = append(got, s.At)
 	}
-	want := []time.Duration{0, time.Second, 2 * time.Second, 3500 * time.Millisecond}
+	want := []time.Duration{0, time.Second, 2 * time.Second, 3500 * time.Millisecond, 3501 * time.Millisecond}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("sync points at %v, want %v", got, want)
 	}
@@ -526,5 +528,49 @@ func TestFirstPictureDelay(t *testing.T) {
 	}
 	if got := g.timeline(int64(1)<<ptsTagShift | 900000 + 90000); got != time.Hour+time.Second {
 		t.Errorf("second clip: %v", got)
+	}
+}
+
+// The name says what the file is: layout, resolution, codec and quality,
+// encoder, and the main audio track.
+func TestDetailTags(t *testing.T) {
+	o := DefaultOptions()
+	o.Codec, o.CRF, o.Encoder = CodecH265, 20, EncoderNVENC
+	thd := Track{Type: "TRUE-HD", StreamID: "A_AC3", Info: "AC3 core + TRUE-HD + ATMOS. Sample Rate: 48KHz Channels: 7.1"}
+	got := DetailTags(o, []Track{thd}, 1080)
+	if got != "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1" {
+		t.Errorf("tags %q", got)
+	}
+	o.Codec, o.CRF, o.Encoder, o.Layout = CodecH264, 18, EncoderSoftware, LayoutHalfSBS
+	ma := Track{Type: "DTS-HD Master Audio", StreamID: "A_DTS", Info: "Sample Rate: 48KHz Channels: 5.1"}
+	if got := DetailTags(o, []Track{ma}, 1080); got != "3D HSBS 1080p H264 CRF18 x264 DTS-HD-MA 5.1" {
+		t.Errorf("tags %q", got)
+	}
+	o.Codec, o.CRF, o.Encoder, o.Layout = CodecAV1, 20, EncoderSoftware, LayoutFullSBS
+	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 CRF20 SVT-AV1" {
+		t.Errorf("AV1 tags %q", got)
+	}
+	for in, want := range map[string]string{
+		"/out/Moana (2016).mkv":         "/out/Moana (2016) 3D FSBS 1080p.mkv",
+		"/out/Moana (2016) 3D FSBS.mkv": "/out/Moana (2016) 3D FSBS 1080p.mkv",
+	} {
+		if got := WithDetails(in, "3D FSBS 1080p"); got != want {
+			t.Errorf("%s: %s", in, got)
+		}
+	}
+}
+
+// --playlist picks a disc's title by name, with or without the extension.
+func TestPlaylistOption(t *testing.T) {
+	for _, form := range bothForms {
+		for _, name := range []string{"00000", "00000.mpls", "00000.MPLS"} {
+			src, err := resolveGo(bluray(form), name, nil)
+			if err != nil || src.playlist == nil {
+				t.Fatalf("%s %s: %v", form, name, err)
+			}
+		}
+		if _, err := resolveGo(bluray(form), "09999", nil); err == nil {
+			t.Errorf("%s: a missing playlist must fail", form)
+		}
 	}
 }

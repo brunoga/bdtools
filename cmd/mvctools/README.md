@@ -126,10 +126,11 @@ scheduler such as pipeliner retry it.
 | `--quiet` | — | Only report errors |
 | `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
 | `--output` | — | Destination `.mkv` |
+| `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
-| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc` (`x264` is still accepted for `software`) |
-| `--codec` | `h264` | `h264` or `h265` — see [Codec](#codec) |
+| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |
+| `--codec` | `h264` | `h264`, `h265` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
 | `--audio-lang` | — | Keep only audio in these languages, e.g. `eng` or `eng,fra` |
@@ -139,6 +140,7 @@ scheduler such as pipeliner retry it.
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
+| `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
 | `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
@@ -184,6 +186,31 @@ than saying what it means. If you want HEVC's saving rather than its extra
 quality, raise the CRF by two or three.
 
 The codec is independent of the encoder: every encoder below produces either.
+
+### AV1
+
+`--codec av1` is smaller again, but the newest to decode in hardware (Intel
+Arc and 11th-gen Core onwards, NVIDIA RTX 30, AMD RX 6000, recent Android TV
+devices and Apple M3/A17 onwards), so check what plays it first. It is encoded
+by:
+
+| Encoder | AV1 | Notes |
+|---|---|---|
+| NVENC | RTX 40 and later | in process, or `av1_nvenc` through ffmpeg; B-frames as for HEVC |
+| VAAPI | Intel Arc / Core Ultra, AMD RX 7000 | in process, or `av1_vaapi` through ffmpeg; I and P frames only, so it is larger than NVENC's at the same `--crf` |
+| software | everywhere | `SvtAv1EncApp` when installed, else ffmpeg's `libsvtav1`; slow at this frame size |
+| VideoToolbox | no | Apple has no AV1 encoder: refused up front |
+
+`--crf` keeps its 0–51 scale and means about the same picture quality as the
+same number in HEVC: it is mapped onto AV1's 0–255 quantiser index by a line
+measured on NVENC over a Blu-ray 3D, the AV1 index giving the same luma PSNR as
+HEVC at QP 14, 18, 24 and 30 (index ≈ 7.1 × crf − 76). At equal PSNR the AV1
+encodes were 11–15% smaller than HEVC's. SVT-AV1's CRF (0–63) is a quarter of
+that index, and `--preset` maps onto SVT's numbered presets:
+
+| `--preset` | ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SVT-AV1 | 12 | 11 | 10 | 9 | 8 | 6 | 5 | 4 | 3 | 2 |
 
 ## Choosing tracks
 
@@ -297,6 +324,19 @@ with no alias entry matches itself, so nothing is lost by not being listed.
 Toy Story (1995) 3D FSBS.mkv  ->  Toy Story (1995) 3D FSBS.TrueHD-Atmos.mkv
 ```
 
+`--name-details` says everything that tells one conversion from another:
+the layout, the resolution per eye, the codec and its quality setting (`QP`
+for a GPU, `CRF` for x264/x265, `Q` for VideoToolbox's quality), the encoder,
+and the main audio track with its channels:
+
+```
+Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv
+```
+
+A name that already ends in `3D FSBS` does not get it twice. "3D FSBS" is
+also what Kodi and Jellyfin look for in a name to treat a file as
+side-by-side 3D.
+
 Useful with `--audio-best`, where the codec is whatever the disc turned out to
 offer. The rename happens after the conversion, because the codec is not known
 until the source has been probed, and probing a disc image twice to decide a
@@ -322,11 +362,27 @@ giving one transport stream with both views, which is what a player that
 decodes MVC expects. Nothing is decoded or re-timed, so the result plays
 exactly as the disc does, and it needs no tools at all.
 
+A title made of several clips — a playlist of several play items, as
+seamless-branching and some long films are — is joined into one stream:
+
+- Each clip is cut to its play item's window. A remux cannot re-encode, so a
+  clip starts at the picture that opens the GOP at or before its IN time
+  (the pictures before IN are a fraction of a second at most), and keeps
+  pictures while they decode before OUT, so none loses a picture it is
+  predicted from. Audio and subtitles are kept by their presentation time,
+  IN to OUT.
+- Every later clip is moved onto the first one's timeline: its PTS, DTS,
+  clock references and arrival timestamps, so the result has one clock and
+  plays and seeks like a single clip, rather than marking a discontinuity
+  that many players handle badly. Where a clip's opening GOP would overlap
+  the end of the clip before it, it moves just far enough not to.
+- Continuity counters are renumbered across the cuts, and the clips must
+  carry the kept tracks on the same PIDs (discs do); if not, the remux says
+  so rather than guessing.
+
 The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
 has no home in Matroska that players agree on. Nothing about the picture can
-change, so `--layout half` and `--swap-lr` are refused. A title made of
-several clips joined together cannot be remuxed: the remux copies one
-clip's packets.
+change, so `--layout half` and `--swap-lr` are refused.
 
 ## What plays the result, and at what resolution
 
@@ -471,9 +527,9 @@ go test ./internal/convert/
 
 | Platform | Hardware | Software |
 |---|---|---|
-| Linux | NVENC, VAAPI | x264 / x265 |
-| macOS | VideoToolbox | x264 / x265 |
-| Windows | NVENC | x264 / x265 |
+| Linux | NVENC, VAAPI | x264 / x265 / SVT-AV1 |
+| macOS | VideoToolbox (not AV1) | x264 / x265 / SVT-AV1 |
+| Windows | NVENC, Media Foundation (Intel, AMD; H.264 and HEVC) | x264 / x265 / SVT-AV1 |
 
 `auto` runs a **trial encode** for each candidate and takes the first that
 succeeds, falling back to software: in process first, then through ffmpeg.
@@ -496,10 +552,12 @@ at run time — no cgo, no ffmpeg, nothing to link:
 | NVENC | the NVIDIA driver's `libnvidia-encode` and `libcuda` (`nvEncodeAPI64.dll`, `nvcuda.dll`) | Linux, Windows |
 | VAAPI | `libva` and `libva-drm`, with the GPU's driver (Intel's `iHD`, Mesa's `radeonsi`) | Linux |
 | VideoToolbox | the system frameworks | macOS |
+| Media Foundation | the encoder MFT the GPU driver installs (Intel Quick Sync, AMD AMF), through `mfplat.dll` | Windows |
 
 The decoder's frames are drawn side by side straight into the encoder's
 input buffer, squeezed for half-SBS on the way, so nothing is piped and no
-filter runs. Each encoder makes an IDR every two seconds with B-frames
+filter runs. Each encoder makes an IDR every 250 frames (about 10 s, as x264
+and x265 do; 7% smaller than every 2 s at the same quality) with B-frames
 between references, at a constant quantiser: `--crf` is the P-picture QP,
 and I and B pictures get the offsets ffmpeg applies by default for that
 encoder, so a number means what it meant through ffmpeg's `-qp`.
@@ -508,7 +566,7 @@ and `51` the worst.
 
 When the library is missing or its trial encode fails, the encoder is reached
 through ffmpeg as before; `--gpu-api ffmpeg` asks for that outright.
-Windows has NVENC in process; Intel and AMD GPUs there need ffmpeg.
+On Windows, `auto` tries NVENC, then the Media Foundation encoder a driver installs, which is how Intel and AMD GPUs encode there. Microsoft's own software encoder MFT is never picked. `--encoder mediafoundation --gpu-api ffmpeg` uses ffmpeg's `h264_mf` / `hevc_mf` instead. Media Foundation takes a constant QP where the driver supports one, which Intel's and AMD's do, and otherwise its 0-100 quality, mapped from `--crf` as for VideoToolbox. This path is tested in CI with Microsoft's software encoder, not yet on an Intel or AMD GPU.
 
 Decoding and encoding a minute of a Blu-ray to H.264 on a Core Ultra 9 285K
 (wall time for the whole conversion, then the decode-and-encode rate):
@@ -531,7 +589,7 @@ recent GPUs is `intel-media-va-driver-non-free` on Debian and Ubuntu.
 ## Docker
 
 `Dockerfile.mvctools` carries the whole toolchain, for amd64 and arm64, on
-Alpine. A release publishes it:
+Debian. A release publishes it:
 
 ```sh
 docker run --rm -v /media:/media ghcr.io/brunoga/mvctools:latest --check
@@ -546,7 +604,26 @@ docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t
 
 The demuxer, decoder and muxer are part of the `mvctools` binary, with the
 decoder's assembly kernels chosen at run time by what the CPU supports; the
-image adds x264, x265 and ffmpeg.
+image adds x264, x265, ffmpeg (with NVENC and VAAPI), libva, and the VAAPI
+drivers for Intel (non-free, amd64) and AMD.
+
+It is Debian, not Alpine, because a GPU's own libraries are built for glibc:
+NVIDIA's `libnvidia-encode` and `libcuda`, which the NVIDIA container toolkit
+mounts in, cannot be loaded by a musl system, and Alpine's ffmpeg has no
+NVENC either.
+
+### GPUs in the container
+
+- **NVIDIA:** install the NVIDIA container toolkit on the host and run with
+  `--gpus all`. The image sets `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`;
+  `video` is the capability that brings `libnvidia-encode` in, and without it
+  there is no NVENC.
+- **Intel / AMD (VAAPI):** pass the render node, `--device /dev/dri/renderD128`
+  (and `--vaapi-device` if it is another one). The drivers are in the image.
+
+`--check` in the container tries a GPU reached through ffmpeg with a short
+encode, so an image or host that cannot drive the GPU says so before a
+conversion starts rather than at its encode.
 
 ### Running the conversion out of the image
 

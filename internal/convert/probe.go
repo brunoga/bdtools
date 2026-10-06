@@ -36,6 +36,12 @@ func probeArgv(enc Encoder, codec Codec, device string, viaFFmpeg bool) []string
 			"-f", "lavfi", "-i", src, "-frames:v", "1",
 			"-vf", "format=nv12,hwupload", "-c:v", name,
 			"-f", "null", "-"}
+	case EncoderMediaFoundation:
+		// Without hw_encoding ffmpeg falls back to Microsoft's software MFT,
+		// which would pass the probe on a machine with no GPU encoder.
+		return []string{"ffmpeg", "-hide_banner", "-loglevel", "error",
+			"-f", "lavfi", "-i", src, "-frames:v", "1",
+			"-c:v", name, "-hw_encoding", "1", "-f", "null", "-"}
 	default:
 		return []string{"ffmpeg", "-hide_banner", "-loglevel", "error",
 			"-f", "lavfi", "-i", src, "-frames:v", "1",
@@ -52,6 +58,9 @@ var runProbe = func(ctx context.Context, argv []string) error {
 
 // ProbeEncoder reports whether enc actually encodes codec on this machine.
 func ProbeEncoder(ctx context.Context, enc Encoder, codec Codec, device string, viaFFmpeg bool) bool {
+	if enc.UsesFFmpeg() && codec.ffmpegEncoder(enc) == "" {
+		return false // no such encoder (AV1 on VideoToolbox)
+	}
 	argv := probeArgv(enc, codec, device, viaFFmpeg)
 	if argv == nil {
 		return true // software

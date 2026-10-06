@@ -21,13 +21,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install the libva headers
-        # TestVAAPILayout checks the VAAPI struct offsets against them.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libva-dev
+      - name: Install the libva and mingw-w64 headers
+        # TestVAAPILayout checks the VAAPI struct offsets against libva's, and
+        # TestMFConstants the Media Foundation GUIDs, constants and vtable
+        # slots against mingw-w64's Windows SDK headers.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libva-dev mingw-w64-common mingw-w64-x86-64-dev
 
       - name: Test
         # The end-to-end conversion tests skip when x264 is not installed,
         # which it is not here; the GPU encoder tests skip without a GPU.
+        env:
+          MVC_MF_HEADERS: /usr/share/mingw-w64/include:/usr/x86_64-w64-mingw32/include
         run: go test -race -timeout 300s ./...
 
       - name: Test the pure-Go decoder
@@ -51,6 +55,32 @@ jobs:
         # The virtual Macs have no media engine, so the VideoToolbox tests
         # fall back to Apple's software encoder: the same API and code.
         run: go test -timeout 300s ./internal/hwenc/... ./internal/convert/...
+
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Enable Media Foundation
+        # An optional feature on Windows Server; without it the tests skip.
+        shell: pwsh
+        continue-on-error: true
+        run: Install-WindowsFeature Server-Media-Foundation
+
+      - name: Test Media Foundation
+        # The virtual machines have no GPU, so the tests use Microsoft's
+        # software encoder MFTs: the same API and code, only synchronous.
+        # -v shows whether they ran or skipped. Only the encoder tests of
+        # convert run here: the others assert Unix paths.
+        run: |
+          go test -v -timeout 300s ./internal/hwenc/...
+          go test -timeout 300s -run "MediaFoundation|SupportsEncoder" ./internal/convert/...
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }})

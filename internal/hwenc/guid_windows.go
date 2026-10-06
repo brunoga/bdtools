@@ -4,13 +4,12 @@ package hwenc
 
 import "sync"
 
-// guidCopies keeps the copies guidArg hands out alive: C sees only their
-// address, as an integer.
+// guidCopies keeps the GUIDs C sees by address alive: it gets only their
+// address, as an integer. One copy per GUID, and a callee may change it.
 var guidCopies sync.Map
 
-// guidArg passes a GUID by value: on Windows x64 a 16-byte struct goes by
-// reference to a copy the callee may change, one per GUID here.
-func guidArg(g []byte) []uintptr {
+// gp is a pointer to a GUID, for an argument passed as REFGUID or REFIID.
+func gp(g []byte) uintptr {
 	c, _ := guidCopies.LoadOrStore(string(g), func() cstruct { s := newStruct(16); copy(s, g); return s }())
-	return []uintptr{c.(cstruct).ptr()} //nolint:forcetypeassert // only cstructs are stored
+	return c.(cstruct).ptr() //nolint:forcetypeassert // only cstructs are stored
 }

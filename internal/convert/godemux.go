@@ -58,7 +58,7 @@ type goSource struct {
 }
 
 // resolveGo turns the input into the stream files to read.
-func resolveGo(in string, report Reporter) (*goSource, error) {
+func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
 	st, err := os.Stat(in) //nolint:gosec // the operator's input is the point
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", in, err)
@@ -72,6 +72,10 @@ func resolveGo(in string, report Reporter) (*goSource, error) {
 		}
 		if ext == ".iso" {
 			report.Report("reading the disc image in place (no mount, no extraction)")
+		}
+		if playlist != "" {
+			name := strings.ToUpper(strings.TrimSuffix(filepath.Base(playlist), filepath.Ext(playlist))) + ".mpls"
+			return playlistSource(d, name, report)
 		}
 		return chooseGo(d, report)
 	case ext == ".mpls":
@@ -544,16 +548,24 @@ type esWriter struct {
 	sync     []mkv.SyncPoint
 	lastAt   time.Duration
 	lastSync time.Duration
+	sawAC3   bool // a sync point was recorded at an AC-3 frame
 }
 
 // syncEvery is how often a sync point is recorded when the timestamps run
 // smoothly; a jump between two payloads is always recorded.
 const syncEvery = time.Second
 
-// mark notes that the next byte written is presented at at.
-func (w *esWriter) mark(at time.Duration) {
+// mark notes that the next byte written, starting payload, is presented at
+// at. The first AC-3 frame always gets a point: in a TrueHD stream that is
+// the core's own start, which the core track must not take from the TrueHD
+// frame beside it.
+func (w *esWriter) mark(at time.Duration, payload []byte) {
 	jump := at-w.lastAt > 100*time.Millisecond || at < w.lastAt
-	if len(w.sync) == 0 || jump || at-w.lastSync >= syncEvery {
+	firstAC3 := !w.sawAC3 && len(payload) >= 2 && payload[0] == 0x0b && payload[1] == 0x77
+	if firstAC3 {
+		w.sawAC3 = true
+	}
+	if len(w.sync) == 0 || jump || firstAC3 || at-w.lastSync >= syncEvery {
 		w.sync = append(w.sync, mkv.SyncPoint{Offset: w.n, At: at})
 		w.lastSync = at
 	}
@@ -834,7 +846,7 @@ func (g *goDemux) emitES(w *esWriter, p m2ts.PES) error {
 		err = writeSup(w, pts, dts, p.Payload)
 	default:
 		if p.PTS >= 0 {
-			w.mark(ticks90k(p.PTS + g.offsets[g.clip] - g.ins[g.clip]))
+			w.mark(ticks90k(p.PTS+g.offsets[g.clip]-g.ins[g.clip]), p.Payload)
 		}
 		_, err = w.w.Write(p.Payload)
 		w.n += int64(len(p.Payload))
@@ -933,6 +945,7 @@ func hasSlice(au []byte) bool {
 // finish closes the track files and reports; it returns the files to mux.
 func (g *goDemux) finish() ([]extra, error) {
 	g.closeClip()
+	var empty []Track
 	var firstErr error
 	for _, t := range append(append([]Track(nil), g.sel.Audio...), g.sel.Subtitles...) {
 		w := g.writers[uint16(t.ID)] //nolint:gosec // track ids are PIDs
@@ -952,11 +965,12 @@ func (g *goDemux) finish() ([]extra, error) {
 			firstErr = w.err
 		}
 		if w.n == 0 {
-			g.report.Report("warning: %s track %d demuxed to nothing; it will be missing from the output", t.StreamID, t.ID)
+			empty = append(empty, t)
 			continue
 		}
 		g.extras = append(g.extras, extra{path: w.path, track: t, sync: w.sync})
 	}
+	reportEmpty(g.report, empty)
 	if len(g.dropped) > 0 {
 		var most int64
 		for _, b := range g.dropped {
@@ -1174,4 +1188,17 @@ func writeSup(w *esWriter, pts, dts int64, seg []byte) error {
 		seg = seg[n:]
 	}
 	return err
+}
+
+// reportEmpty names, in one line, the selected tracks that held nothing in
+// the part played: a subtitle stream with no captions there is common.
+func reportEmpty(report Reporter, empty []Track) {
+	if len(empty) == 0 {
+		return
+	}
+	var ids []string
+	for _, t := range empty {
+		ids = append(ids, fmt.Sprintf("%d (%s %s)", t.ID, strings.TrimPrefix(t.StreamID, "S_HDMV/"), t.Lang))
+	}
+	report.Report("warning: %d track(s) hold nothing in the part played and are left out: %s", len(empty), strings.Join(ids, ", "))
 }

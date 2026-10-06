@@ -53,11 +53,12 @@ func run(argv []string, stdout, stderr *os.File) int {
 		check    = fs.Bool("check", false, "report which external tools are present and which are missing, then exit")
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
 		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, or an MKV")
+		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
 		output   = fs.String("output", "", "destination .mkv")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
-		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox or nvenc")
-		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere) or h265 (smaller)")
+		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
+		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere), h265 (smaller) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
@@ -69,6 +70,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		audioCdc = fs.String("audio-codec", "", "keep only audio matching these codecs, e.g. truehd or dts,ac3 (default: every track)")
 		audioBst = fs.Bool("audio-best", false, "of the audio tracks that match, keep only the highest quality one (lossless, then channels, then bitrate)")
 		nameCdc  = fs.Bool("name-audio-codec", false, "append the kept audio codec to the output filename, e.g. \"Film 3D FSBS.TrueHD-Atmos.mkv\"")
+		nameDet  = fs.Bool("name-details", false, "append the layout, resolution, codec, quality, encoder and main audio track to the output filename, e.g. \"Film (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv\"")
 		keepFall = fs.Bool("keep-fallback", false, "keep the lossy core embedded in a lossless track (the AC-3 inside TrueHD, the DTS inside DTS-HD) instead of dropping it")
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
@@ -119,7 +121,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	o := convert.DefaultOptions()
 	o.GPUAPI = ga
-	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
+	o.Input, o.Output, o.TempDir, o.Playlist = *input, *output, *tempDir, *playlst
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
 	o.SwapLR = *swapLR
@@ -214,6 +216,19 @@ func run(argv []string, stdout, stderr *os.File) int {
 			report.Report("warning: keeping %s: %v", o.Output, err)
 		} else {
 			final = renamed
+		}
+	}
+	if *nameDet {
+		// The encoder auto chose, not "auto".
+		done := o
+		done.Encoder = runner.Opts.Encoder
+		target := convert.WithDetails(final, convert.DetailTags(done, runner.Selected.Audio, runner.Height))
+		if target != final {
+			if err := os.Rename(final, target); err != nil {
+				report.Report("warning: keeping %s: %v", final, err)
+			} else {
+				final = target
+			}
 		}
 	}
 	report.Report("done: %s", final)

@@ -29,3 +29,10 @@ func TestNVENCHEVCDecodesBack(t *testing.T) {
 	b := encodeTest(t, NVENC, HEVC, w, h, n)
 	checkDecodeFFmpeg(t, b, "hevc", w, h, n)
 }
+
+// AV1 comes out as low-overhead OBUs, which ffmpeg's obu demuxer reads.
+func TestNVENCAV1DecodesBack(t *testing.T) {
+	const w, h, n = 640, 368, 30
+	b := encodeTest(t, NVENC, AV1, w, h, n)
+	checkDecodeFFmpeg(t, b, "obu", w, h, n)
+}
