@@ -18,12 +18,17 @@ Complete, and tested end to end against a real MVC source — see
 ## The pipeline
 
 ```
-demuxer    read the disc in place; the video goes to the decoder, audio,   ─┐
-           subtitles and chapters to the work directory — built in         │
-decoder    decode both eyes and stack them side by side, as Y4M — built in ─┤ one pass,
-encoder    the GPU's encoder in process, or x264 / x265 (ffmpeg as fallback) ─┘ piped
+demuxer    read the disc in place; the video goes to the decoder, audio,    ─┐
+           subtitles and chapters to the work directory — built in          │
+decoder    decode both eyes and stack them side by side — built in          ├ one pass
+encoder    a GPU in process (NVENC, VAAPI, VideoToolbox), drawn straight    │
+           into its buffers; or x264 / x265 fed Y4M through a pipe         ─┘
 muxer      write the MKV: video, audio, subtitles, chapters — built in
 ```
+
+With a GPU nothing outside the process runs at all. ffmpeg is used only for
+software half-SBS (its scaler) and as a fallback for a GPU whose library is
+missing — see [Hardware encoding](#hardware-encoding).
 
 The disc is read **once and in place**: a `.iso` straight out of the image, a
 folder straight from its files. Nothing is extracted and neither view is
@@ -101,7 +106,7 @@ It reports as it goes, because a feature film takes hours:
 ```
 mvctools: probing STREAM/SSIF/00272.ssif
 mvctools: source: base view track 4113, dependent view track 4114, 2 audio, 4 subtitle
-mvctools: decoding and encoding (h264, nvenc)
+mvctools: decoding and encoding (h264, nvenc on the GPU, in process)
 mvctools: frame rate 24000/1001
 mvctools: 1800 frames decoded (61.2 fps)
 mvctools: decoded 170271 frames
@@ -120,7 +125,7 @@ scheduler such as pipeliner retry it.
 | `--quiet` | — | Only report errors |
 | `--input` | — | An `.m2ts`, a `.mpls` playlist from a BDMV, or an MKV — see [What you can point it at](#what-you-can-point-it-at) |
 | `--output` | — | Destination `.mkv` |
-| `--temp` | beside the output | Scratch space for the demuxed views |
+| `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc` (`x264` is still accepted for `software`) |
 | `--codec` | `h264` | `h264` or `h265` — see [Codec](#codec) |
@@ -378,6 +383,8 @@ platform: linux   encoder: software   codec: h264
 all 1 required tools present
 ```
 
+With a GPU that encodes in process it says so: `no external tools needed`.
+
 `--check` exits non-zero when anything is missing, so it works as a preflight.
 It answers for the options given, so `--check --demuxer tsmuxer` looks for
 tsMuxeR too, and `--check --muxer mkvmerge` for mkvmerge.
@@ -490,8 +497,8 @@ go test ./internal/convert/
 | Windows | NVENC | x264 / x265 |
 
 `auto` runs a **trial encode** for each candidate and takes the first that
-succeeds, falling back to software: in process first, then through ffmpeg. Merely finding ffmpeg is not evidence a
-GPU is present — a stock build advertises `h264_nvenc` on a machine with no
+succeeds, falling back to software: in process first, then through ffmpeg.
+Merely finding ffmpeg or a driver library is not evidence a GPU is present — a stock build advertises `h264_nvenc` on a machine with no
 NVIDIA card — and discovering that at the encode step would waste the hours
 already spent decoding.
 
