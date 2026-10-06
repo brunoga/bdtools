@@ -508,3 +508,23 @@ func TestSyncPointSampling(t *testing.T) {
 		t.Errorf("the gap's point is at offset %d", w.sync[3].Offset)
 	}
 }
+
+// The first kept picture's place on the output's timeline becomes the
+// video's delay: a disc whose picture starts after its sound keeps that gap.
+func TestFirstPictureDelay(t *testing.T) {
+	g := &goDemux{ins: []int64{552600, 900000}, outs: []int64{1000000000, 1000000000}, offsets: []int64{0, 3600 * 90000}}
+	r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
+	r.timeline = g.timeline
+	r.noteFirstPicture(639450) // 0.965 s after IN, in clip 0
+	if r.videoDelay != 965*time.Millisecond {
+		t.Errorf("delay %v", r.videoDelay)
+	}
+	r.videoDelay = 0
+	r.noteFirstPicture(552600) // at IN
+	if r.videoDelay != 0 {
+		t.Errorf("a picture at IN delays by %v", r.videoDelay)
+	}
+	if got := g.timeline(int64(1)<<ptsTagShift | 900000 + 90000); got != time.Hour+time.Second {
+		t.Errorf("second clip: %v", got)
+	}
+}

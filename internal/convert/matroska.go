@@ -237,11 +237,10 @@ type mkvDemux struct {
 	nalSize int
 	params  []byte // the avcC's parameter sets, ahead of the first picture
 	writers map[uint64]*esWriter
-	// Until the first picture's time is known, other tracks wait: their
-	// frames before it are dropped, the rest are timed from it.
+	// t0 is the first block's time, the output's zero; anything earlier
+	// (out of order) is dropped.
 	t0      time.Duration
 	t0Known bool
-	pending []mkv.Packet
 	deps    map[time.Duration][]byte // a separate dependent track, by time
 	aus     int
 	noDep   int
@@ -295,17 +294,13 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 			}
 			return nil, nil, 0, err
 		}
+		if !g.t0Known {
+			// The output starts with the file's first block, whichever track
+			// it belongs to; a track that starts later starts later.
+			g.t0, g.t0Known = p.Time, true
+		}
 		switch {
 		case p.Track == g.video:
-			if !g.t0Known {
-				g.t0, g.t0Known = p.Time, true
-				for _, q := range g.pending {
-					if err := g.write(q); err != nil {
-						return nil, nil, 0, err
-					}
-				}
-				g.pending = nil
-			}
 			au := annexB(p.Data, g.nalSize)
 			if g.params != nil {
 				au = append(g.params, au...)
@@ -334,10 +329,6 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 		case p.Track == g.src.dependent && g.src.dependent != 0:
 			g.deps[p.Time] = annexB(p.Data, g.nalSize)
 		default:
-			if !g.t0Known {
-				g.pending = append(g.pending, p)
-				continue
-			}
 			if err := g.write(p); err != nil {
 				return nil, nil, 0, err
 			}
@@ -406,7 +397,7 @@ func (g *mkvDemux) finish() ([]extra, error) {
 		extras = append(extras, extra{path: w.path, track: t, sync: w.sync})
 	}
 	if len(g.dropped) > 0 {
-		g.report.Report("dropped the audio and subtitles before the first picture")
+		g.report.Report("dropped audio and subtitle frames timed before the file's start")
 	}
 	if g.noDep > 0 {
 		g.report.Report("warning: %d of %d pictures had no dependent view", g.noDep, g.aus)
@@ -463,6 +454,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	}
 	r.length = src.duration
 	g := newMkvDemux(src, sel, tmp, r.Report)
+	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
 	if err := g.start(); err != nil {
 		if g.f != nil {
 			_ = g.f.Close()

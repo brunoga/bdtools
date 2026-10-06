@@ -40,6 +40,11 @@ type Runner struct {
 
 	// fpsNum and fpsDen are the frame rate the decode found, for the mux.
 	fpsNum, fpsDen int
+	// timeline places a decoded picture's timestamp on the output's
+	// timeline, and videoDelay is where the first kept picture landed: a
+	// source can start its picture after its sound.
+	timeline   func(pts int64) time.Duration
+	videoDelay time.Duration
 	// length is how long the output plays, when the source says (a
 	// playlist, a Matroska file's duration), for the progress lines.
 	length time.Duration
@@ -111,6 +116,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	}
 	r.length = src.duration
 	g := newGoDemux(src, sel, tmp, r.Report)
+	r.timeline = g.timeline
 	if err := g.start(); err != nil {
 		return err
 	}
@@ -267,6 +273,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 			return err
 		}
 		if frames == 0 {
+			r.noteFirstPicture(sf.Base.PTS)
 			if num, den := dec.FrameRate(); num > 0 {
 				y4m.FPSNum, y4m.FPSDen = num, den
 				r.fpsNum, r.fpsDen = num, den
@@ -332,4 +339,15 @@ func (r *Runner) resolve(t Tool) (string, error) {
 		hint = "\n  try: " + hint
 	}
 	return "", fmt.Errorf("%s is not installed — needed to %s%s", t.Name, t.Purpose, hint)
+}
+
+// noteFirstPicture records where the first kept picture plays, so the mux
+// can start the video there rather than at zero.
+func (r *Runner) noteFirstPicture(pts int64) {
+	if r.timeline == nil || pts < 0 {
+		return
+	}
+	if d := r.timeline(pts); d >= time.Millisecond {
+		r.videoDelay = d
+	}
 }

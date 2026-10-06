@@ -49,6 +49,10 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
 	}
+	if r.videoDelay > 0 {
+		v.SetDelay(r.videoDelay)
+		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
+	}
 	sources := []mkv.Source{v}
 	var timed []timedAudio
 	firstAudio := true

@@ -640,6 +640,16 @@ func (g *goDemux) tag(pts int64) int64 {
 	return int64(g.clip)<<ptsTagShift | pts
 }
 
+// timeline places a tagged picture timestamp on the output's timeline.
+func (g *goDemux) timeline(tagged int64) time.Duration {
+	k := int(tagged >> ptsTagShift)
+	pts := tagged & (1<<ptsTagShift - 1)
+	if k >= len(g.ins) || g.ins[k] < 0 {
+		return 0
+	}
+	return ticks90k(pts - g.ins[k] + g.offsets[k])
+}
+
 // KeepFrame reports whether a decoded picture, by its tagged timestamp, is
 // inside its clip's window. Pictures the playlist does not play — before
 // IN_time or from OUT_time — are decoded (others may reference them) but

@@ -300,3 +300,30 @@ func TestAudioSyncPoints(t *testing.T) {
 		t.Errorf("delay %v, gaps %v", a.Delay(), a.Gaps())
 	}
 }
+
+// A delayed picture keeps its frame spacing, shifted.
+func TestVideoDelay(t *testing.T) {
+	read := func(d time.Duration) []time.Duration {
+		v, err := NewVideoSource(fixture(t, "mkv", "bframes.264"), H264, 24000, 1001, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v.SetDelay(d)
+		var pts []time.Duration
+		for {
+			f, err := v.Next()
+			if err == io.EOF {
+				return pts
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			pts = append(pts, f.PTS, f.Order)
+		}
+	}
+	plain, late := read(0), read(965*time.Millisecond)
+	for i := range plain {
+		if late[i]-plain[i] != 965*time.Millisecond {
+			t.Fatalf("time %d: %v vs %v", i, late[i], plain[i])
+		}
+	}
+}

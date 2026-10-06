@@ -27,6 +27,7 @@ type VideoSource struct {
 	codec    Codec
 	r        *bufio.Reader
 	frameDur time.Duration
+	delay    time.Duration
 	track    Track
 
 	buf      []byte
@@ -149,7 +150,11 @@ func (v *VideoSource) hasParams(nals [][]byte) bool {
 // at is the time of frame n: n frame durations, each truncated to a whole
 // nanosecond. That is how mkvmerge counts, so the two give the same
 // timestamps; the drift over a feature film is under 0.05 ms.
-func (v *VideoSource) at(n int64) time.Duration { return time.Duration(n) * v.frameDur }
+func (v *VideoSource) at(n int64) time.Duration { return v.delay + time.Duration(n)*v.frameDur }
+
+// SetDelay starts the picture later: for a source whose first picture comes
+// after the start of what plays (the audio's), as some discs do.
+func (v *VideoSource) SetDelay(d time.Duration) { v.delay = d }
 
 // readFrame reads one access unit and queues it.
 func (v *VideoSource) readFrame() error {
