@@ -17,6 +17,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Both commands print a banner with their name and version in their help,
   and `mvcdec` has `-version`.
 
+### Fixed
+
+- Audio and picture stay in step when a disc starts one after the other.
+  Every track was placed at zero, so a soundtrack the disc starts late
+  played early for the whole film (0.3 s on Moana, 0.14 s on The Lion King)
+  and so did a picture that starts late (almost a second on Raya and both
+  Toy Story discs). Tracks now start, and continue across any gap, where
+  the source's timestamps put them. The tsMuxeR and mkvmerge pipeline had
+  the same fault.
+
 ### Removed
 
 - tsMuxeR and mkvmerge are no longer used: the built-in demuxer and muxer do
