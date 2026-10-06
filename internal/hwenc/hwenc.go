@@ -1,8 +1,8 @@
 // Package hwenc drives GPU video encoders through their system libraries —
-// NVENC (NVIDIA's driver), VAAPI (Mesa, Intel's media driver) and
-// VideoToolbox (macOS) — loaded at run time, so mvctools needs neither cgo
-// nor ffmpeg for hardware encoding. Each encoder takes NV12 pictures and
-// writes an Annex B H.264 or HEVC stream.
+// NVENC (NVIDIA's driver), VAAPI (Mesa, Intel's media driver), VideoToolbox
+// (macOS) and Media Foundation (Windows) — loaded at run time, so mvctools
+// needs neither cgo nor ffmpeg for hardware encoding. Each encoder takes NV12
+// pictures and writes an Annex B H.264 or HEVC stream.
 package hwenc
 
 import (
@@ -60,6 +60,9 @@ const (
 	NVENC        Kind = "nvenc"
 	VAAPI        Kind = "vaapi"
 	VideoToolbox Kind = "videotoolbox"
+	// MediaFoundation is the encoder MFT a Windows GPU driver installs:
+	// Intel Quick Sync, AMD AMF, NVIDIA's too.
+	MediaFoundation Kind = "mediafoundation"
 )
 
 // Open starts an encoder writing to w.
@@ -74,6 +77,8 @@ func Open(k Kind, cfg Config, w io.Writer) (Encoder, error) {
 		return openVAAPI(cfg, w)
 	case VideoToolbox:
 		return openVideoToolbox(cfg, w)
+	case MediaFoundation:
+		return openMediaFoundation(cfg, w)
 	}
 	return nil, ErrUnavailable
 }

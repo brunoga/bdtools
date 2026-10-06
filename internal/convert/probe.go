@@ -36,6 +36,12 @@ func probeArgv(enc Encoder, codec Codec, device string, viaFFmpeg bool) []string
 			"-f", "lavfi", "-i", src, "-frames:v", "1",
 			"-vf", "format=nv12,hwupload", "-c:v", name,
 			"-f", "null", "-"}
+	case EncoderMediaFoundation:
+		// Without hw_encoding ffmpeg falls back to Microsoft's software MFT,
+		// which would pass the probe on a machine with no GPU encoder.
+		return []string{"ffmpeg", "-hide_banner", "-loglevel", "error",
+			"-f", "lavfi", "-i", src, "-frames:v", "1",
+			"-c:v", name, "-hw_encoding", "1", "-f", "null", "-"}
 	default:
 		return []string{"ffmpeg", "-hide_banner", "-loglevel", "error",
 			"-f", "lavfi", "-i", src, "-frames:v", "1",

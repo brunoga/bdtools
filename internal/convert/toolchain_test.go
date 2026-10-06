@@ -137,6 +137,9 @@ func TestSupportsEncoderIsPlatformAware(t *testing.T) {
 		{"linux", EncoderVideoToolbox, false},
 		{"windows", EncoderNVENC, true},
 		{"darwin", EncoderNVENC, false},
+		{"windows", EncoderMediaFoundation, true},
+		{"linux", EncoderMediaFoundation, false},
+		{"darwin", EncoderMediaFoundation, false},
 		{"linux", EncoderSoftware, true},
 		{"windows", EncoderSoftware, true},
 		{"darwin", EncoderSoftware, true},
@@ -217,4 +220,33 @@ func toolsOf(fs []Found) []Tool {
 		out[i] = f.Tool
 	}
 	return out
+}
+
+// Media Foundation is spelled out or as "mf"; through ffmpeg it is the _mf
+// encoder at constant quality, hardware only.
+func TestMediaFoundationEncoder(t *testing.T) {
+	if got := ParseEncoder("mf"); got != EncoderMediaFoundation {
+		t.Errorf(`ParseEncoder("mf") = %q`, got)
+	}
+	if enc := Encoders("windows"); len(enc) != 3 || enc[0] != EncoderNVENC || enc[1] != EncoderMediaFoundation {
+		t.Errorf("windows encoders %v: NVENC, then Media Foundation, then software", enc)
+	}
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.GPUAPI, o.Codec = "/in/a.iso", "/out/a.mkv", EncoderMediaFoundation, GPUFFmpeg, CodecH265
+	p, err := BuildPlan("windows", o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := p.String()
+	for _, want := range []string{"-c:v hevc_mf", "-hw_encoding 1", "-rate_control quality", "-quality 65"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("plan lacks %q:\n%s", want, s)
+		}
+	}
+	if argv := strings.Join(probeArgv(EncoderMediaFoundation, CodecH264, "", false), " "); !strings.Contains(argv, "-c:v h264_mf -hw_encoding 1") {
+		t.Errorf("the probe could pass on the software MFT: %s", argv)
+	}
+	if k, ok := hwKind(EncoderMediaFoundation); !ok || k != "mediafoundation" {
+		t.Errorf("hwKind = %q, %v", k, ok)
+	}
 }

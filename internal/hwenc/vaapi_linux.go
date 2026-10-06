@@ -3,7 +3,6 @@
 package hwenc
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -662,5 +661,4 @@ func vaapiQPS(qp int) (i, p, b int) {
 	return qp, qp, clipQP(float64(qp) * 6 / 5)
 }
 
-func (s cstruct) u8(off int, v uint8)   { s[off] = v }
-func (s cstruct) u16(off int, v uint16) { binary.LittleEndian.PutUint16(s[off:], v) }
+func (s cstruct) u8(off int, v uint8) { s[off] = v }

@@ -5,6 +5,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--encoder mediafoundation` (`mf`): Intel and AMD GPUs on Windows encode in
+  process through the Media Foundation encoder their driver installs, with
+  no ffmpeg; `auto` tries it after NVENC. It is tested in CI with
+  Microsoft's software encoder, not yet on a GPU.
+
+### Fixed
+
+- NVENC on Windows on Arm passed its codec GUIDs by reference; that
+  platform passes a 16-byte struct in registers.
+
 ## [0.2.0] - 2026-10-06
 
 ### Added
