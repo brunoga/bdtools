@@ -45,6 +45,9 @@ type Runner struct {
 	// source can start its picture after its sound.
 	timeline   func(pts int64) time.Duration
 	videoDelay time.Duration
+	// Height is the source picture's height (one eye), known once the
+	// first picture is decoded: for naming the output.
+	Height int
 	// length is how long the output plays, when the source says (a
 	// playlist, a Matroska file's duration), for the progress lines.
 	length time.Duration
@@ -274,6 +277,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 		}
 		if frames == 0 {
 			r.noteFirstPicture(sf.Base.PTS)
+			r.Height = sf.Base.Height
 			if num, den := dec.FrameRate(); num > 0 {
 				y4m.FPSNum, y4m.FPSDen = num, den
 				r.fpsNum, r.fpsDen = num, den

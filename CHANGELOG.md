@@ -5,6 +5,29 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--name-details` names the output after what it is: layout, resolution
+  per eye, codec and quality setting, encoder and main audio track, e.g.
+  "Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv".
+- After the mux, a timeline line gives where the picture and each audio
+  track start and end, with a warning when the picture's length is not the
+  source's.
+- With `--keep-fallback`, a Matroska source's lossy track that stands in for
+  TrueHD's core (an "AC3 compatibility" track) is kept beside it, as the core
+  is on a disc.
+
+### Changed
+
+- GPU encoders make a keyframe every 250 frames, as x264 and x265 do,
+  instead of every 2 s: 7% smaller at the same quality.
+- Tracks that hold nothing in the part played are reported in one line.
+
+### Fixed
+
+- The AC-3 core of a TrueHD track starts at its own timestamp, not the
+  TrueHD frame's beside it (up to 16 ms off for its first second).
+
 ## [0.2.0] - 2026-10-06
 
 ### Added

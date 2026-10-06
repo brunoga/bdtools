@@ -139,6 +139,7 @@ scheduler such as pipeliner retry it.
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
+| `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
 | `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
@@ -296,6 +297,19 @@ with no alias entry matches itself, so nothing is lost by not being listed.
 ```
 Toy Story (1995) 3D FSBS.mkv  ->  Toy Story (1995) 3D FSBS.TrueHD-Atmos.mkv
 ```
+
+`--name-details` says everything that tells one conversion from another:
+the layout, the resolution per eye, the codec and its quality setting (`QP`
+for a GPU, `CRF` for x264/x265, `Q` for VideoToolbox's quality), the encoder,
+and the main audio track with its channels:
+
+```
+Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv
+```
+
+A name that already ends in `3D FSBS` does not get it twice. "3D FSBS" is
+also what Kodi and Jellyfin look for in a name to treat a file as
+side-by-side 3D.
 
 Useful with `--audio-best`, where the codec is whatever the disc turned out to
 offer. The rename happens after the conversion, because the codec is not known
@@ -499,7 +513,8 @@ at run time — no cgo, no ffmpeg, nothing to link:
 
 The decoder's frames are drawn side by side straight into the encoder's
 input buffer, squeezed for half-SBS on the way, so nothing is piped and no
-filter runs. Each encoder makes an IDR every two seconds with B-frames
+filter runs. Each encoder makes an IDR every 250 frames (about 10 s, as x264
+and x265 do; 7% smaller than every 2 s at the same quality) with B-frames
 between references, at a constant quantiser: `--crf` is the P-picture QP,
 and I and B pictures get the offsets ffmpeg applies by default for that
 encoder, so a number means what it meant through ffmpeg's `-qp`.

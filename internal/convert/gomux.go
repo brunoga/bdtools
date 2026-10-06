@@ -125,7 +125,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 	if err != nil {
 		return err
 	}
+	var spans []mkv.Span
 	err = mkv.Mux(out, sources, mkv.Options{
+		Spans:      &spans,
 		Chapters:   chs,
 		WritingApp: "mvctools",
 		Progress: func(t time.Duration) {
@@ -144,6 +146,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		_ = os.Remove(tmp)
 		return fmt.Errorf("muxing: %w", err)
 	}
+	r.reportTimeline(sources, spans)
 	for _, t := range timed {
 		what := fmt.Sprintf("%s%s track %d", t.prefix, t.track.Type, t.track.ID)
 		if d := t.a.Delay(); d > 0 {
@@ -182,4 +185,34 @@ type timedAudio struct {
 	a      *mkv.AudioSource
 	track  Track
 	prefix string
+}
+
+// reportTimeline says where each track starts and ends, and warns when the
+// picture's length is not the source's: a whole-film offset or lost
+// pictures show there, and nowhere else.
+func (r *Runner) reportTimeline(sources []mkv.Source, spans []mkv.Span) {
+	if len(spans) != len(sources) {
+		return
+	}
+	var parts []string
+	for i, s := range sources {
+		if spans[i].Frames == 0 {
+			continue
+		}
+		t := s.Track()
+		name := map[mkv.TrackType]string{mkv.TypeVideo: "picture", mkv.TypeAudio: t.CodecID, mkv.TypeSubtitle: "subtitles"}[t.Type]
+		if t.Type == mkv.TypeSubtitle {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s %.3f-%.3f s", name, spans[i].First.Seconds(), spans[i].Last.Seconds()))
+	}
+	r.Report.Report("timeline: %s", strings.Join(parts, ", "))
+	v := spans[0]
+	if r.length > 0 && r.fpsNum > 0 {
+		frame := time.Duration(int64(time.Second) * int64(r.fpsDen) / int64(r.fpsNum))
+		if d := v.Last + frame - r.length; d > time.Second || d < -time.Second {
+			r.Report.Report("warning: the picture runs %.3f s but the source plays %.3f s; check it is in step with the sound",
+				(v.Last + frame).Seconds(), r.length.Seconds())
+		}
+	}
 }
