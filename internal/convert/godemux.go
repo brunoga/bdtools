@@ -550,6 +550,7 @@ type esWriter struct {
 	w     io.Writer
 	n     int64
 	lpcm  *wavWriter
+	wav   *rawWAV // PCM already in WAV's layout (from Matroska)
 	err   error
 }
 
@@ -655,35 +656,9 @@ func (g *goDemux) start() error {
 		return err
 	}
 	for _, t := range append(append([]Track(nil), g.sel.Audio...), g.sel.Subtitles...) {
-		w := &esWriter{track: t}
-		ext := "bin"
-		switch {
-		case t.StreamID == "S_HDMV/PGS":
-			ext = "sup"
-		case t.Type == "TRUE-HD":
-			ext = "thd"
-		case strings.HasPrefix(t.Type, "E-AC3"):
-			ext = "eac3"
-		case t.StreamID == "A_AC3":
-			ext = "ac3"
-		case t.StreamID == "A_DTS":
-			ext = "dts"
-		case t.StreamID == "A_LPCM":
-			ext = "wav"
-		}
-		name := fmt.Sprintf("%s.track_%d", fileSafe(g.src.name), t.ID)
-		if l := fileSafe(t.Lang); l != "" {
-			name += "_" + l
-		}
-		w.path = filepath.Join(g.tmp, name+"."+ext)
-		f, err := os.Create(w.path) //nolint:gosec // a file-safe name in the work directory
+		w, err := createESWriter(g.tmp, g.src.name, t)
 		if err != nil {
-			return fmt.Errorf("creating %s: %w", w.path, err)
-		}
-		w.f = f
-		w.w = f
-		if ext == "wav" {
-			w.lpcm = newWAVWriter(f)
+			return err
 		}
 		g.writers[uint16(t.ID)] = w //nolint:gosec // track ids are PIDs
 	}
@@ -847,20 +822,7 @@ func (g *goDemux) emitES(w *esWriter, p m2ts.PES) error {
 		if p.DTS < 0 {
 			dts = pts
 		}
-		seg := p.Payload
-		for len(seg) >= 3 && err == nil {
-			n := 3 + (int(seg[1])<<8 | int(seg[2]))
-			n = min(n, len(seg))
-			var hdr [10]byte
-			hdr[0], hdr[1] = 'P', 'G'
-			binary.BigEndian.PutUint32(hdr[2:], uint32(pts)) //nolint:gosec // 33-bit timestamps, as the format stores them
-			binary.BigEndian.PutUint32(hdr[6:], uint32(dts)) //nolint:gosec // as above
-			if _, err = w.w.Write(hdr[:]); err == nil {
-				_, err = w.w.Write(seg[:n])
-			}
-			w.n += int64(n) + 10
-			seg = seg[n:]
-		}
+		err = writeSup(w, pts, dts, p.Payload)
 	default:
 		_, err = w.w.Write(p.Payload)
 		w.n += int64(len(p.Payload))
@@ -1077,30 +1039,36 @@ func wavChannel(channels int, lfe bool, ch int) int {
 }
 
 func (w *wavWriter) header(dataLen uint32) error {
-	var h [68]byte
+	h := wavHeader(w.channels, w.rate, w.bits, wavMask(w.channels, w.lfe), dataLen)
+	if _, err := w.f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := w.f.Write(h)
+	return err
+}
+
+// wavHeader is a WAVE_FORMAT_EXTENSIBLE header for dataLen bytes of PCM.
+func wavHeader(channels, rate, bits int, mask, dataLen uint32) []byte {
+	h := make([]byte, 68)
 	copy(h[0:], "RIFF")
 	binary.LittleEndian.PutUint32(h[4:], 60+dataLen)
 	copy(h[8:], "WAVE")
 	copy(h[12:], "fmt ")
 	binary.LittleEndian.PutUint32(h[16:], 40)
-	binary.LittleEndian.PutUint16(h[20:], 0xfffe)                             // extensible
-	binary.LittleEndian.PutUint16(h[22:], uint16(w.channels))                 //nolint:gosec // small
-	binary.LittleEndian.PutUint32(h[24:], uint32(w.rate))                     //nolint:gosec // small
-	binary.LittleEndian.PutUint32(h[28:], uint32(w.rate*w.channels*w.bits/8)) //nolint:gosec // small
-	binary.LittleEndian.PutUint16(h[32:], uint16(w.channels*w.bits/8))        //nolint:gosec // small
-	binary.LittleEndian.PutUint16(h[34:], uint16(w.bits))                     //nolint:gosec // small
+	binary.LittleEndian.PutUint16(h[20:], 0xfffe)                       // extensible
+	binary.LittleEndian.PutUint16(h[22:], uint16(channels))             //nolint:gosec // small
+	binary.LittleEndian.PutUint32(h[24:], uint32(rate))                 //nolint:gosec // small
+	binary.LittleEndian.PutUint32(h[28:], uint32(rate*channels*bits/8)) //nolint:gosec // small
+	binary.LittleEndian.PutUint16(h[32:], uint16(channels*bits/8))      //nolint:gosec // small
+	binary.LittleEndian.PutUint16(h[34:], uint16(bits))                 //nolint:gosec // small
 	binary.LittleEndian.PutUint16(h[36:], 22)
-	binary.LittleEndian.PutUint16(h[38:], uint16(w.bits)) //nolint:gosec // small
-	binary.LittleEndian.PutUint32(h[40:], wavMask(w.channels, w.lfe))
+	binary.LittleEndian.PutUint16(h[38:], uint16(bits)) //nolint:gosec // small
+	binary.LittleEndian.PutUint32(h[40:], mask)
 	// KSDATAFORMAT_SUBTYPE_PCM
 	copy(h[44:], []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71})
 	copy(h[60:], "data")
 	binary.LittleEndian.PutUint32(h[64:], dataLen)
-	if _, err := w.f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	_, err := w.f.Write(h[:])
-	return err
+	return h
 }
 
 // wavMask is the WAVE channel mask for a Blu-ray layout.
@@ -1137,5 +1105,61 @@ func (w *wavWriter) close() error {
 		return err
 	}
 	_, err := w.f.Seek(0, io.SeekEnd)
+	return err
+}
+
+// createESWriter creates the file a track is demuxed to, named and laid out
+// as tsMuxeR would.
+func createESWriter(tmp, srcName string, t Track) (*esWriter, error) {
+	w := &esWriter{track: t}
+	ext := "bin"
+	switch {
+	case t.StreamID == "S_HDMV/PGS":
+		ext = "sup"
+	case t.Type == "TRUE-HD":
+		ext = "thd"
+	case strings.HasPrefix(t.Type, "E-AC3"):
+		ext = "eac3"
+	case t.StreamID == "A_AC3":
+		ext = "ac3"
+	case t.StreamID == "A_DTS":
+		ext = "dts"
+	case t.StreamID == "A_LPCM":
+		ext = "wav"
+	}
+	name := fmt.Sprintf("%s.track_%d", fileSafe(srcName), t.ID)
+	if l := fileSafe(t.Lang); l != "" {
+		name += "_" + l
+	}
+	w.path = filepath.Join(tmp, name+"."+ext)
+	f, err := os.Create(w.path) //nolint:gosec // a file-safe name in the work directory
+	if err != nil {
+		return nil, fmt.Errorf("creating %s: %w", w.path, err)
+	}
+	w.f = f
+	w.w = f
+	if ext == "wav" {
+		w.lpcm = newWAVWriter(f)
+	}
+	return w, nil
+}
+
+// writeSup writes a PGS payload to a .sup: each segment behind "PG" and its
+// PTS and DTS (90 kHz, on the output's timeline).
+func writeSup(w *esWriter, pts, dts int64, seg []byte) error {
+	var err error
+	for len(seg) >= 3 && err == nil {
+		n := 3 + (int(seg[1])<<8 | int(seg[2]))
+		n = min(n, len(seg))
+		var hdr [10]byte
+		hdr[0], hdr[1] = 'P', 'G'
+		binary.BigEndian.PutUint32(hdr[2:], uint32(pts)) //nolint:gosec // 33-bit timestamps, as the format stores them
+		binary.BigEndian.PutUint32(hdr[6:], uint32(dts)) //nolint:gosec // as above
+		if _, err = w.w.Write(hdr[:]); err == nil {
+			_, err = w.w.Write(seg[:n])
+		}
+		w.n += int64(n) + 10
+		seg = seg[n:]
+	}
 	return err
 }

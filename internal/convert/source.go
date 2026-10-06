@@ -21,6 +21,10 @@ type Track struct {
 	Info string
 	// Lang is the ISO-639 code, empty when the source does not say.
 	Lang string
+	// Name and Forced are the track's title and forced flag, when the source
+	// has them (a Matroska file does; a disc does not).
+	Name   string
+	Forced bool
 }
 
 // Kind classifies a track by what the conversion must do with it.

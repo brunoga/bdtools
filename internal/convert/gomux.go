@@ -59,7 +59,10 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			if err != nil {
 				return err
 			}
-			sources = append(sources, mkv.NewPGSSource(f, lang))
+			p := mkv.NewPGSSource(f, lang)
+			p.SetName(e.track.Name)
+			p.SetForced(e.track.Forced)
+			sources = append(sources, p)
 			continue
 		}
 		format := audioFormat(e)
@@ -72,6 +75,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 			r.Report.Report("warning: leaving out %s track %d: %v", e.track.Type, e.track.ID, err)
 			continue
 		}
+		a.SetName(e.track.Name)
 		if firstAudio {
 			a.SetDefault(true)
 			firstAudio = false

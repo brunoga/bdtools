@@ -27,6 +27,7 @@ type Track struct {
 	Language     string // ISO 639-2; empty writes "und"
 	Name         string
 	Default      bool
+	Forced       bool
 	// DefaultDuration is the duration of a frame, for constant-rate tracks.
 	DefaultDuration time.Duration
 	// Video.
@@ -348,6 +349,9 @@ func trackEntry(n int, t Track) []byte {
 	b = elemUint(b, idTrackType, uint64(t.Type))
 	if !t.Default {
 		b = elemUint(b, idFlagDefault, 0)
+	}
+	if t.Forced {
+		b = elemUint(b, idFlagForced, 1)
 	}
 	b = elemUint(b, idFlagLacing, 0)
 	if t.DefaultDuration > 0 {

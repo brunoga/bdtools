@@ -131,6 +131,9 @@ func (r *Runner) Run(ctx context.Context) error {
 // place, with the video going straight into the decoder and the other
 // tracks to their files on the way.
 func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
+	if isMatroska(r.Opts.Input) {
+		return r.runMatroska(ctx, tmp)
+	}
 	src, err := resolveGo(r.Opts.Input, r.Report)
 	if err != nil {
 		return err
@@ -301,6 +304,10 @@ func (r *Runner) probe(ctx context.Context, source string) (Selection, error) {
 // without extracting the playlist first. That is worth knowing before running
 // it against a 40 GB image over a network share.
 func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
+	if r.Opts.builtin() && isMatroska(r.Opts.Input) {
+		_, tracks, err := probeMatroska(ctx, r.Opts.Input)
+		return tracks, err
+	}
 	if r.Opts.builtin() {
 		// Reading the playlists and the first megabytes of the feature's
 		// stream is enough, wherever the disc is: nothing is extracted.

@@ -192,3 +192,11 @@ func TestUnknownMuxerIsRefused(t *testing.T) {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 }
+
+// The help starts with a banner naming the tool and its version.
+func TestHelpHasABanner(t *testing.T) {
+	_, errOut, _ := capture(t, "-h")
+	if !strings.HasPrefix(errOut, "mvctools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "side-by-side") {
+		t.Errorf("help starts %q", strings.SplitN(errOut, "\n", 2)[0])
+	}
+}

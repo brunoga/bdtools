@@ -77,6 +77,9 @@ func (a *AudioSource) Track() Track { return a.track }
 // SetDefault marks the track as the one a player picks by default.
 func (a *AudioSource) SetDefault(d bool) { a.track.Default = d }
 
+// SetName names the track.
+func (a *AudioSource) SetName(n string) { a.track.Name = n }
+
 func (a *AudioSource) describe(head []byte) error {
 	switch a.format {
 	case AC3:

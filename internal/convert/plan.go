@@ -105,14 +105,15 @@ func (m Muxer) Valid() bool { return m == MuxerBuiltin || m == MuxerMkvmerge }
 func (o Options) builtinMux() bool { return o.Muxer != MuxerMkvmerge }
 
 // builtin reports whether the built-in demuxer is in use. It reads Blu-ray
-// sources; a Matroska, MP4 or VOB input goes to tsMuxeR whatever was asked.
+// and Matroska sources; an MP4 or VOB input goes to tsMuxeR whatever was
+// asked.
 func (o Options) builtin() bool { return o.Demuxer != DemuxerTSMuxeR && !foreignContainer(o.Input) }
 
 // foreignContainer reports whether a source is a container the built-in
 // demuxer does not read.
 func foreignContainer(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mkv", ".mk3d", ".mp4", ".m4v", ".mov", ".vob":
+	case ".mp4", ".m4v", ".mov", ".vob":
 		return true
 	}
 	return false

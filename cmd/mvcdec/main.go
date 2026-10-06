@@ -19,6 +19,8 @@ import (
 	"os"
 	"time"
 
+	pversion "github.com/brunoga/mvc/internal/version"
+
 	"github.com/brunoga/mvc"
 )
 
@@ -56,12 +58,22 @@ func open(name string) *os.File {
 	return f
 }
 
+// version is set at build time with -ldflags="-X main.version=..."; left
+// alone, the module version the toolchain embeds is reported.
+var version = pversion.Placeholder
+
 func main() {
+	showVer := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "mvcdec %s — H.264/MVC stereo decoder\n\n", pversion.Resolve(version))
 		fmt.Fprintf(os.Stderr, "usage: mvcdec [flags] input.{m2ts,264} [dependent.mvc]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *showVer {
+		fmt.Printf("mvcdec %s\n", pversion.Resolve(version))
+		return
+	}
 	if flag.NArg() < 1 || flag.NArg() > 2 {
 		flag.Usage()
 		os.Exit(2)

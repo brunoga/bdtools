@@ -81,6 +81,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
+		fmt.Fprintf(stderr, "mvctools %s — Blu-ray 3D to side-by-side MKV\n\n", pversion.Resolve(version))
 		fmt.Fprintf(stderr, "usage: mvctools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
 			"Converts a Blu-ray 3D (MVC) source into a side-by-side MKV that an\n"+
 			"ordinary decoder can play. The disc is read, decoded and muxed in\n"+
