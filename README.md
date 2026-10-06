@@ -8,9 +8,11 @@ view and the dependent view — ready to be consumed by other code.
 It ships two commands: `mvcdec`, which decodes a stream to raw YUV or Y4M,
 and [`mvctools`](cmd/mvctools/README.md), which turns a Blu-ray 3D disc,
 image or playlist into a side-by-side MKV (or remuxes it), reading the disc in
-place with its own demuxer and decoder, handing the frames to x264/x265 or
-straight to the GPU's encoder (NVENC, VAAPI, VideoToolbox, through their
-system libraries, with no cgo), and writing the MKV with its own muxer.
+place with its own demuxer and decoder, handing the frames to x264, x265 or
+SVT-AV1 or straight to the GPU's encoder (NVENC, VAAPI, VideoToolbox, Media
+Foundation, through their system libraries, with no cgo), and writing the
+MKV with its own muxer — subtitles drawn in 3D if asked, and resuming an
+interrupted run where it stopped.
 
 - Bit-exact: verified against the ITU-T/JVT conformance suite (2D and MVC)
   and against a complete 3D Blu-ray feature (all 110,162 access units, both
@@ -20,9 +22,9 @@ system libraries, with no cgo), and writing the MKV with its own muxer.
 - Realtime friendly: access units in, display-ordered stereo pairs out, with
   presentation timestamps carried through; zero-copy frame buffers.
 - Includes a Blu-ray M2TS demuxer (`m2ts`), an Annex B access-unit splitter,
-  a Y4M writer (side by side, top-and-bottom, either view, with the frame
-  rate taken from the stream) and a stream decoding loop for all three
-  input forms.
+  a Y4M writer (side by side, top-and-bottom, either view, 8- or 10-bit,
+  with the frame rate taken from the stream) and a stream decoding loop for
+  all three input forms.
 
 ## Build
 
@@ -131,8 +133,8 @@ disc's own MVC video with just those tracks. The disc is read once and in
 place — an image is not extracted, the views are not demuxed to disk — and
 decoded in process, and the MKV is written in process too. A GPU encodes in
 process as well, through its own system library, so with one the conversion
-needs no tools at all; otherwise the only external tool is x264/x265 (or
-ffmpeg, for software half-SBS), and a remux needs none. HEVC and AV1 can be
+needs no tools at all; otherwise the only external tool is x264, x265 or
+SvtAv1EncApp (or ffmpeg, for software half-SBS), and a remux needs none. HEVC and AV1 can be
 encoded at 10 bits (`--bit-depth 10`). See
 [cmd/mvctools](cmd/mvctools/README.md).
 A container with the whole toolchain is published as
@@ -238,7 +240,9 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
 | `stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/mvctools` | the commands |
-| `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer |
+| `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
+| `internal/hwenc` | the GPU encoders, driven in process through their system libraries: NVENC, VAAPI, VideoToolbox, Media Foundation |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
 | `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |
+| `probe` | identifying a disc image or Matroska file from a pre-download sample |

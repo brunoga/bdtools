@@ -21,13 +21,16 @@ Complete, and tested end to end against a real MVC source — see
 demuxer    read the disc in place; the video goes to the decoder, audio,    ─┐
            subtitles and chapters to the work directory — built in          │
 decoder    decode both eyes and stack them side by side — built in          ├ one pass
-encoder    a GPU in process (NVENC, VAAPI, VideoToolbox), drawn straight    │
-           into its buffers; or x264 / x265 fed Y4M through a pipe         ─┘
-muxer      write the MKV: video, audio, subtitles, chapters — built in
+encoder    a GPU in process (NVENC, VAAPI, VideoToolbox, Media Foundation), │
+           drawn straight into its buffers; or x264 / x265 / SVT-AV1 fed    │
+           Y4M through a pipe; in segments, so a stopped run can resume    ─┘
+muxer      write the MKV: video, audio, subtitles (flat, or drawn in 3D),
+           chapters — built in
 ```
 
 With a GPU nothing outside the process runs at all. ffmpeg is used only for
-software half-SBS (its scaler) and as a fallback for a GPU whose library is
+software half-SBS (its scaler), for software AV1 when SvtAv1EncApp is not
+installed (its libsvtav1), and as a fallback for a GPU whose library is
 missing — see [Hardware encoding](#hardware-encoding).
 
 The disc is read **once and in place**: a `.iso` straight out of the image, a
@@ -106,13 +109,17 @@ It reports as it goes, because a feature film takes hours:
 
 ```
 mvctools: probing STREAM/SSIF/00272.ssif
-mvctools: source: base view track 4113, dependent view track 4114, 2 audio, 4 subtitle
-mvctools: decoding and encoding (h264, nvenc on the GPU, in process)
+mvctools: source: base view track 4113, dependent view track 4114, 1 audio, 1 subtitle
+mvctools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
+mvctools: decoding and encoding (h265, nvenc on the GPU, in process)
 mvctools: frame rate 24000/1001
-mvctools: 1800 frames decoded (61.2 fps)
-mvctools: decoded 170271 frames
-mvctools: muxing /media/3dmovies/Life of Pi (2012).mkv
-mvctools: done: /media/3dmovies/Life of Pi (2012).mkv
+mvctools: about 116664 frames to encode (1h21m6s at 23.976 fps)
+mvctools: 7939 of 116664 frames encoded (6.8%), 264.6 fps, 6m51s left
+mvctools: encoded 116642 frames (260.3 fps)
+mvctools: muxing /media/3dmovies/Toy Story (1995).mkv
+mvctools: muxed 10m0s
+mvctools: timeline: picture 0.898-4865.800 s, A_TRUEHD 0.000-4865.841 s
+mvctools: done: /media/3dmovies/Toy Story (1995).mkv
 ```
 
 A non-zero exit means the conversion did not happen, which is what lets a
@@ -122,6 +129,7 @@ scheduler such as pipeliner retry it.
 |---|---|---|
 | `--check` | — | Report which external tools are present and which are missing, then exit |
 | `--dry-run` | — | Print the commands that would run, without running them |
+| `--version` | — | Print the version and exit |
 | `--keep-temp` | — | Leave the work directory's files behind instead of deleting them |
 | `--restart` | — | Encode from the start, ignoring the video an interrupted run left — see [Resuming](#resuming-an-interrupted-conversion) |
 | `--quiet` | — | Only report errors |
@@ -188,7 +196,8 @@ adjusts it for you, because silently re-interpreting a number you typed is worse
 than saying what it means. If you want HEVC's saving rather than its extra
 quality, raise the CRF by two or three.
 
-The codec is independent of the encoder: every encoder below produces either.
+The codec is independent of the encoder: every encoder produces H.264 and
+HEVC; AV1 is below.
 
 ### AV1
 
@@ -254,13 +263,16 @@ mvctools --list --input "Toy Story 1995 3D.iso" --temp /scratch
 
 ```
 track kind               lang  codec                info
-4113  video (base view)  und   H.264                Profile: High@4.1 Resolution: 1920:1080p
-4114  video (dependent)  und   MVC                  H.264/MVC Views: 2
-4352  audio              eng   TrueHD Atmos         Bitrate: 0Kbps Channels: 8
-4353  audio              eng   AC3                  Bitrate: 640Kbps Channels: 6
-4354  audio              fra   DTS-HD Master Audio  Channels: 6
-4356  audio              und   AC3                  Bitrate: 192Kbps Channels: 2
-4608  subtitle           eng   PGS
+  4113  video (base view)  und   H.264                Profile: High@4.1  Resolution: 1920:1080p  Frame rate: 23.976
+  4114  video (dependent)  und   MVC                  H.264/MVC Views: 2 Profile: Stereo High@4.1  Resolution: 1920:1080p  Frame rate: 23.976
+  4352  audio              eng   TRUE-HD              AC3 core + TRUE-HD + ATMOS. Peak bitrate: 9612Kbps (core 640Kbps) Sample Rate: 48KHz Channels: 7.1
+  4353  audio              eng   DTS-HD Master Audio  Sample Rate: 48KHz Channels: 5.1
+  4354  audio              eng   AC3                  Bitrate: 192Kbps Sample Rate: 48KHz Channels: 2.0
+  4355  audio              fra   AC3                  Bitrate: 640Kbps Sample Rate: 48KHz Channels: 5.1
+  4356  audio              spa   AC3                  Bitrate: 640Kbps Sample Rate: 48KHz Channels: 5.1
+  4608  subtitle           eng   PGS                  Presentation Graphic Stream #0
+  4609  subtitle           fra   PGS                  Presentation Graphic Stream #1
+  4610  subtitle           spa   PGS                  Presentation Graphic Stream #2
 ```
 
 Then narrow it. Language and codec are **both** required when both are given,
@@ -320,7 +332,7 @@ The chosen track is logged, because a decision made on your behalf should be
 visible rather than inferred from the finished file hours later:
 
 ```
-mvctools: audio: TrueHD Atmos 8ch (eng) lossless
+mvctools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
 ```
 
 `--audio-best` does not apply to subtitles. Several are routinely wanted at
@@ -377,9 +389,10 @@ Toy Story (1995) 3D FSBS.mkv  ->  Toy Story (1995) 3D FSBS.TrueHD-Atmos.mkv
 ```
 
 `--name-details` says everything that tells one conversion from another:
-the layout, the resolution per eye, the codec and its quality setting (`QP`
-for a GPU, `CRF` for x264/x265, `Q` for VideoToolbox's quality), the encoder,
-and the main audio track with its channels:
+the layout, the resolution per eye, the codec (with `10bit` at 10 bits) and
+its quality setting (`QP` for a GPU, `CRF` for x264, x265 and SVT-AV1, `Q`
+for VideoToolbox's quality), the encoder, and the main audio track with its
+channels:
 
 ```
 Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv
@@ -498,7 +511,7 @@ process.
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
-| **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead for software half-SBS (its scaler), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
+| **x264** / **x265** / **SvtAv1EncApp** *or* **ffmpeg** | Re-encodes the stacked frames when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264, x265 or SvtAv1EncApp follows `--codec`; ffmpeg instead for software half-SBS (its scaler), for AV1 without SvtAv1EncApp (its libsvtav1), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
 
 A `--remux` needs nothing at all.
 
@@ -550,7 +563,8 @@ demuxed elementary stream has no timestamps left to say so.
 Audio and subtitle tracks are demuxed alongside the two views and muxed into the
 output in the order the source listed them, so the first audio track stays
 first, and the first audio track is the default one. One output track per disc
-track: a Blu-ray TrueHD stream carries an embedded AC-3 core for players that
+track (and, with `--subs-3d both`, a 3D subtitle track after each flat one):
+a Blu-ray TrueHD stream carries an embedded AC-3 core for players that
 cannot decode TrueHD, and DTS-HD carries a plain DTS core the same way, and the
 demux writes each pair as a single file. The muxer takes the main stream and leaves the core out — it is the same audio,
 lossily, and an extra track the probe never reported would be a surprise —
@@ -681,8 +695,9 @@ docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t
 
 The demuxer, decoder and muxer are part of the `mvctools` binary, with the
 decoder's assembly kernels chosen at run time by what the CPU supports; the
-image adds x264, x265, ffmpeg (with NVENC and VAAPI), libva, and the VAAPI
-drivers for Intel (non-free, amd64) and AMD.
+image adds x264, x265, ffmpeg (with NVENC, VAAPI and libsvtav1, which
+software AV1 uses), libva, and the VAAPI drivers for Intel (non-free, amd64)
+and AMD.
 
 It is Debian, not Alpine, because a GPU's own libraries are built for glibc:
 NVIDIA's `libnvidia-encode` and `libcuda`, which the NVIDIA container toolkit
@@ -721,7 +736,9 @@ output("exec", upstream=once, command="docker",
 ```
 
 Both forms behave identically to the pipeline: a non-zero exit fails the entry,
-so the conversion is retried rather than recorded as done. Hardware encoding
+so the conversion is retried rather than recorded as done. A retry resumes:
+the work directory sits beside the output, on the mounted volume, and
+`docker stop` sends the SIGTERM that stops a conversion cleanly. Hardware encoding
 needs the device passed through, which is the one thing the container cannot
 arrange for itself.
 
