@@ -39,6 +39,9 @@ type Runner struct {
 
 	// fpsNum and fpsDen are the frame rate the decode found, for the mux.
 	fpsNum, fpsDen int
+	// length is how long the output plays, when the source says (a
+	// playlist, a Matroska file's duration), for the progress lines.
+	length time.Duration
 
 	// tool resolves a program name to a path. Indirected for tests.
 	tool func(string) (string, error)
@@ -105,6 +108,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
+	r.length = src.duration
 	g := newGoDemux(src, sel, tmp, r.Report)
 	if err := g.start(); err != nil {
 		return err
@@ -237,8 +241,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 	y4m.SwapViews = r.Opts.SwapLR
 	var (
 		decodeErrs int
-		started    = time.Now()
-		lastReport = started
+		prog       = r.newProgress("decoded")
 		frames     int
 	)
 	var skipped int
@@ -264,15 +267,14 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 				y4m.FPSNum, y4m.FPSDen = num, den
 				r.fpsNum, r.fpsDen = num, den
 				r.Report.Report("frame rate %d/%d", num, den)
+				prog.begin(num, den)
 			} else {
 				r.Report.Report("warning: the stream carries no frame rate; assuming 24000/1001")
+				prog.begin(24000, 1001)
 			}
 		}
 		frames++
-		if now := time.Now(); now.Sub(lastReport) >= 30*time.Second {
-			lastReport = now
-			r.Report.Report("%d frames decoded (%.1f fps)", frames, float64(frames)/now.Sub(started).Seconds())
-		}
+		prog.frame(frames)
 		return y4m.Write(sf)
 	})
 	flushErr := y4m.Flush()

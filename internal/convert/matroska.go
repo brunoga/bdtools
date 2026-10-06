@@ -460,6 +460,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
+	r.length = src.duration
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	if err := g.start(); err != nil {
 		if g.f != nil {

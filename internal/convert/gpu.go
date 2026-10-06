@@ -7,7 +7,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/brunoga/mvc"
 	"github.com/brunoga/mvc/internal/hwenc"
@@ -104,8 +103,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 		decodeErrs int
 		frames     int
 		skipped    int
-		started    = time.Now()
-		lastReport = started
+		prog       = r.newProgress("encoded")
 	)
 	half := r.Opts.Layout == LayoutHalfSBS
 	st, decErr := dec.DecodeStream(src, mvc.DecodeOptions{
@@ -132,6 +130,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 				r.Report.Report("frame rate %d/%d", num, den)
 			}
 			r.fpsNum, r.fpsDen = num, den
+			prog.begin(num, den)
 			w, h := 2*sf.Base.Width, sf.Base.Height
 			if half {
 				w = sf.Base.Width
@@ -148,10 +147,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 			}
 		}
 		frames++
-		if now := time.Now(); now.Sub(lastReport) >= 30*time.Second {
-			lastReport = now
-			r.Report.Report("%d frames encoded (%.1f fps)", frames, float64(frames)/now.Sub(started).Seconds())
-		}
+		prog.frame(frames)
 		return enc.Encode(func(p *hwenc.Picture) { drawSBS(p, sf, r.Opts.SwapLR, half) })
 	})
 	var closeErr error
@@ -171,7 +167,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 	if skipped > 0 {
 		r.Report.Report("left out %d pictures outside the playlist's IN/OUT times", skipped)
 	}
-	r.Report.Report("encoded %d frames (%.1f fps)", frames, float64(frames)/time.Since(started).Seconds())
+	r.Report.Report("encoded %d frames (%.1f fps)", frames, prog.rate(frames))
 	return f.Close()
 }
 

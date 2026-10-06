@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brunoga/mvc"
 	"github.com/brunoga/mvc/internal/bdmv"
@@ -441,5 +443,43 @@ func TestVideoToolboxQualityFollowsCRF(t *testing.T) {
 	}
 	if got := q(0); got != "100" {
 		t.Errorf("--crf 0: -q:v %s, want 100", got)
+	}
+}
+
+// With the source's length known the progress line says how far along the
+// conversion is and how long it has left; without it, just the count.
+func TestProgressLine(t *testing.T) {
+	var lines []string
+	r := NewRunner(CurrentGOOS, DefaultOptions(), func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	r.length = 2*time.Hour + 14*time.Minute + 32*time.Second
+	p := r.newProgress("encoded")
+	p.begin(24000, 1001)
+	if len(lines) != 1 || lines[0] != "about 193534 frames to encode (2h14m32s at 23.976 fps)" {
+		t.Errorf("announced %q", lines)
+	}
+	at := p.started.Add(1000 * time.Second)
+	if got, want := p.line(97100, at), "97100 of 193534 frames encoded (50.2%), 97.1 fps, 16m33s left"; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	// Past the estimate (the length was a little short): no percentage.
+	if got := p.line(200000, p.started.Add(2000*time.Second)); got != "200000 frames encoded (100.0 fps)" {
+		t.Errorf("past the end: %q", got)
+	}
+	r.length = 0
+	q := r.newProgress("decoded")
+	q.begin(24000, 1001)
+	if got := q.line(50, q.started.Add(time.Second)); got != "50 frames decoded (50.0 fps)" {
+		t.Errorf("no length: %q", got)
+	}
+	// Reports come every progressEvery, not every frame.
+	lines = nil
+	clock := q.started
+	q.now = func() time.Time { return clock }
+	for i := 1; i <= 100; i++ {
+		clock = clock.Add(time.Second)
+		q.frame(i)
+	}
+	if len(lines) != 3 {
+		t.Errorf("%d reports over 100 s", len(lines))
 	}
 }

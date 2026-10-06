@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Progress lines give the total number of frames up front (from the
+  playlist's or file's length and the stream's frame rate), then how far
+  along the conversion is and an estimate of the time left.
 - `mvctools` reads Matroska remuxes of 3D discs (MakeMKV, mkvmerge) in
   process, like a disc: the video track's MVC access units go straight to
   the decoder, and the audio and subtitle tracks keep their names and forced
