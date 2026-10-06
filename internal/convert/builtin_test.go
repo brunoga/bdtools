@@ -546,6 +546,10 @@ func TestDetailTags(t *testing.T) {
 	if got := DetailTags(o, []Track{ma}, 1080); got != "3D HSBS 1080p H264 CRF18 x264 DTS-HD-MA 5.1" {
 		t.Errorf("tags %q", got)
 	}
+	o.Codec, o.CRF, o.Encoder, o.Layout = CodecAV1, 20, EncoderSoftware, LayoutFullSBS
+	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 CRF20 SVT-AV1" {
+		t.Errorf("AV1 tags %q", got)
+	}
 	for in, want := range map[string]string{
 		"/out/Moana (2016).mkv":         "/out/Moana (2016) 3D FSBS 1080p.mkv",
 		"/out/Moana (2016) 3D FSBS.mkv": "/out/Moana (2016) 3D FSBS 1080p.mkv",

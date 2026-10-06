@@ -23,7 +23,7 @@ func DetailTags(o Options, audio []Track, height int) string {
 	if height > 0 {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}
-	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC"}[o.Codec])
+	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC", CodecAV1: "AV1"}[o.Codec])
 	switch o.Encoder {
 	case EncoderVideoToolbox:
 		// VideoToolbox takes a quality, not a quantiser: name what it got.
@@ -34,7 +34,8 @@ func DetailTags(o Options, audio []Track, height int) string {
 		tags = append(tags, fmt.Sprintf("QP%d", o.CRF))
 	}
 	tags = append(tags, map[Encoder]string{EncoderNVENC: "NVENC", EncoderVAAPI: "VAAPI",
-		EncoderVideoToolbox: "VideoToolbox", EncoderSoftware: map[Codec]string{CodecH264: "x264", CodecH265: "x265"}[o.Codec]}[o.Encoder])
+		EncoderVideoToolbox: "VideoToolbox", EncoderMediaFoundation: "MF",
+		EncoderSoftware: map[Codec]string{CodecH264: "x264", CodecH265: "x265", CodecAV1: "SVT-AV1"}[o.Codec]}[o.Encoder])
 	if len(audio) > 0 {
 		if a := audioTag(audio[0]); a != "" {
 			tags = append(tags, a)
