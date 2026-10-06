@@ -34,6 +34,8 @@ func hwKind(e Encoder) (hwenc.Kind, bool) {
 		return hwenc.VAAPI, true
 	case EncoderVideoToolbox:
 		return hwenc.VideoToolbox, true
+	case EncoderMediaFoundation:
+		return hwenc.MediaFoundation, true
 	}
 	return "", false
 }

@@ -30,6 +30,7 @@ func newStruct(size int) cstruct {
 var escapeSink atomic.Pointer[byte]
 
 func (s cstruct) ptr() uintptr          { return uintptr(unsafe.Pointer(&s[0])) }
+func (s cstruct) u16(off int, v uint16) { binary.LittleEndian.PutUint16(s[off:], v) }
 func (s cstruct) u32(off int, v uint32) { binary.LittleEndian.PutUint32(s[off:], v) }
 func (s cstruct) u64(off int, v uint64) { binary.LittleEndian.PutUint64(s[off:], v) }
 func (s cstruct) uptr(off int, v uintptr) {

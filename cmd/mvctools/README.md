@@ -128,7 +128,7 @@ scheduler such as pipeliner retry it.
 | `--output` | — | Destination `.mkv` |
 | `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
-| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc` (`x264` is still accepted for `software`) |
+| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |
 | `--codec` | `h264` | `h264`, `h265` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
@@ -528,7 +528,7 @@ go test ./internal/convert/
 |---|---|---|
 | Linux | NVENC, VAAPI | x264 / x265 / SVT-AV1 |
 | macOS | VideoToolbox (not AV1) | x264 / x265 / SVT-AV1 |
-| Windows | NVENC | x264 / x265 / SVT-AV1 |
+| Windows | NVENC, Media Foundation (Intel, AMD; H.264 and HEVC) | x264 / x265 / SVT-AV1 |
 
 `auto` runs a **trial encode** for each candidate and takes the first that
 succeeds, falling back to software: in process first, then through ffmpeg.
@@ -551,6 +551,7 @@ at run time — no cgo, no ffmpeg, nothing to link:
 | NVENC | the NVIDIA driver's `libnvidia-encode` and `libcuda` (`nvEncodeAPI64.dll`, `nvcuda.dll`) | Linux, Windows |
 | VAAPI | `libva` and `libva-drm`, with the GPU's driver (Intel's `iHD`, Mesa's `radeonsi`) | Linux |
 | VideoToolbox | the system frameworks | macOS |
+| Media Foundation | the encoder MFT the GPU driver installs (Intel Quick Sync, AMD AMF), through `mfplat.dll` | Windows |
 
 The decoder's frames are drawn side by side straight into the encoder's
 input buffer, squeezed for half-SBS on the way, so nothing is piped and no
@@ -564,7 +565,7 @@ and `51` the worst.
 
 When the library is missing or its trial encode fails, the encoder is reached
 through ffmpeg as before; `--gpu-api ffmpeg` asks for that outright.
-Windows has NVENC in process; Intel and AMD GPUs there need ffmpeg.
+On Windows, `auto` tries NVENC, then the Media Foundation encoder a driver installs, which is how Intel and AMD GPUs encode there. Microsoft's own software encoder MFT is never picked. `--encoder mediafoundation --gpu-api ffmpeg` uses ffmpeg's `h264_mf` / `hevc_mf` instead. Media Foundation takes a constant QP where the driver supports one, which Intel's and AMD's do, and otherwise its 0-100 quality, mapped from `--crf` as for VideoToolbox. This path is tested in CI with Microsoft's software encoder, not yet on an Intel or AMD GPU.
 
 Decoding and encoding a minute of a Blu-ray to H.264 on a Core Ultra 9 285K
 (wall time for the whole conversion, then the decode-and-encode rate):

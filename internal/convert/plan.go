@@ -184,6 +184,9 @@ func (o Options) Validate(goos string) error {
 	if o.Codec == CodecAV1 && o.Encoder == EncoderVideoToolbox {
 		return fmt.Errorf("VideoToolbox cannot encode AV1: use --encoder software (SVT-AV1) or another codec")
 	}
+	if o.Codec == CodecAV1 && o.Encoder == EncoderMediaFoundation {
+		return fmt.Errorf("Media Foundation here encodes H.264 and HEVC, not AV1: use --encoder nvenc or software (SVT-AV1)")
+	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
 	}
@@ -354,6 +357,12 @@ func encodeStep(opts Options, out string) Step {
 		return ff([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
 	case EncoderNVENC:
 		return ff([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(qp)}, "")
+	case EncoderMediaFoundation:
+		// ffmpeg's MF encoders take constant quality as 0 to 100, higher
+		// better, mapped from --crf as for VideoToolbox; hw_encoding refuses
+		// Microsoft's software MFT.
+		return ff([]string{"-c:v", name, "-hw_encoding", "1", "-rate_control", "quality",
+			"-quality", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
 	default:
 		if opts.Codec == CodecAV1 {
 			if opts.EncodesViaFFmpeg() {

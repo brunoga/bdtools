@@ -23,6 +23,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The AC-3 core of a TrueHD track starts at its own timestamp, not the
   TrueHD frame's beside it (up to 16 ms off for its first second).
+- NVENC on Windows on Arm passed its codec GUIDs by reference; that
+  platform passes a 16-byte struct in registers.
 
 ## [0.2.0] - 2026-10-06
 

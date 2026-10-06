@@ -67,14 +67,20 @@ const (
 	EncoderVideoToolbox Encoder = "videotoolbox"
 	// EncoderNVENC is ffmpeg NVENC — NVIDIA, Linux and Windows.
 	EncoderNVENC Encoder = "nvenc"
+	// EncoderMediaFoundation is the encoder a Windows GPU driver installs as
+	// a Media Foundation transform: Intel Quick Sync, AMD AMF. Windows only.
+	EncoderMediaFoundation Encoder = "mediafoundation"
 )
 
 // ParseEncoder resolves the name an operator typed. "x264" is accepted for
 // EncoderSoftware: it was the name of this setting when H.264 was the only
 // output, and it would otherwise silently become an unknown encoder.
 func ParseEncoder(s string) Encoder {
-	if s == "x264" || s == "x265" {
+	switch s {
+	case "x264", "x265":
 		return EncoderSoftware
+	case "mf":
+		return EncoderMediaFoundation
 	}
 	return Encoder(s)
 }
@@ -124,8 +130,8 @@ func (c Codec) ffmpegEncoder(enc Encoder) string {
 		// ffmpeg spells the HEVC encoders "hevc_*", not "h265_*".
 		family = "hevc"
 	case CodecAV1:
-		if enc == EncoderVideoToolbox {
-			return "" // Apple has no AV1 encoder
+		if enc == EncoderVideoToolbox || enc == EncoderMediaFoundation {
+			return "" // Apple has no AV1 encoder; this Media Foundation path does H.264/HEVC
 		}
 		family = "av1"
 	}
@@ -136,6 +142,8 @@ func (c Codec) ffmpegEncoder(enc Encoder) string {
 		return family + "_nvenc"
 	case EncoderVideoToolbox:
 		return family + "_videotoolbox"
+	case EncoderMediaFoundation:
+		return family + "_mf"
 	default:
 		return ""
 	}
@@ -210,7 +218,7 @@ func Encoders(goos string) []Encoder {
 	case "darwin":
 		return []Encoder{EncoderVideoToolbox, EncoderSoftware}
 	case "windows":
-		return []Encoder{EncoderNVENC, EncoderSoftware}
+		return []Encoder{EncoderNVENC, EncoderMediaFoundation, EncoderSoftware}
 	default:
 		return []Encoder{EncoderSoftware}
 	}
