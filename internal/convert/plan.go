@@ -185,7 +185,7 @@ func (o Options) Validate(goos string) error {
 		return fmt.Errorf("VideoToolbox cannot encode AV1: use --encoder software (SVT-AV1) or another codec")
 	}
 	if o.Codec == CodecAV1 && o.Encoder == EncoderMediaFoundation {
-		return fmt.Errorf("Media Foundation here encodes H.264 and HEVC, not AV1: use --encoder nvenc or software (SVT-AV1)")
+		return fmt.Errorf("the Media Foundation encoder does H.264 and HEVC, not AV1: use --encoder nvenc or software (SVT-AV1)")
 	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
