@@ -25,8 +25,11 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		num, den = 24000, 1001
 	}
 	codec := mkv.H264
-	if r.Opts.Codec == CodecH265 {
+	switch r.Opts.Codec {
+	case CodecH265:
 		codec = mkv.HEVC
+	case CodecAV1:
+		codec = mkv.AV1
 	}
 	var files []*os.File
 	defer func() {

@@ -87,15 +87,21 @@ func Open(k Kind, cfg Config, w io.Writer) (Encoder, error) {
 func VTQuality(qp int) float64 { return max(0, min(1, 1-float64(qp)/51)) }
 
 // AV1QIndex maps a quantiser on the H.264/HEVC 0-51 scale to an AV1
-// quantizer index (0-255), so that a value means about the same quality in
-// AV1 as in HEVC; see the calibration in hwenc_test.go and the README.
+// quantizer index (1-255), so that a value means about the same picture
+// quality in AV1 as in HEVC. Index 0 would be AV1's lossless mode, which
+// no --crf means, so the bottom of the scale stops at 1.
+//
+// The line was measured on NVENC (same preset, tuning and B-frames for
+// both codecs) over 300 frames of a Blu-ray 3D: for HEVC QP 14, 18, 24 and
+// 30, the AV1 index with the same luma PSNR against the source was 26, 49,
+// 92 and 139, and the line fits those within 3 (about 0.2 dB). At equal
+// PSNR the AV1 encodes were 11-15% smaller.
 func AV1QIndex(qp int) int {
 	v := av1Slope*float64(qp) + av1Offset
-	return max(0, min(255, int(v+0.5)))
+	return max(1, min(255, int(v+0.5)))
 }
 
-// The AV1QIndex line, measured against NVENC HEVC on Blu-ray content.
 const (
-	av1Slope  = 5.0
-	av1Offset = 0.0
+	av1Slope  = 7.1
+	av1Offset = -76.0
 )

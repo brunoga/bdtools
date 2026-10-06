@@ -2,6 +2,7 @@ package mkv
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,83 @@ type av1State struct {
 	held  []byte // the next temporal unit's first OBU, read ahead
 	eof   bool
 	first *Frame // the temporal unit read while priming
+	ivf   bool   // the stream is IVF: one temporal unit per frame record
+}
+
+// startIVF recognises an IVF file (what SvtAv1EncApp writes) and skips its
+// header; the frames that follow are temporal units.
+func (a *av1State) startIVF() error {
+	head, err := a.r.Peek(32)
+	if err != nil || string(head[:4]) != "DKIF" {
+		return nil // a bare OBU stream
+	}
+	n := int(head[6]) | int(head[7])<<8
+	if n < 32 || string(head[8:12]) != "AV01" {
+		return errors.New("mkv: an IVF file that is not AV1")
+	}
+	_, err = a.r.Discard(n)
+	a.ivf = true
+	return err
+}
+
+// nextIVF reads one IVF frame record and keeps its OBUs but the temporal
+// delimiter.
+func (a *av1State) nextIVF() (tu []byte, key bool, err error) {
+	for len(tu) == 0 { // an empty record has no frame; read on
+		if tu, key, err = a.ivfRecord(); err != nil {
+			return nil, false, err
+		}
+	}
+	return tu, key, nil
+}
+
+func (a *av1State) ivfRecord() (tu []byte, key bool, err error) {
+	var h [12]byte
+	if _, err := io.ReadFull(a.r, h[:]); err != nil {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, false, io.EOF // a truncated last record
+		}
+		return nil, false, err
+	}
+	size := int(h[0]) | int(h[1])<<8 | int(h[2])<<16 | int(h[3])<<24
+	if size < 0 || size > 64<<20 {
+		return nil, false, fmt.Errorf("mkv: IVF frame of %d bytes", size)
+	}
+	frame := make([]byte, size)
+	if _, err := io.ReadFull(a.r, frame); err != nil {
+		return nil, false, io.EOF
+	}
+	r := bufio.NewReader(bytes.NewReader(frame))
+	frameSeen := false
+	for {
+		typ, whole, payload, err := readOBU(r)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		switch typ {
+		case obuTemporalDelimiter:
+			continue
+		case obuSequenceHeader:
+			if a.seq == nil {
+				s, err := parseAV1Seq(payload)
+				if err != nil {
+					return nil, false, err
+				}
+				s.raw = append([]byte(nil), whole...)
+				a.seq = s
+			}
+		case obuFrame, obuFrameHeader:
+			if !frameSeen && a.seq != nil {
+				key = a.seq.shownKeyFrame(payload)
+				frameSeen = true
+			}
+		}
+		tu = append(tu, whole...)
+	}
+	return tu, key, nil
 }
 
 // readOBU reads one OBU whole (header, size field, payload) and returns its
@@ -97,6 +175,9 @@ func readOBU(r *bufio.Reader) (typ int, whole, payload []byte, err error) {
 // nextTU returns the next temporal unit, without its temporal delimiter,
 // and whether it is a keyframe (a key frame that is shown).
 func (a *av1State) nextTU() (tu []byte, key bool, err error) {
+	if a.ivf {
+		return a.nextIVF()
+	}
 	first := true
 	frameSeen := false
 	for {
@@ -330,6 +411,9 @@ func (s *av1Seq) av1C() []byte {
 // header the track's codec private data is made from.
 func (v *VideoSource) primeAV1(stereoMode int) error {
 	v.av1 = &av1State{r: v.r}
+	if err := v.av1.startIVF(); err != nil {
+		return err
+	}
 	tu, key, err := v.av1.nextTU()
 	if err != nil {
 		if errors.Is(err, io.EOF) {

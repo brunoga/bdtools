@@ -2,6 +2,7 @@ package convert
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -87,7 +88,12 @@ func TestSoftwareCodecsCarryQualitySettings(t *testing.T) {
 				joined = strings.Join(s.Argv, " ")
 			}
 		}
-		for _, want := range []string{"--crf 21", "--preset veryslow"} {
+		wants := []string{"--crf 21", "--preset veryslow"}
+		if cod == CodecAV1 {
+			// SVT-AV1's own scales: CRF 0-63, numbered presets.
+			wants = []string{fmt.Sprintf("crf %d", svtCRF(21)), "preset 3"}
+		}
+		for _, want := range wants {
 			if !strings.Contains(joined, want) {
 				t.Errorf("%s: want %q in %s", cod, want, joined)
 			}
@@ -187,11 +193,11 @@ func TestAutoSelectionProbesForTheRequestedCodec(t *testing.T) {
 }
 
 func TestUnknownCodecIsRejected(t *testing.T) {
-	_, err := BuildPlan("linux", opts("linux", func(o *Options) { o.Codec = "av1" }))
+	_, err := BuildPlan("linux", opts("linux", func(o *Options) { o.Codec = "vp9" }))
 	if err == nil {
 		t.Fatal("an unknown codec must not build a plan")
 	}
-	if !strings.Contains(err.Error(), "av1") {
+	if !strings.Contains(err.Error(), "vp9") {
 		t.Errorf("error should name the codec, got: %v", err)
 	}
 }

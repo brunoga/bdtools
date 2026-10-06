@@ -128,6 +128,47 @@ func TestAV1SequenceHeaderFields(t *testing.T) {
 	}
 }
 
+// IVF (what SvtAv1EncApp writes) reads to the same frames as the bare OBU
+// stream, one temporal unit per record.
+func TestAV1FromIVF(t *testing.T) {
+	read := func(r io.Reader) []Frame {
+		v, err := NewVideoSource(r, AV1, 24000, 1001, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fs []Frame
+		for {
+			f, err := v.Next()
+			if err == io.EOF {
+				return fs
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			fs = append(fs, f)
+		}
+	}
+	obu := read(fixture(t, "mkv", "av1.obu"))
+	// The same temporal units in IVF records, each led by a temporal
+	// delimiter as encoders write them.
+	ivf := []byte("DKIF\x00\x00\x20\x00AV01\x00\x05\xe0\x01\xc0\x5d\x00\x00\xe9\x03\x00\x00\x1b\x00\x00\x00\x00\x00\x00\x00")
+	for i, f := range obu {
+		rec := append([]byte{0x12, 0x00}, f.Data...)
+		var h [12]byte
+		h[0], h[1], h[2], h[3] = byte(len(rec)), byte(len(rec)>>8), byte(len(rec)>>16), byte(len(rec)>>24)
+		h[4] = byte(i)
+		ivf = append(append(ivf, h[:]...), rec...)
+	}
+	got := read(bytes.NewReader(ivf))
+	if len(got) != len(obu) {
+		t.Fatalf("%d frames from IVF, %d from OBUs", len(got), len(obu))
+	}
+	for i := range got {
+		if !bytes.Equal(got[i].Data, obu[i].Data) || got[i].Keyframe != obu[i].Keyframe || got[i].PTS != obu[i].PTS {
+			t.Fatalf("frame %d differs", i)
+		}
+	}
+}
+
 func FuzzAV1Source(f *testing.F) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "mkv", "av1.obu"))
 	if err == nil {
