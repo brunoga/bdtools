@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--codec av1`: AV1 output from NVENC (RTX 40 and later) and VAAPI (Intel
+  Arc / Core Ultra, recent AMD) in process or through ffmpeg, and from
+  SVT-AV1 in software (`SvtAv1EncApp`, else ffmpeg's `libsvtav1`). The
+  Matroska muxer writes AV1 (`V_AV1` with an `av1C`) from a bare OBU stream
+  or IVF. `--crf` keeps its 0-51 scale, mapped onto AV1's quantiser index
+  so a number gives about the quality it gives in HEVC (measured on NVENC:
+  AV1 11-15% smaller at equal PSNR). VideoToolbox has no AV1 encoder.
+
 ## [0.2.0] - 2026-10-06
 
 ### Added

@@ -29,3 +29,11 @@ func TestVAAPIHEVCDecodesBack(t *testing.T) {
 	b := encodeTest(t, VAAPI, HEVC, w, h, n)
 	checkDecodeFFmpeg(t, b, "hevc", w, h, n)
 }
+
+// AV1 headers are written here, the tiles by the driver: the stream must
+// decode, across a key frame, with no errors.
+func TestVAAPIAV1DecodesBack(t *testing.T) {
+	const w, h, n = 640, 360, 30
+	b := encodeTest(t, VAAPI, AV1, w, h, n)
+	checkDecodeFFmpeg(t, b, "obu", w, h, n)
+}

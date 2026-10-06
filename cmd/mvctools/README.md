@@ -129,7 +129,7 @@ scheduler such as pipeliner retry it.
 | `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc` (`x264` is still accepted for `software`) |
-| `--codec` | `h264` | `h264` or `h265` — see [Codec](#codec) |
+| `--codec` | `h264` | `h264`, `h265` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
 | `--audio-lang` | — | Keep only audio in these languages, e.g. `eng` or `eng,fra` |
@@ -184,6 +184,31 @@ than saying what it means. If you want HEVC's saving rather than its extra
 quality, raise the CRF by two or three.
 
 The codec is independent of the encoder: every encoder below produces either.
+
+### AV1
+
+`--codec av1` is smaller again, but the newest to decode in hardware (Intel
+Arc and 11th-gen Core onwards, NVIDIA RTX 30, AMD RX 6000, recent Android TV
+devices and Apple M3/A17 onwards), so check what plays it first. It is encoded
+by:
+
+| Encoder | AV1 | Notes |
+|---|---|---|
+| NVENC | RTX 40 and later | in process, or `av1_nvenc` through ffmpeg; B-frames as for HEVC |
+| VAAPI | Intel Arc / Core Ultra, AMD RX 7000 | in process, or `av1_vaapi` through ffmpeg; I and P frames only, so it is larger than NVENC's at the same `--crf` |
+| software | everywhere | `SvtAv1EncApp` when installed, else ffmpeg's `libsvtav1`; slow at this frame size |
+| VideoToolbox | no | Apple has no AV1 encoder: refused up front |
+
+`--crf` keeps its 0–51 scale and means about the same picture quality as the
+same number in HEVC: it is mapped onto AV1's 0–255 quantiser index by a line
+measured on NVENC over a Blu-ray 3D, the AV1 index giving the same luma PSNR as
+HEVC at QP 14, 18, 24 and 30 (index ≈ 7.1 × crf − 76). At equal PSNR the AV1
+encodes were 11–15% smaller than HEVC's. SVT-AV1's CRF (0–63) is a quarter of
+that index, and `--preset` maps onto SVT's numbered presets:
+
+| `--preset` | ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo |
+|---|---|---|---|---|---|---|---|---|---|---|
+| SVT-AV1 | 12 | 11 | 10 | 9 | 8 | 6 | 5 | 4 | 3 | 2 |
 
 ## Choosing tracks
 
@@ -471,9 +496,9 @@ go test ./internal/convert/
 
 | Platform | Hardware | Software |
 |---|---|---|
-| Linux | NVENC, VAAPI | x264 / x265 |
-| macOS | VideoToolbox | x264 / x265 |
-| Windows | NVENC | x264 / x265 |
+| Linux | NVENC, VAAPI | x264 / x265 / SVT-AV1 |
+| macOS | VideoToolbox (not AV1) | x264 / x265 / SVT-AV1 |
+| Windows | NVENC | x264 / x265 / SVT-AV1 |
 
 `auto` runs a **trial encode** for each candidate and takes the first that
 succeeds, falling back to software: in process first, then through ffmpeg.

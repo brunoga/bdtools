@@ -57,7 +57,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox or nvenc")
-		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere) or h265 (smaller)")
+		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere), h265 (smaller) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")

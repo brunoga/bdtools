@@ -212,4 +212,4 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
-| `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, audio and PGS framing |
+| `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |
