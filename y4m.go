@@ -43,8 +43,13 @@ type Y4MWriter struct {
 	// them from Decoder.FrameRate once the stream's parameter sets have been
 	// seen.
 	FPSNum, FPSDen int
-	header         bool
-	err            error
+	// Depth is the sample depth written: 8 (or 0), or 10, which writes each
+	// sample as the 10-bit value four times it, two bytes little-endian
+	// (C420p10), for an encoder that is to work at 10 bits.
+	Depth   int
+	header  bool
+	err     error
+	scratch []byte
 }
 
 // NewY4MWriter returns a writer emitting frames in the given layout. The
@@ -84,15 +89,19 @@ func (y *Y4MWriter) Write(sf *StereoFrame) error {
 		if num <= 0 || den <= 0 {
 			num, den = 24000, 1001
 		}
-		y.put(fmt.Appendf(nil, "YUV4MPEG2 W%d H%d F%d:%d Ip A1:1 C420jpeg\n", w, h, num, den))
+		colour := "C420jpeg"
+		if y.Depth == 10 {
+			colour = "C420p10"
+		}
+		y.put(fmt.Appendf(nil, "YUV4MPEG2 W%d H%d F%d:%d Ip A1:1 %s\n", w, h, num, den, colour))
 		y.header = true
 	}
 	y.put([]byte("FRAME\n"))
 	switch y.layout {
 	case LayoutSideBySide:
 		for row := 0; row < a.Height; row++ {
-			y.put(a.Y[row*a.StrideY : row*a.StrideY+a.Width])
-			y.put(b.Y[row*b.StrideY : row*b.StrideY+b.Width])
+			y.samples(a.Y[row*a.StrideY : row*a.StrideY+a.Width])
+			y.samples(b.Y[row*b.StrideY : row*b.StrideY+b.Width])
 		}
 		for c := 0; c < 2; c++ {
 			pa, pb := a.Cb, b.Cb
@@ -100,14 +109,14 @@ func (y *Y4MWriter) Write(sf *StereoFrame) error {
 				pa, pb = a.Cr, b.Cr
 			}
 			for row := 0; row < a.Height/2; row++ {
-				y.put(pa[row*a.StrideC : row*a.StrideC+a.Width/2])
-				y.put(pb[row*b.StrideC : row*b.StrideC+b.Width/2])
+				y.samples(pa[row*a.StrideC : row*a.StrideC+a.Width/2])
+				y.samples(pb[row*b.StrideC : row*b.StrideC+b.Width/2])
 			}
 		}
 	case LayoutTopBottom:
 		for _, f := range []*Frame{a, b} {
 			for row := 0; row < f.Height; row++ {
-				y.put(f.Y[row*f.StrideY : row*f.StrideY+f.Width])
+				y.samples(f.Y[row*f.StrideY : row*f.StrideY+f.Width])
 			}
 		}
 		for c := 0; c < 2; c++ {
@@ -117,14 +126,37 @@ func (y *Y4MWriter) Write(sf *StereoFrame) error {
 					p = f.Cr
 				}
 				for row := 0; row < f.Height/2; row++ {
-					y.put(p[row*f.StrideC : row*f.StrideC+f.Width/2])
+					y.samples(p[row*f.StrideC : row*f.StrideC+f.Width/2])
 				}
 			}
 		}
 	default:
-		y.err = WritePlanes(y.w, a)
+		for row := 0; row < a.Height; row++ {
+			y.samples(a.Y[row*a.StrideY : row*a.StrideY+a.Width])
+		}
+		for _, p := range [][]byte{a.Cb, a.Cr} {
+			for row := 0; row < a.Height/2; row++ {
+				y.samples(p[row*a.StrideC : row*a.StrideC+a.Width/2])
+			}
+		}
 	}
 	return y.err
+}
+
+// samples buffers a row of samples at the writer's depth.
+func (y *Y4MWriter) samples(row []byte) {
+	if y.Depth != 10 {
+		y.put(row)
+		return
+	}
+	if cap(y.scratch) < 2*len(row) {
+		y.scratch = make([]byte, 2*len(row))
+	}
+	d := y.scratch[:2*len(row)]
+	for i, v := range row {
+		d[2*i], d[2*i+1] = v<<2, v>>6
+	}
+	y.put(d)
 }
 
 // put buffers p. bufio keeps the first error and returns it on every later

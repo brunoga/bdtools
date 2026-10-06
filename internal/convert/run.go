@@ -254,6 +254,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 	dec := mvc.NewDecoder(mvc.Options{Threads: r.Opts.DecodeThreads})
 	y4m := mvc.NewY4MWriter(stdin, mvc.LayoutSideBySide)
 	y4m.SwapViews = r.Opts.SwapLR
+	y4m.Depth = r.Opts.BitDepth
 	var (
 		decodeErrs int
 		prog       = r.newProgress("decoded")

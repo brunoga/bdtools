@@ -132,7 +132,8 @@ place — an image is not extracted, the views are not demuxed to disk — and
 decoded in process, and the MKV is written in process too. A GPU encodes in
 process as well, through its own system library, so with one the conversion
 needs no tools at all; otherwise the only external tool is x264/x265 (or
-ffmpeg, for software half-SBS), and a remux needs none. See
+ffmpeg, for software half-SBS), and a remux needs none. HEVC and AV1 can be
+encoded at 10 bits (`--bit-depth 10`). See
 [cmd/mvctools](cmd/mvctools/README.md).
 A container with the whole toolchain is published as
 `ghcr.io/brunoga/mvctools` for amd64 and arm64.

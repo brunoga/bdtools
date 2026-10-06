@@ -108,14 +108,14 @@ func (e *vaapi) av1SequenceHeader() []byte {
 	s.flag(false) // enable_superres
 	s.flag(true)  // enable_cdef
 	s.flag(false) // enable_restoration
-	// color_config: 8-bit 4:2:0, no colour description.
-	s.flag(false) // high_bitdepth
-	s.flag(false) // mono_chrome
-	s.flag(false) // color_description_present_flag
-	s.flag(false) // color_range: studio
-	s.u(2, 0)     // chroma_sample_position: unknown
-	s.flag(false) // separate_uv_delta_q
-	s.flag(false) // film_grain_params_present
+	// color_config: 8- or 10-bit 4:2:0, no colour description.
+	s.flag(e.cfg.BitDepth == 10) // high_bitdepth
+	s.flag(false)                // mono_chrome
+	s.flag(false)                // color_description_present_flag
+	s.flag(false)                // color_range: studio
+	s.u(2, 0)                    // chroma_sample_position: unknown
+	s.flag(false)                // separate_uv_delta_q
+	s.flag(false)                // film_grain_params_present
 	return av1OBU(av1OBUSequence, s.trailing())
 }
 
@@ -253,7 +253,8 @@ func (e *vaapi) av1Params(p vaPic, l0 []vaPic, add addBuf) error {
 		s.u8(vaAV1SeqLevel, uint8(av1Level(e.cfg)))   //nolint:gosec // a level index
 		s.u32(vaAV1SeqIntraPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 		s.u32(vaAV1SeqIPPeriod, 1)
-		s.u32(vaAV1SeqFields, 1<<vaAV1SeqOrderHintBit|1<<vaAV1SeqCDEFBit)
+		s.u32(vaAV1SeqFields, 1<<vaAV1SeqOrderHintBit|1<<vaAV1SeqCDEFBit|
+			uint32(e.cfg.BitDepth-8)<<vaAV1SeqDepthBit) //nolint:gosec // 0 or 2
 		s.u8(vaAV1SeqOrderHintBits, av1OrderHintBits-1)
 		if err := add(vaEncSequenceParameterBufferType, s); err != nil {
 			return err

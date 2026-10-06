@@ -47,6 +47,9 @@ const (
 	vaPictureHEVCStCurrBefore            = 16
 	vaPictureHEVCStCurrAfter             = 32
 	vaFourccNV12                         = 842094158
+	vaFourccP010                         = 808530000
+	vaRTFormatYUV420_10                  = 256
+	vaProfileHEVCMain10                  = 18
 	vaCodedSliceOverflow                 = 512
 	vaSizeConfigAttrib                   = 8
 	vaHEVCFeatAMPBit                     = 4
@@ -162,6 +165,8 @@ const (
 	vaHEVCSeqHeight                      = 22
 	vaHEVCSeqFields                      = 24
 	vaHEVCSeqChromaFormatBit             = 0
+	vaHEVCSeqLumaDepthBit                = 3
+	vaHEVCSeqChromaDepthBit              = 6
 	vaHEVCSeqAMPBit                      = 11
 	vaHEVCSeqSAOBit                      = 12
 	vaHEVCSeqTMVPBit                     = 15
@@ -231,6 +236,7 @@ const (
 	vaAV1SeqFields                       = 16
 	vaAV1SeqOrderHintBits                = 20
 	vaAV1SeqOrderHintBit                 = 8
+	vaAV1SeqDepthBit                     = 14
 	vaAV1SeqCDEFBit                      = 12
 	vaSizeAV1Pic                         = 1032
 	vaAV1PicWidth                        = 0

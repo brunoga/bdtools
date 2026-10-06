@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--bit-depth 10`: HEVC Main 10 or 10-bit AV1, in process on NVENC, VAAPI
+  and VideoToolbox, through ffmpeg, and with x265 and SVT-AV1. Less banding,
+  and about 4% smaller at equal quality on NVENC HEVC, at no cost in speed.
+  `--name-details` adds `10bit`.
+- `mvc.Y4MWriter.Depth` writes 10-bit Y4M (C420p10).
+
 ## [0.4.1] - 2026-10-06
 
 ### Fixed

@@ -24,6 +24,9 @@ func DetailTags(o Options, audio []Track, height int) string {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}
 	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC", CodecAV1: "AV1"}[o.Codec])
+	if o.tenBit() {
+		tags = append(tags, "10bit")
+	}
 	switch o.Encoder {
 	case EncoderVideoToolbox:
 		// VideoToolbox takes a quality, not a quantiser: name what it got.

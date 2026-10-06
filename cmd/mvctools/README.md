@@ -143,6 +143,7 @@ scheduler such as pipeliner retry it.
 | `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
 | `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
+| `--bit-depth` | `8` | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
@@ -211,6 +212,25 @@ that index, and `--preset` maps onto SVT's numbered presets:
 | `--preset` | ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo |
 |---|---|---|---|---|---|---|---|---|---|---|
 | SVT-AV1 | 12 | 11 | 10 | 9 | 8 | 6 | 5 | 4 | 3 | 2 |
+
+### 10-bit
+
+`--bit-depth 10` encodes HEVC Main 10 or 10-bit AV1. A Blu-ray is 8-bit, so
+the picture going in is the same, each sample at four times its value; what
+changes is the encoder, which predicts and quantises at finer precision. That
+shows as less banding in smooth gradients (skies, dark scenes, fades), and
+in fewer bits: on NVENC HEVC over 300 frames of a Blu-ray 3D, QP 20 at 10
+bits was 1.4% smaller than at 8 bits and 0.1 dB better (luma PSNR against
+the source, rounded back to 8 bits), about 4% smaller at equal quality. It
+costs no speed. Every HEVC and AV1 decoder plays it, since 10-bit is what
+HDR is.
+
+NVENC, VAAPI and VideoToolbox encode it in process (and through ffmpeg),
+x265 with `--output-depth 10` (a build with 10-bit support, which the
+common packages are), SVT-AV1 from 10-bit Y4M. H.264 is refused: High 10
+plays on almost nothing. So is Media Foundation, whose 10-bit path is
+untested; `--encoder nvenc` or `software` instead. `--name-details` adds
+`10bit` after the codec.
 
 ## Choosing tracks
 

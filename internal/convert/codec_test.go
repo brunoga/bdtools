@@ -162,7 +162,7 @@ func TestAutoSelectionProbesForTheRequestedCodec(t *testing.T) {
 	origLook, origProbe, origNative := LookPath, runProbe, ProbeNative
 	t.Cleanup(func() { LookPath, runProbe, ProbeNative = origLook, origProbe, origNative })
 	LookPath = func(string) (string, error) { return "/usr/bin/stub", nil }
-	ProbeNative = func(Encoder, Codec, string) bool { return false }
+	ProbeNative = func(Encoder, Codec, int, string) bool { return false }
 
 	var probed []string
 	runProbe = func(_ context.Context, argv []string) error {
@@ -175,10 +175,10 @@ func TestAutoSelectionProbesForTheRequestedCodec(t *testing.T) {
 		return nil
 	}
 
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderNVENC {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderNVENC {
 		t.Errorf("h264 auto = %q, want nvenc", got)
 	}
-	if got := DefaultEncoder(context.Background(), "linux", CodecH265, "/dev/dri/renderD128"); got != EncoderSoftware {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH265, 8, "/dev/dri/renderD128"); got != EncoderSoftware {
 		t.Errorf("h265 auto = %q, want software — no hardware HEVC encoder here", got)
 	}
 	var sawHEVC bool

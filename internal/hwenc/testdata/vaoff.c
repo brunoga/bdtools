@@ -29,7 +29,7 @@ int main(void) {
 	C(VAConfigAttribEncHEVCFeatures, "vaConfigAttribEncHEVCFeatures"); C(VAConfigAttribEncHEVCBlockSizes, "vaConfigAttribEncHEVCBlockSizes"); C(VA_FEATURE_NOT_SUPPORTED, "vaFeatureNotSupported"); C(VA_FEATURE_REQUIRED, "vaFeatureRequired");
 	C(VA_PICTURE_H264_INVALID, "vaPictureH264Invalid"); C(VA_PICTURE_H264_SHORT_TERM_REFERENCE, "vaPictureH264ShortTermRef");
 	C(VA_PICTURE_HEVC_INVALID, "vaPictureHEVCInvalid"); C(VA_PICTURE_HEVC_RPS_ST_CURR_BEFORE, "vaPictureHEVCStCurrBefore"); C(VA_PICTURE_HEVC_RPS_ST_CURR_AFTER, "vaPictureHEVCStCurrAfter");
-	C(VA_FOURCC_NV12, "vaFourccNV12"); C(VA_CODED_BUF_STATUS_SLICE_OVERFLOW_MASK, "vaCodedSliceOverflow");
+	C(VA_FOURCC_NV12, "vaFourccNV12"); C(VA_FOURCC_P010, "vaFourccP010"); C(VA_RT_FORMAT_YUV420_10, "vaRTFormatYUV420_10"); C(VAProfileHEVCMain10, "vaProfileHEVCMain10"); C(VA_CODED_BUF_STATUS_SLICE_OVERFLOW_MASK, "vaCodedSliceOverflow");
 
 	SZ(VAConfigAttrib, "vaSizeConfigAttrib");
 	typedef VAConfigAttribValEncHEVCFeatures F;
@@ -101,7 +101,7 @@ int main(void) {
 	OFF(HS, intra_period, "vaHEVCSeqIntraPeriod"); OFF(HS, intra_idr_period, "vaHEVCSeqIDRPeriod"); OFF(HS, ip_period, "vaHEVCSeqIPPeriod");
 	OFF(HS, pic_width_in_luma_samples, "vaHEVCSeqWidth"); OFF(HS, pic_height_in_luma_samples, "vaHEVCSeqHeight");
 	OFF(HS, seq_fields, "vaHEVCSeqFields");
-	BIT(HS, seq_fields, chroma_format_idc, "vaHEVCSeqChromaFormatBit"); BIT(HS, seq_fields, amp_enabled_flag, "vaHEVCSeqAMPBit");
+	BIT(HS, seq_fields, chroma_format_idc, "vaHEVCSeqChromaFormatBit"); BIT(HS, seq_fields, bit_depth_luma_minus8, "vaHEVCSeqLumaDepthBit"); BIT(HS, seq_fields, bit_depth_chroma_minus8, "vaHEVCSeqChromaDepthBit"); BIT(HS, seq_fields, amp_enabled_flag, "vaHEVCSeqAMPBit");
 	BIT(HS, seq_fields, sample_adaptive_offset_enabled_flag, "vaHEVCSeqSAOBit"); BIT(HS, seq_fields, sps_temporal_mvp_enabled_flag, "vaHEVCSeqTMVPBit");
 	BIT(HS, seq_fields, strong_intra_smoothing_enabled_flag, "vaHEVCSeqStrongIntraBit"); BIT(HS, seq_fields, low_delay_seq, "vaHEVCSeqLowDelayBit");
 	OFF(HS, log2_min_luma_coding_block_size_minus3, "vaHEVCSeqLog2MinCB"); OFF(HS, log2_diff_max_min_luma_coding_block_size, "vaHEVCSeqLog2DiffCB");
@@ -146,7 +146,7 @@ int main(void) {
 	OFF(AS, seq_profile, "vaAV1SeqProfile"); OFF(AS, seq_level_idx, "vaAV1SeqLevel"); OFF(AS, seq_tier, "vaAV1SeqTier");
 	OFF(AS, intra_period, "vaAV1SeqIntraPeriod"); OFF(AS, ip_period, "vaAV1SeqIPPeriod");
 	OFF(AS, seq_fields, "vaAV1SeqFields"); OFF(AS, order_hint_bits_minus_1, "vaAV1SeqOrderHintBits");
-	BIT(AS, seq_fields, enable_order_hint, "vaAV1SeqOrderHintBit"); BIT(AS, seq_fields, enable_cdef, "vaAV1SeqCDEFBit");
+	BIT(AS, seq_fields, enable_order_hint, "vaAV1SeqOrderHintBit"); BIT(AS, seq_fields, bit_depth_minus8, "vaAV1SeqDepthBit"); BIT(AS, seq_fields, enable_cdef, "vaAV1SeqCDEFBit");
 	typedef VAEncPictureParameterBufferAV1 AP;
 	SZ(AP, "vaSizeAV1Pic");
 	OFF(AP, frame_width_minus_1, "vaAV1PicWidth"); OFF(AP, frame_height_minus_1, "vaAV1PicHeight");

@@ -108,14 +108,20 @@ func (e *vaapi) hevcParams(p vaPic, l0, l1 []vaPic, add addBuf) error {
 	w, h := e.cfg.Width, e.cfg.Height
 	if p.idr {
 		s := newStruct(vaSizeHEVCSeq)
-		s.u8(vaHEVCSeqProfile, 1)                      // Main
+		profile := uint8(1) // Main
+		if e.cfg.BitDepth == 10 {
+			profile = 2 // Main 10
+		}
+		s.u8(vaHEVCSeqProfile, profile)
 		s.u8(vaHEVCSeqLevel, uint8(hevcLevel(e.cfg)))  //nolint:gosec // a level
 		s.u32(vaHEVCSeqIntraPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 		s.u32(vaHEVCSeqIDRPeriod, uint32(e.cfg.GOP))   //nolint:gosec // small
 		s.u32(vaHEVCSeqIPPeriod, uint32(e.bFrames+1))  //nolint:gosec // small
 		s.u16(vaHEVCSeqWidth, uint16(w))               //nolint:gosec // frame size
 		s.u16(vaHEVCSeqHeight, uint16(h))              //nolint:gosec // frame size
-		s.u32(vaHEVCSeqFields, 1<<vaHEVCSeqChromaFormatBit|b2u(c.amp)<<vaHEVCSeqAMPBit|
+		depth := uint32(e.cfg.BitDepth - 8)            //nolint:gosec // 0 or 2
+		s.u32(vaHEVCSeqFields, 1<<vaHEVCSeqChromaFormatBit|depth<<vaHEVCSeqLumaDepthBit|depth<<vaHEVCSeqChromaDepthBit|
+			b2u(c.amp)<<vaHEVCSeqAMPBit|
 			b2u(c.sao)<<vaHEVCSeqSAOBit|b2u(c.tmvp)<<vaHEVCSeqTMVPBit|
 			b2u(c.strongIntra)<<vaHEVCSeqStrongIntraBit|b2u(e.bFrames == 0)<<vaHEVCSeqLowDelayBit)
 		s.u8(vaHEVCSeqLog2MinCB, uint8(c.log2MinCB-3))             //nolint:gosec // 0..3
