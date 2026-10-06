@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-05
+
 ### Added
 
 - `mvc`: a pure-Go H.264/MVC (stereo high profile) decoder producing both
@@ -43,8 +45,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--crf` with VideoToolbox no longer runs backwards: it was passed as
   ffmpeg's `-q:v`, where higher is better, so the default 18 asked for low
   quality. It now maps onto VideoToolbox's scale with lower better.
-
 - Audio and subtitles before the playlist's IN time (or a loose stream's
   first picture) and after its OUT time are no longer muxed. tsMuxeR's demux
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
+
+[Unreleased]: https://github.com/brunoga/mvc/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/brunoga/mvc/releases/tag/v0.1.0
