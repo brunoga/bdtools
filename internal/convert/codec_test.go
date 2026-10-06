@@ -154,9 +154,10 @@ func TestRequiredSoftwareToolFollowsTheCodec(t *testing.T) {
 // can carry an H.264 encoder and no HEVC one, so accepting "nvenc works here"
 // would pick an encoder that fails at the encode step, hours in.
 func TestAutoSelectionProbesForTheRequestedCodec(t *testing.T) {
-	origLook, origProbe := LookPath, runProbe
-	t.Cleanup(func() { LookPath, runProbe = origLook, origProbe })
+	origLook, origProbe, origNative := LookPath, runProbe, ProbeNative
+	t.Cleanup(func() { LookPath, runProbe, ProbeNative = origLook, origProbe, origNative })
 	LookPath = func(string) (string, error) { return "/usr/bin/stub", nil }
+	ProbeNative = func(Encoder, Codec, string) bool { return false }
 
 	var probed []string
 	runProbe = func(_ context.Context, argv []string) error {

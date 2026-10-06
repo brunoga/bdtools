@@ -108,7 +108,7 @@ func TestDryRunShowsTheChosenLayout(t *testing.T) {
 		t.Errorf("half-SBS software encoding should squeeze through libx264:\n%s", soft)
 	}
 
-	half, _, code := capture(t, "--dry-run", "--encoder", "nvenc", "--layout", "half",
+	half, _, code := capture(t, "--dry-run", "--encoder", "nvenc", "--gpu-api", "ffmpeg", "--layout", "half",
 		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
 	if code != 0 {
 		t.Fatalf("half-SBS with an ffmpeg encoder should work, exit = %d", code)

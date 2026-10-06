@@ -244,7 +244,7 @@ var (
 // This is the set for a conversion with tsMuxeR as the demuxer; RequiredFor
 // answers for any options.
 func Required(goos string, enc Encoder, codec Codec, viaFFmpeg bool) []Tool {
-	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false, MuxerMkvmerge)
+	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false, MuxerMkvmerge, false)
 }
 
 // RequiredFor returns the tools a run with these options needs. With the
@@ -259,10 +259,10 @@ func RequiredFor(goos string, o Options) []Tool {
 	if !o.builtinMux() {
 		mux = MuxerMkvmerge
 	}
-	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux, mux)
+	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux, mux, o.NativeGPU)
 }
 
-func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool, mux Muxer) []Tool {
+func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool, mux Muxer, native bool) []Tool {
 	var tools []Tool
 	if demux == DemuxerTSMuxeR {
 		tools = append(tools, toolTSMuxeR)
@@ -270,7 +270,9 @@ func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux boo
 	if remux {
 		return tools
 	}
-	tools = append(tools, encoderTool(enc, codec, viaFFmpeg))
+	if !native {
+		tools = append(tools, encoderTool(enc, codec, viaFFmpeg))
+	}
 	if mux == MuxerMkvmerge {
 		tools = append(tools, toolMkvmerge)
 	}
@@ -427,6 +429,10 @@ func DefaultEncoder(ctx context.Context, goos string, codec Codec, vaapiDevice s
 	for _, enc := range Encoders(goos) {
 		if enc == EncoderSoftware {
 			continue
+		}
+		// The GPU's own library first: it needs no ffmpeg.
+		if ProbeNative(enc, codec, vaapiDevice) {
+			return enc
 		}
 		if !Detect(ctx, goos, enc, codec, false).OK() {
 			continue

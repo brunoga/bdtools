@@ -64,6 +64,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		demuxer  = fs.String("demuxer", string(convert.DemuxerBuiltin), "builtin (reads a disc image or folder in place) or tsmuxer (the external tsMuxeR)")
 		muxer    = fs.String("muxer", string(convert.MuxerBuiltin), "builtin (writes the MKV in process) or mkvmerge (the external mkvmerge)")
+		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
 		swapLR   = fs.Bool("swap-lr", false, "exchange the eyes (default: taken from the disc's own base-view marking)")
 		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select (with --demuxer tsmuxer a disc image is read first, so pass --temp)")
@@ -82,8 +83,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "usage: mvctools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
 			"Converts a Blu-ray 3D (MVC) source into a side-by-side MKV that an\n"+
-			"ordinary decoder can play. External tools do the work; run --check to\n"+
-			"see which are installed.\n\nflags:\n")
+			"ordinary decoder can play. The disc is read, decoded and muxed in\n"+
+			"process, and a GPU encodes in process; without one, x264 or x265 does.\n"+
+			"Run --check to see what is installed.\n\nflags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(argv); err != nil {
@@ -123,9 +125,16 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 
+	ga := convert.GPUAPI(*gpuAPI)
+	if !ga.Valid() {
+		fmt.Fprintf(stderr, "mvctools: unknown GPU API %q (want builtin or ffmpeg)\n", ga)
+		return 2
+	}
+
 	o := convert.DefaultOptions()
 	o.Demuxer = dmx
 	o.Muxer = mx
+	o.GPUAPI = ga
 	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
@@ -133,6 +142,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.DecodeThreads = *decThr
 	o.KeepFallback = *keepFall
 	o.Remux = *remux
+	if !o.Remux {
+		convert.ResolveGPU(&o)
+	}
 
 	// After the options are assembled, so --check answers for the settings
 	// given: half-SBS or an eye swap moves software encoding onto ffmpeg,

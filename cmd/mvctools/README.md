@@ -21,7 +21,7 @@ Complete, and tested end to end against a real MVC source — see
 demuxer    read the disc in place; the video goes to the decoder, audio,   ─┐
            subtitles and chapters to the work directory — built in         │
 decoder    decode both eyes and stack them side by side, as Y4M — built in ─┤ one pass,
-encoder    x264 or x265, or ffmpeg with a platform hardware encoder        ─┘ piped
+encoder    the GPU's encoder in process, or x264 / x265 (ffmpeg as fallback) ─┘ piped
 muxer      write the MKV: video, audio, subtitles, chapters — built in
 ```
 
@@ -139,6 +139,8 @@ scheduler such as pipeliner retry it.
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--demuxer` | `builtin` | `builtin` reads the disc in place; `tsmuxer` uses tsMuxeR — see [The pipeline](#the-pipeline) |
 | `--muxer` | `builtin` | `builtin` writes the MKV in process; `mkvmerge` uses mkvmerge |
+| `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
+| `--vaapi-device` | `/dev/dri/renderD128` | The render node VAAPI encodes on |
 
 `--layout full` is almost always what a 3D library wants: it is the only layout
 that keeps the disc's resolution, and it is what the decoder emits natively, so
@@ -353,13 +355,14 @@ that will only take that, and costs half the horizontal detail by definition.
 
 ## Tools, and why each is needed
 
-One: the encoder. The demux, the decode and the mux are built in
+At most one: the encoder. The demux, the decode and the mux are built in
 (libavcodec drops the MVC dependent view outright, so ffmpeg could not stand
-in for the first two).
+in for the first two), and a GPU encodes through its driver's own library, in
+process.
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
-| **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead, for GPU encoding or the half-SBS filter |
+| **x264** / **x265** *or* **ffmpeg** | Re-encodes the stacked frames when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264 or x265 follows `--codec`; ffmpeg instead for software half-SBS (its scaler), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
 
 A `--remux` needs nothing at all. **mkvmerge** is needed only for
 `--muxer mkvmerge`.
@@ -486,8 +489,8 @@ go test ./internal/convert/
 | macOS | VideoToolbox | x264 / x265 |
 | Windows | NVENC | x264 / x265 |
 
-`auto` runs a **one-frame trial encode** for each candidate and takes the first
-that succeeds, falling back to software. Merely finding ffmpeg is not evidence a
+`auto` runs a **trial encode** for each candidate and takes the first that
+succeeds, falling back to software: in process first, then through ffmpeg. Merely finding ffmpeg is not evidence a
 GPU is present — a stock build advertises `h264_nvenc` on a machine with no
 NVIDIA card — and discovering that at the encode step would waste the hours
 already spent decoding.
@@ -496,6 +499,48 @@ The trial is run for the codec being produced, not for the encoder in the
 abstract: a GPU generation can carry an H.264 encoder and no HEVC one, so
 `--codec h265` can fall back to x265 on the same machine where `--codec h264`
 picks NVENC.
+
+## Hardware encoding
+
+A GPU encoder is driven **in process, through its system library**, loaded
+at run time — no cgo, no ffmpeg, nothing to link:
+
+| Encoder | Library | Platforms |
+|---|---|---|
+| NVENC | the NVIDIA driver's `libnvidia-encode` and `libcuda` (`nvEncodeAPI64.dll`, `nvcuda.dll`) | Linux, Windows |
+| VAAPI | `libva` and `libva-drm`, with the GPU's driver (Intel's `iHD`, Mesa's `radeonsi`) | Linux |
+| VideoToolbox | the system frameworks | macOS |
+
+The decoder's frames are drawn side by side straight into the encoder's
+input buffer, squeezed for half-SBS on the way, so nothing is piped and no
+filter runs. Each encoder makes an IDR every two seconds with B-frames
+between references, at a constant quantiser: `--crf` is the P-picture QP,
+and I and B pictures get the offsets ffmpeg applies by default for that
+encoder, so a number means what it meant through ffmpeg's `-qp`.
+VideoToolbox has no QP; `--crf` maps onto its quality scale, `0` the best
+and `51` the worst.
+
+When the library is missing or its trial encode fails, the encoder is reached
+through ffmpeg as before; `--gpu-api ffmpeg` asks for that outright.
+Windows has NVENC in process; Intel and AMD GPUs there need ffmpeg.
+
+Decoding and encoding a minute of a Blu-ray to H.264 on a Core Ultra 9 285K
+(wall time for the whole conversion, then the decode-and-encode rate):
+
+| Encoder | Full SBS | Half SBS |
+|---|---|---|
+| NVENC (RTX 5090), in process | 7.0 s, 292 fps | 5.0 s, 435 fps |
+| NVENC through ffmpeg | 7.9 s | 7.5 s |
+| VAAPI (Arrow Lake iGPU), in process | 7.8 s, 239 fps | 6.8 s, 270 fps |
+| VAAPI through ffmpeg | 7.6 s | 7.4 s |
+
+The iGPU's encoder tops out near 270 fps at this size, so VAAPI is as fast
+either way; NVENC is not the limit, and in process it keeps up with the
+decoder.
+
+A VAAPI driver that only decodes (NVIDIA's `nvidia-vaapi-driver`) has no
+encode entrypoint; the probe sees that and moves on. Intel's driver for
+recent GPUs is `intel-media-va-driver-non-free` on Debian and Ubuntu.
 
 ## Docker
 

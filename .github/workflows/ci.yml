@@ -21,9 +21,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install the libva headers
+        # TestVAAPILayout checks the VAAPI struct offsets against them.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libva-dev
+
       - name: Test
         # The end-to-end conversion tests skip when tsMuxeR, x264 and
-        # mkvmerge are not installed, which they are not here.
+        # mkvmerge are not installed, which they are not here; the GPU
+        # encoder tests skip without a GPU.
         run: go test -race -timeout 300s ./...
 
       - name: Test the pure-Go decoder
@@ -31,6 +36,22 @@ jobs:
         # on every non-amd64 platform); the conformance corpus must pass
         # through it too.
         run: go test -tags purego -timeout 300s ./...
+
+  test-macos:
+    name: Test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test VideoToolbox
+        # The virtual Macs have no media engine, so the VideoToolbox tests
+        # fall back to Apple's software encoder: the same API and code.
+        run: go test -timeout 300s ./internal/hwenc/... ./internal/convert/...
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }}${{ matrix.goarm && format('/v{0}', matrix.goarm) || '' }})

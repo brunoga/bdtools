@@ -33,6 +33,9 @@ func fakeProbe(t *testing.T, working ...Encoder) {
 	for _, e := range working {
 		ok[e] = true
 	}
+	origNative := ProbeNative
+	ProbeNative = func(Encoder, Codec, string) bool { return false }
+	t.Cleanup(func() { ProbeNative = origNative })
 	orig := runProbe
 	runProbe = func(_ context.Context, argv []string) error {
 		for e := range ok {
