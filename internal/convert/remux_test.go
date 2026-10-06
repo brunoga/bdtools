@@ -146,7 +146,7 @@ func TestKeepFallbackKeepsTheCore(t *testing.T) {
 		o := DefaultOptions()
 		o.Output, o.KeepFallback = filepath.Join(tmp, "out.mkv"), keep
 		r := NewRunner(CurrentGOOS, o, nil)
-		err := r.muxBuiltin(context.Background(), video, []extra{
+		err := r.muxBuiltin(context.Background(), []string{video}, []extra{
 			{path: thd, track: Track{ID: 4352, StreamID: "A_AC3", Type: "TRUE-HD", Lang: "eng"}},
 		}, nil)
 		if err != nil {

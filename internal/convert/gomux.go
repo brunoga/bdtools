@@ -19,7 +19,7 @@ import (
 // lossless track (the AC-3 inside a TrueHD stream, the AC-3 of a 7.1 E-AC-3
 // track, the DTS of DTS-HD) is left out unless --keep-fallback asks for it,
 // in which case it is its own track beside the main one.
-func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, chapters []time.Duration) error {
+func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra, chapters []time.Duration) error {
 	num, den := r.fpsNum, r.fpsDen
 	if num <= 0 {
 		num, den = 24000, 1001
@@ -44,11 +44,12 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 		}
 		return f, err
 	}
-	vf, err := open(video)
+	vr, closeVideo, err := openSegments(video)
 	if err != nil {
 		return err
 	}
-	v, err := mkv.NewVideoSource(vf, codec, num, den, 1)
+	defer closeVideo()
+	v, err := mkv.NewVideoSource(vr, codec, num, den, 1)
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
 	}

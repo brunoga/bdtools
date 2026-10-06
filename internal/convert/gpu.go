@@ -1,11 +1,8 @@
 package convert
 
 import (
-	"context"
 	"encoding/binary"
-	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"sync"
 
@@ -98,89 +95,6 @@ func ResolveGPU(o *Options) {
 		return
 	}
 	o.NativeGPU = ProbeNative(o.Encoder, o.Codec, o.BitDepth, o.VAAPIDevice)
-}
-
-// encodeNative is decodeAndEncode with the GPU encoder in process: each
-// stacked frame is drawn straight into the encoder's input buffer.
-func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int64) bool, out string) error {
-	k, _ := hwKind(r.Opts.Encoder)
-	f, err := os.Create(out) //nolint:gosec // our work directory
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	r.Report.Report("decoding and encoding (%s, %s on the GPU, in process)", r.Opts.Codec, r.Opts.Encoder)
-
-	dec := mvc.NewDecoder(mvc.Options{Threads: r.Opts.DecodeThreads})
-	var (
-		enc        hwenc.Encoder
-		decodeErrs int
-		frames     int
-		skipped    int
-		prog       = r.newProgress("encoded")
-	)
-	half := r.Opts.Layout == LayoutHalfSBS
-	st, decErr := dec.DecodeStream(src, mvc.DecodeOptions{
-		OnError: func(err error) {
-			decodeErrs++
-			if decodeErrs <= 5 {
-				r.Report.Report("warning: %v", err)
-			}
-		},
-	}, func(sf *mvc.StereoFrame) error {
-		if keep != nil && !keep(sf.Base.PTS) {
-			skipped++
-			return nil
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if enc == nil {
-			r.noteFirstPicture(sf.Base.PTS)
-			r.Height = sf.Base.Height
-			num, den := dec.FrameRate()
-			if num <= 0 {
-				num, den = 24000, 1001
-				r.Report.Report("warning: the stream carries no frame rate; assuming 24000/1001")
-			} else {
-				r.Report.Report("frame rate %d/%d", num, den)
-			}
-			r.fpsNum, r.fpsDen = num, den
-			prog.begin(num, den)
-			w, h := 2*sf.Base.Width, sf.Base.Height
-			if half {
-				w = sf.Base.Width
-			}
-			var err error
-			enc, err = hwenc.Open(k, hwenc.Config{Codec: r.Opts.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
-				QP: r.Opts.CRF, Device: r.Opts.VAAPIDevice, BitDepth: r.Opts.BitDepth}, f)
-			if err != nil {
-				return fmt.Errorf("opening the %s encoder: %w", r.Opts.Encoder, err)
-			}
-		}
-		frames++
-		prog.frame(frames)
-		return enc.Encode(func(p *hwenc.Picture) { drawSBS(p, sf, r.Opts.SwapLR, half) })
-	})
-	var closeErr error
-	if enc != nil {
-		closeErr = enc.Close()
-	}
-	switch {
-	case decErr != nil:
-		return fmt.Errorf("decoding: %w", decErr)
-	case closeErr != nil:
-		return fmt.Errorf("encoding: %w", closeErr)
-	case frames == 0:
-		return fmt.Errorf("the video decoded to no frames")
-	case st.DependentFrames == 0:
-		return fmt.Errorf("the dependent view decoded to nothing: the source does not look like 3D")
-	}
-	if skipped > 0 {
-		r.Report.Report("left out %d pictures outside the playlist's IN/OUT times", skipped)
-	}
-	r.Report.Report("encoded %d frames (%.1f fps)", frames, prog.rate(frames))
-	return f.Close()
 }
 
 // drawSBS writes a stereo frame side by side into an NV12 picture (P010

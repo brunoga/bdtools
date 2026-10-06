@@ -467,8 +467,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		}
 		return err
 	}
-	video := filepath.Join(tmp, "stacked"+r.Opts.Codec.streamExt())
-	decErr := r.decodeAndEncode(ctx, mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, nil, video)
+	video, decErr := r.decodeAndEncode(ctx, mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, nil)
 	extras, finErr := g.finish()
 	if decErr != nil {
 		return decErr
