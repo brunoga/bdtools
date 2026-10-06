@@ -63,6 +63,9 @@ const (
 	nvAV1ChromaFormatBit    = 7
 	nvAV1InputBitDepthBit   = 12
 	nvAV1PixelBitDepthBit   = 15
+	nvHEVCFlags             = 16 // the bitfield word after maxCUSize
+	nvHEVCPixelBitDepthBit  = 11
+	nvCfgProfileGUID        = 4
 	nvLevelAV1Auto          = 24
 	nvTierAV1Main           = 0
 	nvSizeInitializeParams  = 1808
@@ -107,6 +110,7 @@ const (
 
 	nvDeviceTypeCUDA    = 1
 	nvBufferFormatNV12  = 1
+	nvBufferFormatP010  = 0x10000
 	nvRCConstQPMode     = 0
 	nvPicStructFrame    = 1
 	nvPicFlagEOS        = 0x8
@@ -120,4 +124,6 @@ var (
 	nvCodecHEVCGUID = guid(0x790cdc88, 0x4522, 0x4d7b, [8]byte{0x94, 0x25, 0xbd, 0xa9, 0x97, 0x5f, 0x76, 0x03})
 	nvCodecAV1GUID  = guid(0x0a352289, 0x0aa7, 0x4759, [8]byte{0x86, 0x2d, 0x5d, 0x15, 0xcd, 0x16, 0xd2, 0x54})
 	nvPresetP4GUID  = guid(0x90a7b826, 0xdf06, 0x4862, [8]byte{0xb9, 0xd2, 0xcd, 0x6d, 0x73, 0xa0, 0x86, 0x81})
+	// nvHEVCMain10GUID is the HEVC Main 10 profile.
+	nvHEVCMain10GUID = guid(0xfa4d2b6c, 0x3a5b, 0x411a, [8]byte{0x80, 0x18, 0x0a, 0x3f, 0x5e, 0x3c, 0x9b, 0xe5})
 )

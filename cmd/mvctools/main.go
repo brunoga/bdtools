@@ -60,6 +60,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
 		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere), h265 (smaller) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
+		depth    = fs.Int("bit-depth", 8, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
@@ -110,7 +111,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	if enc == convert.EncoderAuto {
-		enc = convert.DefaultEncoder(ctx, goos, cod, *vaapi)
+		enc = convert.DefaultEncoder(ctx, goos, cod, *depth, *vaapi)
 	}
 
 	ga := convert.GPUAPI(*gpuAPI)
@@ -124,6 +125,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.Input, o.Output, o.TempDir, o.Playlist = *input, *output, *tempDir, *playlst
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
+	o.BitDepth = *depth
 	o.SwapLR = *swapLR
 	o.DecodeThreads = *decThr
 	o.KeepFallback = *keepFall

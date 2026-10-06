@@ -37,3 +37,10 @@ func TestVAAPIAV1DecodesBack(t *testing.T) {
 	b := encodeTest(t, VAAPI, AV1, w, h, n)
 	checkDecodeFFmpeg(t, b, "obu", w, h, n)
 }
+
+// At 10 bits the stream is HEVC Main 10 or 10-bit AV1, made from P010.
+func TestVAAPI10Bit(t *testing.T) {
+	const w, h, n = 640, 368, 30
+	checkDecode10(t, encodeDepth(t, VAAPI, HEVC, 10, w, h, n), "hevc", w, h, n)
+	checkDecode10(t, encodeDepth(t, VAAPI, AV1, 10, w, h, n), "obu", w, h, n)
+}

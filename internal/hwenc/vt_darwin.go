@@ -26,6 +26,7 @@ const (
 	cfNumberFloat64 = 6
 
 	cvPixelFormat420v = 0x34323076 // '420v': NV12, video range
+	cvPixelFormatx420 = 0x78343230 // 'x420': P010, video range
 	cmCodecH264       = 0x61766331 // 'avc1'
 	cmCodecHEVC       = 0x68766331 // 'hvc1'
 	cmTimeValid       = 1
@@ -183,6 +184,7 @@ func loadVTLibs() (*vtAPI, error) {
 		{"VideoToolbox", "kVTCompressionPropertyKey_Quality"},
 		{"VideoToolbox", "kVTProfileLevel_H264_High_AutoLevel"},
 		{"VideoToolbox", "kVTProfileLevel_HEVC_Main_AutoLevel"},
+		{"VideoToolbox", "kVTProfileLevel_HEVC_Main10_AutoLevel"},
 	} {
 		a.keys[k.name] = constant(k.lib, k.name)
 	}
@@ -239,8 +241,12 @@ func openVideoToolbox(cfg Config, w io.Writer) (Encoder, error) {
 
 	src := a.dict()
 	defer a.release(src)
+	format := int32(cvPixelFormat420v)
+	if cfg.BitDepth == 10 {
+		format = cvPixelFormatx420
+	}
 	for k, v := range map[string]int32{
-		"kCVPixelBufferPixelFormatTypeKey": cvPixelFormat420v,
+		"kCVPixelBufferPixelFormatTypeKey": format,
 		"kCVPixelBufferWidthKey":           int32(cfg.Width),  //nolint:gosec // frame size
 		"kCVPixelBufferHeightKey":          int32(cfg.Height), //nolint:gosec // frame size
 	} {
@@ -252,6 +258,9 @@ func openVideoToolbox(cfg Config, w io.Writer) (Encoder, error) {
 	codec, profile := uint32(cmCodecH264), a.keys["kVTProfileLevel_H264_High_AutoLevel"]
 	if cfg.Codec == HEVC {
 		codec, profile = cmCodecHEVC, a.keys["kVTProfileLevel_HEVC_Main_AutoLevel"]
+		if cfg.BitDepth == 10 {
+			profile = a.keys["kVTProfileLevel_HEVC_Main10_AutoLevel"]
+		}
 	}
 	var session uintptr
 	st := a.sessionCreate(0, int32(cfg.Width), int32(cfg.Height), codec, spec, src, 0, vtCallback, e.refcon, &session) //nolint:gosec // frame size
@@ -312,20 +321,24 @@ func (e *vtEnc) Encode(fill func(*Picture)) error {
 	if st := a.lock(pb, 0); st != 0 {
 		return fmt.Errorf("videotoolbox: locking a pixel buffer: %d", st)
 	}
-	w, h := e.cfg.Width, e.cfg.Height
+	h, depth := e.cfg.Height, e.cfg.BitDepth
+	row := e.cfg.Width
+	if depth == 10 {
+		row *= 2 // P010: two bytes a sample
+	}
 	yp, uvp := a.planeStride(pb, 0), a.planeStride(pb, 1)
 	y, uv := cbytes(a.planeBase(pb, 0), yp*h), cbytes(a.planeBase(pb, 1), uvp*h/2)
 	if yp == uvp {
-		fill(&Picture{Y: y, UV: uv, Pitch: yp})
+		fill(&Picture{Y: y, UV: uv, Pitch: yp, Depth: depth})
 	} else {
 		// One pitch for both planes is what fill takes: draw, then copy.
-		p := &Picture{Y: make([]byte, w*h), UV: make([]byte, w*h/2), Pitch: w}
+		p := &Picture{Y: make([]byte, row*h), UV: make([]byte, row*h/2), Pitch: row, Depth: depth}
 		fill(p)
 		for r := range h {
-			copy(y[r*yp:r*yp+w], p.Y[r*w:])
+			copy(y[r*yp:r*yp+row], p.Y[r*row:])
 		}
 		for r := range h / 2 {
-			copy(uv[r*uvp:r*uvp+w], p.UV[r*w:])
+			copy(uv[r*uvp:r*uvp+row], p.UV[r*row:])
 		}
 	}
 	a.unlock(pb, 0)

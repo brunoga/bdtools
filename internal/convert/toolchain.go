@@ -459,13 +459,13 @@ func (r Report) String() string {
 // a one-frame trial encode rather than merely having its tools located — the
 // alternative is choosing an encoder that fails at the encode step, hours into
 // a conversion.
-func DefaultEncoder(ctx context.Context, goos string, codec Codec, vaapiDevice string) Encoder {
+func DefaultEncoder(ctx context.Context, goos string, codec Codec, depth int, vaapiDevice string) Encoder {
 	for _, enc := range Encoders(goos) {
-		if enc == EncoderSoftware {
+		if enc == EncoderSoftware || depth == 10 && enc == EncoderMediaFoundation {
 			continue
 		}
 		// The GPU's own library first: it needs no ffmpeg.
-		if ProbeNative(enc, codec, vaapiDevice) {
+		if ProbeNative(enc, codec, depth, vaapiDevice) {
 			return enc
 		}
 		if !Detect(ctx, goos, enc, codec, false).OK() {

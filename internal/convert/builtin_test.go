@@ -353,12 +353,12 @@ func mustPlan(t *testing.T, o Options) *Plan {
 func TestNativeGPUIsPreferred(t *testing.T) {
 	origNative, origLook := ProbeNative, LookPath
 	t.Cleanup(func() { ProbeNative, LookPath = origNative, origLook })
-	ProbeNative = func(e Encoder, c Codec, _ string) bool { return e == EncoderVAAPI && c == CodecH265 }
+	ProbeNative = func(e Encoder, c Codec, _ int, _ string) bool { return e == EncoderVAAPI && c == CodecH265 }
 	LookPath = func(string) (string, error) { return "", os.ErrNotExist }
-	if got := DefaultEncoder(context.Background(), "linux", CodecH265, ""); got != EncoderVAAPI {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH265, 8, ""); got != EncoderVAAPI {
 		t.Errorf("auto = %s, want vaapi", got)
 	}
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, ""); got != EncoderSoftware {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, ""); got != EncoderSoftware {
 		t.Errorf("auto for h264 = %s, want software", got)
 	}
 	o := DefaultOptions()
