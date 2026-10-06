@@ -327,3 +327,45 @@ func TestVideoDelay(t *testing.T) {
 		}
 	}
 }
+
+// However the reads fall — a start code split across two, or ending one —
+// every access unit comes out whole. A start code in the last bytes of a read
+// used to be lost, merging the next picture into the one before.
+func TestVideoReadBoundaries(t *testing.T) {
+	for codec, name := range map[Codec]string{H264: "bframes.264", HEVC: "bframes.265"} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "mkv", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		read := func() []Frame {
+			v, err := NewVideoSource(bytes.NewReader(data), codec, 24000, 1001, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fs []Frame
+			for {
+				f, err := v.Next()
+				if err == io.EOF {
+					return fs
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				fs = append(fs, f)
+			}
+		}
+		want := read()
+		defer func(n int) { readChunk = n }(readChunk)
+		for readChunk = 1; readChunk <= 200; readChunk++ {
+			got := read()
+			if len(got) != len(want) {
+				t.Fatalf("%s, %d-byte reads: %d frames, want %d", name, readChunk, len(got), len(want))
+			}
+			for i := range got {
+				if got[i].PTS != want[i].PTS || !bytes.Equal(got[i].Data, want[i].Data) {
+					t.Fatalf("%s, %d-byte reads: frame %d differs", name, readChunk, i)
+				}
+			}
+		}
+		readChunk = 1 << 20
+	}
+}

@@ -291,25 +291,26 @@ func (v *VideoSource) release(final bool) {
 	}
 }
 
+// readChunk is how much of the stream is read at a time; small in tests, so
+// start codes fall across reads at every position.
+var readChunk = 1 << 20
+
 // nextAU reads NAL units up to the next access unit boundary.
 func (v *VideoSource) nextAU() ([][]byte, error) {
 	for {
-		nals := splitNALs(v.buf)
+		nals, at := splitNALsAt(v.buf)
 		// The last NAL may be incomplete until more is read or the input ends.
 		if cut, ok := v.boundary(nals, v.eof); ok {
 			au := nals[:cut]
-			// Keep the rest in the buffer.
-			rest := nals[cut:]
-			var nb []byte
-			for _, n := range rest {
-				nb = append(nb, 0, 0, 0, 1)
-				nb = append(nb, n...)
-			}
 			out := make([][]byte, len(au))
 			for i, n := range au {
 				out[i] = append([]byte(nil), n...)
 			}
-			v.buf = nb
+			// Keep the rest of the buffer as it was read, from the next access
+			// unit's start code on. Rebuilding it from the NAL units would lose
+			// a start code the read ended in, whose NAL unit is still to come,
+			// and the next picture would merge into the one before.
+			v.buf = append([]byte(nil), v.buf[at[cut]:]...)
 			return out, nil
 		}
 		if v.eof {
@@ -323,7 +324,7 @@ func (v *VideoSource) nextAU() ([][]byte, error) {
 			}
 			return out, nil
 		}
-		chunk := make([]byte, 1<<20)
+		chunk := make([]byte, readChunk)
 		n, err := io.ReadFull(v.r, chunk)
 		v.buf = append(v.buf, chunk[:n]...)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {

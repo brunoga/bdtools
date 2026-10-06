@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-06
+
+### Fixed
+
+- A picture whose start code fell in the last bytes of one of the muxer's
+  1 MiB reads was merged into the picture before it and lost, breaking the
+  pictures that referenced it until the next keyframe (one picture in
+  Raya's 4.3 GB stream; any H.264 or HEVC conversion could be hit). The
+  muxer now keeps the rest of a read as it was read.
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
@@ -135,7 +145,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/mvc/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/brunoga/mvc/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/brunoga/mvc/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/brunoga/mvc/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/brunoga/mvc/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/brunoga/mvc/releases/tag/v0.1.0
