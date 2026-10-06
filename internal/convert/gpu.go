@@ -123,6 +123,7 @@ func (r *Runner) encodeNative(ctx context.Context, src mvc.Source, keep func(int
 		}
 		if enc == nil {
 			r.noteFirstPicture(sf.Base.PTS)
+			r.Height = sf.Base.Height
 			num, den := dec.FrameRate()
 			if num <= 0 {
 				num, den = 24000, 1001

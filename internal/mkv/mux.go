@@ -71,6 +71,15 @@ type Options struct {
 	WritingApp string
 	// Progress, when set, is called now and then with the time muxed so far.
 	Progress func(time.Duration)
+	// Spans, when set, receives each track's first and last presentation
+	// time (the last frame's start), in source order, once the mux is done.
+	Spans *[]Span
+}
+
+// Span is when a track's frames start and end.
+type Span struct {
+	First, Last time.Duration
+	Frames      int
 }
 
 // ticks converts a time to the file's timestamp units, rounding to nearest
@@ -113,6 +122,7 @@ type head struct {
 }
 
 type muxer struct {
+	spans   []Span
 	w       io.WriteSeeker
 	sources []Source
 	pos     int64 // file position
@@ -137,6 +147,10 @@ func (m *muxer) write(b []byte) error {
 
 func (m *muxer) run(opts Options) error {
 	m.seeks = map[uint32]int64{}
+	if opts.Spans != nil {
+		m.spans = make([]Span, len(m.sources))
+		defer func() { *opts.Spans = m.spans }()
+	}
 	if opts.WritingApp == "" {
 		opts.WritingApp = "mvctools"
 	}
@@ -328,6 +342,16 @@ func (m *muxer) block(track int, f Frame) error {
 	m.cluster = append(m.cluster, f.Data...)
 	if f.PTS > m.end {
 		m.end = f.PTS
+	}
+	if m.spans != nil {
+		s := &m.spans[track-1]
+		if s.Frames == 0 || f.PTS < s.First {
+			s.First = f.PTS
+		}
+		if f.PTS > s.Last || s.Frames == 0 {
+			s.Last = f.PTS
+		}
+		s.Frames++
 	}
 	return nil
 }

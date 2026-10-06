@@ -356,7 +356,7 @@ func (g *mkvDemux) write(p mkv.Packet) error {
 		err = w.wav.write(p.Data)
 		w.n += int64(len(p.Data))
 	default:
-		w.mark(p.Time - g.t0)
+		w.mark(p.Time-g.t0, p.Data)
 		_, err = w.w.Write(p.Data)
 		w.n += int64(len(p.Data))
 	}
@@ -373,6 +373,7 @@ func (g *mkvDemux) finish() ([]extra, error) {
 		g.f = nil
 	}
 	var extras []extra
+	var empty []Track
 	var firstErr error
 	for _, t := range append(append([]Track(nil), g.sel.Audio...), g.sel.Subtitles...) {
 		w := g.writers[uint64(t.ID)] //nolint:gosec // a track number
@@ -391,11 +392,12 @@ func (g *mkvDemux) finish() ([]extra, error) {
 			firstErr = w.err
 		}
 		if w.n == 0 {
-			g.report.Report("warning: %s track %d holds nothing; it will be missing from the output", t.StreamID, t.ID)
+			empty = append(empty, t)
 			continue
 		}
 		extras = append(extras, extra{path: w.path, track: t, sync: w.sync})
 	}
+	reportEmpty(g.report, empty)
 	if len(g.dropped) > 0 {
 		g.report.Report("dropped audio and subtitle frames timed before the file's start")
 	}
@@ -444,8 +446,12 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if err != nil {
 		return err
 	}
+	all := sel.Audio
 	if sel, err = sel.Apply(r.Opts.Audio, r.Opts.Subs); err != nil {
 		return err
+	}
+	if r.Opts.KeepFallback {
+		sel.Audio = withFallbacks(sel.Audio, all, r.Report)
 	}
 	r.Selected = sel
 	r.Report.Report("source: video track %d (both views), %d audio, %d subtitle", sel.Base.ID, len(sel.Audio), len(sel.Subtitles))
@@ -471,4 +477,34 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		return finErr
 	}
 	return r.mux(ctx, video, extras, src.chapters)
+}
+
+// withFallbacks adds, for each kept lossless track without a lossy core
+// inside it, the best lossy track in the same language. A remux keeps
+// TrueHD's AC-3 core (or an E-AC-3 "compatibility" track) as a track of its
+// own, and that is what --keep-fallback keeps on a disc.
+func withFallbacks(kept, all []Track, report Reporter) []Track {
+	out := append([]Track(nil), kept...)
+	has := map[int]bool{}
+	for _, t := range kept {
+		has[t.ID] = true
+	}
+	for _, t := range kept {
+		// DTS-HD carries its DTS core inside, and the mux keeps that.
+		if audioTier(t) != tierLossless || strings.Contains(strings.ToUpper(t.Type), "DTS") {
+			continue
+		}
+		var lossy []Track
+		for _, c := range all {
+			if !has[c.ID] && audioTier(c) != tierLossless && audioTier(c) != tierUnknown && strings.EqualFold(c.Lang, t.Lang) {
+				lossy = append(lossy, c)
+			}
+		}
+		if f, ok := BestAudio(lossy); ok {
+			has[f.ID] = true
+			out = append(out, f)
+			report.Report("keeping %s as the fallback for %s", DescribeAudio(f), DescribeAudio(t))
+		}
+	}
+	return out
 }
