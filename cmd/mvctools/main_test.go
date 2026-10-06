@@ -61,18 +61,7 @@ func TestDryRunNeedsNoTools(t *testing.T) {
 		}
 	}
 	if strings.Contains(out, "tsMuxeR") || strings.Contains(out, "mkvmerge") {
-		t.Errorf("the built-in demuxer and muxer are the default:\n%s", out)
-	}
-	mkv, _, code := capture(t, "--dry-run", "--encoder", "x264", "--muxer", "mkvmerge",
-		"--input", "/media/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
-	if code != 0 || !strings.Contains(mkv, "mkvmerge -o /out/a.mkv") {
-		t.Errorf("--muxer mkvmerge: exit %d\n%s", code, mkv)
-	}
-	// And tsMuxeR is still there when asked for.
-	tsm, _, code := capture(t, "--dry-run", "--encoder", "x264", "--demuxer", "tsmuxer",
-		"--input", "/media/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
-	if code != 0 || !strings.Contains(tsm, "tsMuxeR") {
-		t.Errorf("--demuxer tsmuxer: exit %d\n%s", code, tsm)
+		t.Errorf("the demux and the mux are built in:\n%s", out)
 	}
 	// The decoder stacks the eyes itself, so nothing else should.
 	for _, unwanted := range []string{"StackHorizontal", "vspipe", "vapoursynth"} {
@@ -171,9 +160,20 @@ func TestCheckReportsAndExitsNonZeroWhenIncomplete(t *testing.T) {
 	}
 }
 
-func TestUnknownDemuxerIsRefused(t *testing.T) {
-	_, errOut, code := capture(t, "--dry-run", "--demuxer", "ffmpeg", "--input", "/in/a.iso", "--output", "/out/a.mkv")
-	if code != 2 || !strings.Contains(errOut, "demuxer") {
+// tsMuxeR and mkvmerge are gone, and the flags that chose them with them.
+func TestRemovedFlagsAreRefused(t *testing.T) {
+	for _, flag := range []string{"--demuxer", "--muxer"} {
+		_, errOut, code := capture(t, "--dry-run", flag, "builtin", "--input", "/in/a.iso", "--output", "/out/a.mkv")
+		if code != 2 || !strings.Contains(errOut, "not defined") {
+			t.Errorf("%s: exit %d, stderr %q", flag, code, errOut)
+		}
+	}
+}
+
+// A container nothing here reads is refused up front, by name.
+func TestUnsupportedSourceIsRefused(t *testing.T) {
+	_, errOut, code := capture(t, "--dry-run", "--encoder", "x264", "--input", "/in/film.mp4", "--output", "/out/a.mkv")
+	if code != 2 || !strings.Contains(errOut, "Blu-ray") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 }
@@ -183,13 +183,6 @@ func TestCheckForABuiltinRemux(t *testing.T) {
 	out, _, code := capture(t, "--check", "--remux")
 	if code != 0 || !strings.Contains(out, "no external tools needed") {
 		t.Errorf("exit %d\n%s", code, out)
-	}
-}
-
-func TestUnknownMuxerIsRefused(t *testing.T) {
-	_, errOut, code := capture(t, "--dry-run", "--muxer", "ffmpeg", "--input", "/in/a.iso", "--output", "/out/a.mkv")
-	if code != 2 || !strings.Contains(errOut, "muxer") {
-		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
 }
 

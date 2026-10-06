@@ -17,11 +17,10 @@
 //	mvctools --dry-run --input 00800.m2ts --output "Life of Pi (2012).mkv"
 //	mvctools --input BDMV/PLAYLIST/00800.mpls --output "Life of Pi (2012).mkv"
 //
-// The source is a .iso disc image, a BDMV directory (or its parent), or
-// anything tsMuxeR reads directly: an .m2ts, a .mpls playlist, an MKV, or a
-// VOB/MP4. An image and a directory are handled here rather than by tsMuxeR —
-// the image is read in place, with no mounting and no root, and in both cases
-// the feature playlist is chosen by probing.
+// The source is a .iso disc image, a BDMV directory (or its parent), a .mpls
+// playlist, an .m2ts, or a Matroska remux of a 3D disc. Everything is read in
+// place — an image with no mounting and no root — and for a disc the feature
+// playlist is chosen by reading the playlists.
 package main
 
 import (
@@ -55,19 +54,17 @@ func run(argv []string, stdout, stderr *os.File) int {
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
 		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, or an MKV")
 		output   = fs.String("output", "", "destination .mkv")
-		tempDir  = fs.String("temp", "", "scratch directory for demuxed streams (default: alongside the output)")
+		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox or nvenc")
 		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere) or h265 (smaller)")
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
-		demuxer  = fs.String("demuxer", string(convert.DemuxerBuiltin), "builtin (reads a disc image or folder in place) or tsmuxer (the external tsMuxeR)")
-		muxer    = fs.String("muxer", string(convert.MuxerBuiltin), "builtin (writes the MKV in process) or mkvmerge (the external mkvmerge)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
 		swapLR   = fs.Bool("swap-lr", false, "exchange the eyes (default: taken from the disc's own base-view marking)")
-		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select (with --demuxer tsmuxer a disc image is read first, so pass --temp)")
+		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select")
 		audioLng = fs.String("audio-lang", "", "keep only audio in these languages, e.g. eng or eng,fra (default: every track)")
 		audioCdc = fs.String("audio-codec", "", "keep only audio matching these codecs, e.g. truehd or dts,ac3 (default: every track)")
 		audioBst = fs.Bool("audio-best", false, "of the audio tracks that match, keep only the highest quality one (lossless, then channels, then bitrate)")
@@ -76,7 +73,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
-		keepTemp = fs.Bool("keep-temp", false, "leave the demuxed streams behind instead of deleting them")
+		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		quiet    = fs.Bool("quiet", false, "only report errors")
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
@@ -114,18 +111,6 @@ func run(argv []string, stdout, stderr *os.File) int {
 		enc = convert.DefaultEncoder(ctx, goos, cod, *vaapi)
 	}
 
-	dmx := convert.Demuxer(*demuxer)
-	if !dmx.Valid() {
-		fmt.Fprintf(stderr, "mvctools: unknown demuxer %q (want builtin or tsmuxer)\n", dmx)
-		return 2
-	}
-
-	mx := convert.Muxer(*muxer)
-	if !mx.Valid() {
-		fmt.Fprintf(stderr, "mvctools: unknown muxer %q (want builtin or mkvmerge)\n", mx)
-		return 2
-	}
-
 	ga := convert.GPUAPI(*gpuAPI)
 	if !ga.Valid() {
 		fmt.Fprintf(stderr, "mvctools: unknown GPU API %q (want builtin or ffmpeg)\n", ga)
@@ -133,8 +118,6 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 
 	o := convert.DefaultOptions()
-	o.Demuxer = dmx
-	o.Muxer = mx
 	o.GPUAPI = ga
 	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
@@ -168,14 +151,6 @@ func run(argv []string, stdout, stderr *os.File) int {
 		if o.Input == "" {
 			fmt.Fprintf(stderr, "mvctools: --list needs --input\n")
 			return 2
-		}
-		// Listing needs only the demuxer: a remux's requirements.
-		lo := o
-		lo.Remux = true
-		if rep := convert.DetectFor(ctx, goos, lo); !rep.OK() {
-			fmt.Fprint(stderr, rep.String())
-			fmt.Fprintf(stderr, "\nmvctools: cannot list a source without the toolchain; see --check\n")
-			return 1
 		}
 		tracks, err := convert.NewRunner(goos, o, nil).ListTracks(ctx)
 		if err != nil {

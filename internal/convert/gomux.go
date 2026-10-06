@@ -14,8 +14,7 @@ import (
 // muxBuiltin writes the MKV in process: the encoded video, then each audio
 // and subtitle track in the order the disc lists them, with the chapters.
 //
-// It does what the mkvmerge path does with the same files: the video is
-// flagged side by side, left eye first; each track carries the language the
+// The video is flagged side by side, left eye first; each track carries the language the
 // disc gives it ("und" when it gives none); and a lossy core packed with a
 // lossless track (the AC-3 inside a TrueHD stream, the AC-3 of a 7.1 E-AC-3
 // track, the DTS of DTS-HD) is left out unless --keep-fallback asks for it,
@@ -139,9 +138,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video string, extras []extra, c
 	return os.Rename(tmp, r.Opts.Output)
 }
 
-// audioFormat says how a demuxed file's frames are laid out. tsMuxeR and the
-// built-in demuxer name the files differently, and tsMuxeR's stream ID for a
-// TrueHD track is A_AC3, so the type and the extension are both consulted.
+// audioFormat says how a demuxed file's frames are laid out. A TrueHD
+// track's stream ID is A_AC3 (tsMuxeR's spelling, which the listing keeps),
+// so the type and the extension are both consulted.
 func audioFormat(e extra) mkv.AudioFormat {
 	ext := strings.ToLower(filepath.Ext(e.path))
 	typ := strings.ToUpper(e.track.Type)
@@ -154,13 +153,4 @@ func audioFormat(e extra) mkv.AudioFormat {
 		return mkv.DTS
 	}
 	return mkv.AC3
-}
-
-// chapterFile renders chapters in the simple format mkvmerge reads.
-func chapterFile(chapters []time.Duration) string {
-	var b strings.Builder
-	for i, c := range chapters {
-		fmt.Fprintf(&b, "CHAPTER%02d=%s\nCHAPTER%02dNAME=Chapter %d\n", i+1, chapterTime(c), i+1, i+1)
-	}
-	return b.String()
 }

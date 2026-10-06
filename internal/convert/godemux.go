@@ -25,26 +25,12 @@ import (
 // units to the decoder and writes the other tracks out as elementary
 // streams, all in one pass. Nothing is extracted or copied.
 //
-// Where it matters it does what tsMuxeR does, so the rest of the pipeline
-// (mkvmerge, the track identification) sees the same files: raw PES
-// payloads for audio, the AC-3 core kept inside a TrueHD stream, .sup
+// The track files are what tsMuxeR's demux wrote, which this replaced: raw
+// PES payloads for audio, the AC-3 core kept inside a TrueHD stream, .sup
 // entries as "PG" + PTS + DTS rebased to the first picture. Where tsMuxeR
-// does something a player would not — keeping the audio that precedes the
+// did something a player would not — keeping the audio that precedes the
 // playlist's IN_time — this trims instead, since muxing that lead-in puts
 // the sound ahead of the picture by exactly that much.
-
-// Demuxer names which demuxer a conversion uses.
-type Demuxer string
-
-const (
-	// DemuxerBuiltin reads the disc in process.
-	DemuxerBuiltin Demuxer = "builtin"
-	// DemuxerTSMuxeR runs tsMuxeR, as before.
-	DemuxerTSMuxeR Demuxer = "tsmuxer"
-)
-
-// Valid reports whether d is a known demuxer.
-func (d Demuxer) Valid() bool { return d == DemuxerBuiltin || d == DemuxerTSMuxeR }
 
 // clipRef is one stream file to read, in playlist order.
 type clipRef struct {
@@ -675,16 +661,6 @@ func fileSafe(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func chapterTime(d time.Duration) string {
-	h := d / time.Hour
-	d -= h * time.Hour
-	m := d / time.Minute
-	d -= m * time.Minute
-	s := d / time.Second
-	d -= s * time.Second
-	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, d/time.Millisecond)
 }
 
 // openClip starts reading clip i.

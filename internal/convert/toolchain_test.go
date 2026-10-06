@@ -69,49 +69,28 @@ func TestRequiredToolsDependOnTheEncoder(t *testing.T) {
 	if !hasTool(hw, "ffmpeg") || hasTool(hw, "x264") {
 		t.Errorf("hardware encoding needs ffmpeg and not x264, got %v", names(hw))
 	}
-	// The demux and mux stages are the same either way; the decode is built
-	// in and needs nothing.
-	for _, want := range []string{"tsmuxer", "mkvmerge"} {
-		if !hasTool(sw, want) || !hasTool(hw, want) {
-			t.Errorf("%s is required regardless of encoder", want)
-		}
+	// The demux, decode and mux are built in and need nothing.
+	if len(sw) != 1 || len(hw) != 1 {
+		t.Errorf("only the encoder is required, got %v and %v", names(sw), names(hw))
 	}
 }
 
 func TestDetectReportsWhatIsMissing(t *testing.T) {
-	fakeLookPath(t, "mkvmerge")
+	fakeLookPath(t, "ffmpeg")
 	rep := Detect(context.Background(), "linux", EncoderSoftware, CodecH264, false)
 	if rep.OK() {
 		t.Fatal("report should not be OK when tools are absent")
 	}
-	missing := names(toolsOf(rep.Missing()))
-	for _, want := range []string{"tsMuxeR", "x264"} {
-		if !containsFold(missing, want) {
-			t.Errorf("missing list %v should contain %s", missing, want)
-		}
-	}
-	for _, unwanted := range []string{"mkvmerge"} {
-		if containsFold(missing, unwanted) {
-			t.Errorf("%s was present and must not be reported missing", unwanted)
-		}
+	if missing := names(toolsOf(rep.Missing())); !containsFold(missing, "x264") {
+		t.Errorf("missing list %v should contain x264", missing)
 	}
 }
 
 func TestDetectIsOKWhenEverythingIsPresent(t *testing.T) {
-	fakeLookPath(t, "tsMuxeR", "x264", "mkvmerge")
+	fakeLookPath(t, "x264")
 	rep := Detect(context.Background(), "linux", EncoderSoftware, CodecH264, false)
 	if !rep.OK() {
 		t.Errorf("expected OK, missing: %v", names(toolsOf(rep.Missing())))
-	}
-}
-
-// tsMuxeR ships under two spellings; either satisfies the requirement.
-func TestDetectAcceptsEitherBinaryName(t *testing.T) {
-	for _, spelling := range []string{"tsMuxeR", "tsmuxer"} {
-		fakeLookPath(t, spelling, "x264", "mkvmerge")
-		if rep := Detect(context.Background(), "linux", EncoderSoftware, CodecH264, false); !rep.OK() {
-			t.Errorf("%s should satisfy the tsmuxer requirement", spelling)
-		}
 	}
 }
 
@@ -124,22 +103,22 @@ func TestMissingToolReportExplainsItself(t *testing.T) {
 	if !strings.Contains(out, "MISSING") {
 		t.Error("report should mark missing tools")
 	}
-	if !strings.Contains(out, "demux the base and dependent MVC views") {
+	if !strings.Contains(out, "encode the stacked frames in software") {
 		t.Error("report should say what each missing tool is for")
 	}
 	if !strings.Contains(out, "try:") {
 		t.Error("report should offer an install hint")
 	}
-	if !strings.Contains(out, "3 of 3 tools missing") {
+	if !strings.Contains(out, "1 of 1 tools missing") {
 		t.Errorf("report should total the misses, got:\n%s", out)
 	}
 }
 
 func TestInstallHintFallsBackForAnUnlistedPlatform(t *testing.T) {
-	if h := toolMkvmerge.InstallHint("plan9"); h == "" {
+	if h := toolX264.InstallHint("plan9"); h == "" {
 		t.Error("an unlisted platform should still get a starting point")
 	}
-	if h := toolMkvmerge.InstallHint("darwin"); !strings.Contains(h, "brew") {
+	if h := toolX264.InstallHint("darwin"); !strings.Contains(h, "brew") {
 		t.Errorf("darwin hint should be the macOS one, got %q", h)
 	}
 }
@@ -173,7 +152,7 @@ func TestSupportsEncoderIsPlatformAware(t *testing.T) {
 
 func TestDefaultEncoderFallsBackToSoftware(t *testing.T) {
 	// Only the software chain is installed, so auto must not pick a GPU path.
-	fakeLookPath(t, "tsMuxeR", "x264", "mkvmerge")
+	fakeLookPath(t, "x264")
 	fakeProbe(t)
 	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderSoftware {
 		t.Errorf("got %q, want x264 when no ffmpeg is installed", got)
@@ -181,7 +160,7 @@ func TestDefaultEncoderFallsBackToSoftware(t *testing.T) {
 }
 
 func TestDefaultEncoderPrefersHardwareWhenItActuallyWorks(t *testing.T) {
-	fakeLookPath(t, "tsMuxeR", "ffmpeg", "mkvmerge")
+	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t, EncoderVideoToolbox)
 	if got := DefaultEncoder(context.Background(), "darwin", CodecH264, ""); got != EncoderVideoToolbox {
 		t.Errorf("got %q, want videotoolbox when its trial encode succeeds", got)
@@ -192,7 +171,7 @@ func TestDefaultEncoderPrefersHardwareWhenItActuallyWorks(t *testing.T) {
 // with no NVIDIA card. Locating the tools is not evidence the encoder works, so
 // a failing trial must fall through rather than be chosen.
 func TestDefaultEncoderSkipsAnEncoderThatDoesNotWork(t *testing.T) {
-	fakeLookPath(t, "tsMuxeR", "ffmpeg", "mkvmerge")
+	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t) // nothing works
 	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderSoftware {
 		t.Errorf("got %q, want x264 when no hardware trial succeeds", got)
@@ -201,7 +180,7 @@ func TestDefaultEncoderSkipsAnEncoderThatDoesNotWork(t *testing.T) {
 
 // On Linux NVENC is preferred over VAAPI, but only if it actually encodes.
 func TestDefaultEncoderFallsFromNVENCToVAAPI(t *testing.T) {
-	fakeLookPath(t, "tsMuxeR", "ffmpeg", "mkvmerge")
+	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t, EncoderVAAPI)
 	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderVAAPI {
 		t.Errorf("got %q, want vaapi when nvenc's trial fails and vaapi's passes", got)

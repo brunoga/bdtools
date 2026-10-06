@@ -26,9 +26,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libva-dev
 
       - name: Test
-        # The end-to-end conversion tests skip when tsMuxeR, x264 and
-        # mkvmerge are not installed, which they are not here; the GPU
-        # encoder tests skip without a GPU.
+        # The end-to-end conversion tests skip when x264 is not installed,
+        # which it is not here; the GPU encoder tests skip without a GPU.
         run: go test -race -timeout 300s ./...
 
       - name: Test the pure-Go decoder

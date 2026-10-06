@@ -14,7 +14,7 @@ import (
 // `--audio-lang eng --audio-codec truehd` means "the English TrueHD track",
 // not "anything English or anything TrueHD".
 type TrackFilter struct {
-	// Langs are ISO-639 codes as tsMuxeR reports them ("eng", "fra"). The
+	// Langs are ISO-639-2 codes as the source gives them ("eng", "fra"). The
 	// special value "und" matches a track the source gave no language for,
 	// which is what Matroska already calls undetermined.
 	Langs []string
@@ -28,7 +28,7 @@ type TrackFilter struct {
 	// case-insensitively, as substrings: "truehd" matches A_TRUEHD, and "dts"
 	// matches both A_DTS and DTS-HD Master Audio. A substring is the right
 	// shape here because the disc's own spelling varies and an operator
-	// should not have to know which form tsMuxeR used.
+	// should not have to know which form the source used.
 	Codecs []string
 }
 
@@ -38,7 +38,7 @@ func (f TrackFilter) Empty() bool {
 }
 
 // langAliases maps the spellings people and discs actually use onto the
-// ISO-639-2 code tsMuxeR reports.
+// ISO-639-2 code a source gives.
 //
 // A Blu-ray has no way to say "Brazilian Portuguese" in ISO-639-2 — there is
 // only "por" — so discs variously tag it "por", or use the non-standard "pob"

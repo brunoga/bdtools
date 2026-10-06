@@ -7,19 +7,20 @@
 // it to side-by-side keeps both eyes at full resolution in a single frame that
 // any H.264/HEVC decoder handles.
 //
-// The work itself is done by external programs; this package decides which
-// ones a platform needs, finds them, and assembles the commands:
+// Everything but the encode runs in process:
 //
-//	tsMuxeR   demux the base (AVC) and dependent (MVC) views, plus audio,
-//	          subtitles and chapters
-//	decoder   the MVC decoder of the parent package, in process: both views
-//	          decoded and stacked side by side, streamed as Y4M
-//	encoder   x264 or x265, or ffmpeg with a platform hardware encoder
-//	mkvmerge  mux the result back together
+//	demuxer   read a Blu-ray (image, folder, playlist, m2ts) or a Matroska
+//	          remux in place: the video to the decoder, audio, subtitles and
+//	          chapters to the work directory
+//	decoder   the MVC decoder of the parent package: both views decoded and
+//	          stacked side by side
+//	encoder   a GPU through its system library, in process; or x264 / x265
+//	          (ffmpeg for software half-SBS, or a GPU without its library)
+//	muxer     write the MKV
 //
-// Installing the programs is left to the operator. What this package guarantees
-// is that it will say precisely which are missing, and why each is needed,
-// rather than failing partway through a multi-hour run.
+// Installing an encoder program, when one is needed, is left to the
+// operator. What this package guarantees is that it will say precisely what
+// is missing, and why, rather than failing partway through a multi-hour run.
 package convert
 
 import (
@@ -138,9 +139,8 @@ func (c Codec) ffmpegSoftwareEncoder() string {
 	return "libx264"
 }
 
-// streamExt is the extension for the raw elementary stream the encoder writes.
-// mkvmerge identifies a raw stream by extension, so getting this wrong makes
-// the mux reject the file rather than mis-handle it.
+// streamExt is the extension for the raw elementary stream the encoder
+// writes.
 func (c Codec) streamExt() string {
 	if c == CodecH265 {
 		return ".265"
@@ -169,37 +169,6 @@ func Encoders(goos string) []Encoder {
 func (e Encoder) UsesFFmpeg() bool { return e != EncoderSoftware && e != EncoderAuto }
 
 var (
-	toolTSMuxeR = Tool{
-		Name:        "tsmuxer",
-		Binaries:    []string{"tsMuxeR", "tsmuxer"},
-		Purpose:     "demux the base and dependent MVC views, audio, subtitles and chapters",
-		VersionArgs: nil, // prints a banner with no arguments
-		// Upstream's own release binaries demux MVC — verified against
-		// 2.7.0-linux, which carries the V_MPEG4/ISO/MVC codec — so there is
-		// nothing to build on the platforms it publishes for.
-		//
-		// The published Linux build is x86_64 and the macOS one is arm64, so
-		// the only case needing a build is 64-bit Arm Linux. Its CLI needs no
-		// Qt — that is the GUI alone — so it is cmake plus zlib and freetype.
-		Install: map[string]string{
-			"linux": "x86_64: unzip tsMuxer-*-linux.zip from https://github.com/justdan96/tsMuxer/releases. " +
-				"arm64: build the CLI (no Qt needed) — apt install build-essential cmake ninja-build " +
-				"zlib1g-dev libfreetype-dev, then cmake -S . -B build -G Ninja && ninja -C build tsmuxer",
-			"darwin":  "unzip tsMuxer-*-mac.zip from https://github.com/justdan96/tsMuxer/releases (it is an arm64 build)",
-			"windows": "unzip tsMuxer-*-win64.zip from https://github.com/justdan96/tsMuxer/releases",
-		},
-	}
-	toolMkvmerge = Tool{
-		Name:        "mkvmerge",
-		Binaries:    []string{"mkvmerge"},
-		Purpose:     "mux the encoded video with audio, subtitles and chapters",
-		VersionArgs: []string{"--version"},
-		Install: map[string]string{
-			"linux":   "install mkvtoolnix",
-			"darwin":  "brew install mkvtoolnix",
-			"windows": "https://mkvtoolnix.download/",
-		},
-	}
 	toolX264 = Tool{
 		Name:        "x264",
 		Binaries:    []string{"x264"},
@@ -235,48 +204,23 @@ var (
 	}
 )
 
-// Required returns the tools needed on goos to produce codec with the given
-// encoder, in the order a reader would meet them in the pipeline. The decode
-// needs none, being built in. Only the encode step varies: a hardware encoder
-// is ffmpeg either way, and software encoding is whichever of x264 / x265
-// matches the codec.
+// Required returns the program needed on goos to produce codec with the
+// given encoder through an external program: ffmpeg for a hardware encoder
+// (or software half-SBS), else whichever of x264 / x265 matches the codec.
+// The demux, decode and mux are built in and need nothing.
 //
-// This is the set for a conversion with tsMuxeR as the demuxer; RequiredFor
-// answers for any options.
+// RequiredFor answers for any options, including a GPU encoding in process.
 func Required(goos string, enc Encoder, codec Codec, viaFFmpeg bool) []Tool {
-	return required(enc, codec, viaFFmpeg, DemuxerTSMuxeR, false, MuxerMkvmerge, false)
+	return []Tool{encoderTool(enc, codec, viaFFmpeg)}
 }
 
-// RequiredFor returns the tools a run with these options needs. With the
-// built-in demuxer a remux needs none at all, and a conversion only the
-// encoder and the muxer.
+// RequiredFor returns the tools a run with these options needs: none for a
+// remux or a GPU encoding in process, otherwise the encoder program.
 func RequiredFor(goos string, o Options) []Tool {
-	demux := DemuxerBuiltin
-	if !o.builtin() {
-		demux = DemuxerTSMuxeR
+	if o.Remux || o.NativeGPU {
+		return nil
 	}
-	mux := MuxerBuiltin
-	if !o.builtinMux() {
-		mux = MuxerMkvmerge
-	}
-	return required(o.Encoder, o.Codec, o.EncodesViaFFmpeg(), demux, o.Remux, mux, o.NativeGPU)
-}
-
-func required(enc Encoder, codec Codec, viaFFmpeg bool, demux Demuxer, remux bool, mux Muxer, native bool) []Tool {
-	var tools []Tool
-	if demux == DemuxerTSMuxeR {
-		tools = append(tools, toolTSMuxeR)
-	}
-	if remux {
-		return tools
-	}
-	if !native {
-		tools = append(tools, encoderTool(enc, codec, viaFFmpeg))
-	}
-	if mux == MuxerMkvmerge {
-		tools = append(tools, toolMkvmerge)
-	}
-	return tools
+	return Required(goos, o.Encoder, o.Codec, o.EncodesViaFFmpeg())
 }
 
 // encoderTool is the program that runs the encode. The runner resolves the
@@ -336,8 +280,8 @@ var LookPath = exec.LookPath
 // Detect locates every tool required on this platform for enc.
 //
 // A version string is best-effort: several of these programs exit non-zero
-// when asked for one, and tsMuxeR has no version flag at all, so a tool that
-// was found but would not report a version is still reported as present.
+// when asked for one, so a tool that was found but would not report a
+// version is still reported as present.
 func Detect(ctx context.Context, goos string, enc Encoder, codec Codec, viaFFmpeg bool) Report {
 	return detect(ctx, goos, enc, codec, Required(goos, enc, codec, viaFFmpeg))
 }

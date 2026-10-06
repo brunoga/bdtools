@@ -5,6 +5,25 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `mvctools` reads Matroska remuxes of 3D discs (MakeMKV, mkvmerge) in
+  process, like a disc: the video track's MVC access units go straight to
+  the decoder, and the audio and subtitle tracks keep their names and forced
+  flags in the output.
+- Both commands print a banner with their name and version in their help,
+  and `mvcdec` has `-version`.
+
+### Removed
+
+- tsMuxeR and mkvmerge are no longer used: the built-in demuxer and muxer do
+  everything they did. `--demuxer` and `--muxer` are gone, and so are both
+  tools from the Docker image.
+- MP4, MOV and VOB sources are no longer accepted (they went to tsMuxeR):
+  MVC travels on Blu-rays and in Matroska remuxes of them.
+- A title made of several clips can no longer be remuxed (that, too, was
+  tsMuxeR's); it still converts.
+
 ## [0.1.0] - 2026-10-05
 
 ### Added

@@ -95,9 +95,8 @@ func TestSoftwareCodecsCarryQualitySettings(t *testing.T) {
 	}
 }
 
-// mkvmerge identifies a raw elementary stream by its extension, so an HEVC
-// stream written to a .264 file is rejected at the mux — hours after the
-// encode started.
+// The raw stream's extension follows the codec, and the mux reads the file
+// the encode wrote.
 func TestRawStreamExtensionFollowsTheCodec(t *testing.T) {
 	for _, c := range []struct {
 		cod Codec
