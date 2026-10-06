@@ -218,3 +218,25 @@ func toolsOf(fs []Found) []Tool {
 	}
 	return out
 }
+
+// An ffmpeg that is there but cannot drive the GPU asked for is reported as
+// unusable, so --check and the start of a run say so before the demux.
+func TestDetectForTriesTheGPUThroughFFmpeg(t *testing.T) {
+	origLook, origProbe := LookPath, runProbe
+	t.Cleanup(func() { LookPath, runProbe = origLook, origProbe })
+	LookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	runProbe = func(context.Context, []string) error { return errors.New("Unknown encoder 'hevc_nvenc'") }
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.Codec = "/in/a.iso", "/out/a.mkv", EncoderNVENC, CodecH265
+	rep := DetectFor(t.Context(), "linux", o)
+	if rep.OK() || !strings.Contains(rep.String(), "UNUSABLE") || !strings.Contains(rep.String(), "hevc_nvenc") {
+		t.Errorf("report:\n%s", rep)
+	}
+	runProbe = func(context.Context, []string) error { return nil }
+	if rep := DetectFor(t.Context(), "linux", o); !rep.OK() {
+		t.Errorf("a working ffmpeg is reported unusable:\n%s", rep)
+	}
+	o.NativeGPU = true
+	runProbe = func(context.Context, []string) error { t.Error("probed ffmpeg for an in-process GPU"); return nil }
+	DetectFor(t.Context(), "linux", o)
+}

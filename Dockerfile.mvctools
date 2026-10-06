@@ -10,7 +10,7 @@
 # encoders and ffmpeg (software half-SBS, and GPUs without their library).
 
 # ── Go build ──────────────────────────────────────────────────────────────────
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS gobuild
+FROM --platform=$BUILDPLATFORM golang:1.27 AS gobuild
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG VERSION=dev
@@ -22,11 +22,28 @@ RUN GOARM="${TARGETVARIANT#v}" CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
     go build -ldflags="-s -w -X main.version=${VERSION}" -o mvctools ./cmd/mvctools
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-FROM alpine:latest
+# Debian, not Alpine: a GPU's own libraries — NVIDIA's libnvidia-encode and
+# libcuda, which the NVIDIA container toolkit mounts in, and the VAAPI drivers —
+# are built against glibc, and a musl system cannot load them. Debian's ffmpeg
+# also has NVENC and VAAPI, for --gpu-api ffmpeg.
+FROM debian:trixie-slim
+ARG TARGETARCH
 
 # x264 and x265 are both installed: the codec is chosen per run (--codec), and
-# an image that carried only one would fail --check for the other.
-RUN apk --no-cache add ca-certificates tzdata ffmpeg x264 x265
+# an image that carried only one would fail --check for the other. VAAPI needs
+# libva and a driver: Intel's (non-free, the one that encodes on recent GPUs,
+# amd64 only) and Mesa's for AMD.
+RUN sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg x264 x265 \
+      libva2 libva-drm2 mesa-va-drivers \
+ && if [ "$TARGETARCH" = amd64 ]; then apt-get install -y --no-install-recommends intel-media-va-driver-non-free; fi \
+ && rm -rf /var/lib/apt/lists/*
+
+# What the NVIDIA container toolkit mounts: "video" brings libnvidia-encode,
+# without which NVENC is not there (the default is compute and utility only).
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
 COPY --from=gobuild /build/mvctools /usr/local/bin/mvctools
 
