@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Added
 
 - `probe` reports video bit depth: on a disc, the depth Blu-ray allows the
@@ -22,7 +24,6 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the same file an uninterrupted run would. Other settings or another
   source start over, as does `--restart`. Ctrl-C now stops a conversion
   cleanly.
-
 - `--subs-3d on|both`: subtitles drawn into both halves of the side-by-side
   frame at the depth the disc gives them (the offset metadata in the MVC
   stream, the sequence the playlist assigns each track), for players that
@@ -201,7 +202,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/mvc/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/brunoga/mvc/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/brunoga/mvc/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/brunoga/mvc/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/brunoga/mvc/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/brunoga/mvc/compare/v0.3.0...v0.3.1
