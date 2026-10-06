@@ -546,7 +546,7 @@ recent GPUs is `intel-media-va-driver-non-free` on Debian and Ubuntu.
 ## Docker
 
 `Dockerfile.mvctools` carries the whole toolchain, for amd64 and arm64, on
-Alpine. A release publishes it:
+Debian. A release publishes it:
 
 ```sh
 docker run --rm -v /media:/media ghcr.io/brunoga/mvctools:latest --check
@@ -561,7 +561,26 @@ docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t
 
 The demuxer, decoder and muxer are part of the `mvctools` binary, with the
 decoder's assembly kernels chosen at run time by what the CPU supports; the
-image adds x264, x265 and ffmpeg.
+image adds x264, x265, ffmpeg (with NVENC and VAAPI), libva, and the VAAPI
+drivers for Intel (non-free, amd64) and AMD.
+
+It is Debian, not Alpine, because a GPU's own libraries are built for glibc:
+NVIDIA's `libnvidia-encode` and `libcuda`, which the NVIDIA container toolkit
+mounts in, cannot be loaded by a musl system, and Alpine's ffmpeg has no
+NVENC either.
+
+### GPUs in the container
+
+- **NVIDIA:** install the NVIDIA container toolkit on the host and run with
+  `--gpus all`. The image sets `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`;
+  `video` is the capability that brings `libnvidia-encode` in, and without it
+  there is no NVENC.
+- **Intel / AMD (VAAPI):** pass the render node, `--device /dev/dri/renderD128`
+  (and `--vaapi-device` if it is another one). The drivers are in the image.
+
+`--check` in the container tries a GPU reached through ffmpeg with a short
+encode, so an image or host that cannot drive the GPU says so before a
+conversion starts rather than at its encode.
 
 ### Running the conversion out of the image
 

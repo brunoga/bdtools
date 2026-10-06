@@ -22,6 +22,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - GPU encoders make a keyframe every 250 frames, as x264 and x265 do,
   instead of every 2 s: 7% smaller at the same quality.
 - Tracks that hold nothing in the part played are reported in one line.
+- The Docker image is Debian instead of Alpine, with the VAAPI drivers for
+  Intel and AMD, and asks the NVIDIA container toolkit for the video
+  capability: on Alpine, NVIDIA's glibc libraries could not load, so no GPU
+  encoder worked in the container.
+- `--check`, and the check before a run, try a GPU encoder reached through
+  ffmpeg with a short encode: an ffmpeg without it is reported as unusable.
 
 ### Fixed
 

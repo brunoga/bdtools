@@ -245,10 +245,13 @@ type Found struct {
 	Path string
 	// Version is the first line the tool printed when asked, best-effort.
 	Version string
+	// Unusable says why a tool that is there cannot do the job: an ffmpeg
+	// built without the GPU encoder asked for, say.
+	Unusable string
 }
 
-// OK reports whether the tool was located.
-func (f Found) OK() bool { return f.Path != "" }
+// OK reports whether the tool was located and can do its job.
+func (f Found) OK() bool { return f.Path != "" && f.Unusable == "" }
 
 // Report is the result of a toolchain check.
 type Report struct {
@@ -286,9 +289,21 @@ func Detect(ctx context.Context, goos string, enc Encoder, codec Codec, viaFFmpe
 	return detect(ctx, goos, enc, codec, Required(goos, enc, codec, viaFFmpeg))
 }
 
-// DetectFor locates the tools a run with these options needs.
+// DetectFor locates the tools a run with these options needs. A GPU
+// encoder reached through ffmpeg is also tried there, with a short encode:
+// an ffmpeg can be present and still lack it (Alpine's has no NVENC), which
+// would otherwise only show at the encode, after the demux.
 func DetectFor(ctx context.Context, goos string, o Options) Report {
-	return detect(ctx, goos, o.Encoder, o.Codec, RequiredFor(goos, o))
+	rep := detect(ctx, goos, o.Encoder, o.Codec, RequiredFor(goos, o))
+	if _, hw := hwKind(o.Encoder); hw && !o.NativeGPU {
+		for i, f := range rep.Tools {
+			if f.Name == toolFFmpeg.Name && f.Path != "" && !ProbeEncoder(ctx, o.Encoder, o.Codec, o.VAAPIDevice, true) {
+				rep.Tools[i].Unusable = fmt.Sprintf("this ffmpeg cannot encode %s with %s (no %s, or no GPU it can use)",
+					o.Codec, o.Encoder, o.Codec.ffmpegEncoder(o.Encoder))
+			}
+		}
+	}
+	return rep
 }
 
 func detect(ctx context.Context, goos string, enc Encoder, codec Codec, tools []Tool) Report {
@@ -343,6 +358,8 @@ func (r Report) String() string {
 			fmt.Fprintf(&b, "  ok       %-10s %s\n           %s\n", f.Name, f.Path, f.Version)
 		case f.OK():
 			fmt.Fprintf(&b, "  ok       %-10s %s\n", f.Name, f.Path)
+		case f.Path != "":
+			fmt.Fprintf(&b, "  UNUSABLE %-10s %s\n           %s\n", f.Name, f.Path, f.Unusable)
 		default:
 			fmt.Fprintf(&b, "  MISSING  %-10s %s\n", f.Name, f.Purpose)
 			if h := f.InstallHint(r.GOOS); h != "" {
@@ -356,7 +373,7 @@ func (r Report) String() string {
 	case r.OK():
 		fmt.Fprintf(&b, "\nall %d required tools present\n", len(r.Tools))
 	default:
-		fmt.Fprintf(&b, "\n%d of %d tools missing\n", len(r.Missing()), len(r.Tools))
+		fmt.Fprintf(&b, "\n%d of %d tools missing or unusable\n", len(r.Missing()), len(r.Tools))
 	}
 	return b.String()
 }
