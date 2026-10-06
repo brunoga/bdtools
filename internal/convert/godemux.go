@@ -58,7 +58,7 @@ type goSource struct {
 }
 
 // resolveGo turns the input into the stream files to read.
-func resolveGo(in string, report Reporter) (*goSource, error) {
+func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
 	st, err := os.Stat(in) //nolint:gosec // the operator's input is the point
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", in, err)
@@ -72,6 +72,10 @@ func resolveGo(in string, report Reporter) (*goSource, error) {
 		}
 		if ext == ".iso" {
 			report.Report("reading the disc image in place (no mount, no extraction)")
+		}
+		if playlist != "" {
+			name := strings.ToUpper(strings.TrimSuffix(filepath.Base(playlist), filepath.Ext(playlist))) + ".mpls"
+			return playlistSource(d, name, report)
 		}
 		return chooseGo(d, report)
 	case ext == ".mpls":

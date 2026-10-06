@@ -126,6 +126,7 @@ scheduler such as pipeliner retry it.
 | `--quiet` | — | Only report errors |
 | `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
 | `--output` | — | Destination `.mkv` |
+| `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Scratch space for the audio and subtitle tracks and the encoded video |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |

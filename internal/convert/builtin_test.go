@@ -30,7 +30,7 @@ var bothForms = []string{"folder", "disc.iso"}
 
 func TestBuiltinListsTheDisc(t *testing.T) {
 	for _, form := range bothForms {
-		src, err := resolveGo(bluray(form), nil)
+		src, err := resolveGo(bluray(form), "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestBuiltinListsTheDisc(t *testing.T) {
 // side-by-side Y4M, writing the selected other tracks to dir.
 func decodeBuiltin(t *testing.T, input, dir string, filter func(*Selection)) ([]byte, []extra) {
 	t.Helper()
-	src, err := resolveGo(input, nil)
+	src, err := resolveGo(input, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,6 +556,21 @@ func TestDetailTags(t *testing.T) {
 	} {
 		if got := WithDetails(in, "3D FSBS 1080p"); got != want {
 			t.Errorf("%s: %s", in, got)
+		}
+	}
+}
+
+// --playlist picks a disc's title by name, with or without the extension.
+func TestPlaylistOption(t *testing.T) {
+	for _, form := range bothForms {
+		for _, name := range []string{"00000", "00000.mpls", "00000.MPLS"} {
+			src, err := resolveGo(bluray(form), name, nil)
+			if err != nil || src.playlist == nil {
+				t.Fatalf("%s %s: %v", form, name, err)
+			}
+		}
+		if _, err := resolveGo(bluray(form), "09999", nil); err == nil {
+			t.Errorf("%s: a missing playlist must fail", form)
 		}
 	}
 }

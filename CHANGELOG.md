@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--playlist` picks the title of a disc image or folder by its playlist,
+  instead of the one the playlists suggest.
 ### Changed
 
 - GPU encoders make a keyframe every 250 frames, as x264 and x265 do,

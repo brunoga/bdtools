@@ -88,7 +88,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if isMatroska(r.Opts.Input) {
 		return r.runMatroska(ctx, tmp)
 	}
-	src, err := resolveGo(r.Opts.Input, r.Report)
+	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Report)
 	if err != nil {
 		return err
 	}
@@ -179,7 +179,7 @@ func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
 	}
 	// Reading the playlists and the first megabytes of the feature's stream
 	// is enough, wherever the disc is: nothing is extracted.
-	src, err := resolveGo(r.Opts.Input, r.Report)
+	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Report)
 	if err != nil {
 		return nil, err
 	}

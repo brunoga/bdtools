@@ -53,6 +53,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		check    = fs.Bool("check", false, "report which external tools are present and which are missing, then exit")
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
 		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, or an MKV")
+		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
 		output   = fs.String("output", "", "destination .mkv")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
@@ -120,7 +121,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	o := convert.DefaultOptions()
 	o.GPUAPI = ga
-	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
+	o.Input, o.Output, o.TempDir, o.Playlist = *input, *output, *tempDir, *playlst
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
 	o.SwapLR = *swapLR

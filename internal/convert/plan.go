@@ -74,6 +74,9 @@ type Options struct {
 	// DecodeThreads is how many pictures the decoder works on at once; 0 uses
 	// every CPU.
 	DecodeThreads int
+	// Playlist picks the title of a disc image or folder by its playlist
+	// ("00800" or "00800.mpls") instead of letting the playlists decide.
+	Playlist string
 	// GPUAPI says how a hardware encoder is driven: through its system
 	// library in process (the default; empty means it too), or ffmpeg.
 	GPUAPI GPUAPI
