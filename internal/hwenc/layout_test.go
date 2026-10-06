@@ -66,7 +66,10 @@ func headerDirs(t *testing.T, env, header string, system ...string) []string {
 func TestNVENCLayout(t *testing.T) {
 	inc := headerDirs(t, "MVC_NVENC_HEADERS", "ffnvcodec/nvEncodeAPI.h", "/usr/include", "/usr/local/include")
 	var src strings.Builder
-	src.WriteString("#include <stdio.h>\n#include <stddef.h>\n#include <ffnvcodec/nvEncodeAPI.h>\n")
+	src.WriteString("#include <stdio.h>\n#include <stddef.h>\n#include <string.h>\n#include <stdint.h>\n#include <ffnvcodec/nvEncodeAPI.h>\n")
+	// AV1BIT is the bit position of a bitfield in NV_ENC_CONFIG_AV1's flag word.
+	src.WriteString("#define AV1BIT(f) ({ NV_ENC_CONFIG_AV1 c; memset(&c, 0, sizeof c); c.f = 1; uint32_t w; " +
+		"memcpy(&w, (char *)&c + offsetof(NV_ENC_CONFIG_AV1, maxPartSize) + sizeof(NV_ENC_AV1_PART_SIZE), 4); __builtin_ctz(w); })\n")
 	src.WriteString("static void guid(const GUID *g) { const unsigned char *b = (const void *)g; for (int i = 0; i < 16; i++) printf(\"%02x\", b[i]); printf(\"\\n\"); }\n")
 	src.WriteString("int main(void) {\n\tprintf(\"%d.%d\\n\", NVENCAPI_MAJOR_VERSION, NVENCAPI_MINOR_VERSION);\n")
 	for _, f := range nvencFacts {
@@ -158,6 +161,18 @@ var nvencFacts = []struct {
 	{"nvRCConstQP", nvRCConstQP, "offsetof(NV_ENC_RC_PARAMS, constQP)"},
 	{"nvH264IDRPeriod", nvH264IDRPeriod, "offsetof(NV_ENC_CONFIG_H264, idrPeriod)"},
 	{"nvHEVCIDRPeriod", nvHEVCIDRPeriod, "offsetof(NV_ENC_CONFIG_HEVC, idrPeriod)"},
+	{"nvAV1Level", nvAV1Level, "offsetof(NV_ENC_CONFIG_AV1, level)"},
+	{"nvAV1Tier", nvAV1Tier, "offsetof(NV_ENC_CONFIG_AV1, tier)"},
+	{"nvAV1Flags", nvAV1Flags, "offsetof(NV_ENC_CONFIG_AV1, maxPartSize) + sizeof(NV_ENC_AV1_PART_SIZE)"},
+	{"nvAV1IDRPeriod", nvAV1IDRPeriod, "offsetof(NV_ENC_CONFIG_AV1, idrPeriod)"},
+	{"nvAV1AnnexBBit", nvAV1AnnexBBit, "AV1BIT(outputAnnexBFormat)"},
+	{"nvAV1DisableSeqHdrBit", nvAV1DisableSeqHdrBit, "AV1BIT(disableSeqHdr)"},
+	{"nvAV1RepeatSeqHdrBit", nvAV1RepeatSeqHdrBit, "AV1BIT(repeatSeqHdr)"},
+	{"nvAV1ChromaFormatBit", nvAV1ChromaFormatBit, "AV1BIT(chromaFormatIDC)"},
+	{"nvAV1InputBitDepthBit", nvAV1InputBitDepthBit, "AV1BIT(inputPixelBitDepthMinus8)"},
+	{"nvAV1PixelBitDepthBit", nvAV1PixelBitDepthBit, "AV1BIT(pixelBitDepthMinus8)"},
+	{"nvLevelAV1Auto", nvLevelAV1Auto, "NV_ENC_LEVEL_AV1_AUTOSELECT"},
+	{"nvTierAV1Main", nvTierAV1Main, "NV_ENC_TIER_AV1_0"},
 	{"nvSizeInitializeParams", nvSizeInitializeParams, "sizeof(NV_ENC_INITIALIZE_PARAMS)"},
 	{"nvIPEncodeGUID", nvIPEncodeGUID, "offsetof(NV_ENC_INITIALIZE_PARAMS, encodeGUID)"},
 	{"nvIPPresetGUID", nvIPPresetGUID, "offsetof(NV_ENC_INITIALIZE_PARAMS, presetGUID)"},
@@ -213,5 +228,6 @@ var nvencGUIDs = []struct {
 }{
 	{nvCodecH264GUID, "NV_ENC_CODEC_H264_GUID"},
 	{nvCodecHEVCGUID, "NV_ENC_CODEC_HEVC_GUID"},
+	{nvCodecAV1GUID, "NV_ENC_CODEC_AV1_GUID"},
 	{nvPresetP4GUID, "NV_ENC_PRESET_P4_GUID"},
 }

@@ -15,6 +15,7 @@ type Codec int
 const (
 	H264 Codec = iota
 	HEVC
+	AV1
 )
 
 // VideoSource reads an encoder's raw Annex B output — in decode order, with
@@ -43,6 +44,7 @@ type VideoSource struct {
 	cvsCount int64
 	maxPOC   int64
 	err      error
+	av1      *av1State // the AV1 path, which needs none of the above
 }
 
 type vframe struct {
@@ -69,6 +71,9 @@ func NewVideoSource(r io.Reader, codec Codec, fpsNum, fpsDen int, stereoMode int
 	v := &VideoSource{codec: codec, r: bufio.NewReaderSize(r, 4<<20), window: reorderWindow,
 		frameDur: time.Duration(int64(time.Second) * int64(fpsDen) / int64(fpsNum))}
 	v.params.fpsNum, v.params.fpsDen = fpsNum, fpsDen
+	if codec == AV1 {
+		return v, v.primeAV1(stereoMode)
+	}
 	// Prime: read until the parameter sets are known.
 	for !v.params.complete(codec) {
 		if err := v.readFrame(); err != nil {
@@ -97,6 +102,9 @@ func (v *VideoSource) Track() Track { return v.track }
 
 // Next returns the next frame in decode order.
 func (v *VideoSource) Next() (Frame, error) {
+	if v.av1 != nil {
+		return v.nextAV1()
+	}
 	for len(v.ready) == 0 {
 		if v.err != nil {
 			return Frame{}, v.err

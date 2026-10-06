@@ -218,6 +218,9 @@ type vtEnc struct {
 var vtNextRefcon atomic.Uintptr
 
 func openVideoToolbox(cfg Config, w io.Writer) (Encoder, error) {
+	if cfg.Codec == AV1 {
+		return nil, fmt.Errorf("%w: VideoToolbox has no AV1 encoder", ErrUnavailable)
+	}
 	a, err := loadVT()
 	if err != nil {
 		return nil, err
