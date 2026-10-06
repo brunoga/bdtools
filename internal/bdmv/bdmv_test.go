@@ -1,8 +1,13 @@
 package bdmv
 
 import (
+	"bytes"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,5 +176,127 @@ func FuzzParseMPLS(f *testing.F) {
 			_ = pl.String()
 		}
 		_, _ = ParseCLPI(b)
+	})
+}
+
+// A disc read from a reader is the disc read from its path: the same
+// playlists, durations, stream files and clip streams.
+func TestOpenImageMatchesOpen(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "bluray", "disc.iso")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = byPath.Close() }()
+	byReader, err := OpenImage(bytes.NewReader(b), int64(len(b)), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = byReader.Close() }()
+	describe := func(d Disc) string {
+		names, err := Playlists(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out strings.Builder
+		for _, n := range names {
+			pl, err := ReadPlaylist(d, n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintf(&out, "%s %v 3D=%v\n", n, pl.Duration(), pl.ThreeD())
+			for _, it := range pl.Items {
+				p, ssif := StreamPath(d, it)
+				cb, err := d.ReadFile(ClipInfo(d, it.Clip))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cs, err := ParseCLPI(cb)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fmt.Fprintf(&out, "  %s ssif=%v %+v\n", p, ssif, cs)
+			}
+		}
+		return out.String()
+	}
+	a, b2 := describe(byPath), describe(byReader)
+	if a != b2 {
+		t.Errorf("by path:\n%s\nby reader:\n%s", a, b2)
+	}
+	if !strings.Contains(a, "ssif=true") {
+		t.Errorf("the fixture should read as an SSIF title:\n%s", a)
+	}
+}
+
+// Closing a disc read from a reader leaves the reader alone; closing one
+// opened from a path closes its file.
+func TestDiscClose(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "bluray", "disc.iso")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	st, _ := f.Stat()
+	d, err := OpenImage(f, st.Size(), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.ReadAt(make([]byte, 1), 0); err != nil {
+		t.Errorf("the caller's reader was closed: %v", err)
+	}
+	if runtime.GOOS != "linux" {
+		return
+	}
+	fds := func() int {
+		e, _ := os.ReadDir("/proc/self/fd")
+		return len(e)
+	}
+	before := fds()
+	for range 20 {
+		d, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := fds(); after > before {
+		t.Errorf("%d descriptors left open by 20 opens", after-before)
+	}
+}
+
+// A truncated or garbled image is an error, never a panic.
+func FuzzOpenImage(f *testing.F) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "bluray", "disc.iso"))
+	if err != nil {
+		f.Skip(err)
+	}
+	f.Add(int64(len(b)), int64(0), byte(0))
+	f.Fuzz(func(t *testing.T, size, at int64, v byte) {
+		img := append([]byte(nil), b...)
+		if at >= 0 && at < int64(len(img)) {
+			img[at] = v
+		}
+		if size <= 0 || size > int64(len(img)) {
+			size = int64(len(img))
+		}
+		d, err := OpenImage(bytes.NewReader(img[:size]), size, "fuzz")
+		if err != nil {
+			return
+		}
+		names, _ := Playlists(d)
+		for _, n := range names {
+			_, _ = ReadPlaylist(d, n)
+		}
 	})
 }

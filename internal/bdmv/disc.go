@@ -26,6 +26,9 @@ type Disc interface {
 	Exists(path string) bool
 	// Describe names the disc for messages.
 	Describe() string
+	// Close releases what the disc holds open: the image file Open opened.
+	// A disc read from a caller's reader (OpenImage) leaves it open.
+	Close() error
 }
 
 // Open opens a disc image (.iso), a BDMV directory, or the directory holding
@@ -147,6 +150,9 @@ type dirDisc struct{ root string }
 
 func (d *dirDisc) Describe() string { return d.root }
 
+// Close does nothing: a directory holds nothing open.
+func (d *dirDisc) Close() error { return nil }
+
 // resolve maps a relative path onto the filesystem, matching each component
 // case-insensitively.
 func (d *dirDisc) resolve(path string) (string, error) {
@@ -230,7 +236,7 @@ func (d *dirDisc) Exists(path string) bool {
 // filesystem, and reading it in place needs no mount and no root.
 type isoDisc struct {
 	path string
-	f    *os.File
+	f    io.Closer // the image file Open opened; nil for a caller's reader
 	u    *udf.Udf
 	bdmv []udf.File // entries of the BDMV directory
 }
@@ -240,36 +246,79 @@ func openISO(path string) (Disc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening the image: %w", err)
 	}
-	u, err := udf.NewUdfFromReader(f)
+	d, err := openUDF(f, path)
 	if err != nil {
 		_ = f.Close()
-		return nil, fmt.Errorf("reading %s as a UDF image: %w", filepath.Base(path), err)
+		return nil, err
+	}
+	d.f = f
+	return d, nil
+}
+
+// OpenImage reads a UDF disc image from r, which holds size bytes; label
+// names it in messages. The image may be partial — a pre-download sample
+// with only its first and last pieces, say — as long as the reads the
+// directory and the files asked for need succeed: a read outside what r has
+// is an ordinary error. The caller owns r; Close leaves it open.
+func OpenImage(r io.ReaderAt, size int64, label string) (Disc, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("%s: an image of %d bytes", label, size)
+	}
+	// The UDF reader finds the trailing anchors by asking the reader its
+	// size, which a bare io.ReaderAt cannot say.
+	return openUDF(sizedReader{r, size}, label)
+}
+
+type sizedReader struct {
+	io.ReaderAt
+	size int64
+}
+
+func (s sizedReader) Size() int64 { return s.size }
+
+// openUDF reads the image's root and BDMV directories. A malformed or
+// partial image is an error, never a panic out of the UDF reader.
+func openUDF(r io.ReaderAt, label string) (d *isoDisc, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			d, err = nil, fmt.Errorf("reading %s as a UDF image: malformed (%v)", filepath.Base(label), p)
+		}
+	}()
+	u, err := udf.NewUdfFromReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s as a UDF image: %w", filepath.Base(label), err)
 	}
 	root, err := u.ReadDir(nil)
 	if err != nil {
-		_ = f.Close()
 		return nil, fmt.Errorf("reading the image root: %w", err)
 	}
-	d := &isoDisc{path: path, f: f, u: u}
+	d = &isoDisc{path: label, u: u}
 	for i := range root {
 		e := &root[i]
 		if e.IsDir() && strings.EqualFold(e.Name(), "BDMV") {
 			kids, err := e.ReadDir()
 			if err != nil {
-				_ = f.Close()
 				return nil, err
 			}
 			d.bdmv = kids
 			return d, nil
 		}
 	}
-	_ = f.Close()
-	return nil, fmt.Errorf("no BDMV in %s", filepath.Base(path))
+	return nil, fmt.Errorf("no BDMV in %s", filepath.Base(label))
 }
 
 func (d *isoDisc) Describe() string { return d.path }
 
-func (d *isoDisc) find(path string) (*udf.File, error) {
+// guard turns a panic out of the UDF reader — a partial or malformed image
+// — into an error.
+func guard(err *error) {
+	if p := recover(); p != nil {
+		*err = fmt.Errorf("reading the image: malformed (%v)", p)
+	}
+}
+
+func (d *isoDisc) find(path string) (_ *udf.File, err error) {
+	defer guard(&err)
 	entries := d.bdmv
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
@@ -305,7 +354,8 @@ func (d *isoDisc) find(path string) (*udf.File, error) {
 	return nil, os.ErrNotExist
 }
 
-func (d *isoDisc) List(dir string) ([]string, error) {
+func (d *isoDisc) List(dir string) (_ []string, err error) {
+	defer guard(&err)
 	entries := d.bdmv
 	if dir != "" && dir != "." {
 		f, err := d.find(dir)
@@ -328,7 +378,8 @@ func (d *isoDisc) List(dir string) ([]string, error) {
 	return out, nil
 }
 
-func (d *isoDisc) ReadFile(path string) ([]byte, error) {
+func (d *isoDisc) ReadFile(path string) (_ []byte, err error) {
+	defer guard(&err)
 	f, err := d.find(path)
 	if err != nil {
 		return nil, err
@@ -344,7 +395,8 @@ type sectionCloser struct{ *io.SectionReader }
 
 func (sectionCloser) Close() error { return nil }
 
-func (d *isoDisc) Open(path string) (io.ReadSeekCloser, int64, error) {
+func (d *isoDisc) Open(path string) (_ io.ReadSeekCloser, _ int64, err error) {
+	defer guard(&err)
 	f, err := d.find(path)
 	if err != nil {
 		return nil, 0, err
@@ -361,5 +413,12 @@ func (d *isoDisc) Exists(path string) bool {
 	return err == nil
 }
 
-// Close releases the image.
-func (d *isoDisc) Close() error { return d.f.Close() }
+// Close releases the image file Open opened.
+func (d *isoDisc) Close() error {
+	if d.f == nil {
+		return nil
+	}
+	err := d.f.Close()
+	d.f = nil
+	return err
+}

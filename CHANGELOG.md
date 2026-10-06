@@ -5,6 +5,24 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `probe`: identifies a Blu-ray image or Matroska file from a pre-download
+  sample — a torrent's first and last pieces, or a Matroska file's first
+  32 KiB — reporting 2D or 3D and how (MVC, side by side, top-bottom), the
+  feature's duration and its tracks, from what the container states. A
+  sample missing what is needed is a `*MissingDataError` naming the bytes,
+  never a panic or a guess. It does not reach the decoder.
+- `bdmv.OpenImage` reads a disc image from an `io.ReaderAt` (a partial one
+  included), and every disc has `Close`.
+
+### Fixed
+
+- mvctools left the disc image of a bare stream file's language lookup
+  open, and a disc open when choosing its title failed.
+- A Matroska prefix that ends inside an element after the tracks (a cover
+  image attachment) reads as its header instead of failing.
+
 ## [0.3.1] - 2026-10-06
 
 ### Fixed

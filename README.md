@@ -137,6 +137,34 @@ ffmpeg, for software half-SBS), and a remux needs none. See
 A container with the whole toolchain is published as
 `ghcr.io/brunoga/mvctools` for amd64 and arm64.
 
+## Probing a source before downloading it
+
+[`probe`](probe) identifies a Blu-ray image or a Matroska file from the little
+a pre-download sample holds — for a torrent, a piece or two — and reports what
+the container states: 2D or 3D and how (MVC, side by side, top-bottom), the
+feature's length, and its video, audio and subtitle tracks. It reads no
+video and pulls in nothing of the decoder.
+
+```go
+r, err := probe.Image(sample, imageSize, name) // an io.ReaderAt over the pieces you have
+var missing *probe.MissingDataError
+if errors.As(err, &missing) {
+	// fetch the piece holding missing.Offset, then try again
+}
+if r.Is3D && r.Layout == probe.LayoutMVC { /* a Blu-ray 3D */ }
+
+r, err = probe.Matroska(prefix, name) // the first 32 KiB or so of an MKV
+```
+
+A disc image keeps its UDF directory at the front and its playlists and clip
+info at the end, so the first and last pieces of a torrent are usually enough:
+on ten Blu-ray 3D images, two 16 MiB pieces were, except one disc with 316
+playlists, which needed a third — the error says which bytes. A read the
+sample cannot satisfy is an error naming them, never a panic and never a
+plausible wrong answer. Fields a source does not state are left zero: a
+disc's "multi-channel" audio has no channel count until the probe can read
+the stream's first frames, which it does when the sample holds them.
+
 ## Performance
 
 Measured on an Intel Core Ultra 9 285K (24 cores), Go 1.27.1:
