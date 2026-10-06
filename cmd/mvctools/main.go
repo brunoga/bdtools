@@ -28,9 +28,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/brunoga/mvc/internal/convert"
 	pversion "github.com/brunoga/mvc/internal/version"
@@ -77,6 +79,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
+		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
 		quiet    = fs.Bool("quiet", false, "only report errors")
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
@@ -98,7 +101,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 
 	goos := runtime.GOOS
-	ctx := context.Background()
+	// Interrupted, a conversion stops cleanly: the video segments it
+	// finished stay in the work directory for the same command to resume
+	// from, and the rest is removed.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	cod := convert.Codec(*codec)
 	if !cod.Valid() {
@@ -195,6 +202,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	runner := convert.NewRunner(goos, o, report)
 	runner.KeepTemp = *keepTemp
+	runner.Restart = *restart
 	// Whether --swap-lr was given, as opposed to merely defaulting to false:
 	// a disc that marks its base view as the right eye sets this itself, but
 	// must not override someone who said otherwise.

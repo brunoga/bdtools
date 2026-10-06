@@ -239,7 +239,7 @@ func TestMatroskaMuxKeepsNames(t *testing.T) {
 	o := DefaultOptions()
 	o.Output = filepath.Join(tmp, "out.mkv")
 	r := NewRunner(CurrentGOOS, o, nil)
-	if err := r.muxBuiltin(t.Context(), video, extras, src.chapters); err != nil {
+	if err := r.muxBuiltin(t.Context(), []string{video}, extras, src.chapters); err != nil {
 		t.Fatal(err)
 	}
 	f, err := os.Open(o.Output)

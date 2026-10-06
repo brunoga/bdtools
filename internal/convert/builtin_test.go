@@ -453,7 +453,7 @@ func TestProgressLine(t *testing.T) {
 	r := NewRunner(CurrentGOOS, DefaultOptions(), func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
 	r.length = 2*time.Hour + 14*time.Minute + 32*time.Second
 	p := r.newProgress("encoded")
-	p.begin(24000, 1001)
+	p.begin(24000, 1001, 0)
 	if len(lines) != 1 || lines[0] != "about 193534 frames to encode (2h14m32s at 23.976 fps)" {
 		t.Errorf("announced %q", lines)
 	}
@@ -465,9 +465,19 @@ func TestProgressLine(t *testing.T) {
 	if got := p.line(200000, p.started.Add(2000*time.Second)); got != "200000 frames encoded (100.0 fps)" {
 		t.Errorf("past the end: %q", got)
 	}
+	// Resumed, the count and the time left are for what is left.
+	lines = nil
+	p = r.newProgress("encoded")
+	p.begin(24000, 1001, 93534)
+	if len(lines) != 1 || lines[0] != "about 100000 of 193534 frames left to encode (2h14m32s at 23.976 fps)" {
+		t.Errorf("resumed: announced %q", lines)
+	}
+	if got, want := p.line(50000, p.started.Add(500*time.Second)), "50000 of 100000 frames encoded (50.0%), 100.0 fps, 8m20s left"; got != want {
+		t.Errorf("resumed: got %q, want %q", got, want)
+	}
 	r.length = 0
 	q := r.newProgress("decoded")
-	q.begin(24000, 1001)
+	q.begin(24000, 1001, 0)
 	if got := q.line(50, q.started.Add(time.Second)); got != "50 frames decoded (50.0 fps)" {
 		t.Errorf("no length: %q", got)
 	}
