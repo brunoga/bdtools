@@ -65,14 +65,8 @@ func (r *bitReader) se() int32 {
 	return -int32(v / 2)
 }
 
-// splitNALs returns the NAL units of an Annex B buffer, without start codes.
-func splitNALs(b []byte) [][]byte {
-	nals, _ := splitNALsAt(b)
-	return nals
-}
-
-// splitNALsAt is splitNALs that also gives where each NAL unit's start code
-// begins in b.
+// splitNALsAt returns the NAL units of an Annex B buffer, without start
+// codes, and where each one's start code begins in b.
 func splitNALsAt(b []byte) (nals [][]byte, at []int) {
 	start, code := -1, -1
 	for i := 0; i+2 < len(b); {
