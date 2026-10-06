@@ -52,6 +52,9 @@ var runProbe = func(ctx context.Context, argv []string) error {
 
 // ProbeEncoder reports whether enc actually encodes codec on this machine.
 func ProbeEncoder(ctx context.Context, enc Encoder, codec Codec, device string, viaFFmpeg bool) bool {
+	if enc.UsesFFmpeg() && codec.ffmpegEncoder(enc) == "" {
+		return false // no such encoder (AV1 on VideoToolbox)
+	}
 	argv := probeArgv(enc, codec, device, viaFFmpeg)
 	if argv == nil {
 		return true // software

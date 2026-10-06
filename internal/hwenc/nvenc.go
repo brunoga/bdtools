@@ -146,8 +146,11 @@ func (e *nvenc) open() error {
 	e.enc = enc.getPtr(0)
 
 	codec := nvCodecH264GUID
-	if e.cfg.Codec == HEVC {
+	switch e.cfg.Codec {
+	case HEVC:
 		codec = nvCodecHEVCGUID
+	case AV1:
+		codec = nvCodecAV1GUID
 	}
 	// The P4 preset tuned for quality, then constant QP as ffmpeg's -qp sets
 	// it, B-frames, and a keyframe interval.
@@ -170,14 +173,31 @@ func (e *nvenc) open() error {
 	cfg.u32(rc, nvRCParamsVer)
 	cfg.u32(rc+nvRCRateControlMode, nvRCConstQPMode)
 	i, p, b := qps(e.cfg.QP)
-	cfg.u32(rc+nvRCConstQP, uint32(p))   //nolint:gosec // 0..51
-	cfg.u32(rc+nvRCConstQP+4, uint32(b)) //nolint:gosec // 0..51
-	cfg.u32(rc+nvRCConstQP+8, uint32(i)) //nolint:gosec // 0..51
-	idr := nvH264IDRPeriod
-	if e.cfg.Codec == HEVC {
-		idr = nvHEVCIDRPeriod
+	if e.cfg.Codec == AV1 {
+		// AV1's quantiser is a 0-255 index: the same offsets, mapped.
+		i, p, b = AV1QIndex(i), AV1QIndex(p), AV1QIndex(b)
 	}
-	cfg.u32(nvCfgCodecConfig+idr, uint32(e.cfg.GOP)) //nolint:gosec // small
+	cfg.u32(rc+nvRCConstQP, uint32(p))   //nolint:gosec // 0..255
+	cfg.u32(rc+nvRCConstQP+4, uint32(b)) //nolint:gosec // 0..255
+	cfg.u32(rc+nvRCConstQP+8, uint32(i)) //nolint:gosec // 0..255
+	cc := nvCfgCodecConfig
+	switch e.cfg.Codec {
+	case H264:
+		cfg.u32(cc+nvH264IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+	case HEVC:
+		cfg.u32(cc+nvHEVCIDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+	case AV1:
+		cfg.u32(cc+nvAV1IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+		cfg.u32(cc+nvAV1Level, nvLevelAV1Auto)
+		cfg.u32(cc+nvAV1Tier, nvTierAV1Main)
+		// 4:2:0, 8-bit, low-overhead OBUs (not Annex B), and the sequence
+		// header again on every keyframe so a player can start anywhere.
+		f := cfg.getU32(cc + nvAV1Flags)
+		f &^= 3<<nvAV1ChromaFormatBit | 7<<nvAV1InputBitDepthBit | 7<<nvAV1PixelBitDepthBit |
+			1<<nvAV1AnnexBBit | 1<<nvAV1DisableSeqHdrBit
+		f |= 1<<nvAV1ChromaFormatBit | 1<<nvAV1RepeatSeqHdrBit
+		cfg.u32(cc+nvAV1Flags, f)
+	}
 
 	ip := newStruct(nvSizeInitializeParams)
 	ip.u32(0, nvInitializeParamsVer)

@@ -181,6 +181,9 @@ func (o Options) Validate(goos string) error {
 		return fmt.Errorf("encoder %q is not available on %s (have: %s)",
 			o.Encoder, goos, encoderList(Encoders(goos)))
 	}
+	if o.Codec == CodecAV1 && o.Encoder == EncoderVideoToolbox {
+		return fmt.Errorf("VideoToolbox cannot encode AV1: use --encoder software (SVT-AV1) or another codec")
+	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
 	}
@@ -200,12 +203,30 @@ func (o Options) NeedsFilters() bool {
 }
 
 // EncodesViaFFmpeg reports whether ffmpeg runs the encode: always for a
-// hardware encoder, and for software encoding that needs a filter.
+// hardware encoder, for software encoding that needs a filter, and for
+// software AV1 when SvtAv1EncApp is not installed but ffmpeg (with its
+// libsvtav1) is.
 func (o Options) EncodesViaFFmpeg() bool {
 	if o.NativeGPU {
 		return false
 	}
-	return o.Encoder.UsesFFmpeg() || (o.Encoder == EncoderSoftware && o.NeedsFilters())
+	if o.Encoder.UsesFFmpeg() {
+		return true
+	}
+	if o.Encoder != EncoderSoftware {
+		return false
+	}
+	return o.NeedsFilters() || o.Codec == CodecAV1 && svtViaFFmpeg()
+}
+
+// svtViaFFmpeg reports whether software AV1 has to go through ffmpeg: the
+// standalone SvtAv1EncApp is missing and ffmpeg is there.
+func svtViaFFmpeg() bool {
+	if _, err := LookPath("SvtAv1EncApp"); err == nil {
+		return false
+	}
+	_, err := LookPath("ffmpeg")
+	return err == nil
 }
 
 func codecList(cs []Codec) string {
@@ -311,6 +332,11 @@ func encodeStep(opts Options, out string) Step {
 		argv = append(argv, codecArgs...)
 		return Step{Name: "encode", Argv: append(argv, out)}
 	}
+	// The GPU encoders take AV1's quantiser as its 0-255 index.
+	qp := opts.CRF
+	if opts.Codec == CodecAV1 {
+		qp = hwenc.AV1QIndex(opts.CRF)
+	}
 	switch opts.Encoder {
 	case EncoderVAAPI:
 		// The upload has to come last: the filters before it work on software
@@ -320,15 +346,32 @@ func encodeStep(opts Options, out string) Step {
 			"-vaapi_device", opts.VAAPIDevice,
 			"-f", "yuv4mpegpipe", "-i", "-",
 			"-vf", videoFilters(opts, "format=nv12,hwupload"),
-			"-c:v", name, "-qp", fmt.Sprint(opts.CRF),
+			"-c:v", name, "-qp", fmt.Sprint(qp),
 		}, out)}
 	case EncoderVideoToolbox:
 		// VideoToolbox's quality runs the other way, 1 to 100 with higher
 		// better; -q:v takes it, and the in-process encoder maps the same.
 		return ff([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
 	case EncoderNVENC:
-		return ff([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(opts.CRF)}, "")
+		return ff([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(qp)}, "")
 	default:
+		if opts.Codec == CodecAV1 {
+			if opts.EncodesViaFFmpeg() {
+				return ff([]string{
+					"-c:v", "libsvtav1",
+					"-crf", fmt.Sprint(svtCRF(opts.CRF)),
+					"-preset", fmt.Sprint(svtPreset(opts.Preset)),
+				}, "")
+			}
+			// SvtAv1EncApp reads Y4M from stdin and writes IVF, which the
+			// muxer reads as well as bare OBUs.
+			return Step{Name: "encode", Argv: []string{
+				"SvtAv1EncApp", "-i", "stdin",
+				"--crf", fmt.Sprint(svtCRF(opts.CRF)),
+				"--preset", fmt.Sprint(svtPreset(opts.Preset)),
+				"-b", out,
+			}}
+		}
 		if opts.NeedsFilters() {
 			// The standalone encoders cannot rescale or rearrange the frame,
 			// so the same encoder library is reached through ffmpeg, which

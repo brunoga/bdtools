@@ -5,6 +5,7 @@
 #include <va/va.h>
 #include <va/va_enc_h264.h>
 #include <va/va_enc_hevc.h>
+#include <va/va_enc_av1.h>
 
 #define SZ(T, n) printf("\t%s = %zu\n", n, sizeof(T))
 #define OFF(T, f, n) printf("\t%s = %zu\n", n, offsetof(T, f))
@@ -137,6 +138,35 @@ int main(void) {
 	BIT(HL, slice_fields, num_ref_idx_active_override_flag, "vaHEVCSliceOverrideBit");
 	BIT(HL, slice_fields, slice_loop_filter_across_slices_enabled_flag, "vaHEVCSliceLFAcrossBit");
 	BIT(HL, slice_fields, collocated_from_l0_flag, "vaHEVCSliceColFromL0Bit");
+
+	/* AV1 */
+	C(VAProfileAV1Profile0, "vaProfileAV1Profile0");
+	typedef VAEncSequenceParameterBufferAV1 AS;
+	SZ(AS, "vaSizeAV1Seq");
+	OFF(AS, seq_profile, "vaAV1SeqProfile"); OFF(AS, seq_level_idx, "vaAV1SeqLevel"); OFF(AS, seq_tier, "vaAV1SeqTier");
+	OFF(AS, intra_period, "vaAV1SeqIntraPeriod"); OFF(AS, ip_period, "vaAV1SeqIPPeriod");
+	OFF(AS, seq_fields, "vaAV1SeqFields"); OFF(AS, order_hint_bits_minus_1, "vaAV1SeqOrderHintBits");
+	BIT(AS, seq_fields, enable_order_hint, "vaAV1SeqOrderHintBit"); BIT(AS, seq_fields, enable_cdef, "vaAV1SeqCDEFBit");
+	typedef VAEncPictureParameterBufferAV1 AP;
+	SZ(AP, "vaSizeAV1Pic");
+	OFF(AP, frame_width_minus_1, "vaAV1PicWidth"); OFF(AP, frame_height_minus_1, "vaAV1PicHeight");
+	OFF(AP, reconstructed_frame, "vaAV1PicRecon"); OFF(AP, coded_buf, "vaAV1PicCodedBuf");
+	OFF(AP, reference_frames, "vaAV1PicRefs"); OFF(AP, ref_frame_idx, "vaAV1PicRefIdx");
+	OFF(AP, primary_ref_frame, "vaAV1PicPrimaryRef"); OFF(AP, order_hint, "vaAV1PicOrderHint");
+	OFF(AP, refresh_frame_flags, "vaAV1PicRefresh"); OFF(AP, ref_frame_ctrl_l0, "vaAV1PicRefCtrlL0");
+	OFF(AP, picture_flags, "vaAV1PicFlags");
+	BIT(AP, picture_flags, frame_type, "vaAV1PicFrameTypeBit"); BIT(AP, picture_flags, error_resilient_mode, "vaAV1PicErrorResilientBit");
+	OFF(AP, base_qindex, "vaAV1PicBaseQIndex"); OFF(AP, min_base_qindex, "vaAV1PicMinQIndex"); OFF(AP, max_base_qindex, "vaAV1PicMaxQIndex");
+	OFF(AP, mode_control_flags, "vaAV1PicModeControl"); BIT(AP, mode_control_flags, tx_mode, "vaAV1PicTxModeBit");
+	OFF(AP, tile_cols, "vaAV1PicTileCols"); OFF(AP, tile_rows, "vaAV1PicTileRows");
+	OFF(AP, width_in_sbs_minus_1, "vaAV1PicWidthSBs"); OFF(AP, height_in_sbs_minus_1, "vaAV1PicHeightSBs");
+	OFF(AP, bit_offset_qindex, "vaAV1PicBitOffsetQIndex"); OFF(AP, bit_offset_segmentation, "vaAV1PicBitOffsetSeg");
+	OFF(AP, bit_offset_loopfilter_params, "vaAV1PicBitOffsetLF"); OFF(AP, bit_offset_cdef_params, "vaAV1PicBitOffsetCDEF");
+	OFF(AP, size_in_bits_cdef_params, "vaAV1PicCDEFBits"); OFF(AP, byte_offset_frame_hdr_obu_size, "vaAV1PicOBUSizeOffset");
+	OFF(AP, size_in_bits_frame_hdr_obu, "vaAV1PicFrameHdrBits"); OFF(AP, tile_group_obu_hdr_info, "vaAV1PicTGHeader");
+	{ AP p; memset(&p, 0, sizeof p); p.tile_group_obu_hdr_info.bits.obu_has_size_field = 1; printf("\t%s = %d\n", "vaAV1TGHasSizeBit", ffs(p.tile_group_obu_hdr_info.value) - 1); }
+	{ VARefFrameCtrlAV1 c; c.value = 0; c.fields.search_idx0 = 1; printf("\t%s = %d\n", "vaAV1SearchIdx0Bit", ffs(c.value) - 1); }
+	SZ(VAEncTileGroupBufferAV1, "vaSizeAV1TileGroup");
 	printf(")\n");
 	return 0;
 }

@@ -190,8 +190,11 @@ func (e *vaapi) open(dev string) error {
 	}
 
 	e.profile = vaProfileH264High
-	if e.cfg.Codec == HEVC {
+	switch e.cfg.Codec {
+	case HEVC:
 		e.profile = vaProfileHEVCMain
+	case AV1:
+		e.profile = vaProfileAV1Profile0
 	}
 	entry, err := e.entrypoint()
 	if err != nil {
@@ -220,6 +223,9 @@ func (e *vaapi) open(dev string) error {
 	if v := attr(3); v != vaAttribNotSupported && v&vaPredictionBiNotEmpty != 0 {
 		e.gpb = true
 	}
+	if e.cfg.Codec == AV1 {
+		e.maxRefs, e.bFrames, e.gpb = 1, 0, false // I and P pictures only; see vaapi_av1_linux.go
+	}
 	if e.cfg.Codec == HEVC {
 		if err := e.hevcCapabilities(entry, attr(4)); err != nil {
 			return err
@@ -238,6 +244,14 @@ func (e *vaapi) open(dev string) error {
 			packedFlags |= vaPackedSliceFlag
 		}
 	}
+	if e.cfg.Codec == AV1 {
+		// AV1 is only possible with both headers packed: the driver writes
+		// neither.
+		if v := attr(5); v == vaAttribNotSupported || v&(vaPackedSeqFlag|vaPackedPicFlag) != vaPackedSeqFlag|vaPackedPicFlag {
+			return fmt.Errorf("%w: %s: the driver takes no packed AV1 headers", ErrUnavailable, dev)
+		}
+		packedFlags = vaPackedSeqFlag | vaPackedPicFlag
+	}
 	create := newStruct(3 * vaSizeConfigAttrib)
 	create.u32(0, vaConfigAttribRTFormat)
 	create.u32(4, vaRTFormatYUV420)
@@ -252,7 +266,7 @@ func (e *vaapi) open(dev string) error {
 	e.conf = id.getU32(0)
 
 	w, h := uint32(e.cfg.Width), uint32(e.cfg.Height) //nolint:gosec // frame size
-	surfaces := func(n int) ([]uint32, error) {
+	surfaces := func(n int, w, h uint32) ([]uint32, error) {
 		s := newStruct(4 * n)
 		if err := e.check("creating surfaces", call(e.f.createSurfaces, e.dpy, vaRTFormatYUV420, uintptr(w), uintptr(h), s.ptr(), uintptr(n), 0, 0)); err != nil {
 			return nil, err
@@ -263,10 +277,16 @@ func (e *vaapi) open(dev string) error {
 		}
 		return ids, nil
 	}
-	if e.ins, err = surfaces(e.bFrames + vaInFlight + 1); err != nil {
+	if e.ins, err = surfaces(e.bFrames+vaInFlight+1, w, h); err != nil {
 		return err
 	}
-	if e.recs, err = surfaces(e.maxRefs + vaInFlight + 1); err != nil {
+	// AV1's reconstructed pictures cover whole superblocks, as ffmpeg
+	// allocates them for Intel's driver.
+	rw, rh := w, h
+	if e.cfg.Codec == AV1 {
+		rw, rh = (w+av1SB-1)/av1SB*av1SB, (h+av1SB-1)/av1SB*av1SB
+	}
+	if e.recs, err = surfaces(e.maxRefs+vaInFlight+1, rw, rh); err != nil {
 		return err
 	}
 	all := append(append([]uint32(nil), e.ins...), e.recs...)
@@ -492,9 +512,12 @@ func (e *vaapi) encode(p vaPic) error {
 		return err
 	}
 	var err error
-	if e.cfg.Codec == HEVC {
+	switch e.cfg.Codec {
+	case HEVC:
 		err = e.hevcParams(p, l0, l1, add)
-	} else {
+	case AV1:
+		err = e.av1Params(p, l0, add)
+	default:
 		err = e.h264Params(p, l0, l1, add)
 	}
 	if err == nil {
@@ -560,6 +583,10 @@ func (e *vaapi) finish() error {
 		return err
 	}
 	var werr error
+	if e.cfg.Codec == AV1 {
+		// Each picture is a temporal unit, which starts with a delimiter.
+		_, werr = e.w.Write(av1TD)
+	}
 	for s := seg.getPtr(0); s != 0; {
 		h := cbytes(s, 32)
 		hdr := cstruct(h)
