@@ -57,20 +57,40 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		v.SetDelay(r.videoDelay)
 		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
 	}
+	if r.depth != nil {
+		r.depth.frame = time.Duration(int64(time.Second) * int64(den) / int64(num))
+		r.depth.sort()
+	}
 	sources := []mkv.Source{v}
 	var timed []timedAudio
 	firstAudio := true
 	for _, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
 		if e.track.Kind() == KindSubtitle {
-			f, err := open(e.path)
-			if err != nil {
-				return err
+			pgs := func() (*mkv.PGSSource, error) {
+				f, err := open(e.path)
+				if err != nil {
+					return nil, err
+				}
+				p := mkv.NewPGSSource(f, lang)
+				p.SetName(e.track.Name)
+				p.SetForced(e.track.Forced)
+				return p, nil
 			}
-			p := mkv.NewPGSSource(f, lang)
-			p.SetName(e.track.Name)
-			p.SetForced(e.track.Forced)
-			sources = append(sources, p)
+			if r.Opts.Subs3D.flat() {
+				p, err := pgs()
+				if err != nil {
+					return err
+				}
+				sources = append(sources, p)
+			}
+			if r.Opts.Subs3D.threeD() {
+				p, err := pgs()
+				if err != nil {
+					return err
+				}
+				sources = append(sources, r.subtitles3D(p, e.track))
+			}
 			continue
 		}
 		format := audioFormat(e)

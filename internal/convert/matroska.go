@@ -245,6 +245,12 @@ type mkvDemux struct {
 	aus     int
 	noDep   int
 	dropped map[uint64]int64
+	// depth, when 3D subtitles are made, collects the offset metadata. Its
+	// timestamps are the disc's, which a Matroska file does not keep:
+	// depthBase is what to add to place one on the file's timeline.
+	depth     *depthMap
+	depthBase time.Duration
+	depthSet  bool
 }
 
 func newMkvDemux(src *mkvSource, sel Selection, tmp string, report Reporter) *mkvDemux {
@@ -317,8 +323,10 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 				if hasSlice(au) {
 					g.aus++
 				}
+				g.noteDepth(d, p.Time)
 				return au, d, pts, nil
 			}
+			g.noteDepth(au, p.Time)
 			if hasSlice(au) {
 				g.aus++
 				if !hasNAL(au, 20) {
@@ -334,6 +342,28 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 			}
 		}
 	}
+}
+
+// noteDepth records the offset metadata an access unit at t carries. The
+// metadata's own timestamp is the GOP's first frame on the disc's clock;
+// the access unit carrying it, its first in decoding order, shows at t on
+// the file's, at or after that first frame (a GOP can open with pictures
+// shown before it). So the smallest gap between the two over a stretch of
+// the disc's clock is the offset between the clocks; a jump of seconds is
+// a new stretch (the next clip of a title).
+func (g *mkvDemux) noteDepth(au []byte, t time.Duration) {
+	if g.depth == nil || au == nil {
+		return
+	}
+	gop, ok := parseOffsetMetadata(au)
+	if !ok {
+		return
+	}
+	gap := t - g.t0 - ticks90k(gop.pts)
+	if !g.depthSet || gap < g.depthBase || gap > g.depthBase+2*time.Second {
+		g.depthBase, g.depthSet = gap, true
+	}
+	g.depth.add(ticks90k(gop.pts)+g.depthBase, gop)
 }
 
 // write puts an audio or subtitle frame in its track's file, dropping what
@@ -461,6 +491,15 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	r.length = src.duration
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
+	if r.Opts.Subs3D.threeD() {
+		r.depth = &depthMap{}
+		g.depth = r.depth
+		// A Matroska file does not say which offset sequence a subtitle
+		// track follows. Discs give the subtitles one (often all the same)
+		// and other graphics others; the one nearest the viewer at each
+		// moment never puts a subtitle behind the picture.
+		r.offsetSequence = func(Track) int { return frontMost }
+	}
 	if err := g.start(); err != nil {
 		if g.f != nil {
 			_ = g.f.Close()

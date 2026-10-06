@@ -64,6 +64,12 @@ type Options struct {
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
+	// Subs3D is what becomes of the subtitles: kept as they are, drawn
+	// once for a player to place in 3D itself (Subs3DOff, the default);
+	// drawn into both halves of the frame at the depth the disc gives them,
+	// for players that show a side-by-side frame as it is (Subs3DOn); or
+	// both, the 3D track after its flat one (Subs3DBoth).
+	Subs3D Subs3D
 	// BitDepth is the output's: 8 (or 0), or 10 for HEVC (Main 10) and AV1.
 	// The source is 8-bit either way; at 10 the encoder predicts and
 	// quantises at finer precision, which shows as less banding in smooth
@@ -90,6 +96,21 @@ type Options struct {
 	// process.
 	NativeGPU bool
 }
+
+// Subs3D says what becomes of the subtitles: see Options.Subs3D.
+type Subs3D string
+
+const (
+	Subs3DOff  Subs3D = "off"
+	Subs3DOn   Subs3D = "on"
+	Subs3DBoth Subs3D = "both"
+)
+
+// flat reports whether the subtitles stay as they are.
+func (s Subs3D) flat() bool { return s == "" || s == Subs3DOff || s == Subs3DBoth }
+
+// threeD reports whether 3D subtitles are made.
+func (s Subs3D) threeD() bool { return s == Subs3DOn || s == Subs3DBoth }
 
 // unsupportedContainer reports whether a source is a container nothing
 // here reads. MVC travels on Blu-rays and in Matroska remuxes of them; a VOB
@@ -176,6 +197,9 @@ func (o Options) Validate(goos string) error {
 		if o.BitDepth == 10 {
 			return fmt.Errorf("--remux cannot change the bit depth: it copies the disc's MVC video without re-encoding")
 		}
+		if o.Subs3D.threeD() {
+			return fmt.Errorf("--remux keeps the disc's subtitles, whose 3D player places them: --subs-3d does not apply")
+		}
 		return nil
 	}
 	if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".mkv" {
@@ -201,6 +225,11 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
+	}
+	switch o.Subs3D {
+	case "", Subs3DOff, Subs3DOn, Subs3DBoth:
+	default:
+		return fmt.Errorf("--subs-3d %q: want off, on or both", o.Subs3D)
 	}
 	switch o.BitDepth {
 	case 0, 8:

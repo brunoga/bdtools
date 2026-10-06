@@ -60,6 +60,11 @@ type Stream struct {
 	Format, Rate byte
 	// Lang is the ISO 639-2 code for audio, PG, IG and text streams.
 	Lang string
+	// OffsetSequence is, for a PG stream of a 3D play item, the offset
+	// sequence of the MVC stream's offset metadata that sets its depth:
+	// how far the graphics move apart in the two eyes, frame by frame. -1
+	// when the playlist gives none.
+	OffsetSequence int
 }
 
 // PlayItem is one clip of a playlist.
@@ -375,7 +380,7 @@ func parseSTN(c *cursor) ([]Stream, error) {
 	var out []Stream
 	for kind, n := range counts {
 		for i := 0; i < n && c.err == nil; i++ {
-			s := Stream{Kind: kind}
+			s := Stream{Kind: kind, OffsetSequence: -1}
 			// stream_entry
 			el := int(c.u8())
 			es := c.pos
@@ -523,25 +528,67 @@ func (p *Playlist) parseExtensions(b []byte, pos int) {
 				p.SubPaths = append(p.SubPaths, sp)
 			}
 		case id1 == 2 && id2 == 1:
-			// STN_table_SS: per play item, the dependent view's stream
-			// entry comes first; only its PID is taken from here.
-			sc := &cursor{b: b, pos: pos + start}
-			for j := range p.Items {
-				l := int(sc.u16())
-				s := sc.pos
-				sc.skip(2)
-				el := int(sc.u8())
-				if sc.u8() == 2 {
-					sc.skip(2)
-					p.Items[j].DependentPID = sc.u16()
-				}
-				_ = el
-				if sc.err != nil || l <= 0 {
-					break
-				}
-				sc.pos = s + l
+			p.parseSTNSS(&cursor{b: b, pos: pos + start})
+		}
+	}
+}
+
+// parseSTNSS reads the STN_table_SS, one per play item: the dependent
+// view's stream entry and attributes, then for each PG stream of the
+// item's STN_table the offset sequence that sets its depth.
+func (p *Playlist) parseSTNSS(c *cursor) {
+	for j := range p.Items {
+		it := &p.Items[j]
+		l := int(c.u16())
+		end := c.pos + l
+		if c.err != nil || l <= 0 {
+			return
+		}
+		c.skip(2) // Fixed_offset_during_PopUp_flag, reserved
+		// stream_entry of the dependent view
+		el := int(c.u8())
+		es := c.pos
+		if c.u8() == 2 {
+			c.skip(2)
+			it.DependentPID = c.u16()
+		}
+		c.pos = es + el
+		c.skip(int(c.u8())) // stream_attributes
+		c.skip(2)           // reserved, number_of_offset_sequences
+		for k := range it.Streams {
+			s := &it.Streams[k]
+			if s.Kind != 2 || c.pos+2 > end {
+				continue
+			}
+			if id := int(c.u8()); id != 0xff {
+				s.OffsetSequence = id
+			}
+			flags := c.u8()
+			// A stereoscopic PG stream (left and right streams of its own)
+			// or a top or bottom variant for a letterboxed frame: their
+			// entries follow, and are skipped.
+			entry := func() {
+				n := int(c.u8())
+				c.skip(n)
+			}
+			if flags&0x08 != 0 { // is_SS_PG
+				entry()
+				entry()
+				c.skip(2)
+			}
+			if flags&0x04 != 0 { // is_top_AS_PG
+				entry()
+				c.skip(1)
+			}
+			if flags&0x02 != 0 { // is_bottom_AS_PG
+				entry()
+				c.skip(1)
 			}
 		}
+		if c.err != nil {
+			return
+		}
+		c.pos = end
 	}
 }
 
