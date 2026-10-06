@@ -9,19 +9,45 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `--codec av1`: AV1 output from NVENC (RTX 40 and later) and VAAPI (Intel
+  Arc / Core Ultra, recent AMD) in process or through ffmpeg, and from
+  SVT-AV1 in software (`SvtAv1EncApp`, else ffmpeg's `libsvtav1`). The
+  Matroska muxer writes AV1 (`V_AV1` with an `av1C`) from a bare OBU stream
+  or IVF. `--crf` keeps its 0-51 scale, mapped onto AV1's quantiser index
+  so a number gives about the quality it gives in HEVC (measured on NVENC:
+  AV1 11-15% smaller at equal PSNR). VideoToolbox has no AV1 encoder.
+- `--remux` joins a title made of several clips again, now in process: each
+  clip is cut to its play item's window (from the GOP that opens at or
+  before IN, while pictures decode before OUT) and moved onto one
+  continuous timeline — PTS, DTS, PCR and arrival times — so the result is
+  a single stream that plays and seeks like one clip.
+- `--encoder mediafoundation` (`mf`): Intel and AMD GPUs on Windows encode in
+  process through the Media Foundation encoder their driver installs, with
+  no ffmpeg; `auto` tries it after NVENC. It is tested in CI with
+  Microsoft's software encoder, not yet on a GPU.
+- `--name-details` names the output after what it is: layout, resolution
+  per eye, codec and quality setting, encoder and main audio track, e.g.
+  "Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv".
 - `--playlist` picks the title of a disc image or folder by its playlist,
   instead of the one the playlists suggest.
+- After the mux, a timeline line gives where the picture and each audio
+  track start and end, with a warning when the picture's length is not the
+  source's.
+- With `--keep-fallback`, a Matroska source's lossy track that stands in for
+  TrueHD's core (an "AC3 compatibility" track) is kept beside it, as the core
+  is on a disc.
+
 ### Changed
 
-- GPU encoders make a keyframe every 250 frames, as x264 and x265 do,
-  instead of every 2 s: 7% smaller at the same quality.
-- Tracks that hold nothing in the part played are reported in one line.
 - The Docker image is Debian instead of Alpine, with the VAAPI drivers for
   Intel and AMD, and asks the NVIDIA container toolkit for the video
   capability: on Alpine, NVIDIA's glibc libraries could not load, so no GPU
   encoder worked in the container.
 - `--check`, and the check before a run, try a GPU encoder reached through
   ffmpeg with a short encode: an ffmpeg without it is reported as unusable.
+- GPU encoders make a keyframe every 250 frames, as x264 and x265 do,
+  instead of every 2 s: 7% smaller at the same quality.
+- Tracks that hold nothing in the part played are reported in one line.
 
 ### Fixed
 
