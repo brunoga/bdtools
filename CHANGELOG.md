@@ -23,6 +23,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   source start over, as does `--restart`. Ctrl-C now stops a conversion
   cleanly.
 
+- `--subs-3d on|both`: subtitles drawn into both halves of the side-by-side
+  frame at the depth the disc gives them (the offset metadata in the MVC
+  stream, the sequence the playlist assigns each track), for players that
+  show the frame as it is; `both` keeps the flat track too. Squeezed with the
+  picture for `--layout half`.
+
 ### Changed
 
 - The work directory is `.<output name>.mvctools` beside the output (or

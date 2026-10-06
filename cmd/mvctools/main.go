@@ -78,6 +78,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
+		subs3D   = fs.String("subs-3d", "off", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
 		quiet    = fs.Bool("quiet", false, "only report errors")
@@ -133,6 +134,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
 	o.BitDepth = *depth
+	o.Subs3D = convert.Subs3D(*subs3D)
 	o.SwapLR = *swapLR
 	o.DecodeThreads = *decThr
 	o.KeepFallback = *keepFall

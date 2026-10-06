@@ -60,6 +60,10 @@ type Runner struct {
 	work *work
 	// sink, when set, takes the place of the encoder. For tests.
 	sink encoderSink
+	// depth is the source's offset metadata, when 3D subtitles are made,
+	// and offsetSequence the sequence a subtitle track follows (-1: none).
+	depth          *depthMap
+	offsetSequence func(Track) int
 
 	// Selected records what the probe chose, readable once Run returns. A
 	// caller naming its output after the audio it got needs this: the codec
@@ -159,6 +163,11 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	r.length = src.duration
 	g := newGoDemux(src, sel, tmp, r.Report)
 	r.timeline = g.timeline
+	if r.Opts.Subs3D.threeD() {
+		r.depth = &depthMap{}
+		g.depth = r.depth
+		r.offsetSequence = func(t Track) int { return src.offsetSequence(uint16(t.ID)) } //nolint:gosec // a PID
+	}
 	if err := g.start(); err != nil {
 		return err
 	}

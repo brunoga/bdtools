@@ -330,3 +330,36 @@ func FuzzOpenImage(f *testing.F) {
 		}
 	})
 }
+
+// The STN_table_SS gives each PG stream its offset sequence, after the
+// dependent view's entry; a stereoscopic PG stream's own entries are
+// skipped, and 255 is none.
+func TestSTNTableSSOffsetSequences(t *testing.T) {
+	pl := &Playlist{Items: []PlayItem{{Streams: []Stream{
+		{Kind: 0, OffsetSequence: -1}, {Kind: 1, OffsetSequence: -1},
+		{Kind: 2, OffsetSequence: -1}, {Kind: 2, OffsetSequence: -1}, {Kind: 2, OffsetSequence: -1},
+	}}}}
+	entry := []byte{9, 1, 0x12, 0x20, 0, 0, 0, 0, 0, 0}
+	body := []byte{0x80, 0}                                 // fixed offset during pop-up, reserved
+	body = append(body, 9, 2, 0, 0, 0x10, 0x12, 0, 0, 0, 0) // the dependent view, in a sub-path
+	body = append(body, 2, 0x20, 0x61, 0, 32)               // attributes; 32 offset sequences
+	body = append(body, 0, 0)                               // PG 1: sequence 0
+	body = append(body, 7, 0x08)                            // PG 2: sequence 7, stereoscopic
+	body = append(body, entry...)
+	body = append(body, entry...)
+	body = append(body, 0, 3)
+	body = append(body, 0xff, 0) // PG 3: none
+	b := append([]byte{byte(len(body) >> 8), byte(len(body))}, body...)
+	pl.parseSTNSS(&cursor{b: b})
+	it := pl.Items[0]
+	if it.DependentPID != 0x1012 {
+		t.Errorf("dependent PID %#x", it.DependentPID)
+	}
+	var got []int
+	for _, s := range it.Streams {
+		got = append(got, s.OffsetSequence)
+	}
+	if fmt.Sprint(got) != "[-1 -1 0 7 -1]" {
+		t.Errorf("offset sequences %v", got)
+	}
+}

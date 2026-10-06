@@ -57,6 +57,20 @@ type goSource struct {
 	knownEye        bool
 }
 
+// offsetSequence is the offset sequence a PG stream of the title follows
+// for its depth, from the playlist's first item; -1 when it names none.
+func (s *goSource) offsetSequence(pid uint16) int {
+	if s.playlist == nil || len(s.playlist.Items) == 0 {
+		return -1
+	}
+	for _, st := range s.playlist.Items[0].Streams {
+		if st.Kind == 2 && st.PID == pid {
+			return st.OffsetSequence
+		}
+	}
+	return -1
+}
+
 // resolveGo turns the input into the stream files to read.
 func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
 	st, err := os.Stat(in) //nolint:gosec // the operator's input is the point
@@ -619,6 +633,9 @@ type goDemux struct {
 	basePID uint16
 	depPID  uint16
 	eof     bool
+	// depth, when 3D subtitles are made, collects the dependent view's
+	// offset metadata on the output's timeline.
+	depth   *depthMap
 	queue   []auPES          // base view, decode order
 	deps    map[int64][]byte // dependent view by DTS
 	maxDep  int64
@@ -909,6 +926,12 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 				}
 				if hasSlice(h.data) {
 					g.aus++
+				}
+				if g.depth != nil && d != nil && h.pts >= 0 {
+					if gop, ok := parseOffsetMetadata(d); ok {
+						clip := h.pts >> ptsTagShift << ptsTagShift
+						g.depth.add(g.timeline(clip|gop.pts), gop)
+					}
 				}
 				return h.data, d, h.pts, nil
 			}

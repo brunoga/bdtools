@@ -139,6 +139,7 @@ scheduler such as pipeliner retry it.
 | `--audio-best` | — | Of the audio that matches, keep only the highest-quality track |
 | `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
+| `--subs-3d` | `off` | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
 | `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
@@ -336,6 +337,36 @@ know which. The same goes for the pairs where ISO-639-2 has both a
 bibliographic and a terminological code and sources disagree about which to
 use: `fra`/`fre`, `deu`/`ger` and `zho`/`chi` each match either spelling. A code
 with no alias entry matches itself, so nothing is lost by not being listed.
+
+### 3D subtitles
+
+A Blu-ray 3D draws its subtitles once, and the player moves them apart in
+the two eyes so that they float in front of the picture, at a depth the
+disc sets frame by frame (the offset metadata in the MVC stream, one of up
+to 32 sequences, which the playlist assigns to each subtitle track). A
+side-by-side file has no such player.
+
+- `--subs-3d off` (the default) keeps the subtitles as the disc has them,
+  drawn once. That is right for a player that places subtitles in 3D itself
+  (Kodi in its 3D mode does), and wrong for one that shows the frame as it
+  is: a TV or headset in side-by-side mode stretches each half to the whole
+  screen, and a subtitle drawn across the middle of the frame ends up in
+  neither eye whole.
+- `--subs-3d on` draws each subtitle into both halves of the frame, moved
+  apart by the disc's offset (right in the left eye, left in the right one,
+  for the usual depth in front of the screen), as a 3D player would. With
+  `--layout half` it is squeezed to half width like the picture, keeping
+  thin strokes. The track is named "3D".
+- `--subs-3d both` keeps the flat track and adds the 3D one after it.
+
+A subtitle takes the depth the disc gives at its first frame; a disc that
+moves it while it is up is followed from its next display set. A subtitle
+track the disc assigns no offset sequence sits at the screen plane. A
+Matroska source keeps the offset metadata but not which sequence a track
+follows, so its subtitles take the sequence nearest the viewer at each
+moment: never behind the picture, at most a little further forward than
+the disc meant. (On Avatar: Fire and Ash the subtitles follow other
+sequences than the first, which would have put them inside the scene.)
 
 ### Naming the output after the audio
 
