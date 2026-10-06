@@ -6,9 +6,10 @@
 # reason — upstream publishes one Linux binary and it is x86_64, but its CLI
 # needs no Qt and compiles anywhere.
 #
-# The Blu-ray demuxer and the MVC decoder are part of mvctools itself (pure Go,
-# with assembly kernels on amd64), so the toolchain is the encoders and the
-# muxer — plus tsMuxeR, for --demuxer tsmuxer and Matroska/MP4/VOB sources.
+# The Blu-ray demuxer, the MVC decoder and the Matroska muxer are part of
+# mvctools itself (pure Go, with assembly kernels on amd64), so the toolchain
+# is the encoders — plus tsMuxeR and mkvmerge, for --demuxer tsmuxer (and
+# Matroska/MP4/VOB sources) and --muxer mkvmerge.
 
 # ── Go build ──────────────────────────────────────────────────────────────────
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS gobuild

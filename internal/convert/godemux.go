@@ -578,21 +578,20 @@ type goDemux struct {
 	held               map[uint16]*m2ts.PES // last PES before IN, per PID
 	dropped            map[uint16]int64
 
-	clip     int
-	r        *m2ts.Reader
-	f        io.ReadSeekCloser
-	depR     *m2ts.Reader
-	depF     io.ReadSeekCloser
-	basePID  uint16
-	depPID   uint16
-	eof      bool
-	queue    []auPES          // base view, decode order
-	deps     map[int64][]byte // dependent view by DTS
-	maxDep   int64
-	noDep    int
-	aus      int64
-	chapters string
-	packets  int64
+	clip    int
+	r       *m2ts.Reader
+	f       io.ReadSeekCloser
+	depR    *m2ts.Reader
+	depF    io.ReadSeekCloser
+	basePID uint16
+	depPID  uint16
+	eof     bool
+	queue   []auPES          // base view, decode order
+	deps    map[int64][]byte // dependent view by DTS
+	maxDep  int64
+	noDep   int
+	aus     int64
+	packets int64
 }
 
 // pairWindow is how many base-view access units may wait for their
@@ -687,16 +686,6 @@ func (g *goDemux) start() error {
 			w.lpcm = newWAVWriter(f)
 		}
 		g.writers[uint16(t.ID)] = w //nolint:gosec // track ids are PIDs
-	}
-	if len(g.src.chapters) > 1 {
-		g.chapters = filepath.Join(g.tmp, fileSafe(g.src.name)+".chapters.txt")
-		var b strings.Builder
-		for i, c := range g.src.chapters {
-			fmt.Fprintf(&b, "CHAPTER%02d=%s\nCHAPTER%02dNAME=Chapter %d\n", i+1, chapterTime(c), i+1, i+1)
-		}
-		if err := os.WriteFile(g.chapters, []byte(b.String()), 0o600); err != nil { //nolint:gosec // as above
-			return err
-		}
 	}
 	return nil
 }

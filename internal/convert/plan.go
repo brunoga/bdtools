@@ -74,7 +74,26 @@ type Options struct {
 	// Demuxer reads the source: the built-in one (the default; empty means
 	// it too) reads a disc image or folder in place, or tsMuxeR.
 	Demuxer Demuxer
+	// Muxer writes the MKV: the built-in one (the default; empty means it
+	// too), or mkvmerge.
+	Muxer Muxer
 }
+
+// Muxer names which muxer writes the output.
+type Muxer string
+
+const (
+	// MuxerBuiltin writes the Matroska file in process.
+	MuxerBuiltin Muxer = "builtin"
+	// MuxerMkvmerge runs mkvmerge.
+	MuxerMkvmerge Muxer = "mkvmerge"
+)
+
+// Valid reports whether m is a known muxer.
+func (m Muxer) Valid() bool { return m == MuxerBuiltin || m == MuxerMkvmerge }
+
+// builtinMux reports whether the built-in muxer is in use.
+func (o Options) builtinMux() bool { return o.Muxer != MuxerMkvmerge }
 
 // builtin reports whether the built-in demuxer is in use. It reads Blu-ray
 // sources; a Matroska, MP4 or VOB input goes to tsMuxeR whatever was asked.
@@ -129,6 +148,7 @@ func DefaultOptions() Options {
 		Preset:      "slow",
 		VAAPIDevice: "/dev/dri/renderD128",
 		Demuxer:     DemuxerBuiltin,
+		Muxer:       MuxerBuiltin,
 	}
 }
 
@@ -302,11 +322,17 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 
 	// 4. Mux. Audio, subtitle and chapter arguments are appended by the runner
 	//    from what the demux actually produced.
-	p.Steps = append(p.Steps, Step{
-		Name: "mux",
-		Argv: []string{"mkvmerge", "-o", opts.Output, videoOut},
-	})
+	p.Steps = append(p.Steps, muxStep(opts, videoOut))
 	return p, nil
+}
+
+// muxStep is the final step: mkvmerge, or the built-in muxer.
+func muxStep(opts Options, videoOut string) Step {
+	if opts.builtinMux() {
+		return Step{Name: "mux", Builtin: true,
+			Argv: []string{"write", opts.Output, "(with the audio, subtitles and chapters) from", videoOut}}
+	}
+	return Step{Name: "mux", Argv: []string{"mkvmerge", "-o", opts.Output, videoOut}}
 }
 
 // builtinPlan is the plan with the built-in demuxer: the source is read
@@ -327,7 +353,7 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 	p.Steps = append(p.Steps,
 		Step{Name: "demux and decode", Argv: decode, Builtin: true, PipeTo: "encode"},
 		encodeStep(opts, videoOut),
-		Step{Name: "mux", Argv: []string{"mkvmerge", "-o", opts.Output, videoOut}},
+		muxStep(opts, videoOut),
 	)
 	return p
 }

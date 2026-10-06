@@ -27,6 +27,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so a looped menu or decoy playlist that runs longer than the feature is no
   longer chosen; between copies of the feature, the one with chapters wins.
 - Chapters from the playlist are carried into the MKV.
+- `mvctools` writes the MKV with its own Matroska muxer by default, so a
+  conversion needs no tool but the encoder. Its output matches mkvmerge's
+  packet for packet (checked on a whole film); `--muxer mkvmerge` keeps
+  mkvmerge.
 
 ### Fixed
 

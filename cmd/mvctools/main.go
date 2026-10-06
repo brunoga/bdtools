@@ -63,6 +63,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		demuxer  = fs.String("demuxer", string(convert.DemuxerBuiltin), "builtin (reads a disc image or folder in place) or tsmuxer (the external tsMuxeR)")
+		muxer    = fs.String("muxer", string(convert.MuxerBuiltin), "builtin (writes the MKV in process) or mkvmerge (the external mkvmerge)")
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
 		swapLR   = fs.Bool("swap-lr", false, "exchange the eyes (default: taken from the disc's own base-view marking)")
 		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select (with --demuxer tsmuxer a disc image is read first, so pass --temp)")
@@ -116,8 +117,15 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 
+	mx := convert.Muxer(*muxer)
+	if !mx.Valid() {
+		fmt.Fprintf(stderr, "mvctools: unknown muxer %q (want builtin or mkvmerge)\n", mx)
+		return 2
+	}
+
 	o := convert.DefaultOptions()
 	o.Demuxer = dmx
+	o.Muxer = mx
 	o.Input, o.Output, o.TempDir = *input, *output, *tempDir
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
