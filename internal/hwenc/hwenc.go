@@ -2,13 +2,14 @@
 // NVENC (NVIDIA's driver), VAAPI (Mesa, Intel's media driver), VideoToolbox
 // (macOS) and Media Foundation (Windows) — loaded at run time, so mvctools
 // needs neither cgo nor ffmpeg for hardware encoding. Each encoder takes NV12
-// pictures and writes an Annex B H.264 or HEVC stream, or an AV1 stream of
-// OBUs in the low-overhead format (each with its size), temporal unit after
-// temporal unit.
+// pictures (P010 for 10-bit) and writes an Annex B H.264 or HEVC stream, or
+// an AV1 stream of OBUs in the low-overhead format (each with its size),
+// temporal unit after temporal unit.
 package hwenc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -35,14 +36,21 @@ type Config struct {
 	GOP int
 	// Device is the VAAPI render node (VAAPI only).
 	Device string
+	// BitDepth is 8 (or 0) or 10. Ten encodes HEVC Main 10 or 10-bit AV1
+	// from P010 pictures: from an 8-bit source the picture is the same, but
+	// the encoder works at finer precision, which shows as less banding and
+	// a few percent fewer bits for the same quality. H.264 is 8-bit only.
+	BitDepth int
 }
 
-// Picture is the NV12 frame an encoder wants filled: a full-resolution
-// luma plane and a half-resolution plane of interleaved Cb/Cr, each row
-// Pitch bytes apart.
+// Picture is the frame an encoder wants filled: a full-resolution luma
+// plane and a half-resolution plane of interleaved Cb/Cr, each row Pitch
+// bytes apart. At Depth 8 it is NV12, a byte a sample; at 10 it is P010,
+// two bytes a sample, little-endian, the value in the top ten bits.
 type Picture struct {
 	Y, UV []byte
 	Pitch int
+	Depth int
 }
 
 // Encoder encodes pictures to an Annex B stream.
@@ -74,10 +82,27 @@ const (
 	MediaFoundation Kind = "mediafoundation"
 )
 
+// ErrDepth says the encoder or codec cannot encode the bit depth asked.
+var ErrDepth = errors.New("hwenc: bit depth not supported")
+
 // Open starts an encoder writing to w.
 func Open(k Kind, cfg Config, w io.Writer) (Encoder, error) {
 	if cfg.GOP == 0 {
 		cfg.GOP = DefaultGOP
+	}
+	switch cfg.BitDepth {
+	case 0:
+		cfg.BitDepth = 8
+	case 8:
+	case 10:
+		if cfg.Codec == H264 {
+			return nil, fmt.Errorf("%w: 10-bit H.264 (High 10) is not something GPU encoders do", ErrDepth)
+		}
+		if k == MediaFoundation {
+			return nil, fmt.Errorf("%w: 10-bit through Media Foundation", ErrDepth)
+		}
+	default:
+		return nil, fmt.Errorf("%w: %d-bit", ErrDepth, cfg.BitDepth)
 	}
 	switch k {
 	case NVENC:

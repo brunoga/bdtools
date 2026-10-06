@@ -11,6 +11,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   coding; in Matroska, the Colour element's or the codec configuration's.
 - `probe` reports the MVC view's frame size, from the dependent clip's clip
   info, which lists the MVC stream in its 3D extension.
+- `--bit-depth 10`: HEVC Main 10 or 10-bit AV1, in process on NVENC, VAAPI
+  and VideoToolbox, through ffmpeg, and with x265 and SVT-AV1. Less banding,
+  and about 4% smaller at equal quality on NVENC HEVC, at no cost in speed.
+  `--name-details` adds `10bit`.
+- `mvc.Y4MWriter.Depth` writes 10-bit Y4M (C420p10).
 
 ## [0.4.1] - 2026-10-06
 

@@ -34,7 +34,7 @@ func fakeProbe(t *testing.T, working ...Encoder) {
 		ok[e] = true
 	}
 	origNative := ProbeNative
-	ProbeNative = func(Encoder, Codec, string) bool { return false }
+	ProbeNative = func(Encoder, Codec, int, string) bool { return false }
 	t.Cleanup(func() { ProbeNative = origNative })
 	orig := runProbe
 	runProbe = func(_ context.Context, argv []string) error {
@@ -157,7 +157,7 @@ func TestDefaultEncoderFallsBackToSoftware(t *testing.T) {
 	// Only the software chain is installed, so auto must not pick a GPU path.
 	fakeLookPath(t, "x264")
 	fakeProbe(t)
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderSoftware {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderSoftware {
 		t.Errorf("got %q, want x264 when no ffmpeg is installed", got)
 	}
 }
@@ -165,7 +165,7 @@ func TestDefaultEncoderFallsBackToSoftware(t *testing.T) {
 func TestDefaultEncoderPrefersHardwareWhenItActuallyWorks(t *testing.T) {
 	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t, EncoderVideoToolbox)
-	if got := DefaultEncoder(context.Background(), "darwin", CodecH264, ""); got != EncoderVideoToolbox {
+	if got := DefaultEncoder(context.Background(), "darwin", CodecH264, 8, ""); got != EncoderVideoToolbox {
 		t.Errorf("got %q, want videotoolbox when its trial encode succeeds", got)
 	}
 }
@@ -176,7 +176,7 @@ func TestDefaultEncoderPrefersHardwareWhenItActuallyWorks(t *testing.T) {
 func TestDefaultEncoderSkipsAnEncoderThatDoesNotWork(t *testing.T) {
 	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t) // nothing works
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderSoftware {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderSoftware {
 		t.Errorf("got %q, want x264 when no hardware trial succeeds", got)
 	}
 }
@@ -185,7 +185,7 @@ func TestDefaultEncoderSkipsAnEncoderThatDoesNotWork(t *testing.T) {
 func TestDefaultEncoderFallsFromNVENCToVAAPI(t *testing.T) {
 	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t, EncoderVAAPI)
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, "/dev/dri/renderD128"); got != EncoderVAAPI {
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderVAAPI {
 		t.Errorf("got %q, want vaapi when nvenc's trial fails and vaapi's passes", got)
 	}
 }

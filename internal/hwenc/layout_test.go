@@ -70,6 +70,9 @@ func TestNVENCLayout(t *testing.T) {
 	// AV1BIT is the bit position of a bitfield in NV_ENC_CONFIG_AV1's flag word.
 	src.WriteString("#define AV1BIT(f) ({ NV_ENC_CONFIG_AV1 c; memset(&c, 0, sizeof c); c.f = 1; uint32_t w; " +
 		"memcpy(&w, (char *)&c + offsetof(NV_ENC_CONFIG_AV1, maxPartSize) + sizeof(NV_ENC_AV1_PART_SIZE), 4); __builtin_ctz(w); })\n")
+	// HEVCBIT is the same for NV_ENC_CONFIG_HEVC's flag word.
+	src.WriteString("#define HEVCBIT(f) ({ NV_ENC_CONFIG_HEVC c; memset(&c, 0, sizeof c); c.f = 1; uint32_t w; " +
+		"memcpy(&w, (char *)&c + offsetof(NV_ENC_CONFIG_HEVC, maxCUSize) + sizeof c.maxCUSize, 4); __builtin_ctz(w); })\n")
 	src.WriteString("static void guid(const GUID *g) { const unsigned char *b = (const void *)g; for (int i = 0; i < 16; i++) printf(\"%02x\", b[i]); printf(\"\\n\"); }\n")
 	src.WriteString("int main(void) {\n\tprintf(\"%d.%d\\n\", NVENCAPI_MAJOR_VERSION, NVENCAPI_MINOR_VERSION);\n")
 	for _, f := range nvencFacts {
@@ -171,6 +174,9 @@ var nvencFacts = []struct {
 	{"nvAV1ChromaFormatBit", nvAV1ChromaFormatBit, "AV1BIT(chromaFormatIDC)"},
 	{"nvAV1InputBitDepthBit", nvAV1InputBitDepthBit, "AV1BIT(inputPixelBitDepthMinus8)"},
 	{"nvAV1PixelBitDepthBit", nvAV1PixelBitDepthBit, "AV1BIT(pixelBitDepthMinus8)"},
+	{"nvHEVCFlags", nvHEVCFlags, "offsetof(NV_ENC_CONFIG_HEVC, maxCUSize) + sizeof(NV_ENC_HEVC_CUSIZE)"},
+	{"nvHEVCPixelBitDepthBit", nvHEVCPixelBitDepthBit, "HEVCBIT(pixelBitDepthMinus8)"},
+	{"nvCfgProfileGUID", nvCfgProfileGUID, "offsetof(NV_ENC_CONFIG, profileGUID)"},
 	{"nvLevelAV1Auto", nvLevelAV1Auto, "NV_ENC_LEVEL_AV1_AUTOSELECT"},
 	{"nvTierAV1Main", nvTierAV1Main, "NV_ENC_TIER_AV1_0"},
 	{"nvSizeInitializeParams", nvSizeInitializeParams, "sizeof(NV_ENC_INITIALIZE_PARAMS)"},
@@ -214,6 +220,7 @@ var nvencFacts = []struct {
 	{"nvPPPictureStruct", nvPPPictureStruct, "offsetof(NV_ENC_PIC_PARAMS, pictureStruct)"},
 	{"nvDeviceTypeCUDA", nvDeviceTypeCUDA, "NV_ENC_DEVICE_TYPE_CUDA"},
 	{"nvBufferFormatNV12", nvBufferFormatNV12, "NV_ENC_BUFFER_FORMAT_NV12"},
+	{"nvBufferFormatP010", nvBufferFormatP010, "NV_ENC_BUFFER_FORMAT_YUV420_10BIT"},
 	{"nvRCConstQPMode", nvRCConstQPMode, "NV_ENC_PARAMS_RC_CONSTQP"},
 	{"nvPicStructFrame", nvPicStructFrame, "NV_ENC_PIC_STRUCT_FRAME"},
 	{"nvPicFlagEOS", nvPicFlagEOS, "NV_ENC_PIC_FLAG_EOS"},
@@ -230,4 +237,5 @@ var nvencGUIDs = []struct {
 	{nvCodecHEVCGUID, "NV_ENC_CODEC_HEVC_GUID"},
 	{nvCodecAV1GUID, "NV_ENC_CODEC_AV1_GUID"},
 	{nvPresetP4GUID, "NV_ENC_PRESET_P4_GUID"},
+	{nvHEVCMain10GUID, "NV_ENC_HEVC_PROFILE_MAIN10_GUID"},
 }

@@ -192,8 +192,11 @@ func (e *vaapi) open(dev string) error {
 	switch e.cfg.Codec {
 	case HEVC:
 		e.profile = vaProfileHEVCMain
+		if e.cfg.BitDepth == 10 {
+			e.profile = vaProfileHEVCMain10
+		}
 	case AV1:
-		e.profile = vaProfileAV1Profile0
+		e.profile = vaProfileAV1Profile0 // 8- and 10-bit both
 	}
 	entry, err := e.entrypoint()
 	if err != nil {
@@ -209,8 +212,8 @@ func (e *vaapi) open(dev string) error {
 		return err
 	}
 	attr := func(i int) uint32 { return attrs.getU32(i*vaSizeConfigAttrib + 4) }
-	if v := attr(0); v == vaAttribNotSupported || v&vaRTFormatYUV420 == 0 {
-		return fmt.Errorf("%w: %s: no 4:2:0 encoding", ErrUnavailable, dev)
+	if v := attr(0); v == vaAttribNotSupported || v&e.rtFormat() == 0 {
+		return fmt.Errorf("%w: %s: no %d-bit 4:2:0 encoding", ErrUnavailable, dev, e.cfg.BitDepth)
 	}
 	if v := attr(1); v == vaAttribNotSupported || v&vaRCCQP == 0 {
 		return fmt.Errorf("%w: %s: no constant-QP encoding", ErrUnavailable, dev)
@@ -253,7 +256,7 @@ func (e *vaapi) open(dev string) error {
 	}
 	create := newStruct(3 * vaSizeConfigAttrib)
 	create.u32(0, vaConfigAttribRTFormat)
-	create.u32(4, vaRTFormatYUV420)
+	create.u32(4, e.rtFormat())
 	create.u32(vaSizeConfigAttrib, vaConfigAttribRateControl)
 	create.u32(vaSizeConfigAttrib+4, vaRCCQP)
 	create.u32(2*vaSizeConfigAttrib, vaConfigAttribEncPackedHeaders)
@@ -267,7 +270,7 @@ func (e *vaapi) open(dev string) error {
 	w, h := uint32(e.cfg.Width), uint32(e.cfg.Height) //nolint:gosec // frame size
 	surfaces := func(n int, w, h uint32) ([]uint32, error) {
 		s := newStruct(4 * n)
-		if err := e.check("creating surfaces", call(e.f.createSurfaces, e.dpy, vaRTFormatYUV420, uintptr(w), uintptr(h), s.ptr(), uintptr(n), 0, 0)); err != nil {
+		if err := e.check("creating surfaces", call(e.f.createSurfaces, e.dpy, uintptr(e.rtFormat()), uintptr(w), uintptr(h), s.ptr(), uintptr(n), 0, 0)); err != nil {
 			return nil, err
 		}
 		ids := make([]uint32, n)
@@ -430,6 +433,14 @@ func (e *vaapi) flushHeld(p vaPic) error {
 	return nil
 }
 
+// rtFormat is the surfaces' format: 4:2:0 at 8 or 10 bits.
+func (e *vaapi) rtFormat() uint32 {
+	if e.cfg.BitDepth == 10 {
+		return vaRTFormatYUV420_10
+	}
+	return vaRTFormatYUV420
+}
+
 // upload copies a picture into a surface through a mapping of it.
 func (e *vaapi) upload(surface uint32, fill func(*Picture)) error {
 	img := newStruct(vaSizeImage)
@@ -437,8 +448,12 @@ func (e *vaapi) upload(surface uint32, fill func(*Picture)) error {
 		return err
 	}
 	defer call(e.f.destroyImage, e.dpy, uintptr(img.getU32(vaImageID)))
-	if img.getU32(vaImageFourcc) != vaFourccNV12 {
-		return errors.New("vaapi: the surface is not NV12")
+	want, name := uint32(vaFourccNV12), "NV12"
+	if e.cfg.BitDepth == 10 {
+		want, name = vaFourccP010, "P010"
+	}
+	if img.getU32(vaImageFourcc) != want {
+		return fmt.Errorf("vaapi: the surface is not %s", name)
 	}
 	pitch := int(img.getU32(vaImagePitches))
 	if int(img.getU32(vaImagePitches+4)) != pitch {
@@ -455,6 +470,7 @@ func (e *vaapi) upload(surface uint32, fill func(*Picture)) error {
 		Y:     cbytes(base+uintptr(img.getU32(vaImageOffsets)), pitch*h),
 		UV:    cbytes(base+uintptr(img.getU32(vaImageOffsets+4)), pitch*h/2),
 		Pitch: pitch,
+		Depth: e.cfg.BitDepth,
 	})
 	return e.check("unmapping an image", call(e.f.unmapBuffer, e.dpy, buf))
 }

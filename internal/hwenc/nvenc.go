@@ -186,16 +186,25 @@ func (e *nvenc) open() error {
 		cfg.u32(cc+nvH264IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 	case HEVC:
 		cfg.u32(cc+nvHEVCIDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+		if e.cfg.BitDepth == 10 {
+			cfg.bytes(nvCfgProfileGUID, nvHEVCMain10GUID)
+			f := cfg.getU32(cc + nvHEVCFlags)
+			f = f&^(7<<nvHEVCPixelBitDepthBit) | 2<<nvHEVCPixelBitDepthBit
+			cfg.u32(cc+nvHEVCFlags, f)
+		}
 	case AV1:
 		cfg.u32(cc+nvAV1IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 		cfg.u32(cc+nvAV1Level, nvLevelAV1Auto)
 		cfg.u32(cc+nvAV1Tier, nvTierAV1Main)
-		// 4:2:0, 8-bit, low-overhead OBUs (not Annex B), and the sequence
-		// header again on every keyframe so a player can start anywhere.
+		// 4:2:0, 8- or 10-bit, low-overhead OBUs (not Annex B), and the
+		// sequence header again on every keyframe so a player can start
+		// anywhere.
 		f := cfg.getU32(cc + nvAV1Flags)
 		f &^= 3<<nvAV1ChromaFormatBit | 7<<nvAV1InputBitDepthBit | 7<<nvAV1PixelBitDepthBit |
 			1<<nvAV1AnnexBBit | 1<<nvAV1DisableSeqHdrBit
 		f |= 1<<nvAV1ChromaFormatBit | 1<<nvAV1RepeatSeqHdrBit
+		d := uint32(e.cfg.BitDepth - 8) //nolint:gosec // 0 or 2
+		f |= d<<nvAV1InputBitDepthBit | d<<nvAV1PixelBitDepthBit
 		cfg.u32(cc+nvAV1Flags, f)
 	}
 
@@ -225,7 +234,7 @@ func (e *nvenc) open() error {
 		cib.u32(0, nvCreateInputBufferVer)
 		cib.u32(nvCIBWidth, uint32(e.cfg.Width))   //nolint:gosec // frame size
 		cib.u32(nvCIBHeight, uint32(e.cfg.Height)) //nolint:gosec // frame size
-		cib.u32(nvCIBBufferFmt, nvBufferFormatNV12)
+		cib.u32(nvCIBBufferFmt, e.format())
 		if err := e.status("creating an input buffer", call(e.fnp(nvFnCreateInputBuffer), e.enc, cib.ptr())); err != nil {
 			return err
 		}
@@ -238,6 +247,14 @@ func (e *nvenc) open() error {
 		e.free = append(e.free, i)
 	}
 	return nil
+}
+
+// format is the input buffers' format: NV12, or P010 for 10-bit.
+func (e *nvenc) format() uint32 {
+	if e.cfg.BitDepth == 10 {
+		return nvBufferFormatP010
+	}
+	return nvBufferFormatNV12
 }
 
 func (e *nvenc) Encode(fill func(*Picture)) error {
@@ -261,7 +278,7 @@ func (e *nvenc) Encode(fill func(*Picture)) error {
 	pitch := int(lib.getU32(nvLIBPitch))
 	base := lib.getPtr(nvLIBDataPtr)
 	h := e.cfg.Height
-	fill(&Picture{Y: cbytes(base, pitch*h), UV: cbytes(base+uintptr(pitch*h), pitch*h/2), Pitch: pitch})
+	fill(&Picture{Y: cbytes(base, pitch*h), UV: cbytes(base+uintptr(pitch*h), pitch*h/2), Pitch: pitch, Depth: e.cfg.BitDepth})
 	if err := e.status("unlocking an input buffer", call(e.fnp(nvFnUnlockInputBuffer), e.enc, pair.in)); err != nil {
 		e.err = err
 		return err
@@ -275,7 +292,7 @@ func (e *nvenc) Encode(fill func(*Picture)) error {
 	pp.u64(nvPPInputTimeStamp, e.frame)
 	pp.uptr(nvPPInputBuffer, pair.in)
 	pp.uptr(nvPPOutputBitstream, pair.out)
-	pp.u32(nvPPBufferFmt, nvBufferFormatNV12)
+	pp.u32(nvPPBufferFmt, e.format())
 	pp.u32(nvPPPictureStruct, nvPicStructFrame)
 	e.frame++
 	e.pending = append(e.pending, idx)

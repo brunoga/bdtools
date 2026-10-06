@@ -39,3 +39,10 @@ func TestVideoToolboxHEVCDecodesBack(t *testing.T) {
 	b := encodeTest(t, VideoToolbox, HEVC, w, h, n)
 	checkDecodeFFmpeg(t, b, "hevc", w, h, n)
 }
+
+// At 10 bits VideoToolbox makes HEVC Main 10 from P010 ('x420') buffers.
+func TestVideoToolbox10Bit(t *testing.T) {
+	useVTSoftware(t, HEVC)
+	const w, h, n = 640, 360, 30
+	checkDecode10(t, encodeDepth(t, VideoToolbox, HEVC, 10, w, h, n), "hevc", w, h, n)
+}

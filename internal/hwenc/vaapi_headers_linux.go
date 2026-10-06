@@ -150,17 +150,23 @@ func (e *vaapi) h264Headers() []byte {
 	return append(out, nal([]byte{0x68}, p.trailing())...)
 }
 
-// hevcPTL writes profile_tier_level for Main with no sub-layers.
+// hevcPTL writes profile_tier_level for Main (or Main 10) with no
+// sub-layers.
 func (e *vaapi) hevcPTL(w *bitWriter) {
 	w.u(2, 0) // profile space
 	w.flag(false)
-	w.u(5, 1)           // Main
-	w.u(32, 0x60000000) // compatible with Main and Main 10
-	w.flag(true)        // progressive_source
-	w.flag(false)       // interlaced_source
-	w.flag(false)       // non_packed_constraint
-	w.flag(true)        // frame_only_constraint
-	w.u(32, 0)          // 43 reserved bits and general_inbld_flag
+	if e.cfg.BitDepth == 10 {
+		w.u(5, 2)           // Main 10
+		w.u(32, 0x20000000) // compatible with Main 10
+	} else {
+		w.u(5, 1)           // Main
+		w.u(32, 0x60000000) // compatible with Main and Main 10
+	}
+	w.flag(true)  // progressive_source
+	w.flag(false) // interlaced_source
+	w.flag(false) // non_packed_constraint
+	w.flag(true)  // frame_only_constraint
+	w.u(32, 0)    // 43 reserved bits and general_inbld_flag
 	w.u(12, 0)
 	w.u(8, uint32(hevcLevel(e.cfg))) //nolint:gosec // a level
 }
@@ -192,13 +198,13 @@ func (e *vaapi) hevcHeaders() []byte {
 	s.u(3, 0)    // sps_max_sub_layers_minus1
 	s.flag(true) // sps_temporal_id_nesting
 	e.hevcPTL(s)
-	s.ue(0)                    // sps_seq_parameter_set_id
-	s.ue(1)                    // 4:2:0
-	s.ue(uint32(e.cfg.Width))  //nolint:gosec // frame size
-	s.ue(uint32(e.cfg.Height)) //nolint:gosec // frame size
-	s.flag(false)              // conformance_window
-	s.ue(0)                    // bit depths
-	s.ue(0)
+	s.ue(0)                             // sps_seq_parameter_set_id
+	s.ue(1)                             // 4:2:0
+	s.ue(uint32(e.cfg.Width))           //nolint:gosec // frame size
+	s.ue(uint32(e.cfg.Height))          //nolint:gosec // frame size
+	s.flag(false)                       // conformance_window
+	s.ue(uint32(e.cfg.BitDepth - 8))    //nolint:gosec // bit_depth_luma_minus8: 0 or 2
+	s.ue(uint32(e.cfg.BitDepth - 8))    //nolint:gosec // bit_depth_chroma_minus8
 	s.ue(uint32(e.log2MaxPOCLsb() - 4)) //nolint:gosec // 0..12
 	s.flag(false)                       // sps_sub_layer_ordering_info_present
 	s.ue(uint32(e.maxRefs))             //nolint:gosec // max_dec_pic_buffering_minus1
