@@ -10,6 +10,14 @@ type ClipStream struct {
 	PID    uint16
 	Coding byte
 	Lang   string
+	// Format and Rate are the stream's coding attributes as the clip info
+	// gives them. Video: video_format (1 480i, 2 576i, 3 480p, 4 1080i,
+	// 5 720p, 6 1080p, 7 576p, 8 2160p) and frame_rate (1 23.976, 2 24,
+	// 3 25, 4 29.97, 6 50, 7 59.94). Audio: audio_presentation_type (1 mono,
+	// 3 stereo, 6 multi-channel, 12 stereo + multi-channel) and
+	// sampling_frequency (1 48 kHz, 4 96 kHz, 5 192 kHz, 12 192 kHz with a
+	// 48 kHz core, 14 96 kHz with a 48 kHz core). Zero when not given.
+	Format, Rate byte
 }
 
 // ParseCLPI reads the streams of a clip info (.clpi) file: the program's
@@ -36,9 +44,13 @@ func ParseCLPI(b []byte) ([]ClipStream, error) {
 			start := c.pos
 			s.Coding = c.u8()
 			switch s.Coding {
+			case 0x01, 0x02, CodingAVC, CodingMVC, CodingHEVC, 0xea:
+				a := c.u8()
+				s.Format, s.Rate = a>>4, a&0x0f
 			case CodingLPCM, CodingAC3, CodingDTS, CodingTrueHD, CodingEAC3, CodingDTSHDHR, CodingDTSHDMA,
 				CodingEAC3Sec, CodingDTSSec, 0x03, 0x04:
-				c.skip(1)
+				a := c.u8()
+				s.Format, s.Rate = a>>4, a&0x0f
 				s.Lang = c.str(3)
 			case CodingPGS, CodingIGS:
 				s.Lang = c.str(3)

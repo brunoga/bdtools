@@ -73,18 +73,28 @@ func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
 		if ext == ".iso" {
 			report.Report("reading the disc image in place (no mount, no extraction)")
 		}
+		var src *goSource
 		if playlist != "" {
 			name := strings.ToUpper(strings.TrimSuffix(filepath.Base(playlist), filepath.Ext(playlist))) + ".mpls"
-			return playlistSource(d, name, report)
+			src, err = playlistSource(d, name, report)
+		} else {
+			src, err = chooseGo(d, report)
 		}
-		return chooseGo(d, report)
+		if err != nil {
+			_ = d.Close()
+		}
+		return src, err
 	case ext == ".mpls":
 		// The BDMV is the playlist's grandparent.
 		d, err := bdmv.Open(filepath.Dir(filepath.Dir(in)))
 		if err != nil {
 			return nil, err
 		}
-		return playlistSource(d, filepath.Base(in), report)
+		src, err := playlistSource(d, filepath.Base(in), report)
+		if err != nil {
+			_ = d.Close()
+		}
+		return src, err
 	default:
 		path := in
 		src := &goSource{
@@ -123,6 +133,7 @@ func clipLanguages(path string) map[uint16]string {
 	if err != nil {
 		return nil
 	}
+	defer func() { _ = d.Close() }()
 	clip := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	b, err := d.ReadFile(bdmv.ClipInfo(d, clip))
 	if err != nil {
@@ -1201,4 +1212,11 @@ func reportEmpty(report Reporter, empty []Track) {
 		ids = append(ids, fmt.Sprintf("%d (%s %s)", t.ID, strings.TrimPrefix(t.StreamID, "S_HDMV/"), t.Lang))
 	}
 	report.Report("warning: %d track(s) hold nothing in the part played and are left out: %s", len(empty), strings.Join(ids, ", "))
+}
+
+// close releases the disc the source was read from, if any.
+func (s *goSource) close() {
+	if s.disc != nil {
+		_ = s.disc.Close()
+	}
 }

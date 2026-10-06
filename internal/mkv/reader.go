@@ -91,6 +91,9 @@ type Reader struct {
 	// next holds an element header read ahead while looking for the end of
 	// an unknown-size cluster.
 	next *elemHeader
+	// ended says the input stopped inside the header, after the tracks: a
+	// prefix of the file. There are no frames to read.
+	ended bool
 }
 
 type elemHeader struct {
@@ -143,13 +146,20 @@ func NewReader(r io.Reader) (*Reader, error) {
 			return nil, err
 		}
 	}
-	// The level-1 elements before the first cluster.
+	// The level-1 elements before the first cluster. Input that ends once
+	// the tracks are known — a prefix of the file, cut inside a cover
+	// image attachment, say — ends the header: what it states is known,
+	// and there are no frames to read.
 	for {
 		h, err := m.header()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			if len(m.Tracks) > 0 && errors.Is(err, io.ErrUnexpectedEOF) {
+				m.ended = true
+				break
+			}
 			return nil, err
 		}
 		if h.id == idCluster {
@@ -160,6 +170,10 @@ func NewReader(r io.Reader) (*Reader, error) {
 		case idInfo, idTracks, idChapters:
 			b, err := m.data(h)
 			if err != nil {
+				if len(m.Tracks) > 0 && h.id != idTracks && errors.Is(err, io.ErrUnexpectedEOF) {
+					m.ended = true
+					break
+				}
 				return nil, err
 			}
 			if err := m.level1(h.id, b); err != nil {
@@ -167,8 +181,15 @@ func NewReader(r io.Reader) (*Reader, error) {
 			}
 		default:
 			if err := m.skip(h); err != nil {
+				if len(m.Tracks) > 0 && errors.Is(err, io.ErrUnexpectedEOF) {
+					m.ended = true
+					break
+				}
 				return nil, err
 			}
+		}
+		if m.ended {
+			break
 		}
 	}
 	if len(m.Tracks) == 0 {
@@ -363,6 +384,9 @@ func (m *Reader) Track(n uint64) *ReadTrack { return m.byNumber[n] }
 
 // Next returns the next frame in file order; io.EOF ends the file.
 func (m *Reader) Next() (Packet, error) {
+	if m.ended {
+		return Packet{}, io.ErrUnexpectedEOF
+	}
 	for len(m.pending) == 0 {
 		if err := m.advance(); err != nil {
 			return Packet{}, err

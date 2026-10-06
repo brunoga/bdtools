@@ -92,6 +92,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if err != nil {
 		return err
 	}
+	defer src.close()
 	// Take the eye order from the disc unless it was given explicitly.
 	if src.knownEye && !r.SwapLRSet {
 		r.Opts.SwapLR = src.baseViewIsRight
@@ -183,6 +184,7 @@ func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer src.close()
 	return probeGo(ctx, src)
 }
 
