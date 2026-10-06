@@ -5,6 +5,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The Docker image is Debian instead of Alpine, with the VAAPI drivers for
+  Intel and AMD, and asks the NVIDIA container toolkit for the video
+  capability: on Alpine, NVIDIA's glibc libraries could not load, so no GPU
+  encoder worked in the container.
+- `--check`, and the check before a run, try a GPU encoder reached through
+  ffmpeg with a short encode: an ffmpeg without it is reported as unusable.
+
 ## [0.2.0] - 2026-10-06
 
 ### Added
