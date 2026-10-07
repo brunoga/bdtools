@@ -160,6 +160,17 @@ func (v *VideoSource) hasParams(nals [][]byte) bool {
 // timestamps; the drift over a feature film is under 0.05 ms.
 func (v *VideoSource) at(n int64) time.Duration { return v.delay + time.Duration(n)*v.frameDur }
 
+// SetDisplaySize sets the shape a frame is shown at. For a side-by-side
+// frame the convention mkvmerge writes and ffmpeg's demuxer reads is one
+// eye's shape: a full-width pair of 1920x1080 eyes (3840x1080) is 3840x2160,
+// square pixels; a half-width pair squeezed into 1920x1080 is 1920x1080,
+// each eye stretched back to 16:9. Left at the pixel size, ffmpeg takes a
+// full-width pair for 7680x1080, which players then show and size their
+// output for as if it were twice as wide.
+func (v *VideoSource) SetDisplaySize(w, h int) {
+	v.track.DisplayWidth, v.track.DisplayHeight = w, h
+}
+
 // SetDelay starts the picture later: for a source whose first picture comes
 // after the start of what plays (the audio's), as some discs do.
 func (v *VideoSource) SetDelay(d time.Duration) { v.delay = d }

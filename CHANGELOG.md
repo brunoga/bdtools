@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Full side-by-side output now states its display size the way mkvmerge
+  does (3840x2160 for a 3840x1080 pair). Without it, players built on
+  ffmpeg, Kodi and CoreELEC among them, took each eye for 3840 wide: the
+  file showed as "3D UHD", at 64:9 in 2D, and CoreELEC chose a 4K output
+  mode, which cannot be frame packed. `mkvpropedit FILE --edit track:v1
+  --set display-width=3840 --set display-height=2160` fixes a file made
+  before, in place.
+
 ## [0.5.1] - 2026-10-07
 
 ### Fixed

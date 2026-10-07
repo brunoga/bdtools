@@ -35,6 +35,11 @@ type Track struct {
 	// StereoMode is the Matroska stereo layout: 1 is side by side, left
 	// eye first.
 	StereoMode int
+	// DisplayWidth and DisplayHeight, when set, are the shape a frame is
+	// shown at (zero leaves Matroska's default, the pixel size). For a
+	// stereo frame, players built on ffmpeg (Kodi, mpv) and mkvmerge take
+	// them as one eye's shape: see SetDisplaySize.
+	DisplayWidth, DisplayHeight int
 	// Audio.
 	SampleRate int
 	Channels   int
@@ -400,6 +405,10 @@ func trackEntry(n int, t Track) []byte {
 		v = elemUint(v, idPixelHeight, uint64(t.Height))
 		if t.StereoMode != 0 {
 			v = elemUint(v, idStereoMode, uint64(t.StereoMode))
+		}
+		if t.DisplayWidth > 0 && t.DisplayHeight > 0 {
+			v = elemUint(v, idDisplayWidth, uint64(t.DisplayWidth))
+			v = elemUint(v, idDisplayHeight, uint64(t.DisplayHeight))
 		}
 		b = elem(b, idVideo, v)
 	case TypeAudio:

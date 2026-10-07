@@ -53,6 +53,13 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
 	}
+	// Each eye's shape, as players read it: 16:9 from square pixels for a
+	// full-width pair, 16:9 from squeezed ones for a half-width pair.
+	if t := v.Track(); r.Opts.Layout == LayoutHalfSBS {
+		v.SetDisplaySize(t.Width, t.Height)
+	} else {
+		v.SetDisplaySize(t.Width, 2*t.Height)
+	}
 	if r.videoDelay > 0 {
 		v.SetDelay(r.videoDelay)
 		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())

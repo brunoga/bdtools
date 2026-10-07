@@ -48,6 +48,8 @@ const (
 	idPixelWidth      = 0xB0
 	idPixelHeight     = 0xBA
 	idStereoMode      = 0x53B8
+	idDisplayWidth    = 0x54B0
+	idDisplayHeight   = 0x54BA
 	idColour          = 0x55B0
 	idBitsPerChannel  = 0x55B2
 	idAudio           = 0xE1

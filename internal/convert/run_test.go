@@ -207,6 +207,11 @@ func checkConverted(t *testing.T, out, work string, names ...string) {
 	if v.Type != mkv.TypeVideo || v.Width != 1280 || v.Height != 480 || v.StereoMode != 1 {
 		t.Errorf("video track %+v, want 1280x480 side by side", v)
 	}
+	// One eye's shape, as ffmpeg-based players read the display size of a
+	// side-by-side track: 640x480 square pixels, doubled to 1280x960.
+	if v.DisplayWidth != 1280 || v.DisplayHeight != 960 {
+		t.Errorf("display size %dx%d, want 1280x960", v.DisplayWidth, v.DisplayHeight)
+	}
 	have := map[string]bool{}
 	for _, tr := range rd.Tracks {
 		have[tr.Name] = true
