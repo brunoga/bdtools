@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A PGS segment longer than its PES packet holds (a full-screen subtitle
+  graphic, such as the end credits Avatar's Blu-ray draws as subtitles)
+  was written cut short, which made the mux fail with "not a .sup file" at
+  the end of a film. It is now completed from the next packet.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added
