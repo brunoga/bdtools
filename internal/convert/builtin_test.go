@@ -314,6 +314,51 @@ func TestPGSSegmentsGetHeaders(t *testing.T) {
 	}
 }
 
+// A segment longer than its PES packet holds (a full-screen graphic's
+// object data) continues in the next packet: it is written whole, once,
+// with the times of the packet it began in, and the segments after it are
+// not misread.
+func TestPGSSegmentSplitAcrossPackets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.sup")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &goDemux{ins: []int64{0}, outs: []int64{1 << 40}, offsets: []int64{0}}
+	w := &esWriter{track: Track{StreamID: "S_HDMV/PGS"}, f: f, w: f}
+	big := bytes.Repeat([]byte{7}, 65519)
+	ods := append([]byte{0x15, 0xff, 0xef}, big...)
+	end := []byte{0x80, 0, 0}
+	for _, p := range []m2ts.PES{
+		{PTS: 900, DTS: -1, Payload: ods[:65522-20]},                // cut 20 bytes short
+		{PTS: -1, DTS: -1, Payload: append(ods[65522-20:], end...)}, // the rest, then the end
+		{PTS: 1800, DTS: -1, Payload: end[:1]},                      // a header cut short
+		{PTS: -1, DTS: -1, Payload: end[1:]},
+	} {
+		if err := g.emitES(w, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = f.Close()
+	b, _ := os.ReadFile(path) //nolint:gosec // test
+	var types []byte
+	var pts []uint32
+	for len(b) >= 13 {
+		if b[0] != 'P' || b[1] != 'G' {
+			t.Fatalf("not a segment header: % x", b[:13])
+		}
+		n := int(b[11])<<8 | int(b[12])
+		types, pts = append(types, b[10]), append(pts, binary.BigEndian.Uint32(b[2:]))
+		if b[10] == 0x15 && !bytes.Equal(b[13:13+n], big) {
+			t.Error("the object data changed")
+		}
+		b = b[13+n:]
+	}
+	if fmt.Sprintf("% x %v", types, pts) != "15 80 80 [900 900 1800]" || len(b) != 0 {
+		t.Errorf("segments % x at %v, %d bytes over", types, pts, len(b))
+	}
+}
+
 // The built-in plan names no demuxing tool and reads the input in place.
 func TestBuiltinPlan(t *testing.T) {
 	o := DefaultOptions()

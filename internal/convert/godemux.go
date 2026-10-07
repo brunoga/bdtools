@@ -574,6 +574,12 @@ type esWriter struct {
 	lastAt   time.Duration
 	lastSync time.Duration
 	sawAC3   bool // a sync point was recorded at an AC-3 frame
+	// supHeld is the start of a PGS segment its PES packet cut short, with
+	// its packet's times: a segment can be longer than one packet holds
+	// (a full-screen graphic's object data, up to 65,535 bytes, plus the
+	// PES header), and the rest comes in the next packet.
+	supHeld        []byte
+	supPTS, supDTS int64
 }
 
 // syncEvery is how often a sync point is recorded when the timestamps run
@@ -1205,12 +1211,23 @@ func createESWriter(tmp, srcName string, t Track) (*esWriter, error) {
 }
 
 // writeSup writes a PGS payload to a .sup: each segment behind "PG" and its
-// PTS and DTS (90 kHz, on the output's timeline).
+// PTS and DTS (90 kHz, on the output's timeline). A segment the payload
+// ends inside is held, and completed by the next payload, whose start is
+// its rest; it keeps the times of the packet it began in.
 func writeSup(w *esWriter, pts, dts int64, seg []byte) error {
+	if len(w.supHeld) > 0 {
+		seg = append(w.supHeld, seg...)
+		pts, dts = w.supPTS, w.supDTS
+		w.supHeld = nil
+	}
 	var err error
-	for len(seg) >= 3 && err == nil {
+	for len(seg) > 0 && err == nil {
+		if len(seg) < 3 || 3+(int(seg[1])<<8|int(seg[2])) > len(seg) {
+			w.supHeld = append([]byte(nil), seg...)
+			w.supPTS, w.supDTS = pts, dts
+			return nil
+		}
 		n := 3 + (int(seg[1])<<8 | int(seg[2]))
-		n = min(n, len(seg))
 		var hdr [10]byte
 		hdr[0], hdr[1] = 'P', 'G'
 		binary.BigEndian.PutUint32(hdr[2:], uint32(pts)) //nolint:gosec // 33-bit timestamps, as the format stores them
