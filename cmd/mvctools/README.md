@@ -369,7 +369,10 @@ side-by-side file has no such player.
   for the usual depth in front of the screen), as a 3D player would. With
   `--layout half` it is squeezed to half width like the picture, keeping
   thin strokes. The track is named "3D".
-- `--subs-3d both` keeps the flat track and adds the 3D one after it.
+- `--subs-3d both` keeps the flat track and adds the 3D one after it. The
+  first flat track is marked default, since a player that places subtitles
+  in 3D itself (Kodi playing frame packed) draws a 3D track squeezed into
+  one eye; pick the 3D one on a player that shows the frame as it is.
 
 A subtitle takes the depth the disc gives at its first frame; a disc that
 moves it while it is up is followed from its next display set. A subtitle

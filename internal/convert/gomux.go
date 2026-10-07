@@ -70,7 +70,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	}
 	sources := []mkv.Source{v}
 	var timed []timedAudio
-	firstAudio := true
+	firstAudio, firstSubs := true, true
 	for _, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
 		if e.track.Kind() == KindSubtitle {
@@ -88,6 +88,15 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 				p, err := pgs()
 				if err != nil {
 					return err
+				}
+				// With 3D tracks beside them, a player left to choose can
+				// take a 3D one, which a player placing subtitles in 3D
+				// itself (Kodi showing the film frame packed) draws
+				// squeezed into one eye: the first flat track is the
+				// default.
+				if r.Opts.Subs3D == Subs3DBoth && firstSubs {
+					p.SetDefault(true)
+					firstSubs = false
 				}
 				sources = append(sources, p)
 			}

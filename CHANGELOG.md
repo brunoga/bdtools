@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- With `--subs-3d both` the first flat subtitle track is marked default.
+  Left unmarked, Kodi could take a 3D track, which in frame-packed playback
+  it draws squeezed into one eye and looks jagged. `mkvpropedit FILE --edit
+  track:s1 --set flag-default=1 --edit track:s2 --set flag-default=0 ...`
+  sets the flags on a file made before.
+
 ## [0.5.2] - 2026-10-07
 
 ### Fixed

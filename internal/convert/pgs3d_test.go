@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -301,13 +302,20 @@ func TestMuxSubtitles3D(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var names []string
+		var names, defaults []string
 		subs := map[uint64]string{}
 		for _, tr := range rd.Tracks {
 			if tr.Type == mkv.TypeSubtitle {
 				names = append(names, tr.Name)
 				subs[tr.Number] = tr.Name
+				defaults = append(defaults, fmt.Sprint(tr.Default))
 			}
+		}
+		// With both, the flat track is the default, so a player that
+		// places subtitles in 3D itself does not take the 3D one.
+		wantDefaults := map[Subs3D]string{Subs3DOff: "false", Subs3DOn: "false", Subs3DBoth: "true false"}[mode]
+		if strings.Join(defaults, " ") != wantDefaults {
+			t.Errorf("%s: default flags %v, want %s", mode, defaults, wantDefaults)
 		}
 		want := map[Subs3D]string{Subs3DOff: "[]", Subs3DOn: "[3D]", Subs3DBoth: "[ 3D]"}[mode]
 		if fmt.Sprint(names) != want {
