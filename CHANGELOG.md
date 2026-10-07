@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-07
+
 ### Changed
 
 - With `--subs-3d both` the first flat subtitle track is marked default.
@@ -231,7 +233,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/mvc/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/brunoga/mvc/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/brunoga/mvc/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/brunoga/mvc/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/brunoga/mvc/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/brunoga/mvc/compare/v0.4.1...v0.5.0
