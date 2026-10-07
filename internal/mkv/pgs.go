@@ -29,6 +29,9 @@ func (p *PGSSource) Track() Track { return p.track }
 // SetName names the track.
 func (p *PGSSource) SetName(n string) { p.track.Name = n }
 
+// SetDefault marks the track the one a player picks among the subtitles.
+func (p *PGSSource) SetDefault(d bool) { p.track.Default = d }
+
 // SetForced marks the track forced: shown even with subtitles off, as for
 // dialogue in another language.
 func (p *PGSSource) SetForced(f bool) { p.track.Forced = f }
