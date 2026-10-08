@@ -167,7 +167,7 @@ func TestGPUDecodersMatchFFmpeg(t *testing.T) {
 		{"HEVC 10-bit", DecodeHEVC, gen("b.hevc", "-c:v", "libx265", "-x265-params", "bframes=3:log-level=error", "-pix_fmt", "yuv420p10le"), "hevc", "p010le", 640, 360, 10},
 		{"MPEG-2, B-frames", DecodeMPEG2, gen("c.m2v", "-c:v", "mpeg2video", "-bf", "2", "-q:v", "4"), "mpegvideo", "nv12", 640, 360, 8},
 	} {
-		for _, k := range []Kind{NVENC, VideoToolbox} {
+		for _, k := range []Kind{NVENC, VideoToolbox, VAAPI} {
 			t.Run(string(k)+"/"+c.name, func(t *testing.T) { matchesFFmpeg(t, k, c.codec, c.path, c.format, c.pixfmt, c.w, c.h, c.depth) })
 		}
 	}

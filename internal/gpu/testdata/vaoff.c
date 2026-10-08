@@ -6,6 +6,7 @@
 #include <va/va_enc_h264.h>
 #include <va/va_enc_hevc.h>
 #include <va/va_enc_av1.h>
+#include <va/va_dec_hevc.h>
 
 #define SZ(T, n) printf("\t%s = %zu\n", n, sizeof(T))
 #define OFF(T, f, n) printf("\t%s = %zu\n", n, offsetof(T, f))
@@ -167,6 +168,49 @@ int main(void) {
 	{ AP p; memset(&p, 0, sizeof p); p.tile_group_obu_hdr_info.bits.obu_has_size_field = 1; printf("\t%s = %d\n", "vaAV1TGHasSizeBit", ffs(p.tile_group_obu_hdr_info.value) - 1); }
 	{ VARefFrameCtrlAV1 c; c.value = 0; c.fields.search_idx0 = 1; printf("\t%s = %d\n", "vaAV1SearchIdx0Bit", ffs(c.value) - 1); }
 	SZ(VAEncTileGroupBufferAV1, "vaSizeAV1TileGroup");
+
+	/* HEVC decoding. */
+	C(VAEntrypointVLD, "vaEntrypointVLD"); C(VAPictureParameterBufferType, "vaPictureParameterBufferType"); C(VAIQMatrixBufferType, "vaIQMatrixBufferType");
+	C(VASliceParameterBufferType, "vaSliceParameterBufferType"); C(VASliceDataBufferType, "vaSliceDataBufferType"); C(VA_SLICE_DATA_FLAG_ALL, "vaSliceDataFlagAll");
+	C(VA_PICTURE_HEVC_LONG_TERM_REFERENCE, "vaPictureHEVCLongTerm"); C(VA_PICTURE_HEVC_RPS_LT_CURR, "vaPictureHEVCLtCurr");
+	typedef VAPictureParameterBufferHEVC DP;
+	SZ(DP, "vaSizeHEVCDecPic"); OFF(DP, ReferenceFrames, "vaHEVCDecPicRefs"); OFF(DP, pic_width_in_luma_samples, "vaHEVCDecPicWidth");
+	OFF(DP, pic_fields, "vaHEVCDecPicFields"); OFF(DP, sps_max_dec_pic_buffering_minus1, "vaHEVCDecPicMaxDecPicBuf");
+	OFF(DP, init_qp_minus26, "vaHEVCDecPicInitQP"); OFF(DP, num_tile_rows_minus1, "vaHEVCDecPicTileRows");
+	OFF(DP, column_width_minus1, "vaHEVCDecPicColumnWidths"); OFF(DP, row_height_minus1, "vaHEVCDecPicRowHeights");
+	OFF(DP, slice_parsing_fields, "vaHEVCDecPicSliceFields"); OFF(DP, log2_max_pic_order_cnt_lsb_minus4, "vaHEVCDecPicLog2MaxPOCLsb");
+	OFF(DP, num_extra_slice_header_bits, "vaHEVCDecPicExtraBits"); OFF(DP, st_rps_bits, "vaHEVCDecPicStRPSBits");
+	BIT(DP, pic_fields, chroma_format_idc, "vaHEVCDecChromaFormatBit"); BIT(DP, pic_fields, separate_colour_plane_flag, "vaHEVCDecSepColourBit");
+	BIT(DP, pic_fields, pcm_enabled_flag, "vaHEVCDecPCMBit"); BIT(DP, pic_fields, scaling_list_enabled_flag, "vaHEVCDecScalingBit");
+	BIT(DP, pic_fields, transform_skip_enabled_flag, "vaHEVCDecTransformSkipBit"); BIT(DP, pic_fields, amp_enabled_flag, "vaHEVCDecAMPBit");
+	BIT(DP, pic_fields, strong_intra_smoothing_enabled_flag, "vaHEVCDecStrongIntraBit"); BIT(DP, pic_fields, sign_data_hiding_enabled_flag, "vaHEVCDecSignHidingBit");
+	BIT(DP, pic_fields, constrained_intra_pred_flag, "vaHEVCDecConstrainedIntraBit"); BIT(DP, pic_fields, cu_qp_delta_enabled_flag, "vaHEVCDecCUQPDeltaBit");
+	BIT(DP, pic_fields, weighted_pred_flag, "vaHEVCDecWeightedPredBit"); BIT(DP, pic_fields, weighted_bipred_flag, "vaHEVCDecWeightedBipredBit");
+	BIT(DP, pic_fields, transquant_bypass_enabled_flag, "vaHEVCDecBypassBit"); BIT(DP, pic_fields, tiles_enabled_flag, "vaHEVCDecTilesBit");
+	BIT(DP, pic_fields, entropy_coding_sync_enabled_flag, "vaHEVCDecEntropySyncBit"); BIT(DP, pic_fields, pps_loop_filter_across_slices_enabled_flag, "vaHEVCDecLFAcrossSlicesBit");
+	BIT(DP, pic_fields, loop_filter_across_tiles_enabled_flag, "vaHEVCDecLFAcrossTilesBit"); BIT(DP, pic_fields, pcm_loop_filter_disabled_flag, "vaHEVCDecPCMLFDisabledBit");
+	BIT(DP, slice_parsing_fields, lists_modification_present_flag, "vaHEVCDecListsModBit"); BIT(DP, slice_parsing_fields, long_term_ref_pics_present_flag, "vaHEVCDecLTRefsBit");
+	BIT(DP, slice_parsing_fields, sps_temporal_mvp_enabled_flag, "vaHEVCDecTMVPBit"); BIT(DP, slice_parsing_fields, cabac_init_present_flag, "vaHEVCDecCabacInitBit");
+	BIT(DP, slice_parsing_fields, output_flag_present_flag, "vaHEVCDecOutputFlagBit"); BIT(DP, slice_parsing_fields, dependent_slice_segments_enabled_flag, "vaHEVCDecDependentBit");
+	BIT(DP, slice_parsing_fields, pps_slice_chroma_qp_offsets_present_flag, "vaHEVCDecSliceChromaQPBit"); BIT(DP, slice_parsing_fields, sample_adaptive_offset_enabled_flag, "vaHEVCDecSAOBit");
+	BIT(DP, slice_parsing_fields, deblocking_filter_override_enabled_flag, "vaHEVCDecDeblockOverrideBit"); BIT(DP, slice_parsing_fields, pps_disable_deblocking_filter_flag, "vaHEVCDecDeblockDisabledBit");
+	BIT(DP, slice_parsing_fields, slice_segment_header_extension_present_flag, "vaHEVCDecHeaderExtBit"); BIT(DP, slice_parsing_fields, RapPicFlag, "vaHEVCDecRapBit");
+	BIT(DP, slice_parsing_fields, IdrPicFlag, "vaHEVCDecIdrBit"); BIT(DP, slice_parsing_fields, IntraPicFlag, "vaHEVCDecIntraBit");
+	typedef VASliceParameterBufferHEVC DS;
+	SZ(DS, "vaSizeHEVCDecSlice"); OFF(DS, RefPicList, "vaHEVCDecSliceRefs"); OFF(DS, LongSliceFlags, "vaHEVCDecSliceFlags");
+	OFF(DS, collocated_ref_idx, "vaHEVCDecSliceColRefIdx"); OFF(DS, delta_chroma_log2_weight_denom, "vaHEVCDecSliceChromaDenom");
+	OFF(DS, delta_luma_weight_l0, "vaHEVCDecSliceWeightsL0"); OFF(DS, ChromaOffsetL1, "vaHEVCDecSliceChromaOffsetL1");
+	OFF(DS, five_minus_max_num_merge_cand, "vaHEVCDecSliceMaxMerge"); OFF(DS, num_entry_point_offsets, "vaHEVCDecSliceEntryPoints");
+	OFF(DS, slice_data_num_emu_prevn_bytes, "vaHEVCDecSliceEmuBytes");
+#define LBIT(f, n) do { DS s; memset(&s, 0, sizeof s); s.LongSliceFlags.fields.f = 1; printf("\t%s = %d\n", n, ffs(s.LongSliceFlags.value) - 1); } while (0)
+	LBIT(LastSliceOfPic, "vaHEVCDecSliceLastBit"); LBIT(dependent_slice_segment_flag, "vaHEVCDecSliceDependentBit");
+	LBIT(slice_type, "vaHEVCDecSliceTypeBit"); LBIT(color_plane_id, "vaHEVCDecSliceColourPlaneBit");
+	LBIT(slice_sao_luma_flag, "vaHEVCDecSliceSAOLumaBit"); LBIT(slice_sao_chroma_flag, "vaHEVCDecSliceSAOChromaBit");
+	LBIT(mvd_l1_zero_flag, "vaHEVCDecSliceMvdL1ZeroBit"); LBIT(cabac_init_flag, "vaHEVCDecSliceCabacInitBit");
+	LBIT(slice_temporal_mvp_enabled_flag, "vaHEVCDecSliceTMVPBit"); LBIT(slice_deblocking_filter_disabled_flag, "vaHEVCDecSliceDeblockOffBit");
+	LBIT(collocated_from_l0_flag, "vaHEVCDecSliceColFromL0Bit"); LBIT(slice_loop_filter_across_slices_enabled_flag, "vaHEVCDecSliceLFAcrossBit");
+	typedef VAIQMatrixBufferHEVC DQ;
+	SZ(DQ, "vaSizeHEVCIQ"); OFF(DQ, ScalingList32x32, "vaHEVCIQ32"); OFF(DQ, ScalingListDC32x32, "vaHEVCIQDC32");
 	printf(")\n");
 	return 0;
 }

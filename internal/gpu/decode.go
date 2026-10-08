@@ -75,6 +75,8 @@ func OpenDecoder(k Kind, cfg DecodeConfig, picture func(*DecodedPicture) error) 
 		return openNVDEC(cfg, picture)
 	case VideoToolbox:
 		return openVTDecoder(cfg, picture)
+	case VAAPI:
+		return openVAAPIDecoder(cfg, picture)
 	}
 	return nil, ErrDecodeUnavailable
 }

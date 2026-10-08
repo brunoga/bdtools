@@ -66,6 +66,9 @@ func (d *Decoder) decodeSlice(h *sliceHeader, n *nalUnit, r *bits) error {
 	if p.sps != d.sps {
 		return errStream // a PPS of another SPS within a picture
 	}
+	if d.accel != nil {
+		return d.accelSlice(h, n)
+	}
 	ps := &d.pic
 	ps.slices = append(ps.slices, h)
 	sd := &sliceDec{d: d, h: h, p: p, s: d.sps, pic: d.cur, ps: ps, sliceIdx: len(ps.slices) - 1}
