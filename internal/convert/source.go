@@ -53,7 +53,9 @@ func (t Track) Kind() Kind {
 	switch {
 	case t.StreamID == "V_MPEG4/ISO/MVC":
 		return KindDependentView
-	case t.StreamID == "V_MPEG4/ISO/AVC":
+	case t.StreamID == "V_MPEG4/ISO/AVC", t.StreamID == "V_MPEGH/ISO/HEVC", t.StreamID == "V_MS/VFW/FOURCC",
+		t.StreamID == "V_MPEG2":
+		// The picture of a 2D source, or the base view of a 3D one.
 		return KindBaseView
 	case strings.HasPrefix(t.StreamID, "A_"):
 		return KindAudio
@@ -109,6 +111,40 @@ func SelectTracks(tracks []Track) (Selection, error) {
 	}
 	sel.Base, sel.Dependent = bases[0], deps[0]
 	return sel, nil
+}
+
+// SelectTracks2D picks what a 2D conversion needs: the main video (the
+// first, which on a Blu-ray is the primary video, PID 0x1011; a 3D source's
+// base view), whatever its codec, and the audio and subtitles. An MVC
+// dependent view is left out.
+func SelectTracks2D(tracks []Track) (Selection, error) {
+	var sel Selection
+	for _, t := range tracks {
+		switch t.Kind() {
+		case KindBaseView:
+			if sel.Base.StreamID == "" {
+				sel.Base = t
+			}
+		case KindAudio:
+			sel.Audio = append(sel.Audio, t)
+		case KindSubtitle:
+			sel.Subtitles = append(sel.Subtitles, t)
+		}
+	}
+	if sel.Base.StreamID == "" {
+		return Selection{}, fmt.Errorf("no video track this can decode (found %s)", describeVideo(tracks))
+	}
+	return sel, nil
+}
+
+// threeD reports whether a listing has an MVC dependent view: a 3D source.
+func threeD(tracks []Track) bool {
+	for _, t := range tracks {
+		if t.Kind() == KindDependentView {
+			return true
+		}
+	}
+	return false
 }
 
 // describeVideo summarises a listing's video tracks, so "not 3D" says what was

@@ -57,6 +57,20 @@ type goSource struct {
 	knownEye        bool
 }
 
+// frameRate is the title's video frame rate, as the playlist's stream
+// table states it; 0 when it does not.
+func (s *goSource) frameRate() (num, den int) {
+	if s.playlist == nil || len(s.playlist.Items) == 0 {
+		return 0, 0
+	}
+	for _, st := range s.playlist.Items[0].Streams {
+		if st.Kind == 0 {
+			return rateFromCode(st.Rate)
+		}
+	}
+	return 0, 0
+}
+
 // offsetSequence is the offset sequence a PG stream of the title follows
 // for its depth, from the playlist's first item; -1 when it names none.
 func (s *goSource) offsetSequence(pid uint16) int {
@@ -72,7 +86,9 @@ func (s *goSource) offsetSequence(pid uint16) int {
 }
 
 // resolveGo turns the input into the stream files to read.
-func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
+// With twoD, the title is chosen for a 2D conversion: among every playlist,
+// not only the 3D ones.
+func resolveGo(in, playlist string, twoD bool, report Reporter) (*goSource, error) {
 	st, err := os.Stat(in) //nolint:gosec // the operator's input is the point
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", in, err)
@@ -92,7 +108,7 @@ func resolveGo(in, playlist string, report Reporter) (*goSource, error) {
 			name := strings.ToUpper(strings.TrimSuffix(filepath.Base(playlist), filepath.Ext(playlist))) + ".mpls"
 			src, err = playlistSource(d, name, report)
 		} else {
-			src, err = chooseGo(d, report)
+			src, err = chooseGo(d, twoD, report)
 		}
 		if err != nil {
 			_ = d.Close()
@@ -174,46 +190,60 @@ func clipLanguages(path string) map[uint16]string {
 // one with more chapters wins — a disc often has a bare copy of the feature
 // playlist beside the real one — then the one with fewer items, then the
 // lower number.
-func chooseGo(d bdmv.Disc, report Reporter) (*goSource, error) {
+func chooseGo(d bdmv.Disc, twoD bool, report Reporter) (*goSource, error) {
 	names, err := bdmv.Playlists(d)
 	if err != nil {
 		return nil, err
 	}
-	var cands []cand
+	var cands, flat []cand
 	for _, n := range names {
 		pl, err := bdmv.ReadPlaylist(d, n)
-		if err != nil || !pl.ThreeD() {
+		if err != nil {
 			continue
 		}
-		cands = append(cands, cand{n, pl})
+		if pl.ThreeD() {
+			cands = append(cands, cand{n, pl})
+		}
+		if len(pl.Items) > 0 {
+			flat = append(flat, cand{n, pl})
+		}
 	}
-	if len(cands) == 0 {
+	if len(cands) == 0 && !twoD {
 		// No MVC sub-path anywhere: the dependent view may be in the same
 		// transport stream as the base view (AVCHD 3D recordings do this).
 		// The program tables of the longest titles say.
 		cands = inMuxCandidates(d, names)
 	}
+	kind := "3D"
+	switch {
+	case twoD:
+		cands, kind = flat, "2D"
+	case len(cands) == 0:
+		report.Report("none of the %d playlists is 3D: converting the 2D feature", len(names))
+		cands, kind = flat, "2D"
+	}
 	if len(cands) == 0 {
-		return nil, fmt.Errorf("none of the %d playlists in %s is 3D (no MVC dependent view in any of them)",
-			len(names), d.Describe())
+		return nil, fmt.Errorf("none of the %d playlists in %s plays anything", len(names), d.Describe())
 	}
 	best := cands[0]
 	for _, c := range cands[1:] {
-		if betterTitle(c, best) {
+		if betterTitle(c, best, twoD) {
 			best = c
 		}
 	}
-	report.Report("chose %s (%s) from %d playlists, %d of them 3D", best.name,
-		best.pl.Duration().Round(time.Second), len(names), len(cands))
-	if best.pl.BaseViewIsRight {
+	report.Report("chose %s (%s) from %d playlists for a %s conversion", best.name,
+		best.pl.Duration().Round(time.Second), len(names), kind)
+	if !twoD && best.pl.BaseViewIsRight {
 		report.Report("the disc's base view is the right eye, so the eyes will be swapped")
 	}
 	return playlistSource(d, best.name, report)
 }
 
 // betterTitle orders candidate titles: more distinct content, then more
-// chapters, then fewer items, then the lower playlist number.
-func betterTitle(a, b cand) bool {
+// chapters, then (for a 2D conversion) a 2D playlist over a 3D one of the
+// same film, which reads less, then fewer items, then the lower playlist
+// number.
+func betterTitle(a, b cand, twoD bool) bool {
 	ua, ub := a.pl.UniqueDuration(), b.pl.UniqueDuration()
 	// Durations within a second are the same title.
 	if diff := ua - ub; diff > time.Second || diff < -time.Second {
@@ -221,6 +251,9 @@ func betterTitle(a, b cand) bool {
 	}
 	if ca, cb := len(a.pl.Chapters()), len(b.pl.Chapters()); ca != cb {
 		return ca > cb
+	}
+	if twoD && a.pl.ThreeD() != b.pl.ThreeD() {
+		return !a.pl.ThreeD()
 	}
 	if len(a.pl.Items) != len(b.pl.Items) {
 		return len(a.pl.Items) < len(b.pl.Items)
@@ -406,6 +439,12 @@ func probeGo(ctx context.Context, src *goSource) ([]Track, error) {
 				t.Type, t.StreamID = "MVC", "V_MPEG4/ISO/MVC"
 			}
 			t.Info = describeVideoES(b, s.Type == m2ts.TypeMVC)
+		case m2ts.TypeHEVC:
+			t.Type, t.StreamID, t.Info = "HEVC", "V_MPEGH/ISO/HEVC", "H.265/HEVC"
+		case m2ts.TypeVC1:
+			t.Type, t.StreamID, t.Info = "VC-1", "V_MS/VFW/FOURCC", "SMPTE VC-1"
+		case m2ts.TypeMPEG2Video:
+			t.Type, t.StreamID, t.Info = "MPEG-2", "V_MPEG2", "MPEG-2 video"
 		case m2ts.TypeAC3, m2ts.TypeEAC3:
 			t.StreamID = "A_AC3"
 			a, _ := esinfo.ParseAC3(b, s.Type == m2ts.TypeEAC3)
@@ -917,7 +956,7 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 				}
 				d, ok = g.deps[h.dts]
 			}
-			if ok || g.eof || g.maxDep > h.dts || len(g.queue) > pairWindow {
+			if ok || g.depPID == 0 || g.eof || g.maxDep > h.dts || len(g.queue) > pairWindow {
 				g.queue = g.queue[1:]
 				if ok {
 					delete(g.deps, h.dts)
@@ -927,7 +966,7 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 							delete(g.deps, k)
 						}
 					}
-				} else if hasSlice(h.data) {
+				} else if hasSlice(h.data) && g.depPID != 0 {
 					g.noDep++
 				}
 				if hasSlice(h.data) {

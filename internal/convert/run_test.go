@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -229,27 +230,89 @@ func checkConverted(t *testing.T, out, work string, names ...string) {
 	}
 }
 
-// A 2D source has to be refused by name, not fail obscurely partway through.
-func TestRunnerRefusesA2DSource(t *testing.T) {
-	if _, err := LookPath("ffmpeg"); err != nil {
-		t.Skip("ffmpeg not installed")
+// A 2D source converts to a 2D file: one picture a frame, no stereo mode,
+// every frame there, the depth the source's (a 10-bit source stays 10-bit).
+// H.264 decodes with the decoder here or on the GPU, to the same pictures;
+// HEVC needs the GPU. Skips without ffmpeg and the encoders.
+func TestRunnerConverts2DSources(t *testing.T) {
+	for _, tool := range []string{"ffmpeg", "x264", "x265"} {
+		if _, err := LookPath(tool); err != nil {
+			t.Skipf("%s not installed", tool)
+		}
 	}
 	work := t.TempDir()
-	src := filepath.Join(work, "2d.m2ts")
-	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc2=s=320x240:d=1", "-c:v", "libx264", src); err != nil {
-		t.Skipf("could not build a 2D source: %v", err)
+	make2D := func(name string, args ...string) string {
+		src := filepath.Join(work, name)
+		if err := runCmd(t, "ffmpeg", append([]string{"-hide_banner", "-loglevel", "error", "-y",
+			"-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=1"}, append(args, "-f", "mpegts", src)...)...); err != nil {
+			t.Skipf("could not build a 2D source: %v", err)
+		}
+		return src
 	}
-	o := DefaultOptions()
-	o.Input, o.Output, o.TempDir = src, filepath.Join(work, "x.mkv"), work
-	o.Encoder = EncoderSoftware
-	err := NewRunner(CurrentGOOS, o, nil).Run(context.Background())
-	if err == nil {
-		t.Fatal("a 2D source must be refused")
+	h264 := make2D("avc.m2ts", "-c:v", "libx264", "-bf", "2")
+	hevc10 := make2D("hevc.m2ts", "-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error")
+	convert := func(t *testing.T, src string, codec Codec, dec Decoder) []byte {
+		t.Helper()
+		out := filepath.Join(t.TempDir(), "out.mkv")
+		o := DefaultOptions()
+		o.Input, o.Output = src, out
+		o.Encoder, o.Codec, o.CRF, o.Preset, o.Decoder = EncoderSoftware, codec, 25, "ultrafast", dec
+		o.BitDepth = 0 // the source's
+		var lines []string
+		r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+		if err := r.Run(context.Background()); err != nil {
+			if strings.Contains(err.Error(), "GPU") {
+				t.Skipf("no GPU decoder: %v", err)
+			}
+			t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+		}
+		f, err := os.Open(out) //nolint:gosec // test
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		rd, err := mkv.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := rd.Tracks[0]
+		if v.Width != 320 || v.Height != 240 || v.StereoMode != 0 || v.DisplayWidth != 0 {
+			t.Errorf("video track %+v, want 320x240 and no stereo mode", v)
+		}
+		var data []byte
+		frames := 0
+		for {
+			p, err := rd.Next()
+			if err != nil {
+				break
+			}
+			if p.Track == v.Number {
+				frames++
+				data = append(data, p.Data...)
+			}
+		}
+		if frames != 24 {
+			t.Errorf("%d frames, want 24", frames)
+		}
+		depth := 8
+		if codec == CodecH265 { // hvcC's bitDepthLumaMinus8
+			depth += int(v.CodecPrivate[17] & 7)
+		}
+		return append([]byte(fmt.Sprintf("%d-bit ", depth)), data...)
 	}
-	if !strings.Contains(err.Error(), "not 3D") {
-		t.Errorf("error should say the source is not 3D, got: %v", err)
-	}
+	t.Run("H.264, the decoder here", func(t *testing.T) {
+		cpu := convert(t, h264, CodecH264, DecoderCPU)
+		t.Run("and on the GPU, the same", func(t *testing.T) {
+			if gpu := convert(t, h264, CodecH264, DecoderGPU); !bytes.Equal(gpu, cpu) {
+				t.Error("the GPU's pictures encode differently from the decoder's here")
+			}
+		})
+	})
+	t.Run("HEVC 10-bit stays 10-bit", func(t *testing.T) {
+		if got := convert(t, hevc10, CodecH265, DecoderAuto); !bytes.HasPrefix(got, []byte("10-bit ")) {
+			t.Errorf("output %s", got[:7])
+		}
+	})
 }
 
 // --- helpers for the end-to-end tests ---------------------------------------

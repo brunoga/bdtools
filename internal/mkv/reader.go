@@ -57,6 +57,9 @@ type ReadTrack struct {
 	StereoMode    int
 	// DisplayWidth and DisplayHeight are zero when the file does not say.
 	DisplayWidth, DisplayHeight int
+	// DefaultDuration is a frame's duration, zero when the file does not
+	// say.
+	DefaultDuration time.Duration
 	// BitsPerChannel is the Colour element's bit depth, zero when the file
 	// does not say.
 	BitsPerChannel int
@@ -257,6 +260,8 @@ func parseTrack(b []byte) (ReadTrack, error) {
 			t.Name = string(v)
 		case idFlagDefault:
 			t.Default = readUint(v) != 0
+		case idDefaultDuration:
+			t.DefaultDuration = time.Duration(readUint(v)) //nolint:gosec // nanoseconds
 		case idFlagForced:
 			t.Forced = readUint(v) != 0
 		case idVideo:

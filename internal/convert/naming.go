@@ -11,15 +11,18 @@ import (
 // DetailTags describes a finished conversion for its file name, in the
 // order release names use: layout, resolution per eye, video codec and its
 // quality setting, encoder, then the main audio track and its channels,
-// e.g. "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1". height is the
-// source picture height (one eye).
+// e.g. "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1", or without the
+// layout for a 2D conversion. height is the source picture height (one
+// eye).
 func DetailTags(o Options, audio []Track, height int) string {
 	var tags []string
-	layout := "3D FSBS"
-	if o.Layout == LayoutHalfSBS {
-		layout = "3D HSBS"
+	switch {
+	case o.TwoD:
+	case o.Layout == LayoutHalfSBS:
+		tags = append(tags, "3D HSBS")
+	default:
+		tags = append(tags, "3D FSBS")
 	}
-	tags = append(tags, layout)
 	if height > 0 {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}

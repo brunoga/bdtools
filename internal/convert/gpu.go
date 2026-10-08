@@ -2,6 +2,7 @@ package convert
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"runtime"
 	"sync"
@@ -287,4 +288,25 @@ func clip8(v int) byte {
 		return 255
 	}
 	return byte(v)
+}
+
+// ProbeDecoder reports whether a GPU decoder of kind k works here for the
+// codec, opening one (the answer is kept: it takes a GPU context). A
+// variable, so tests can decide what the machine has.
+var ProbeDecoder = probeDecoder
+
+var decoderProbes sync.Map // gpu.Kind/codec -> bool
+
+func probeDecoder(k gpu.Kind, codec gpu.VideoCodec) bool {
+	key := fmt.Sprint(k, codec)
+	if ok, done := decoderProbes.Load(key); done {
+		return ok.(bool)
+	}
+	d, err := gpu.OpenDecoder(k, gpu.DecodeConfig{Codec: codec}, func(*gpu.DecodedPicture) error { return nil })
+	ok := err == nil
+	if ok {
+		_ = d.Close()
+	}
+	decoderProbes.Store(key, ok)
+	return ok
 }

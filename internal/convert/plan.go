@@ -64,6 +64,16 @@ type Options struct {
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
+	// Decoder chooses how a 2D source's video is decoded: on a GPU when one
+	// can (DecoderAuto, the default), only on a GPU, or only with the
+	// H.264 decoder here (H.264 sources only). A 3D source always goes to
+	// the MVC decoder here: no GPU decodes MVC.
+	Decoder Decoder
+	// TwoD converts the source as a 2D film: the picture, or a 3D source's
+	// base view (its left eye, or the right one where the disc says so),
+	// on its own. A source with no MVC dependent view is converted so in
+	// any case.
+	TwoD bool
 	// Subs3D is what becomes of the subtitles: kept as they are, drawn
 	// once for a player to place in 3D itself (Subs3DOff, the default);
 	// drawn into both halves of the frame at the depth the disc gives them,
@@ -96,6 +106,15 @@ type Options struct {
 	// process.
 	NativeGPU bool
 }
+
+// Decoder says how a 2D source's video is decoded: see Options.Decoder.
+type Decoder string
+
+const (
+	DecoderAuto Decoder = ""
+	DecoderGPU  Decoder = "gpu"
+	DecoderCPU  Decoder = "cpu"
+)
 
 // Subs3D says what becomes of the subtitles: see Options.Subs3D.
 type Subs3D string
@@ -225,6 +244,11 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
+	}
+	switch o.Decoder {
+	case DecoderAuto, "auto", DecoderGPU, DecoderCPU:
+	default:
+		return fmt.Errorf("--decoder %q: want auto, gpu or cpu", o.Decoder)
 	}
 	switch o.Subs3D {
 	case "", Subs3DOff, Subs3DOn, Subs3DBoth:

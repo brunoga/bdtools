@@ -62,7 +62,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
 		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere), h265 (smaller) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
-		depth    = fs.Int("bit-depth", 8, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller)")
+		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: the source's (10 for a 10-bit source such as an Ultra HD Blu-ray, when the codec can)")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
@@ -78,6 +78,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
+		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
+		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else H.264 here), gpu, or cpu (H.264 only); 3D always decodes here")
 		subs3D   = fs.String("subs-3d", "off", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
@@ -85,11 +87,13 @@ func run(argv []string, stdout, stderr *os.File) int {
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "bdtools %s — Blu-ray 3D to side-by-side MKV\n\n", pversion.Resolve(version))
+		fmt.Fprintf(stderr, "bdtools %s — Blu-ray to MKV: 3D side by side, or 2D\n\n", pversion.Resolve(version))
 		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
-			"Converts a Blu-ray 3D (MVC) source into a side-by-side MKV that an\n"+
-			"ordinary decoder can play. The disc is read, decoded and muxed in\n"+
-			"process, and a GPU encodes in process; without one, x264 or x265 does.\n"+
+			"Converts a Blu-ray into an MKV: a 3D (MVC) source side by side, so an\n"+
+			"ordinary decoder can play it, or a 2D one (Ultra HD included) as it is,\n"+
+			"with the tracks you choose. The disc is read, decoded and muxed in\n"+
+			"process, and a GPU decodes and encodes in process; without one, the\n"+
+			"H.264 decoder here and x264, x265 or SVT-AV1 do.\n"+
 			"Run --check to see what is installed.\n\nflags:\n")
 		fs.PrintDefaults()
 	}
@@ -135,6 +139,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
 	o.BitDepth = *depth
 	o.Subs3D = convert.Subs3D(*subs3D)
+	o.TwoD = *twoD
+	o.Decoder = convert.Decoder(*decoder)
+	if o.Decoder == "auto" {
+		o.Decoder = convert.DecoderAuto
+	}
 	o.SwapLR = *swapLR
 	o.DecodeThreads = *decThr
 	o.KeepFallback = *keepFall
@@ -231,9 +240,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		}
 	}
 	if *nameDet {
-		// The encoder auto chose, not "auto".
-		done := o
-		done.Encoder = runner.Opts.Encoder
+		// What the run settled: the encoder auto chose, the bit depth of
+		// the source, 2D or 3D.
+		done := runner.Opts
 		target := convert.WithDetails(final, convert.DetailTags(done, runner.Selected.Audio, runner.Height))
 		if target != final {
 			if err := os.Rename(final, target); err != nil {

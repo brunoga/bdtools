@@ -5,6 +5,24 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- 2D Blu-rays, Ultra HD included, and 2D Matroska files: converted as a 2D
+  film (no stereo mode), with the same codec, quality, encoder and track
+  choices, and resuming. `--2d` converts a 3D source's base view alone. A
+  disc with no 3D title has its 2D feature converted.
+- NVDEC decoding in process (no cgo; Linux for now): H.264 and HEVC
+  (10-bit included) bit-identical to ffmpeg's decoders, MPEG-2 within its
+  transform's tolerance, VC-1 untried; 580 fps for 4K 10-bit HEVC.
+  `--decoder auto|gpu|cpu`; without a GPU decoder H.264 decodes here.
+- A stream that states no frame rate takes the container's (a playlist's,
+  or a Matroska track's frame duration or frame spacing).
+
+### Changed
+
+- `--bit-depth` defaults to the source's: 10 for a 10-bit source when the
+  codec can, 8 otherwise (Blu-ray 3D included, so 3D output is unchanged).
+
 ## [0.6.0] - 2026-10-08
 
 ### Changed

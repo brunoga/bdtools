@@ -30,7 +30,7 @@ var bothForms = []string{"folder", "disc.iso"}
 
 func TestBuiltinListsTheDisc(t *testing.T) {
 	for _, form := range bothForms {
-		src, err := resolveGo(bluray(form), "", nil)
+		src, err := resolveGo(bluray(form), "", false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestBuiltinListsTheDisc(t *testing.T) {
 // side-by-side Y4M, writing the selected other tracks to dir.
 func decodeBuiltin(t *testing.T, input, dir string, filter func(*Selection)) ([]byte, []extra) {
 	t.Helper()
-	src, err := resolveGo(input, "", nil)
+	src, err := resolveGo(input, "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,10 +242,10 @@ func TestBetterTitlePrefersContentThenChapters(t *testing.T) {
 	bare := cand{"00001.mpls", &bdmv.Playlist{Items: []bdmv.PlayItem{item("00272", 5283)}}}
 	withChapters := cand{"00800.mpls", &bdmv.Playlist{Items: []bdmv.PlayItem{item("00272", 5283)},
 		Marks: []bdmv.Mark{{Type: 1, Time: 45000}, {Type: 1, Time: 45000 * 600}}}}
-	if betterTitle(loop, bare) || !betterTitle(bare, loop) {
+	if betterTitle(loop, bare, false) || !betterTitle(bare, loop, false) {
 		t.Error("a 152-item loop of one clip must lose to the feature")
 	}
-	if !betterTitle(withChapters, bare) || betterTitle(bare, withChapters) {
+	if !betterTitle(withChapters, bare, false) || betterTitle(bare, withChapters, false) {
 		t.Error("between equal features, the one with chapters wins")
 	}
 }
@@ -605,6 +605,10 @@ func TestDetailTags(t *testing.T) {
 	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 CRF20 SVT-AV1" {
 		t.Errorf("AV1 tags %q", got)
 	}
+	o.TwoD = true
+	if got := DetailTags(o, nil, 2160); got != "2160p AV1 CRF20 SVT-AV1" {
+		t.Errorf("2D tags %q", got)
+	}
 	for in, want := range map[string]string{
 		"/out/Moana (2016).mkv":         "/out/Moana (2016) 3D FSBS 1080p.mkv",
 		"/out/Moana (2016) 3D FSBS.mkv": "/out/Moana (2016) 3D FSBS 1080p.mkv",
@@ -619,12 +623,12 @@ func TestDetailTags(t *testing.T) {
 func TestPlaylistOption(t *testing.T) {
 	for _, form := range bothForms {
 		for _, name := range []string{"00000", "00000.mpls", "00000.MPLS"} {
-			src, err := resolveGo(bluray(form), name, nil)
+			src, err := resolveGo(bluray(form), name, false, nil)
 			if err != nil || src.playlist == nil {
 				t.Fatalf("%s %s: %v", form, name, err)
 			}
 		}
-		if _, err := resolveGo(bluray(form), "09999", nil); err == nil {
+		if _, err := resolveGo(bluray(form), "09999", false, nil); err == nil {
 			t.Errorf("%s: a missing playlist must fail", form)
 		}
 	}

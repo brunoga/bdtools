@@ -4,9 +4,7 @@ package gpu
 
 import (
 	"bytes"
-	"crypto/md5"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,7 +72,7 @@ func annexBUnits(b []byte, hevc bool) [][]byte {
 }
 
 // ffmpegFrames decodes a stream with ffmpeg into raw frames of the layout
-// the GPU decoders give (nv12 or p010le), one md5 per frame.
+// the GPU decoders give (nv12 or p010le).
 func ffmpegFrames(t *testing.T, path, format, pixfmt string, w, h int) []string {
 	t.Helper()
 	out, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-f", format, "-i", path, //nolint:gosec // test
@@ -88,13 +86,13 @@ func ffmpegFrames(t *testing.T, path, format, pixfmt string, w, h int) []string 
 	}
 	var sums []string
 	for len(out) >= size {
-		sums = append(sums, fmt.Sprintf("%x", md5.Sum(out[:size])))
+		sums = append(sums, string(out[:size]))
 		out = out[size:]
 	}
 	return sums
 }
 
-// decodeAll decodes a stream with NVDEC, one md5 per picture, with the
+// decodeAll decodes a stream with NVDEC, each picture's planes with the
 // pictures' timestamps.
 func decodeAll(t *testing.T, codec VideoCodec, units [][]byte) ([]string, []int64, *DecodedPicture) {
 	t.Helper()
@@ -113,7 +111,7 @@ func decodeAll(t *testing.T, codec VideoCodec, units [][]byte) ([]string, []int6
 		for y := range p.Height / 2 {
 			b.Write(p.UV[y*p.Pitch : y*p.Pitch+row])
 		}
-		sums = append(sums, fmt.Sprintf("%x", md5.Sum(b.Bytes())))
+		sums = append(sums, b.String())
 		pts = append(pts, p.PTS)
 		last = *p
 		return nil
@@ -164,6 +162,7 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 		{"H.264 (the MVC fixture's base view)", DecodeH264, filepath.Join("..", "..", "testdata", "mvc-source", "mvc_base.264"), "h264", "nv12", 640, 480, 8},
 		{"HEVC 8-bit, B-frames, cropped", DecodeHEVC, gen("a.hevc", "-c:v", "libx265", "-x265-params", "bframes=3:log-level=error", "-pix_fmt", "yuv420p"), "hevc", "nv12", 640, 360, 8},
 		{"HEVC 10-bit", DecodeHEVC, gen("b.hevc", "-c:v", "libx265", "-x265-params", "bframes=3:log-level=error", "-pix_fmt", "yuv420p10le"), "hevc", "p010le", 640, 360, 10},
+		{"MPEG-2, B-frames", DecodeMPEG2, gen("c.m2v", "-c:v", "mpeg2video", "-bf", "2", "-q:v", "4"), "mpegvideo", "nv12", 640, 360, 8},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b, err := os.ReadFile(c.path) //nolint:gosec // test
@@ -171,7 +170,11 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := ffmpegFrames(t, c.path, c.format, c.pixfmt, c.w, c.h)
-			got, pts, last := decodeAll(t, c.codec, annexBUnits(b, c.codec == DecodeHEVC))
+			units := annexBUnits(b, c.codec == DecodeHEVC)
+			if c.codec == DecodeMPEG2 {
+				units = mpeg2Units(b)
+			}
+			got, pts, last := decodeAll(t, c.codec, units)
 			if last.Width != c.w || last.Height != c.h || last.Depth != c.depth {
 				t.Errorf("pictures %dx%d at %d bits, want %dx%d at %d", last.Width, last.Height, last.Depth, c.w, c.h, c.depth)
 			}
@@ -179,6 +182,14 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 				t.Fatalf("%d pictures, ffmpeg %d", len(got), len(want))
 			}
 			for i := range want {
+				if c.codec == DecodeMPEG2 {
+					// MPEG-2's inverse transform is not bit-exact by definition
+					// (IEEE 1180 accuracy): decoders differ in the last bit.
+					if p := lumaPSNR([]byte(got[i][:c.w*c.h]), []byte(want[i][:c.w*c.h])); p < 45 {
+						t.Fatalf("picture %d: %.1f dB from ffmpeg's", i, p)
+					}
+					continue
+				}
 				if got[i] != want[i] {
 					t.Fatalf("picture %d differs from ffmpeg's", i)
 				}
@@ -190,4 +201,27 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mpeg2Units splits an MPEG-2 video stream into pictures: each from a
+// sequence or GOP header, or else a picture start code, to the next.
+func mpeg2Units(b []byte) [][]byte {
+	var units [][]byte
+	start, sawPicture := 0, false
+	for i := 0; i+3 < len(b); i++ {
+		if b[i] != 0 || b[i+1] != 0 || b[i+2] != 1 {
+			continue
+		}
+		switch b[i+3] {
+		case 0xb3, 0xb8, 0x00: // sequence header, GOP, picture
+			if sawPicture {
+				units = append(units, b[start:i])
+				start, sawPicture = i, false
+			}
+			if b[i+3] == 0x00 {
+				sawPicture = true
+			}
+		}
+	}
+	return append(units, b[start:])
 }

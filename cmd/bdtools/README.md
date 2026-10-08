@@ -2,7 +2,8 @@
 
 Converts a frame-packed Blu-ray 3D source (MVC) into a side-by-side MKV that an
 ordinary decoder can play, or remuxes it with the tracks you want and nothing
-else.
+else. It converts 2D Blu-rays too, Ultra HD included — see
+[2D Blu-rays](#2d-blu-rays).
 
 MVC stores the second eye as a *dependent view* of an AVC base view. Very few
 players decode it — **Plex does not**, and neither does libavcodec, which drops
@@ -96,8 +97,12 @@ chapters wins, then the one in fewer pieces.
 
 ```
 bdtools: reading the disc image in place (no mount, no extraction)
-bdtools: chose 00800.mpls (1h28m3s) from 46 playlists, 24 of them 3D
+bdtools: chose 00800.mpls (1h28m3s) from 46 playlists for a 3D conversion
 ```
+
+A disc with no 3D title has its 2D feature converted; with `--2d` the title is
+chosen among every playlist, and a 2D copy of the feature wins over its 3D
+twin, which would read both views to use one.
 
 **The eye order comes from the disc too.** The playlist says whether the base
 view is the left or the right eye, and the decoder stacks the views the other
@@ -153,7 +158,9 @@ scheduler such as pipeliner retry it.
 | `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
 | `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
-| `--bit-depth` | `8` | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
+| `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
+| `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
+| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the H.264 decoder here), `gpu`, or `cpu` (H.264 only) |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
@@ -242,6 +249,35 @@ common packages are), SVT-AV1 from 10-bit Y4M. H.264 is refused: High 10
 plays on almost nothing. So is Media Foundation, whose 10-bit path is
 untested; `--encoder nvenc` or `software` instead. `--name-details` adds
 `10bit` after the codec.
+
+## 2D Blu-rays
+
+A source with no MVC dependent view — a 2D Blu-ray, an Ultra HD one, a 2D
+Matroska remux — is converted as a 2D film: the picture as it is, with the
+same choice of codec, quality, encoder and tracks, the same resuming, and no
+stereo mode in the output. `--2d` converts a 3D source so too, from its base
+view alone.
+
+The video is decoded on the GPU when one can: NVIDIA's NVDEC, driven in
+process through its system library like the encoders, decodes H.264, HEVC
+(Ultra HD's, 10-bit), VC-1 and MPEG-2, at hundreds of frames a second even
+at 4K (580 fps for 10-bit HEVC on an RTX 5090, copied back for the encoder).
+Its H.264 and HEVC pictures are bit-identical to ffmpeg's software
+decoders'; MPEG-2's within the tolerance its inverse transform allows (that
+standard is not bit-exact between decoders). VC-1 awaits a real disc to be
+tried on. Without a GPU
+decoder, H.264 goes to the decoder here; the other codecs need the GPU for
+now. `--decoder` overrides the choice.
+
+The output keeps the source's bit depth unless `--bit-depth` says otherwise:
+a 10-bit Ultra HD picture is encoded at 10 bits (with HEVC or AV1; H.264
+takes 8), a Blu-ray at 8. A stream that states no frame rate takes the
+container's: the playlist's on a disc, the frame duration or the spacing of
+the first frames in Matroska.
+
+Still to come: HDR10 and HDR10+ metadata carried into the encode, Ultra HD
+discs' Dolby Vision (profile 7, FEL and MEL) kept by a remux or converted,
+and a lossless remux of 2D video into MKV.
 
 ## Choosing tracks
 

@@ -49,15 +49,22 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		return err
 	}
 	defer closeVideo()
-	v, err := mkv.NewVideoSource(vr, codec, num, den, 1)
+	stereo := 1 // side by side, left eye first
+	if r.flat {
+		stereo = 0
+	}
+	v, err := mkv.NewVideoSource(vr, codec, num, den, stereo)
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
 	}
 	// Each eye's shape, as players read it: 16:9 from square pixels for a
-	// full-width pair, 16:9 from squeezed ones for a half-width pair.
-	if t := v.Track(); r.Opts.Layout == LayoutHalfSBS {
+	// full-width pair, 16:9 from squeezed ones for a half-width pair. A 2D
+	// picture is shown at its pixel size, Matroska's default.
+	switch t := v.Track(); {
+	case r.flat:
+	case r.Opts.Layout == LayoutHalfSBS:
 		v.SetDisplaySize(t.Width, t.Height)
-	} else {
+	default:
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
 	if r.videoDelay > 0 {
