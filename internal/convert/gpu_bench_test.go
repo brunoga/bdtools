@@ -5,7 +5,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -61,8 +61,8 @@ func TestDrawSBS10(t *testing.T) {
 		if half {
 			ow = w
 		}
-		p8 := &hwenc.Picture{Y: make([]byte, ow*h), UV: make([]byte, ow*h/2), Pitch: ow}
-		p10 := &hwenc.Picture{Y: make([]byte, 2*ow*h), UV: make([]byte, ow*h), Pitch: 2 * ow, Depth: 10}
+		p8 := &gpu.Picture{Y: make([]byte, ow*h), UV: make([]byte, ow*h/2), Pitch: ow}
+		p10 := &gpu.Picture{Y: make([]byte, 2*ow*h), UV: make([]byte, ow*h), Pitch: 2 * ow, Depth: 10}
 		drawSBS(p8, sf, false, half)
 		drawSBS(p10, sf, false, half)
 		for _, pl := range []struct {
@@ -101,7 +101,7 @@ func BenchmarkDrawSBS(b *testing.B) {
 		if depth == 10 {
 			n = 2
 		}
-		p := &hwenc.Picture{Y: make([]byte, n*3840*1080), UV: make([]byte, n*3840*540), Pitch: n * 3840, Depth: depth}
+		p := &gpu.Picture{Y: make([]byte, n*3840*1080), UV: make([]byte, n*3840*540), Pitch: n * 3840, Depth: depth}
 		for _, half := range []bool{false, true} {
 			name := fmt.Sprintf("%dbit/full", depth)
 			if half {

@@ -30,7 +30,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // Tool is an external program the conversion depends on.
@@ -179,7 +179,7 @@ func (c Codec) streamExt() string {
 // svtCRF maps --crf onto SVT-AV1's 0-63 CRF: a quarter of the AV1
 // quantiser index the GPU encoders use, which is how SVT relates the two,
 // so a --crf value means about the same in every AV1 encoder.
-func svtCRF(crf int) int { return max(1, min(63, (hwenc.AV1QIndex(crf)+2)/4)) }
+func svtCRF(crf int) int { return max(1, min(63, (gpu.AV1QIndex(crf)+2)/4)) }
 
 // svtPreset maps the x264/x265 preset names --preset takes onto SVT-AV1's
 // numbered presets (0 slowest, 13 fastest). SVT's slow end is far slower

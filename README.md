@@ -247,7 +247,7 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `mvc/stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/bdtools` | the commands |
 | `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
-| `internal/hwenc` | the GPU encoders, driven in process through their system libraries: NVENC, VAAPI, VideoToolbox, Media Foundation |
+| `internal/gpu` | the GPU encoders and decoders, driven in process through their system libraries: NVENC and NVDEC, VAAPI, VideoToolbox, Media Foundation |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
 | `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |

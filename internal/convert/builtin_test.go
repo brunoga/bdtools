@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/bdmv"
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/m2ts"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -436,7 +436,7 @@ func TestDrawSBS(t *testing.T) {
 		if half {
 			w = 8
 		}
-		p := &hwenc.Picture{Y: make([]byte, 32*4), UV: make([]byte, 32*2), Pitch: 32}
+		p := &gpu.Picture{Y: make([]byte, 32*4), UV: make([]byte, 32*2), Pitch: 32}
 		drawSBS(p, sf, false, half)
 		for y := 0; y < 4; y++ {
 			for x := 0; x < w; x++ {

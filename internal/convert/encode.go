@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -190,10 +190,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 // into the encoder's input buffer.
 type gpuSink struct {
 	r    *Runner
-	kind hwenc.Kind
+	kind gpu.Kind
 	path string
 	f    *os.File
-	enc  hwenc.Encoder
+	enc  gpu.Encoder
 }
 
 func (s *gpuSink) start(path string, first *mvc.StereoFrame, num, den int) error {
@@ -206,7 +206,7 @@ func (s *gpuSink) start(path string, first *mvc.StereoFrame, num, den int) error
 	if o.Layout == LayoutHalfSBS {
 		w = first.Base.Width
 	}
-	enc, err := hwenc.Open(s.kind, hwenc.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
+	enc, err := gpu.Open(s.kind, gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
 		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth}, f)
 	if err != nil {
 		_ = f.Close()
@@ -218,7 +218,7 @@ func (s *gpuSink) start(path string, first *mvc.StereoFrame, num, den int) error
 }
 
 func (s *gpuSink) put(sf *mvc.StereoFrame) error {
-	return s.enc.Encode(func(p *hwenc.Picture) { drawSBS(p, sf, s.r.Opts.SwapLR, s.r.Opts.Layout == LayoutHalfSBS) })
+	return s.enc.Encode(func(p *gpu.Picture) { drawSBS(p, sf, s.r.Opts.SwapLR, s.r.Opts.Layout == LayoutHalfSBS) })
 }
 
 func (s *gpuSink) finish() error {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // DetailTags describes a finished conversion for its file name, in the
@@ -91,7 +91,7 @@ func audioTag(t Track) string {
 	return name
 }
 
-func qualityPercent(crf int) int { return int(100*hwenc.VTQuality(crf) + 0.5) }
+func qualityPercent(crf int) int { return int(100*gpu.VTQuality(crf) + 0.5) }
 
 // WithDetails puts tags into a file name before its extension, unless the
 // name already carries them.

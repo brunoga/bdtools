@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // Layout is how the two eyes are arranged in the output frame.
@@ -394,7 +394,7 @@ func encodeStep(opts Options, out string) Step {
 	// The GPU encoders take AV1's quantiser as its 0-255 index.
 	qp := opts.CRF
 	if opts.Codec == CodecAV1 {
-		qp = hwenc.AV1QIndex(opts.CRF)
+		qp = gpu.AV1QIndex(opts.CRF)
 	}
 	// At 10 bits the GPU encoders take P010 and HEVC is Main 10; the
 	// software ones take the 10-bit planar format.
@@ -427,7 +427,7 @@ func encodeStep(opts Options, out string) Step {
 	case EncoderVideoToolbox:
 		// VideoToolbox's quality runs the other way, 1 to 100 with higher
 		// better; -q:v takes it, and the in-process encoder maps the same.
-		return ff(append([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, gpu10...), "")
+		return ff(append([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*gpu.VTQuality(opts.CRF) + 0.5))}, gpu10...), "")
 	case EncoderNVENC:
 		return ff(append([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(qp)}, gpu10...), "")
 	case EncoderMediaFoundation:
@@ -435,7 +435,7 @@ func encodeStep(opts Options, out string) Step {
 		// better, mapped from --crf as for VideoToolbox; hw_encoding refuses
 		// Microsoft's software MFT.
 		return ff([]string{"-c:v", name, "-hw_encoding", "1", "-rate_control", "quality",
-			"-quality", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
+			"-quality", fmt.Sprint(int(100*gpu.VTQuality(opts.CRF) + 0.5))}, "")
 	default:
 		if opts.Codec == CodecAV1 {
 			if opts.EncodesViaFFmpeg() {

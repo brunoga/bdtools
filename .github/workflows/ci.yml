@@ -54,7 +54,7 @@ jobs:
       - name: Test VideoToolbox
         # The virtual Macs have no media engine, so the VideoToolbox tests
         # fall back to Apple's software encoder: the same API and code.
-        run: go test -timeout 300s ./internal/hwenc/... ./internal/convert/...
+        run: go test -timeout 300s ./internal/gpu/... ./internal/convert/...
 
   test-windows:
     name: Test (Windows)
@@ -79,7 +79,7 @@ jobs:
         # -v shows whether they ran or skipped. Only the encoder tests of
         # convert run here: the others assert Unix paths.
         run: |
-          go test -v -timeout 300s ./internal/hwenc/...
+          go test -v -timeout 300s ./internal/gpu/...
           go test -timeout 300s -run "MediaFoundation|SupportsEncoder" ./internal/convert/...
 
   build:
