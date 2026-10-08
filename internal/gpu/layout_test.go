@@ -239,3 +239,22 @@ var nvencGUIDs = []struct {
 	{nvPresetP4GUID, "NV_ENC_PRESET_P4_GUID"},
 	{nvHEVCMain10GUID, "NV_ENC_HEVC_PROFILE_MAIN10_GUID"},
 }
+
+func TestNVDECLayout(t *testing.T) {
+	inc := headerDirs(t, "MVC_NVENC_HEADERS", "ffnvcodec/dynlink_nvcuvid.h", "/usr/include", "/usr/local/include")
+	src, err := os.ReadFile("testdata/nvdecoff.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := format.Source([]byte(cRun(t, string(src), inc)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile("nvdec_layout.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("nvdec_layout.go is not what the headers give; regenerate it:\n%s", got)
+	}
+}
