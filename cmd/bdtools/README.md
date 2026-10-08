@@ -266,7 +266,12 @@ process through its system library like the encoders, decodes H.264, HEVC
 at 4K (580 fps for 10-bit HEVC on an RTX 5090, copied back for the encoder).
 Its H.264 and HEVC pictures are bit-identical to ffmpeg's software
 decoders'; MPEG-2's within the tolerance its inverse transform allows (that
-standard is not bit-exact between decoders). Without a GPU decoder, every
+standard is not bit-exact between decoders). On Linux, Intel's and AMD's
+GPUs decode HEVC through VAAPI: VAAPI has no parser of its own, so the HEVC
+decoder here parses the stream, keeps the reference pictures and their
+order, and hands the GPU each picture's slices (byte-identical to ffmpeg on
+all 152 conformance streams on an Intel Arrow Lake GPU; 95 fps for a disc's
+4K stream there, with about one CPU core). Without a GPU decoder, every
 codec goes to the decoders here (Go), and HEVC of a profile they do not
 decode (the format range extensions, never on a disc) to ffmpeg (see
 [What works where](#what-works-where)). `--decoder` overrides the choice.
@@ -823,14 +828,15 @@ Everything that only reads and writes streams works everywhere: remuxing
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
 A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
 NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC) — else by the decoders here, in Go:
+(macOS: H.264, HEVC), VAAPI (Linux, Intel and AMD: HEVC) — else by the
+decoders here, in Go:
 
-| | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere |
+| | NVIDIA (Linux, Windows), Mac (H.264, HEVC), VAAPI (HEVC) | elsewhere |
 |---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ |
 | 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) |
-| 2D HEVC (Ultra HD) | ✓ (NVDEC) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD) | ✓ (NVDEC, VideoToolbox, VAAPI) | ✓ (decoded here) |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) |
 

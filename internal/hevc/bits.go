@@ -96,6 +96,8 @@ type nalUnit struct {
 	// ep are the payload offsets (after the header) of the emulation
 	// prevention bytes removed: entry points count them.
 	ep []int
+	// raw is the whole NAL unit, as it came.
+	raw []byte
 }
 
 // unescaped converts a payload offset counting emulation prevention bytes
@@ -184,6 +186,7 @@ func appendNAL(out []nalUnit, b []byte) []nalUnit {
 	}
 	n := nalUnit{typ: int(b[0]>>1) & 0x3f, layer: int(b[0]&1)<<5 | int(b[1]>>3), temporalID: int(b[1]&7) - 1}
 	n.rbsp, n.ep = unescapeEP(b[2:])
+	n.raw = b
 	return append(out, n)
 }
 

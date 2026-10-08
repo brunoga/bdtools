@@ -26,6 +26,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   kernels for motion compensation (about 115 fps for a disc's 4K stream on
   24 threads). Streams of the format range
   extensions still go to ffmpeg.
+- VAAPI decoding of HEVC on Linux (Intel and AMD GPUs), with the HEVC
+  parser here driving it: byte-identical to ffmpeg on the 152 conformance
+  streams on an Intel GPU, 95 fps for a disc's 4K stream with about one CPU
+  core. A 4K Dolby Vision FEL conversion decoded, composed and encoded on
+  an Intel iGPU runs at 47 fps.
 - Matroska remuxes of VC-1 Blu-rays: the `V_MS/VFW/FOURCC` (WVC1) track, and
   PCM audio in `A_MS/ACM`.
 - VideoToolbox decoding on macOS (H.264 and HEVC, 10-bit included),

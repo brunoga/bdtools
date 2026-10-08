@@ -21,6 +21,8 @@ type Picture struct {
 	// (H.273 code points; 2, unspecified, when there is none).
 	Primaries, Transfer, Matrix int
 	FullRange                   bool
+	// Left and Top are the window's offset in the coded picture.
+	Left, Top int
 }
 
 // mvField is a prediction block's motion, kept per 4x4 block for the
@@ -58,6 +60,7 @@ type picture struct {
 	refLT    [][2][16]bool
 	ctbSlice []int16
 	corrupt  bool // made up for a missing reference
+	surface  int  // the accelerator's, or -1
 }
 
 // Decoder decodes an H.265/HEVC elementary stream, access unit by access
@@ -90,6 +93,9 @@ type Decoder struct {
 	out      func(*Picture) error
 
 	pic picState
+
+	accel Accel
+	acc   accelState
 }
 
 // New makes a decoder.
@@ -227,6 +233,9 @@ func (d *Decoder) slice(n *nalUnit, r *bits) error {
 			if _, ok := err.(unsupported); ok {
 				return err
 			}
+			if _, ok := err.(accelError); ok {
+				return err
+			}
 			d.errors++
 			return nil
 		}
@@ -321,7 +330,16 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 		d.dpb = d.dpb[:0]
 	}
 	if d.sps != s {
-		d.pool = nil
+		if d.accel != nil {
+			if d.sps == nil || d.sps.width != s.width || d.sps.height != s.height || d.sps.bitDepth != s.bitDepth {
+				for _, p := range d.pool {
+					d.accel.Release(p.surface)
+				}
+				d.pool = nil
+			}
+		} else {
+			d.pool = nil
+		}
 		d.sps = s
 	}
 	d.pps = p
@@ -356,7 +374,10 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 		}
 		break
 	}
-	pic := d.newPicture(s)
+	pic, err := d.newPicture(s)
+	if err != nil {
+		return err
+	}
 	pic.poc = poc
 	pic.pts = d.pts
 	pic.ref = shortTerm
@@ -369,15 +390,24 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 		d.pocTid0 = poc
 	}
 	d.first = false
-	d.beginPicture()
+	if d.accel == nil {
+		d.beginPicture()
+	}
 	return nil
 }
 
-func (d *Decoder) newPicture(s *sps) *picture {
+func (d *Decoder) newPicture(s *sps) (*picture, error) {
 	var pic *picture
 	if n := len(d.pool); n > 0 {
 		pic = d.pool[n-1]
 		d.pool = d.pool[:n-1]
+		pic.sps = s
+	} else if d.accel != nil {
+		surface, err := d.accel.NewSurface(s.width, s.height, s.bitDepth)
+		if err != nil {
+			return nil, accelError{err}
+		}
+		pic = &picture{sps: s, surface: surface}
 	} else {
 		w := s.ctbW << s.log2Ctb
 		h := s.ctbH << s.log2Ctb
@@ -386,13 +416,14 @@ func (d *Decoder) newPicture(s *sps) *picture {
 			strideY: w, strideC: w / 2, sps: s,
 			mvfW: w >> 2, mvf: make([]mvField, (w>>2)*(h>>2)),
 			ctbSlice: make([]int16, s.ctbW*s.ctbH),
+			surface:  -1,
 		}
 	}
 	pic.refPOC = pic.refPOC[:0]
 	pic.refLT = pic.refLT[:0]
 	pic.corrupt = false
 	pic.latency = 0
-	return pic
+	return pic, nil
 }
 
 // applyRPS marks the buffer's pictures by the current picture's reference
@@ -441,7 +472,10 @@ func (d *Decoder) applyRPS(h *sliceHeader, n *nalUnit, poc int) error {
 			if !h.ltMSBPresent[i] {
 				full = poc - (poc & (maxLsb - 1)) + p
 			}
-			pic = d.missingRef(s, full)
+			var err error
+			if pic, err = d.missingRef(s, full); err != nil {
+				return err
+			}
 		}
 		lts = append(lts, lt{pic, h.ltUsed[i]})
 		keep[pic] = longTerm
@@ -460,7 +494,10 @@ func (d *Decoder) applyRPS(h *sliceHeader, n *nalUnit, poc int) error {
 			if !rps.used[i] {
 				continue // only kept for later pictures: nothing to make up
 			}
-			pic = d.missingRef(s, p)
+			var err error
+			if pic, err = d.missingRef(s, p); err != nil {
+				return err
+			}
 		}
 		keep[pic] = shortTerm
 		if !rps.used[i] {
@@ -486,8 +523,11 @@ func (d *Decoder) applyRPS(h *sliceHeader, n *nalUnit, poc int) error {
 // missingRef makes up a reference the stream lost (or never had: a CRA's
 // leading pictures' after a random access), grey, and puts it in the
 // buffer.
-func (d *Decoder) missingRef(s *sps, poc int) *picture {
-	pic := d.newPicture(s)
+func (d *Decoder) missingRef(s *sps, poc int) (*picture, error) {
+	pic, err := d.newPicture(s)
+	if err != nil {
+		return nil, err
+	}
 	mid := uint16(1 << (s.bitDepth - 1))
 	for i := range pic.y {
 		pic.y[i] = mid
@@ -502,7 +542,7 @@ func (d *Decoder) missingRef(s *sps, poc int) *picture {
 	pic.output = false
 	pic.corrupt = true
 	d.dpb = append(d.dpb, pic)
-	return pic
+	return pic, nil
 }
 
 // removeUnused frees the pictures neither waiting for output nor
@@ -542,19 +582,22 @@ func (d *Decoder) emit(pic *picture) error {
 	l, r, t, b := s.confWin[0], s.confWin[1], s.confWin[2], s.confWin[3]
 	p := &Picture{
 		Width: s.width - l - r, Height: s.height - t - b, BitDepth: s.bitDepth,
-		Y:       pic.y[t*pic.strideY+l:],
-		Cb:      pic.cb[t/2*pic.strideC+l/2:],
-		Cr:      pic.cr[t/2*pic.strideC+l/2:],
 		StrideY: pic.strideY, StrideC: pic.strideC,
-		PTS:       pic.pts,
+		PTS: pic.pts, Left: l, Top: t,
 		Primaries: s.primaries, Transfer: s.transfer, Matrix: s.matrix, FullRange: s.fullRange,
 	}
 	if s.timeScale > 0 && s.unitsInTick > 0 {
 		p.FrameRateNum, p.FrameRateDen = s.timeScale, s.unitsInTick
 	}
+	if d.accel != nil {
+		return d.accel.Output(pic.surface, p)
+	}
 	if d.out == nil {
 		return nil
 	}
+	p.Y = pic.y[t*pic.strideY+l:]
+	p.Cb = pic.cb[t/2*pic.strideC+l/2:]
+	p.Cr = pic.cr[t/2*pic.strideC+l/2:]
 	return d.out(p)
 }
 
@@ -566,7 +609,14 @@ func (d *Decoder) finishPicture() error {
 	if pic == nil {
 		return nil
 	}
-	d.endPicture()
+	if d.accel != nil {
+		if err := d.accelDecode(); err != nil {
+			d.cur = nil
+			return err
+		}
+	} else {
+		d.endPicture()
+	}
 	d.cur = nil
 	s := pic.sps
 	for _, p := range d.dpb {
