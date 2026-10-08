@@ -61,6 +61,11 @@ type Composer struct {
 	// enhancement layer code (zero without a residual).
 	residual [3][1024]float32
 	nlq      bool
+	// nlqParams are the dequantisation's, as numbers, for Rebuild.
+	nlqParams [3]struct {
+		off                  int32
+		slope, thresh, inMax float32
+	}
 	// mmr, when both chroma components are one MMR piece each, is their
 	// prediction for a row at a time.
 	mmr *mmrRow
@@ -191,9 +196,11 @@ func NewComposer(u *RPU) (*Composer, error) {
 	if q := m.NLQ; q != nil && u.residual() && !q.MEL() {
 		c.nlq = true
 		for ci := range 3 {
-			slope := coef(int64(q.SlopeInt[ci]), q.Slope[ci])     //nolint:gosec // small
-			thresh := coef(int64(q.ThreshInt[ci]), q.Thresh[ci])  //nolint:gosec // small
-			inMax := coef(int64(q.InMaxInt[ci]), q.InMax[ci])     //nolint:gosec // small
+			slope := coef(int64(q.SlopeInt[ci]), q.Slope[ci])    //nolint:gosec // small
+			thresh := coef(int64(q.ThreshInt[ci]), q.Thresh[ci]) //nolint:gosec // small
+			inMax := coef(int64(q.InMaxInt[ci]), q.InMax[ci])    //nolint:gosec // small
+			c.nlqParams[ci].off = int32(q.Offset[ci])            //nolint:gosec // a 10-bit code
+			c.nlqParams[ci].slope, c.nlqParams[ci].thresh, c.nlqParams[ci].inMax = float32(slope), float32(thresh), float32(inMax)
 			for code := range c.residual[ci] {
 				t := float64(code) - float64(q.Offset[ci])
 				if t == 0 {
@@ -466,3 +473,152 @@ func code(v, div int32) int32 {
 }
 
 func sample(row []byte, x int) int32 { return int32(binary.LittleEndian.Uint16(row[2*x:]) >> 6) }
+
+// Rebuild makes an enhancement layer for a new base layer: one that, with
+// blNew (the base layer bl encoded and decoded again) and the same RPU,
+// composes to what bl and el compose to. Its residual is el's, plus what
+// the new base layer's mapping falls short of the old one's, brought down
+// to the enhancement layer's size ([1 2 1] across, the two rows averaged:
+// its siting, and enough of a low-pass not to alias the encoder's noise),
+// quantised to the code whose dequantised residual is nearest. With blNew
+// equal to bl it gives el back. dst is the enhancement layer's size, half
+// bl's.
+func (c *Composer) Rebuild(dst, bl, el, blNew *Picture) error {
+	if bl.Width&3 != 0 || bl.Height&3 != 0 || blNew.Width != bl.Width || blNew.Height != bl.Height {
+		return errors.New("dovi: picture sizes do not match")
+	}
+	if el.Width*2 != bl.Width || el.Height*2 != bl.Height || dst.Width != el.Width || dst.Height != el.Height {
+		return fmt.Errorf("dovi: a %dx%d enhancement layer for a %dx%d base layer", el.Width, el.Height, bl.Width, bl.Height)
+	}
+	q := c.quantiser()
+	rows := el.Height / 2 // enhancement layer chroma rows
+	workers := min(runtime.GOMAXPROCS(0), rows)
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.rebuildBand(dst, bl, el, blNew, q, rows*w/workers, rows*(w+1)/workers)
+		}()
+	}
+	wg.Wait()
+	return nil
+}
+
+// quantiser inverts the dequantisation, per component: a residual r is
+// sign(t)·((|t|−½)·S + T) for the code offset+t (t ≠ 0), at most vdr_in_max,
+// and 0 for the offset.
+type quantiser [3]struct {
+	off                  int32
+	slope, thresh, inMax float32
+	inv                  float32 // 1/slope
+}
+
+func (c *Composer) quantiser() *quantiser {
+	var q quantiser
+	for ci := range 3 {
+		q[ci].off = 512
+		if p := c.nlqParams[ci]; c.nlq && p.slope > 0 {
+			q[ci].off, q[ci].slope, q[ci].thresh, q[ci].inMax, q[ci].inv = p.off, p.slope, p.thresh, p.inMax, 1/p.slope
+		}
+	}
+	return &q
+}
+
+// nearest is the code whose residual is nearest r, for component ci.
+func (q *quantiser) nearest(ci int, r float32) int32 {
+	p := &q[ci]
+	a := r
+	if a < 0 {
+		a = -a
+	}
+	if p.slope <= 0 {
+		return p.off
+	}
+	a = min(a, p.inMax)
+	// The nearest |t| ≥ 1, against t = 0.
+	k := int32((a-p.thresh)*p.inv + 1) // round((a−T)/S + ½)
+	k = max(k, 1)
+	if e := (float32(k)-0.5)*p.slope + p.thresh - a; e > a || -e > a {
+		return p.off
+	}
+	if r < 0 {
+		return max(p.off-k, 0)
+	}
+	return min(p.off+k, 1023)
+}
+
+// rebuildBand makes enhancement layer chroma rows [from, to) and the luma
+// rows they cover.
+func (c *Composer) rebuildBand(dst, bl, el, blNew *Picture, q *quantiser, from, to int) {
+	w, cw := bl.Width, bl.Width/2
+	ew, ecw := el.Width, el.Width/2
+	short := [2][]float32{make([]float32, w), make([]float32, w)} // the new mapping's shortfall, two luma rows
+	shortB := [2][]float32{make([]float32, cw), make([]float32, cw)}
+	shortR := [2][]float32{make([]float32, cw), make([]float32, cw)}
+	sy, sb, sr := make([]float32, cw), make([]float32, cw), make([]float32, cw)
+	ob, or := make([]float32, cw), make([]float32, cw)
+	nb, nr := make([]float32, cw), make([]float32, cw)
+	for ecy := from; ecy < to; ecy++ {
+		// Luma: enhancement layer rows 2ecy and 2ecy+1, each from two base
+		// layer rows.
+		for er := range 2 {
+			ey := 2*ecy + er
+			for k := range 2 {
+				y := 2*ey + k
+				src, nw := bl.Y[y*bl.Pitch:], blNew.Y[y*blNew.Pitch:]
+				for x := range w {
+					short[k][x] = c.luma[sample(src, x)] - c.luma[sample(nw, x)]
+				}
+			}
+			in, out := el.Y[ey*el.Pitch:], dst.Y[ey*dst.Pitch:]
+			for ex := range ew {
+				r := c.residual[0][sample(in, ex)] + downsample(short[0], short[1], 2*ex)
+				setCode(out, ex, q.nearest(0, r))
+			}
+		}
+		// Chroma: enhancement layer chroma row ecy, from two base layer
+		// chroma rows.
+		for k := range 2 {
+			cy := 2*ecy + k
+			c.chromaRow(ob, or, sy, sb, sr, bl, cy)
+			c.chromaRow(nb, nr, sy, sb, sr, blNew, cy)
+			for x := range cw {
+				shortB[k][x], shortR[k][x] = ob[x]-nb[x], or[x]-nr[x]
+			}
+		}
+		in, out := el.UV[ecy*el.Pitch:], dst.UV[ecy*dst.Pitch:]
+		for ex := range ecw {
+			rb := c.residual[1][sample(in, 2*ex)] + downsample(shortB[0], shortB[1], 2*ex)
+			rr := c.residual[2][sample(in, 2*ex+1)] + downsample(shortR[0], shortR[1], 2*ex)
+			setCode(out, 2*ex, q.nearest(1, rb))
+			setCode(out, 2*ex+1, q.nearest(2, rr))
+		}
+	}
+}
+
+// chromaRow predicts base layer chroma row cy of p, as composition does.
+func (c *Composer) chromaRow(ob, or, sy, sb, sr []float32, p *Picture, cy int) {
+	chromaPrep(sy, sb, sr, p.Y[2*cy*p.Pitch:], p.Y[(2*cy+1)*p.Pitch:], p.UV[cy*p.Pitch:])
+	if c.mmr != nil {
+		c.mmr.row(ob, or, sy, sb, sr)
+		return
+	}
+	for x := range ob {
+		sig := [3]float32{sy[x], sb[x], sr[x]}
+		ob[x], or[x] = c.chroma[0].apply(sig, 1), c.chroma[1].apply(sig, 2)
+	}
+}
+
+// downsample is the value at x of two rows brought to half size: [1 2 1]
+// across (co-sited), the rows averaged (centred).
+func downsample(r0, r1 []float32, x int) float32 {
+	l, rr := max(x-1, 0), min(x+1, len(r0)-1)
+	return (r0[l] + 2*r0[x] + r0[rr] + r1[l] + 2*r1[x] + r1[rr]) * (1.0 / 8)
+}
+
+// setCode stores a 10-bit code as P010 sample i of a row.
+func setCode(row []byte, i int, code int32) {
+	v := uint16(code) << 6 //nolint:gosec // a 10-bit code
+	row[2*i], row[2*i+1] = byte(v), byte(v>>8)
+}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/brunoga/bdtools/internal/gpu"
@@ -87,7 +88,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			return &encodeError{err}
 		}
 		i := len(r.work.m.Segments)
-		return r.work.add(segment{File: fmt.Sprintf("video-%04d%s", i, ext), Frames: inSegment})
+		seg := segment{File: fmt.Sprintf("video-%04d%s", i, ext), Frames: inSegment}
+		if l, ok := sink.(interface{ elSegment() string }); ok {
+			seg.EL = l.elSegment()
+		}
+		return r.work.add(seg)
 	}
 	decErr := src.run(func(sf picture) error {
 		if keep != nil && !keep(sf.pts) {
@@ -98,6 +103,14 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			return err
 		}
 		if n == 0 {
+			if sf.el != nil {
+				// Dolby Vision's layers kept apart: profile 7 out.
+				if _, ok := sink.(*gpuSink); !ok || r.Opts.Encoder != EncoderNVENC {
+					return &encodeError{errors.New("--dv-fel " + string(r.Opts.DVFEL) +
+						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin)")}
+				}
+				r.felLayered = true
+			}
 			r.noteFirstPicture(sf.pts)
 			_, h, depth := sf.size()
 			r.Height = h
@@ -213,6 +226,9 @@ type gpuSink struct {
 	path string
 	f    *os.File
 	enc  gpu.Encoder
+	// layers is the Dolby Vision enhancement layer's side, when it is kept
+	// as a layer.
+	layers *felLayers
 }
 
 func (s *gpuSink) start(path string, first picture, num, den int) error {
@@ -222,9 +238,28 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	}
 	o := s.r.Opts
 	w, h := s.r.frameSize(first)
-	enc, err := gpu.Open(s.kind, gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
-		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth, Color: o.Color}, f)
+	cfg := gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
+		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth, Color: o.Color}
+	var out io.Writer = f
+	s.layers = nil
+	if s.r.felLayered {
+		elQP := o.DVELCRF
+		if elQP == 0 {
+			elQP = max(o.CRF-elCRFOffset, 0)
+		}
+		l, bl, err := openLayers(o.DVFEL, s.kind, cfg, elQP, path, f)
+		if err != nil {
+			_ = f.Close()
+			_ = os.Remove(path)
+			return err
+		}
+		s.layers, out = l, bl
+	}
+	enc, err := gpu.Open(s.kind, cfg, out)
 	if err != nil {
+		if s.layers != nil {
+			s.layers.abort()
+		}
 		_ = f.Close()
 		_ = os.Remove(path)
 		return fmt.Errorf("opening the %s encoder: %w", o.Encoder, err)
@@ -233,7 +268,21 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	return nil
 }
 
+// elSegment is the enhancement layer's file for the segment, if any.
+func (s *gpuSink) elSegment() string {
+	if s.layers == nil {
+		return ""
+	}
+	return filepath.Base(s.layers.elPath)
+}
+
 func (s *gpuSink) put(p picture) error {
+	if s.layers != nil {
+		if err := s.enc.Encode(func(dst *gpu.Picture) { drawFlat(dst, p) }); err != nil {
+			return err
+		}
+		return s.layers.put(p)
+	}
 	if s.r.flat {
 		return s.enc.Encode(func(dst *gpu.Picture) { drawFlat(dst, p) })
 	}
@@ -242,6 +291,13 @@ func (s *gpuSink) put(p picture) error {
 
 func (s *gpuSink) finish() error {
 	err := s.enc.Close()
+	if s.layers != nil {
+		if err == nil {
+			err = s.layers.finish()
+		} else {
+			s.layers.abort()
+		}
+	}
 	if err == nil {
 		err = s.f.Sync()
 	}
@@ -252,6 +308,9 @@ func (s *gpuSink) finish() error {
 }
 
 func (s *gpuSink) abort() error {
+	if s.layers != nil {
+		s.layers.abort()
+	}
 	_ = s.enc.Close()
 	_ = s.f.Close()
 	_ = os.Remove(s.path)

@@ -49,6 +49,9 @@ type manifest struct {
 type segment struct {
 	File   string `json:"file"` // in the work directory
 	Frames int    `json:"frames"`
+	// EL is the Dolby Vision enhancement layer's file for the segment, when
+	// the layers are kept apart.
+	EL string `json:"el,omitempty"`
 }
 
 // done is how many pictures the finished segments hold.
@@ -92,6 +95,11 @@ func openWork(dir string) (*work, error) {
 		if fi, err := os.Stat(filepath.Join(dir, s.File)); err != nil || fi.Size() == 0 || s.Frames <= 0 {
 			break
 		}
+		if s.EL != "" {
+			if fi, err := os.Stat(filepath.Join(dir, s.EL)); err != nil || fi.Size() == 0 {
+				break
+			}
+		}
 		good = append(good, s)
 	}
 	w.m.Segments = good
@@ -105,6 +113,9 @@ func (w *work) tidy() {
 	keep := map[string]bool{manifestName: true}
 	for _, s := range w.m.Segments {
 		keep[s.File] = true
+		if s.EL != "" {
+			keep[s.EL] = true
+		}
 	}
 	entries, _ := os.ReadDir(w.dir)
 	for _, e := range entries {
@@ -164,6 +175,26 @@ func (w *work) segmentPath(i int, ext string) string {
 	return filepath.Join(w.dir, fmt.Sprintf("video-%04d%s", i, ext))
 }
 
+// elSegmentPaths are the finished segments' enhancement layer files, in
+// order: nil when the segments have none, an error when some do and some
+// do not.
+func (w *work) elSegmentPaths() ([]string, error) {
+	var out []string
+	for _, s := range w.m.Segments {
+		if s.EL == "" {
+			if out != nil {
+				return nil, errors.New("some segments have an enhancement layer and some do not: start over with --restart")
+			}
+			continue
+		}
+		if len(out) == 0 && s != w.m.Segments[0] {
+			return nil, errors.New("some segments have an enhancement layer and some do not: start over with --restart")
+		}
+		out = append(out, filepath.Join(w.dir, s.EL))
+	}
+	return out, nil
+}
+
 // segmentPaths are the finished segments, in order.
 func (w *work) segmentPaths() []string {
 	var out []string
@@ -200,8 +231,9 @@ func (r *Runner) resumeKey() (string, error) {
 		BitDepth  int
 		Segment   int
 		DVFEL     FEL `json:",omitempty"`
+		DVELCRF   int `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL})
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.DVELCRF})
 	if err != nil {
 		return "", err
 	}

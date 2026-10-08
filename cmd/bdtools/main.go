@@ -80,7 +80,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else H.264 here), gpu, or cpu (H.264 only); 3D always decodes here")
-		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture, or drop it (the HDR10 base layer as it is)")
+		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265 --encoder nvenc); or drop it (the HDR10 base layer as it is)")
+		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf less 6)")
 		subs3D   = fs.String("subs-3d", "off", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
@@ -145,7 +146,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if o.Decoder == "auto" {
 		o.Decoder = convert.DecoderAuto
 	}
-	o.DVFEL = convert.FEL(*dvFEL)
+	o.DVFEL, o.DVELCRF = convert.FEL(*dvFEL), *dvELCRF
 	if o.DVFEL == "compose" {
 		o.DVFEL = convert.FELCompose
 	}

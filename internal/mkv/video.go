@@ -28,7 +28,7 @@ type VideoSource struct {
 	// extras gives units to add to a frame, by its display index.
 	extras   func(display int64, key bool) [][]byte
 	// trailer gives units to end a frame with, by its display index.
-	trailer func(display int64) [][]byte
+	trailer func(display int64) ([][]byte, error)
 	codec    Codec
 	r        *bufio.Reader
 	frameDur time.Duration
@@ -138,7 +138,11 @@ func (v *VideoSource) Next() (Frame, error) {
 		}
 	}
 	if v.trailer != nil {
-		if more := v.trailer(f.dispIdx); len(more) > 0 {
+		more, err := v.trailer(f.dispIdx)
+		if err != nil {
+			return Frame{}, err
+		}
+		if len(more) > 0 {
 			nals = append(append([][]byte(nil), nals...), more...)
 		}
 	}
@@ -190,9 +194,10 @@ func (v *VideoSource) SetDisplaySize(w, h int) {
 	v.track.DisplayWidth, v.track.DisplayHeight = w, h
 }
 
-// SetTrailer has trailer give, for each frame by its display index, NAL
-// units to end it with: Dolby Vision's RPU goes last in its access unit.
-func (v *VideoSource) SetTrailer(trailer func(display int64) [][]byte) { v.trailer = trailer }
+// SetTrailer has trailer give, for each frame by its display index (asked
+// in decoding order), NAL units to end it with: Dolby Vision's enhancement
+// layer and RPU go last in its access unit. An error ends the source.
+func (v *VideoSource) SetTrailer(trailer func(display int64) ([][]byte, error)) { v.trailer = trailer }
 
 // SetBlockAdditions sets the track's BlockAdditionMappings.
 func (v *VideoSource) SetBlockAdditions(a []BlockAddition) { v.track.BlockAdditions = a }

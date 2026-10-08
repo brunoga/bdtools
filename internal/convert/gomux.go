@@ -69,7 +69,15 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
 	r.carryHDR(v)
-	r.carryDolbyVision(v, num, den)
+	defer func() {
+		for _, c := range r.closers {
+			c()
+		}
+		r.closers = nil
+	}()
+	if err := r.carryDolbyVision(v, num, den); err != nil {
+		return err
+	}
 	if r.videoDelay > 0 {
 		v.SetDelay(r.videoDelay)
 		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
