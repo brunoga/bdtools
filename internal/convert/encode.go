@@ -53,6 +53,19 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		sink = &gpuSink{r: r, kind: k}
 		verb = "encoded"
 		r.Report.Report("decoding and encoding (%s, %s on the GPU, in process)", r.Opts.Codec, r.Opts.Encoder)
+	case r.Opts.DVFEL.layered() && r.Opts.Encoder == EncoderSoftware && r.Opts.Codec == CodecH265:
+		// Dolby Vision's layers kept apart without NVENC: x265 in process,
+		// set up alike for both layers.
+		bin, err := r.resolve(toolX265)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", errNoX265, err)
+		}
+		preset := r.Opts.Preset
+		sink = &gpuSink{r: r, open: func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) {
+			return openX265(bin, cfg, preset, r.felLayered, w)
+		}}
+		verb = "encoded"
+		r.Report.Report("decoding and encoding (h265, x265, in process)")
 	default:
 		bin, err := r.resolve(encoderTool(r.Opts.Encoder, r.Opts.Codec, r.Opts.EncodesViaFFmpeg()))
 		if err != nil {
@@ -105,9 +118,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		if n == 0 {
 			if sf.el != nil {
 				// Dolby Vision's layers kept apart: profile 7 out.
-				if _, ok := sink.(*gpuSink); !ok || r.Opts.Encoder != EncoderNVENC {
+				if _, ok := sink.(*gpuSink); !ok {
 					return &encodeError{errors.New("--dv-fel " + string(r.Opts.DVFEL) +
-						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin)")}
+						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin) or x265 (--encoder software)")}
 				}
 				r.felLayered = true
 			}
@@ -229,6 +242,15 @@ type gpuSink struct {
 	// layers is the Dolby Vision enhancement layer's side, when it is kept
 	// as a layer.
 	layers *felLayers
+	// open opens the encoder (nil: the GPU's, of kind).
+	open encoderOpener
+}
+
+func (s *gpuSink) opener() encoderOpener {
+	if s.open != nil {
+		return s.open
+	}
+	return func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) { return gpu.Open(s.kind, cfg, w) }
 }
 
 func (s *gpuSink) start(path string, first picture, num, den int) error {
@@ -247,7 +269,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 		if elQP == 0 {
 			elQP = max(o.CRF-elCRFOffset, 0)
 		}
-		l, bl, err := openLayers(o.DVFEL, s.kind, s.r.openDecoder, cfg, elQP, path, f)
+		l, bl, err := openLayers(o.DVFEL, s.opener(), s.r.openDecoder, cfg, elQP, path, f)
 		if err != nil {
 			_ = f.Close()
 			_ = os.Remove(path)
@@ -255,7 +277,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 		}
 		s.layers, out = l, bl
 	}
-	enc, err := gpu.Open(s.kind, cfg, out)
+	enc, err := s.opener()(cfg, out)
 	if err != nil {
 		if s.layers != nil {
 			s.layers.abort()

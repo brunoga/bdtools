@@ -161,7 +161,7 @@ scheduler such as pipeliner retry it.
 | `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else H.264 here and other codecs with ffmpeg), `gpu`, or `cpu` (never the GPU) |
-| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265 --encoder nvenc`); or `drop` it (the HDR10 base layer as it is) |
+| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc` or `software`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` − 6 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
@@ -353,7 +353,7 @@ adds nothing, and its mapping is kept in the RPU.
 A conversion can also keep profile 7 — the HDR10 base layer and the full
 enhancement layer apart, with the disc's RPUs unchanged — for players that
 compose FEL themselves (most play profile 7 as its base layer). Two
-methods, with `--codec h265 --encoder nvenc`:
+methods, with `--codec h265` and `--encoder nvenc` or `software` (x265):
 
 - `--dv-fel keep` rebuilds the enhancement layer for the base layer as it
   was encoded, the way Dolby's encoder makes one. The base layer's
@@ -366,9 +366,12 @@ methods, with `--codec h265 --encoder nvenc`:
   It was made for the disc's base layer, so our base layer's encoding error
   passes through the composition uncorrected; it is the faster one.
 
-The enhancement layer is encoded on a second NVENC session set up like the
+The enhancement layer is encoded on a second encoder set up like the
 first, so that the two streams' pictures are coded in the same order with
-the same types, as Dolby Vision requires; the mux checks it. Its quality is
+the same types, as Dolby Vision requires; the mux checks it. With x265 both
+run in process (raw pictures in, the bitstream back through a pipe), set
+up to code every stream alike: no scene cut keyframes, no adaptive
+B-frames, a fixed keyframe interval, closed GOPs. Its quality is
 `--dv-el-crf` (by default `--crf` less 6: its residual is a few codes
 either side of its offset, which the base layer's quantiser would mostly
 flatten). `--remux` keeps the disc's layers as they are.
@@ -828,7 +831,7 @@ H.264 by the decoder here and the other codecs by ffmpeg:
 | 2D H.264 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
 | 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
-| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC) | NVENC only, for now | — |
+| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) | — |
 
 Decoding through ffmpeg gives each picture its own timestamp (the stream
 goes to it as a transport stream with them, and `-stats_enc_pre` gives them

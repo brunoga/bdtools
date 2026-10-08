@@ -53,7 +53,7 @@ type felLayers struct {
 	// again; the source's layers wait by picture number until their base
 	// layer comes back.
 	loop    gpu.Decoder
-	written [][]byte
+	written *auSplitter
 	held    map[int]*heldLayers
 	in, out int // pictures put, and come back from the loop
 	// The rebuilding and the enhancement layer's encoding run on a
@@ -88,7 +88,7 @@ func elSegmentPath(path string) string {
 // openLayers starts the enhancement layer's encoder (and for keep, the
 // base layer's decode loop) for a segment whose base layer goes to blPath.
 // It returns the writer the base layer's encoder writes to.
-func openLayers(mode FEL, kind gpu.Kind, open decoderOpener, cfg gpu.Config, elQP int, blPath string, bl io.Writer) (*felLayers, io.Writer, error) {
+func openLayers(mode FEL, openEnc encoderOpener, open decoderOpener, cfg gpu.Config, elQP int, blPath string, bl io.Writer) (*felLayers, io.Writer, error) {
 	l := &felLayers{mode: mode, elPath: elSegmentPath(blPath), w: cfg.Width / 2, h: cfg.Height / 2}
 	f, err := os.Create(l.elPath) //nolint:gosec // our work directory
 	if err != nil {
@@ -98,7 +98,7 @@ func openLayers(mode FEL, kind gpu.Kind, open decoderOpener, cfg gpu.Config, elQ
 	ecfg := cfg
 	ecfg.Width, ecfg.Height = l.w, l.h
 	ecfg.QP = elQP
-	if l.el, err = gpu.Open(kind, ecfg, f); err != nil {
+	if l.el, err = openEnc(ecfg, f); err != nil {
 		l.abort()
 		return nil, nil, fmt.Errorf("opening the enhancement layer's encoder: %w", err)
 	}
@@ -128,16 +128,12 @@ func openLayers(mode FEL, kind gpu.Kind, open decoderOpener, cfg gpu.Config, elQ
 			}
 		}
 	}()
-	return l, io.MultiWriter(bl, (*accessUnits)(&l.written)), nil
+	l.written = &auSplitter{}
+	return l, io.MultiWriter(bl, l.written), nil
 }
 
-// accessUnits collects what an encoder writes: one access unit a write.
-type accessUnits [][]byte
-
-func (a *accessUnits) Write(b []byte) (int, error) {
-	*a = append(*a, bytes.Clone(b))
-	return len(b), nil
-}
+// encoderOpener opens an encoder writing to w: the GPU's, or x265.
+type encoderOpener func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error)
 
 // put takes a picture's layers after its base layer has gone to the
 // encoder: reencode encodes its enhancement layer now; keep holds both
@@ -161,9 +157,7 @@ func (l *felLayers) put(p picture) error {
 
 // drain decodes what the base layer's encoder has written.
 func (l *felLayers) drain() error {
-	for len(l.written) > 0 {
-		au := l.written[0]
-		l.written = l.written[1:]
+	for _, au := range l.written.take() {
 		if err := l.loop.Decode(au, int64(l.out+len(l.held))); err != nil {
 			return fmt.Errorf("decoding the encoded base layer: %w", err)
 		}
@@ -277,6 +271,7 @@ func (l *felLayers) encode(el *dovi.Picture, rpu []byte) error {
 func (l *felLayers) finish() error {
 	var err error
 	if l.loop != nil {
+		l.written.close()
 		err = l.drain()
 		if err == nil {
 			err = l.loop.Flush()

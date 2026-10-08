@@ -284,8 +284,8 @@ func (o Options) Validate(goos string) error {
 	switch o.DVFEL {
 	case FELCompose, "compose", FELDrop:
 	case FELKeep, FELReencode:
-		if !o.Remux && (o.Codec != CodecH265 || o.Encoder != EncoderNVENC) {
-			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc", o.DVFEL)
+		if !o.Remux && (o.Codec != CodecH265 || (o.Encoder != EncoderNVENC && o.Encoder != EncoderSoftware)) {
+			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc or software (x265)", o.DVFEL)
 		}
 	default:
 		return fmt.Errorf("--dv-fel %q: want compose, keep, reencode or drop", o.DVFEL)
