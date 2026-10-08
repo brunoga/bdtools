@@ -821,10 +821,11 @@ picks NVENC.
 Everything that only reads and writes streams works everywhere: remuxing
 (Dolby Vision included), demuxing, the 3D conversion (its MVC decoder is
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
-A 2D source's video is decoded on NVIDIA's NVDEC where there is one, else
-H.264 by the decoder here and the other codecs by ffmpeg:
+A 2D source's video is decoded on NVIDIA's NVDEC where there is one
+(Linux and Windows), else H.264 by the decoder here and the other codecs by
+ffmpeg:
 
-| | Linux (NVIDIA) | elsewhere, with ffmpeg | elsewhere, without |
+| | NVIDIA (Linux, Windows) | elsewhere, with ffmpeg | elsewhere, without |
 |---|---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |
@@ -832,6 +833,11 @@ H.264 by the decoder here and the other codecs by ffmpeg:
 | 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) | — |
+
+On Windows, NVDEC's structures are laid out as Windows lays them out (an
+`unsigned long` is 4 bytes there), generated from NVIDIA's headers like
+Linux's and checked by a test; it has not yet been run on a Windows machine
+with an NVIDIA GPU, and where it fails, ffmpeg takes over.
 
 Decoding through ffmpeg gives each picture its own timestamp (the stream
 goes to it as a transport stream with them, and `-stats_enc_pre` gives them

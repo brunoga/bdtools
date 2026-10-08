@@ -60,6 +60,7 @@ int main(void) {
 	C(cudaVideoChromaFormat_420, "cuvChroma420"); C(cudaVideoSurfaceFormat_NV12, "cuvSurfaceNV12"); C(cudaVideoSurfaceFormat_P016, "cuvSurfaceP016");
 	C(cudaVideoDeinterlaceMode_Weave, "cuvDeinterlaceWeave"); C(cudaVideoDeinterlaceMode_Adaptive, "cuvDeinterlaceAdaptive");
 	C(cudaVideoCreate_PreferCUVID, "cuvCreatePreferCUVID");
+	S(tcu_ulong, "cuvULong");
 	printf(")\n");
 	return 0;
 }
