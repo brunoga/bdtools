@@ -1,5 +1,3 @@
-//go:build (linux || windows) && (amd64 || arm64)
-
 package gpu
 
 import (
@@ -95,14 +93,14 @@ func ffmpegFrames(t *testing.T, path, format, pixfmt string, w, h int) []string 
 	return sums
 }
 
-// decodeAll decodes a stream with NVDEC, each picture's planes with the
-// pictures' timestamps.
-func decodeAll(t *testing.T, codec VideoCodec, units [][]byte) ([]string, []int64, *DecodedPicture) {
+// decodeAll decodes a stream with a GPU decoder of kind k, each picture's
+// planes with the pictures' timestamps.
+func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte) ([]string, []int64, *DecodedPicture) {
 	t.Helper()
 	var sums []string
 	var pts []int64
 	var last DecodedPicture
-	d, err := OpenDecoder(NVENC, DecodeConfig{Codec: codec}, func(p *DecodedPicture) error {
+	d, err := OpenDecoder(k, DecodeConfig{Codec: codec}, func(p *DecodedPicture) error {
 		var b bytes.Buffer
 		row := p.Width
 		if p.Depth > 8 {
@@ -120,7 +118,7 @@ func decodeAll(t *testing.T, codec VideoCodec, units [][]byte) ([]string, []int6
 		return nil
 	})
 	if errors.Is(err, ErrDecodeUnavailable) {
-		t.Skipf("no NVDEC: %v", err)
+		t.Skipf("no %s decoder: %v", k, err)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +137,7 @@ func decodeAll(t *testing.T, codec VideoCodec, units [][]byte) ([]string, []int6
 
 // NVDEC decodes exactly what ffmpeg's software decoders do, in display
 // order with the timestamps given in decoding order put back in order.
-func TestNVDECMatchesFFmpeg(t *testing.T) {
+func TestGPUDecodersMatchFFmpeg(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("no ffmpeg")
 	}
@@ -167,48 +165,58 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 		{"HEVC 10-bit", DecodeHEVC, gen("b.hevc", "-c:v", "libx265", "-x265-params", "bframes=3:log-level=error", "-pix_fmt", "yuv420p10le"), "hevc", "p010le", 640, 360, 10},
 		{"MPEG-2, B-frames", DecodeMPEG2, gen("c.m2v", "-c:v", "mpeg2video", "-bf", "2", "-q:v", "4"), "mpegvideo", "nv12", 640, 360, 8},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			b, err := os.ReadFile(c.path) //nolint:gosec // test
-			if err != nil {
-				t.Fatal(err)
+		for _, k := range []Kind{NVENC, VideoToolbox} {
+			t.Run(string(k)+"/"+c.name, func(t *testing.T) { matchesFFmpeg(t, k, c.codec, c.path, c.format, c.pixfmt, c.w, c.h, c.depth) })
+		}
+	}
+}
+
+func matchesFFmpeg(t *testing.T, k Kind, codec VideoCodec, path, format, pixfmt string, w, h, depth int) {
+	c := struct {
+		codec        VideoCodec
+		path, format string
+		pixfmt       string
+		w, h, depth  int
+	}{codec, path, format, pixfmt, w, h, depth}
+	b, err := os.ReadFile(c.path) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ffmpegFrames(t, c.path, c.format, c.pixfmt, c.w, c.h)
+	units := annexBUnits(b, c.codec == DecodeHEVC)
+	if c.codec == DecodeMPEG2 {
+		units = mpeg2Units(b)
+	}
+	got, pts, last := decodeAll(t, k, c.codec, units)
+	if last.Width != c.w || last.Height != c.h || last.Depth != c.depth {
+		t.Errorf("pictures %dx%d at %d bits, want %dx%d at %d", last.Width, last.Height, last.Depth, c.w, c.h, c.depth)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%d pictures, ffmpeg %d", len(got), len(want))
+	}
+	for i := range want {
+		if c.codec == DecodeMPEG2 {
+			// MPEG-2's inverse transform is not bit-exact by definition
+			// (IEEE 1180 accuracy): decoders differ in the last bit.
+			if p := lumaPSNR([]byte(got[i][:c.w*c.h]), []byte(want[i][:c.w*c.h])); p < 45 {
+				t.Fatalf("picture %d: %.1f dB from ffmpeg's", i, p)
 			}
-			want := ffmpegFrames(t, c.path, c.format, c.pixfmt, c.w, c.h)
-			units := annexBUnits(b, c.codec == DecodeHEVC)
-			if c.codec == DecodeMPEG2 {
-				units = mpeg2Units(b)
-			}
-			got, pts, last := decodeAll(t, c.codec, units)
-			if last.Width != c.w || last.Height != c.h || last.Depth != c.depth {
-				t.Errorf("pictures %dx%d at %d bits, want %dx%d at %d", last.Width, last.Height, last.Depth, c.w, c.h, c.depth)
-			}
-			if len(got) != len(want) {
-				t.Fatalf("%d pictures, ffmpeg %d", len(got), len(want))
-			}
-			for i := range want {
-				if c.codec == DecodeMPEG2 {
-					// MPEG-2's inverse transform is not bit-exact by definition
-					// (IEEE 1180 accuracy): decoders differ in the last bit.
-					if p := lumaPSNR([]byte(got[i][:c.w*c.h]), []byte(want[i][:c.w*c.h])); p < 45 {
-						t.Fatalf("picture %d: %.1f dB from ffmpeg's", i, p)
-					}
-					continue
-				}
-				if got[i] != want[i] {
-					t.Fatalf("picture %d differs from ffmpeg's", i)
-				}
-			}
-			// Each picture carries the timestamp its own access unit was
-			// given (the unit's decoding index here).
-			order := displayUnits(t, c.path, c.format, b, units, c.codec)
-			if len(order) != len(pts) {
-				t.Fatalf("ffprobe lists %d pictures, NVDEC gave %d", len(order), len(pts))
-			}
-			for i, p := range pts {
-				if p != int64(order[i])*3754 {
-					t.Fatalf("picture %d has the timestamp of access unit %d, not its own (%d)", i, p/3754, order[i])
-				}
-			}
-		})
+			continue
+		}
+		if got[i] != want[i] {
+			t.Fatalf("picture %d differs from ffmpeg's", i)
+		}
+	}
+	// Each picture carries the timestamp its own access unit was
+	// given (the unit's decoding index here).
+	order := displayUnits(t, c.path, c.format, b, units, c.codec)
+	if len(order) != len(pts) {
+		t.Fatalf("ffprobe lists %d pictures, the decoder gave %d", len(order), len(pts))
+	}
+	for i, p := range pts {
+		if p != int64(order[i])*3754 {
+			t.Fatalf("picture %d has the timestamp of access unit %d, not its own (%d)", i, p/3754, order[i])
+		}
 	}
 }
 
