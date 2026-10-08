@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   VC-1 and MPEG-2 sources, with their HDR10, HDR10+ and Dolby Vision, now
   convert on every platform with ffmpeg 6.1 or later. Each picture keeps
   its own timestamp; the pictures are the ones NVDEC gives.
+- `--dv-fel keep` and `reencode` (profile 7 out) with x265 (`--encoder
+  software`), where there is no NVENC: x265 runs in process for both layers,
+  set up to code them alike.
 
 ### Fixed
 

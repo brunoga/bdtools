@@ -873,9 +873,17 @@ func composesFEL(t *testing.T, fs felSource, dec Decoder) {
 // Skips without ffmpeg, x265, NVDEC and NVENC.
 func TestRunnerKeepsFELLayers(t *testing.T) {
 	fs := makeFELSource(t, 10)
-	if !ProbeNative(EncoderNVENC, CodecH265, 10, "") {
-		t.Skip("no NVENC")
+	for _, enc := range []Encoder{EncoderNVENC, EncoderSoftware} {
+		t.Run(string(enc), func(t *testing.T) {
+			if enc == EncoderNVENC && !ProbeNative(EncoderNVENC, CodecH265, 10, "") {
+				t.Skip("no NVENC")
+			}
+			keepsFELLayers(t, fs, enc)
+		})
 	}
+}
+
+func keepsFELLayers(t *testing.T, fs felSource, enc Encoder) {
 	ref := fs.composition(t, rawP010(t, fs.blES), rawP010(t, fs.elES))
 	mean := map[FEL]float64{}
 	for _, mode := range []FEL{FELKeep, FELReencode} {
@@ -883,7 +891,8 @@ func TestRunnerKeepsFELLayers(t *testing.T) {
 		o := DefaultOptions()
 		// A coarse base layer on smooth pictures (an error a half-size
 		// enhancement layer can make up for) and a fine enhancement layer.
-		o.Input, o.Output, o.Encoder, o.NativeGPU, o.Codec, o.DVFEL = fs.path, out, EncoderNVENC, true, CodecH265, mode
+		o.Input, o.Output, o.Encoder, o.NativeGPU, o.Codec, o.DVFEL = fs.path, out, enc, enc == EncoderNVENC, CodecH265, mode
+		o.Preset = "ultrafast"
 		o.CRF, o.DVELCRF = 40, 8
 		var lines []string
 		if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
