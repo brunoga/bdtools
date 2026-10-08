@@ -609,6 +609,10 @@ func TestDetailTags(t *testing.T) {
 	if got := DetailTags(o, nil, 2160); got != "2160p AV1 CRF20 SVT-AV1" {
 		t.Errorf("2D tags %q", got)
 	}
+	o.Remux, o.Codec = true, CodecH265
+	if got := DetailTags(o, []Track{thd}, 0); got != "HEVC Remux TrueHD-Atmos 7.1" {
+		t.Errorf("remux tags %q", got)
+	}
 	for in, want := range map[string]string{
 		"/out/Moana (2016).mkv":         "/out/Moana (2016) 3D FSBS 1080p.mkv",
 		"/out/Moana (2016) 3D FSBS.mkv": "/out/Moana (2016) 3D FSBS 1080p.mkv",

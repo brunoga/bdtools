@@ -513,6 +513,27 @@ The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
 has no home in Matroska that players agree on. Nothing about the picture can
 change, so `--layout half` and `--swap-lr` are refused.
 
+### A 2D remux into Matroska
+
+A 2D source — a 2D disc, or a 3D one with `--2d` for its base view — can be
+remuxed into an MKV instead: the video untouched, with the audio and
+subtitles chosen, chapters, and the same timing a conversion has:
+
+```sh
+bdtools --remux --input disc.iso --output "Film (2012).mkv" \
+         --audio-lang eng --audio-best --subs-lang eng
+```
+
+The video's access units are copied as they are and the muxer times them
+from their picture order. A remux cannot cut inside a GOP, so it starts at
+the random access point at or before the playlist's IN time (a disc's
+feature normally starts on one). A Matroska source remuxes the same way,
+which is how to drop tracks from an MKV without re-encoding it. H.264 and
+HEVC are carried; VC-1 and MPEG-2 video are not yet (convert those, or
+remux to .m2ts). On Toy Story's 3D disc, `--2d --remux` copied all 116,642
+pictures in two minutes, from the image over the network, and the result
+decodes to exactly the disc's pictures.
+
 ## What plays the result, and at what resolution
 
 The output declares its layout in the Matroska `StereoMode` element

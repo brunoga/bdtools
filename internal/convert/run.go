@@ -164,8 +164,12 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return err
 	}
 	r.Selected = sel
-	if r.Opts.Remux {
+	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
 		return r.remuxBuiltin(ctx, src, sel)
+	}
+	if r.Opts.Remux && !r.flat {
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
+			"remux to .m2ts, or add --2d for its base view alone")
 	}
 	if r.flat {
 		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle",
@@ -189,6 +193,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	}
 	if err := g.start(); err != nil {
 		return err
+	}
+	if r.Opts.Remux {
+		return r.remuxToMKV(ctx, sel.Base, g.Next, g.KeepFrame, g.finish, g.src.chapters)
 	}
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {

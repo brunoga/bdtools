@@ -15,6 +15,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (10-bit included) bit-identical to ffmpeg's decoders, MPEG-2 within its
   transform's tolerance, VC-1 untried; 580 fps for 4K 10-bit HEVC.
   `--decoder auto|gpu|cpu`; without a GPU decoder H.264 decodes here.
+- `--remux` into a `.mkv` for 2D sources (a 3D disc's base view with
+  `--2d`, or a Matroska file): the H.264 or HEVC video untouched, with the
+  chosen tracks and chapters, from the random access point at or before
+  IN. `--name-details` names it `Remux`.
 - A stream that states no frame rate takes the container's (a playlist's,
   or a Matroska track's frame duration or frame spacing).
 

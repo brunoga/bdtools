@@ -315,6 +315,55 @@ func TestRunnerConverts2DSources(t *testing.T) {
 	})
 }
 
+// A 2D remux into Matroska carries the source's video untouched: it
+// decodes to the same pictures, every one of them. From a transport stream
+// and from a Matroska file, H.264 and HEVC. Skips without ffmpeg.
+func TestRunnerRemuxes2DToMatroska(t *testing.T) {
+	if _, err := LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	work := t.TempDir()
+	frames := func(path string) []byte {
+		out, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-i", path, "-map", "0:v:0", //nolint:gosec // test
+			"-f", "framemd5", "-").Output()
+		if err != nil {
+			t.Fatalf("decoding %s: %v", path, err)
+		}
+		var sums []string
+		for _, l := range strings.Split(string(out), "\n") {
+			if f := strings.Split(l, ","); len(f) == 6 && !strings.HasPrefix(l, "#") {
+				sums = append(sums, strings.TrimSpace(f[5]))
+			}
+		}
+		return []byte(strings.Join(sums, " "))
+	}
+	for _, c := range []struct{ name, ext string }{
+		{"h264", ".m2ts"}, {"h264", ".mkv"}, {"hevc", ".m2ts"},
+	} {
+		t.Run(c.name+c.ext, func(t *testing.T) {
+			src := filepath.Join(work, c.name+c.ext)
+			enc := map[string][]string{"h264": {"-c:v", "libx264", "-bf", "2"}, "hevc": {"-c:v", "libx265", "-x265-params", "log-level=error"}}[c.name]
+			format := map[string]string{".m2ts": "mpegts", ".mkv": "matroska"}[c.ext]
+			if err := runCmd(t, "ffmpeg", append(append([]string{"-hide_banner", "-loglevel", "error", "-y",
+				"-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2", "-f", "lavfi", "-i", "sine=d=2",
+				"-c:a", "ac3"}, enc...), "-f", format, src)...); err != nil {
+				t.Skipf("making the source: %v", err)
+			}
+			out := filepath.Join(t.TempDir(), "remux.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.Remux = src, out, true
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
+				t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+			}
+			want, got := frames(src), frames(out)
+			if len(want) == 0 || !bytes.Equal(got, want) {
+				t.Errorf("the remux decodes to other pictures (%d vs %d bytes of sums)\n%s", len(got), len(want), strings.Join(lines, "\n"))
+			}
+		})
+	}
+}
+
 // --- helpers for the end-to-end tests ---------------------------------------
 
 func runCmd(t *testing.T, name string, args ...string) error {

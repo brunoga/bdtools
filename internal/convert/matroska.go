@@ -548,8 +548,8 @@ func (w *rawWAV) header(dataLen uint32) error {
 
 // runMatroska is runBuiltin for a Matroska source.
 func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
-	if r.Opts.Remux {
-		return fmt.Errorf("--remux copies a disc's own MVC stream into an m2ts; %s is already a remux", filepath.Base(r.Opts.Input))
+	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
+		return fmt.Errorf("--remux of %s: a Matroska source remuxes into a .mkv (2D), not a transport stream", filepath.Base(r.Opts.Input))
 	}
 	r.Report.Report("probing %s", r.Opts.Input)
 	src, tracks, err := probeMatroska(ctx, r.Opts.Input)
@@ -558,6 +558,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	}
 	r.flat = r.Opts.TwoD || !threeD(tracks)
 	r.Opts.TwoD = r.flat
+	if r.Opts.Remux && !r.flat {
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: add --2d to remux its base view alone")
+	}
 	selectTracks := SelectTracks
 	if r.flat {
 		selectTracks = SelectTracks2D
@@ -601,6 +604,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 			_ = g.f.Close()
 		}
 		return err
+	}
+	if r.Opts.Remux {
+		return r.remuxToMKV(ctx, sel.Base, g.Next, nil, g.finish, src.chapters)
 	}
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {

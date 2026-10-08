@@ -197,11 +197,11 @@ func (o Options) Validate(goos string) error {
 			"a playlist or an m2ts) or a Matroska remux of one", filepath.Base(o.Input))
 	}
 	if o.Remux {
-		// MVC has no home in Matroska that players agree on, so a remux
-		// stays in the transport stream the disc already uses.
-		if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".m2ts" && ext != ".ts" {
-			return fmt.Errorf("a remux output must be a .m2ts or .ts (got %q); "+
-				"MVC video cannot go into a .mkv that players agree on", ext)
+		// MVC has no home in Matroska that players agree on, so a 3D remux
+		// stays in the transport stream the disc already uses; a 2D one can
+		// be either (whether the source is 3D is known once it is read).
+		if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".m2ts" && ext != ".ts" && ext != ".mkv" {
+			return fmt.Errorf("a remux output must be a .mkv (2D), or a .m2ts or .ts (got %q)", ext)
 		}
 		// Everything below describes the decode-and-encode path, which a
 		// remux does not take. Saying so beats silently ignoring settings.
