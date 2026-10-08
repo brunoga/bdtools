@@ -50,13 +50,10 @@ func (r *bits) peek(n int) uint32 {
 
 func (r *bits) skip(n int) { r.pos += n }
 
+// u reads n bits, at most 32.
 func (r *bits) u(n int) int {
 	if n == 0 {
 		return 0
-	}
-	if n > 32 {
-		hi := r.u(n - 32)
-		return hi<<32 | r.u(32)
 	}
 	v := r.peek(n)
 	r.pos += n
