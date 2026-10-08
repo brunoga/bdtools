@@ -7,12 +7,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
 
 // What the muxer writes, the reader reads back: tracks, chapters and every
 // frame with its time.
+// dvMapping is a Dolby Vision configuration's BlockAdditionMapping.
+var dvMapping = []BlockAddition{{Name: "Dolby Vision configuration", Type: FourCC("dvcC"),
+	ExtraData: []byte{1, 0, 0x0e, 0x37, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}}}
+
 func TestReaderRoundTrip(t *testing.T) {
 	mk := func() []Source {
 		v, err := NewVideoSource(fixture(t, "mkv", "bframes.264"), H264, 24000, 1001, 1)
@@ -28,6 +33,7 @@ func TestReaderRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		th.SetName("Commentary")
+		v.SetBlockAdditions(dvMapping)
 		return []Source{v, a, th}
 	}
 	path := filepath.Join(t.TempDir(), "x.mkv")
@@ -52,6 +58,9 @@ func TestReaderRoundTrip(t *testing.T) {
 	}
 	if len(r.Tracks) != 3 {
 		t.Fatalf("%d tracks", len(r.Tracks))
+	}
+	if got := r.Tracks[0].BlockAdditions; !reflect.DeepEqual(got, dvMapping) {
+		t.Errorf("block additions %+v, want %+v", got, dvMapping)
 	}
 	want := []struct {
 		codec, lang, name string

@@ -183,6 +183,9 @@ func (v *VideoSource) SetDisplaySize(w, h int) {
 	v.track.DisplayWidth, v.track.DisplayHeight = w, h
 }
 
+// SetBlockAdditions sets the track's BlockAdditionMappings.
+func (v *VideoSource) SetBlockAdditions(a []BlockAddition) { v.track.BlockAdditions = a }
+
 // SetColour sets the track's colour signalling and HDR metadata.
 func (v *VideoSource) SetColour(c *Colour) { v.track.Colour = c }
 

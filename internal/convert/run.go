@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
@@ -73,6 +74,9 @@ type Runner struct {
 	colour    *gpu.ColorInfo
 	hdrStatic hdr.Static
 	hdr10Plus map[int64][]byte
+	// dovi is the Dolby Vision configuration the output's video carries
+	// (a remux keeps it); its level, when 0, is worked out at the mux.
+	dovi *dovi.Config
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
@@ -189,6 +193,12 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
+	if sel.Dependent.Kind() == KindEnhancement && !r.Opts.Remux {
+		r.Report.Report("warning: a re-encode does not carry Dolby Vision yet: the HDR10 base layer is converted " +
+			"(--remux keeps it)")
+		sel.Dependent = Track{}
+		r.Selected = sel
+	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.frameRate()
 	g := newGoDemux(src, sel, tmp, r.Report)
@@ -291,6 +301,8 @@ func DescribeTracks(tracks []Track) string {
 			kind = "video (base view)"
 		case KindDependentView:
 			kind = "video (dependent)"
+		case KindEnhancement:
+			kind = "video (DV layer)"
 		case KindAudio:
 			kind = "audio"
 		case KindSubtitle:

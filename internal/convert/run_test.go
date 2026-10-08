@@ -364,6 +364,77 @@ func TestRunnerRemuxes2DToMatroska(t *testing.T) {
 	}
 }
 
+// A UHD Blu-ray's Dolby Vision enhancement layer (PID 0x1015) goes into
+// the remuxed HEVC track: each picture gains the enhancement layer's NAL
+// units behind type 63 headers, the track gains the dvcC record, and the
+// pictures still decode as the base layer's. The "enhancement layer" here is
+// a second HEVC stream with the same structure, which is all the merge
+// looks at. Skips without ffmpeg (with libx265) and ffprobe.
+func TestRunnerRemuxKeepsDolbyVisionLayers(t *testing.T) {
+	for _, tool := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := LookPath(tool); err != nil {
+			t.Skipf("%s not installed", tool)
+		}
+	}
+	work := t.TempDir()
+	src := filepath.Join(work, "uhd.m2ts")
+	x265 := []string{"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error:keyint=24:bframes=2"}
+	args := []string{"-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2", "-f", "lavfi", "-i", "mandelbrot=s=320x240:r=24",
+		"-map", "0:v", "-map", "1:v", "-t", "2"}
+	args = append(append(args, x265...), "-streamid", "0:0x1011", "-streamid", "1:0x1015", "-f", "mpegts", src)
+	if err := runCmd(t, "ffmpeg", args...); err != nil {
+		t.Skipf("making the source: %v", err)
+	}
+	out := filepath.Join(work, "remux.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.Remux = src, out, true
+	var lines []string
+	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	probe, err := exec.CommandContext(t.Context(), "ffprobe", "-v", "error", "-show_streams", out).Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dv_profile=7", "el_present_flag=1", "bl_present_flag=1", "dv_bl_signal_compatibility_id=6"} {
+		if !strings.Contains(string(probe), want) {
+			t.Errorf("ffprobe does not show %s:\n%s", want, probe)
+		}
+	}
+	if n := strings.Count(string(probe), "codec_type=video"); n != 1 {
+		t.Errorf("%d video tracks, want 1", n)
+	}
+	es, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-i", out, "-c", "copy", //nolint:gosec // test
+		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", "-").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(es, []byte{0, 0, 1, 0x7e, 0x01}); n < 48 {
+		t.Errorf("%d enhancement layer NAL units in the track, want at least one per picture", n)
+	}
+	base := filepath.Join(work, "base.hevc")
+	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src, "-map", "0:v:0", "-c", "copy", base); err != nil {
+		t.Fatal(err)
+	}
+	sums := func(path string) string {
+		b, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-i", path, "-map", "0:v:0", "-f", "framemd5", "-").Output() //nolint:gosec // test
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s []string
+		for _, l := range strings.Split(string(b), "\n") {
+			if f := strings.Split(l, ","); len(f) == 6 && !strings.HasPrefix(l, "#") {
+				s = append(s, strings.TrimSpace(f[5]))
+			}
+		}
+		return strings.Join(s, " ")
+	}
+	if got, want := sums(out), sums(base); got == "" || got != want {
+		t.Errorf("the remux does not decode to the base layer's pictures\n%s", strings.Join(lines, "\n"))
+	}
+}
+
 // An HDR10 source keeps its HDR: the colour signalling and the mastering
 // display and light level metadata, in the stream and in the Matroska
 // Colour element. Skips without ffmpeg, x265 and a GPU decoder for HEVC.

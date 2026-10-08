@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/esinfo"
 	"github.com/brunoga/bdtools/internal/mkv"
 )
@@ -46,6 +47,23 @@ type mkvSource struct {
 	// rateNum and rateDen are the video's frame rate: the track's frame
 	// duration, or the spacing of its first frames.
 	rateNum, rateDen int
+	// dovi are the Dolby Vision configurations of the video tracks that
+	// have one, by track number.
+	dovi map[uint64]*dovi.Config
+}
+
+// doviConfig is the Dolby Vision configuration a track's BlockAdditionMapping
+// gives, nil when there is none.
+func doviConfig(t mkv.ReadTrack) *dovi.Config {
+	for _, a := range t.BlockAdditions {
+		if a.Type != mkv.FourCC("dvcC") && a.Type != mkv.FourCC("dvvC") {
+			continue
+		}
+		if c, err := dovi.ParseConfig(a.ExtraData); err == nil {
+			return &c
+		}
+	}
+	return nil
 }
 
 func openMatroska(path string) (*os.File, *mkv.Reader, error) {
@@ -139,6 +157,16 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			tr.Info = fmt.Sprintf("H.265/HEVC Resolution: %dx%d", t.Width, t.Height)
 			if len(t.CodecPrivate) > 17 {
 				tr.Info += fmt.Sprintf(" %d-bit", 8+int(t.CodecPrivate[17]&7))
+			}
+			if c := doviConfig(t); c != nil {
+				if src.dovi == nil {
+					src.dovi = map[uint64]*dovi.Config{}
+				}
+				src.dovi[t.Number] = c
+				tr.Info += fmt.Sprintf(", Dolby Vision profile %d", c.Profile)
+				if c.EL {
+					tr.Info += " with an enhancement layer"
+				}
 			}
 		case "V_MPEG4/ISO/MVC":
 			// A separate dependent-view track, paired by timestamp.
@@ -401,17 +429,17 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 				d, ok := g.deps[p.Time]
 				if ok {
 					delete(g.deps, p.Time)
-				} else if hasSlice(au) {
+				} else if hasSlice(au, false) {
 					g.noDep++
 				}
-				if hasSlice(au) {
+				if hasSlice(au, false) {
 					g.aus++
 				}
 				g.noteDepth(d, p.Time)
 				return au, d, pts, nil
 			}
 			g.noteDepth(au, p.Time)
-			if hasSlice(au) {
+			if hasSlice(au, false) {
 				g.aus++
 				if !hasNAL(au, 20) {
 					g.noDep++
@@ -585,6 +613,15 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	}
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
+	}
+	if c := src.dovi[uint64(sel.Base.ID)]; c != nil { //nolint:gosec // a track number
+		if r.Opts.Remux {
+			r.dovi = c
+			r.Report.Report("keeping Dolby Vision profile %d", c.Profile)
+		} else {
+			r.Report.Report("warning: a re-encode does not carry Dolby Vision yet: the base layer is converted " +
+				"(--remux keeps it)")
+		}
 	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.rateNum, src.rateDen

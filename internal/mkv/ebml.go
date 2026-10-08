@@ -51,6 +51,10 @@ const (
 	idDisplayWidth    = 0x54B0
 	idDisplayHeight   = 0x54BA
 	idColour          = 0x55B0
+	idBlockAddMapping = 0x41E4
+	idBlockAddIDName  = 0x41A4
+	idBlockAddIDType  = 0x41E7
+	idBlockAddIDExtra = 0x41ED
 	idMatrix          = 0x55B1
 	idBitsPerChannel  = 0x55B2
 	idRange           = 0x55B9

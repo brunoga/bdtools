@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/brunoga/bdtools/internal/dovi"
 )
 
 // A lossless 2D remux into Matroska: the disc's video, untouched, with the
@@ -52,6 +54,10 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 		started   bool
 		n, early  int
 		writeErr  error
+		// A UHD Blu-ray's Dolby Vision enhancement layer goes into the
+		// track with the base layer.
+		el           = r.Selected.Dependent.Kind() == KindEnhancement
+		merged, rpus int
 	)
 	write := func(au []byte) {
 		if writeErr == nil {
@@ -64,7 +70,7 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 			writeErr = err
 			break
 		}
-		base, _, pts, err := next()
+		base, dep, pts, err := next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -74,6 +80,13 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 		}
 		if len(base) == 0 {
 			continue
+		}
+		if dep != nil && el {
+			base = dovi.Merge(base, dep)
+			merged++
+			if dovi.HasRPU(dep) {
+				rpus++
+			}
 		}
 		in := keep == nil || keep(pts)
 		switch {
@@ -128,6 +141,11 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 	}
 	r.Opts.Codec = codec // the muxer's video codec
 	r.Report.Report("copied %d pictures", n)
+	if merged > 0 {
+		cfg := dovi.UHDBluRay(0, 0, 0, 0) // the level comes from the picture, at the mux
+		r.dovi = &cfg
+		r.Report.Report("kept Dolby Vision profile 7: the enhancement layer on %d pictures, the RPU on %d", merged, rpus)
+	}
 	return r.mux(ctx, []string{path}, extras, chapters)
 }
 

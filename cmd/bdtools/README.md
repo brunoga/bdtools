@@ -299,8 +299,31 @@ in H.264, which carries none of this here) gets a warning.
 A remux keeps all of it untouched in the stream; its Matroska Colour
 element is not written yet.
 
-Still to come: Ultra HD discs' Dolby Vision (profile 7, FEL and MEL), kept
-by a remux or converted.
+### Dolby Vision
+
+An Ultra HD disc's Dolby Vision is profile 7: the HDR10 picture (the base
+layer, PID 0x1011), and beside it on PID 0x1015 an enhancement layer — the
+full one (FEL) or the minimal one (MEL) — with the RPU, the per-frame
+metadata that says how to combine them. `--list` shows that stream as
+`video (DV layer)`.
+
+`--remux` into a `.mkv` keeps all of it, the way players expect it in
+Matroska: one HEVC track whose every picture carries the base layer, then
+the enhancement layer's NAL units, then the RPU, with the Dolby Vision
+configuration (profile 7, its level worked out from the picture size and
+frame rate, compatible with HDR10) in the track header. Players that know
+Dolby Vision play it as such; others play the HDR10 base layer. A Matroska
+source that has Dolby Vision keeps it in a remux too, and a `.m2ts` remux
+keeps the enhancement layer's stream as it is.
+
+On a Dolby Vision test clip (4K, FEL), the MKV remux carried every picture
+through unchanged, and ffprobe reads the result as profile 7, level 6, with
+the enhancement layer and RPU present.
+
+A conversion does not carry Dolby Vision yet: it encodes the HDR10 base
+layer, with its HDR10 metadata, and says so. Still to come: profile 8.1 in
+a conversion (the RPU rewritten for the base layer alone), then the full
+enhancement layer composed into the picture.
 
 ## Choosing tracks
 
@@ -552,7 +575,7 @@ from their picture order. A remux cannot cut inside a GOP, so it starts at
 the random access point at or before the playlist's IN time (a disc's
 feature normally starts on one). A Matroska source remuxes the same way,
 which is how to drop tracks from an MKV without re-encoding it. H.264 and
-HEVC are carried; VC-1 and MPEG-2 video are not yet (convert those, or
+HEVC are carried (with Dolby Vision, see [Dolby Vision](#dolby-vision)); VC-1 and MPEG-2 video are not yet (convert those, or
 remux to .m2ts). On Toy Story's 3D disc, `--2d --remux` copied all 116,642
 pictures in two minutes, from the image over the network, and the result
 decodes to exactly the disc's pictures.

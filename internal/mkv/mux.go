@@ -45,10 +45,32 @@ type Track struct {
 	// stereo frame, players built on ffmpeg (Kodi, mpv) and mkvmerge take
 	// them as one eye's shape: see SetDisplaySize.
 	DisplayWidth, DisplayHeight int
+	// BlockAdditions describe data the track's frames carry for a purpose
+	// of their own: Dolby Vision's configuration.
+	BlockAdditions []BlockAddition
 	// Audio.
 	SampleRate int
 	Channels   int
 	BitDepth   int
+}
+
+// BlockAddition is a track's BlockAdditionMapping: what a kind of data
+// alongside its frames is. Dolby Vision's names its configuration record:
+// Type is the record's four-character code (dvcC or dvvC) and ExtraData the
+// record.
+type BlockAddition struct {
+	Name      string
+	Type      uint32
+	ExtraData []byte
+}
+
+// FourCC is a four-character code as a BlockAddIDType.
+func FourCC(s string) uint32 {
+	var v uint32
+	for i := 0; i < 4 && i < len(s); i++ {
+		v = v<<8 | uint32(s[i])
+	}
+	return v
 }
 
 // Frame is one block of a track.
@@ -419,6 +441,17 @@ func trackEntry(n int, t Track) []byte {
 			v = elem(v, idColour, t.Colour.element())
 		}
 		b = elem(b, idVideo, v)
+		for _, a := range t.BlockAdditions {
+			var m []byte
+			if a.Name != "" {
+				m = elemString(m, idBlockAddIDName, a.Name)
+			}
+			m = elemUint(m, idBlockAddIDType, uint64(a.Type))
+			if len(a.ExtraData) > 0 {
+				m = elem(m, idBlockAddIDExtra, a.ExtraData)
+			}
+			b = elem(b, idBlockAddMapping, m)
+		}
 	case TypeAudio:
 		var a []byte
 		a = elemFloat(a, idSamplingFreq, float64(t.SampleRate))

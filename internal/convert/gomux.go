@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
 )
@@ -69,6 +70,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
 	r.carryHDR(v)
+	r.carryDolbyVision(v, num, den)
 	if r.videoDelay > 0 {
 		v.SetDelay(r.videoDelay)
 		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
@@ -314,4 +316,19 @@ func (r *Runner) carryHDR(v *mkv.VideoSource) {
 		}
 		return out
 	})
+}
+
+// carryDolbyVision gives the video track the Dolby Vision configuration
+// record players look for, when the stream keeps Dolby Vision.
+func (r *Runner) carryDolbyVision(v *mkv.VideoSource, num, den int) {
+	if r.dovi == nil {
+		return
+	}
+	cfg := *r.dovi
+	if cfg.Level == 0 {
+		t := v.Track()
+		cfg.Level = dovi.Level(t.Width, t.Height, num, den)
+	}
+	v.SetBlockAdditions([]mkv.BlockAddition{{Name: "Dolby Vision configuration",
+		Type: mkv.FourCC(cfg.FourCC()), ExtraData: cfg.Bytes()}})
 }

@@ -32,7 +32,7 @@ func clipBasePES(t *testing.T, c clipRef) []pesInfo {
 		if err != nil {
 			break
 		}
-		if p.PID == 0x1011 && p.PTS >= 0 && hasSlice(p.Payload) {
+		if p.PID == 0x1011 && p.PTS >= 0 && hasSlice(p.Payload, false) {
 			dts := p.DTS
 			if dts < 0 {
 				dts = p.PTS

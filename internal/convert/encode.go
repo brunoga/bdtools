@@ -108,7 +108,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 				if c.Primaries != 2 || c.Transfer != 2 || c.Matrix != 2 { // something stated
 					r.Opts.Color = &c
 				}
-				if (c.Transfer == 16 || c.Transfer == 18) && r.Opts.BitDepth == 8 {
+				switch {
+				case c.Transfer != 16 && c.Transfer != 18, r.Opts.BitDepth != 8:
+				case r.Opts.Codec == CodecH264:
+					r.Report.Report("warning: an HDR source into 8-bit H.264 bands visibly; --codec h265 or av1 keeps 10 bits")
+				default:
 					r.Report.Report("warning: an HDR source at 8 bits bands visibly; --bit-depth 10 (the default for it) keeps its precision")
 				}
 			}
