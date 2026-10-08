@@ -119,7 +119,11 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			if len(videoTimes[p.Track]) < 64 {
 				videoTimes[p.Track] = append(videoTimes[p.Track], p.Time)
 			}
-			samples[p.Track] = append(samples[p.Track], annexB(p.Data, videoNALSize(t))...)
+			if isVC1(t) {
+				samples[p.Track] = append(samples[p.Track], p.Data...)
+			} else {
+				samples[p.Track] = append(samples[p.Track], annexB(p.Data, videoNALSize(t))...)
+			}
 		} else {
 			samples[p.Track] = append(samples[p.Track], p.Data...)
 		}
@@ -189,9 +193,19 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			}
 			a, _ := esinfo.ParseDTS(b, hd)
 			tr.StreamID, tr.Type, tr.Info = "A_DTS", a.Codec, a.Describe()
-		case "A_PCM/INT/LIT":
-			a := esinfo.Audio{Codec: "LPCM", Channels: t.Channels, LFE: t.Channels == 6 || t.Channels == 8,
-				SampleRate: int(t.SampleRate), Bits: t.BitDepth}
+		case "V_MS/VFW/FOURCC":
+			if !isVC1(&t) {
+				continue
+			}
+			tr.Type, tr.StreamID = "VC-1", "V_MS/VFW/FOURCC"
+			tr.Info = fmt.Sprintf("SMPTE VC-1 Resolution: %dx%d", t.Width, t.Height)
+		case "A_PCM/INT/LIT", "A_MS/ACM":
+			channels, rate, bits, ok := pcmFormat(&t)
+			if !ok {
+				continue
+			}
+			a := esinfo.Audio{Codec: "LPCM", Channels: channels, LFE: channels == 6 || channels == 8,
+				SampleRate: rate, Bits: bits}
 			tr.StreamID, tr.Type, tr.Info = "A_LPCM", "LPCM", a.Describe()
 		case "S_HDMV/PGS":
 			tr.Type, tr.StreamID = "PGS", "S_HDMV/PGS"
@@ -205,6 +219,57 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		return nil, nil, fmt.Errorf("%s has no tracks this understands", path)
 	}
 	return src, tracks, nil
+}
+
+// isVC1 reports whether a video track is VC-1 (a VFW track of FourCC
+// WVC1). Its blocks are the stream's own: start codes, and the sequence
+// and entry point headers at each random access point.
+func isVC1(t *mkv.ReadTrack) bool {
+	return t.CodecID == "V_MS/VFW/FOURCC" && len(t.CodecPrivate) >= 20 && string(t.CodecPrivate[16:20]) == "WVC1"
+}
+
+// vc1Headers is a VC-1 track's sequence and entry point headers, after its
+// BITMAPINFOHEADER (from their first start code: a size byte can come
+// first).
+func vc1Headers(t *mkv.ReadTrack) []byte {
+	if len(t.CodecPrivate) <= 40 {
+		return nil
+	}
+	b := t.CodecPrivate[40:]
+	if i := bytes.Index(b, []byte{0, 0, 1}); i >= 0 {
+		return append([]byte(nil), b[i:]...)
+	}
+	return nil
+}
+
+// pcmFormat is a PCM track's channels, sample rate and sample size: the
+// track header's, or a WAVEFORMATEX's (A_MS/ACM). ok is false for an
+// A_MS/ACM track that is not PCM.
+func pcmFormat(t *mkv.ReadTrack) (channels, rate, bits int, ok bool) {
+	channels, rate, bits = t.Channels, int(t.SampleRate), t.BitDepth
+	if t.CodecID != "A_MS/ACM" {
+		return channels, rate, bits, true
+	}
+	w := t.CodecPrivate
+	if len(w) < 16 {
+		return 0, 0, 0, false
+	}
+	switch tag := binary.LittleEndian.Uint16(w); {
+	case tag == 1: // WAVE_FORMAT_PCM
+	case tag == 0xfffe && len(w) >= 40 && binary.LittleEndian.Uint16(w[24:]) == 1: // extensible, KSDATAFORMAT_SUBTYPE_PCM
+	default:
+		return 0, 0, 0, false
+	}
+	if channels == 0 {
+		channels = int(binary.LittleEndian.Uint16(w[2:]))
+	}
+	if rate == 0 {
+		rate = int(binary.LittleEndian.Uint32(w[4:]))
+	}
+	if bits == 0 {
+		bits = int(binary.LittleEndian.Uint16(w[14:]))
+	}
+	return channels, rate, bits, true
 }
 
 // nalLengthSize is the NAL length field size an avcC gives (4 if absent).
@@ -368,6 +433,7 @@ type mkvDemux struct {
 	r       *mkv.Reader
 	video   uint64
 	nalSize int
+	vc1     bool   // the video is VC-1: its blocks go as they are
 	params  []byte // the avcC's parameter sets, ahead of the first picture
 	writers map[uint64]*esWriter
 	// t0 is the first block's time, the output's zero; anything earlier
@@ -400,6 +466,9 @@ func (g *mkvDemux) start() error {
 	if t := r.Track(g.video); t != nil {
 		g.nalSize = videoNALSize(t)
 		g.params = videoParams(t)
+		if isVC1(t) {
+			g.vc1, g.params = true, vc1Headers(t)
+		}
 	}
 	if err := os.MkdirAll(g.tmp, 0o750); err != nil { //nolint:gosec // the operator's work directory
 		return err
@@ -413,7 +482,8 @@ func (g *mkvDemux) start() error {
 			// Matroska's PCM is already little-endian WAV samples.
 			rt := r.Track(uint64(t.ID)) //nolint:gosec // a track number
 			w.lpcm = nil
-			w.wav = &rawWAV{f: w.f, channels: rt.Channels, rate: int(rt.SampleRate), bits: rt.BitDepth}
+			channels, rate, bits, _ := pcmFormat(rt)
+			w.wav = &rawWAV{f: w.f, channels: channels, rate: rate, bits: bits}
 			if err := w.wav.header(0); err != nil {
 				return err
 			}
@@ -439,6 +509,17 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 			g.t0, g.t0Known = p.Time, true
 		}
 		switch {
+		case p.Track == g.video && g.vc1:
+			au := append([]byte(nil), p.Data...)
+			if g.params != nil {
+				// The track header's sequence header, ahead of a first
+				// picture without its own.
+				if !bytes.Contains(au, []byte{0, 0, 1, 0x0f}) {
+					au = append(g.params, au...)
+				}
+				g.params = nil
+			}
+			return au, nil, int64(p.Time) * 9 / 100000, nil
 		case p.Track == g.video:
 			au := annexB(p.Data, g.nalSize)
 			if g.params != nil {
