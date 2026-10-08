@@ -326,6 +326,27 @@ func annexB(b []byte, size int) []byte {
 	return out
 }
 
+// hasParams reports whether an access unit (Annex B) carries its own
+// parameter sets: SPS and PPS, and in HEVC the VPS.
+func hasParams(au []byte, hevc bool) bool {
+	var seen [64]bool
+	for i := 0; i+3 < len(au); i++ {
+		if au[i] != 0 || au[i+1] != 0 || au[i+2] != 1 {
+			continue
+		}
+		if hevc {
+			seen[au[i+3]>>1&0x3f] = true
+		} else {
+			seen[au[i+3]&0x1f] = true
+		}
+		i += 2
+	}
+	if hevc {
+		return seen[32] && seen[33] && seen[34]
+	}
+	return seen[7] && seen[8]
+}
+
 // hasNAL reports whether an Annex B stream holds a NAL unit of a type.
 func hasNAL(b []byte, typ byte) bool {
 	for i := 0; i+3 < len(b); i++ {
@@ -421,7 +442,11 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 		case p.Track == g.video:
 			au := annexB(p.Data, g.nalSize)
 			if g.params != nil {
-				au = append(g.params, au...)
+				// The track header's parameter sets, unless the picture
+				// carries its own: a copy would only repeat them.
+				if !hasParams(au, g.sel.Base.StreamID == "V_MPEGH/ISO/HEVC") {
+					au = append(g.params, au...)
+				}
 				g.params = nil
 			}
 			pts := int64(p.Time) * 9 / 100000 // 90 kHz

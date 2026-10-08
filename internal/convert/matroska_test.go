@@ -288,3 +288,18 @@ func TestMatroskaFallbackTrack(t *testing.T) {
 		t.Errorf("a lossy track needs none: %+v", got)
 	}
 }
+
+func TestHasParams(t *testing.T) {
+	sc := []byte{0, 0, 0, 1}
+	nal := func(h ...byte) []byte { return append(append([]byte(nil), sc...), append(h, 0x80)...) }
+	hevc := bytes.Join([][]byte{nal(32<<1, 1), nal(33<<1, 1), nal(34<<1, 1), nal(19<<1, 1)}, nil)
+	if !hasParams(hevc, true) {
+		t.Error("an HEVC access unit with VPS, SPS and PPS")
+	}
+	if hasParams(bytes.Join([][]byte{nal(33<<1, 1), nal(34<<1, 1), nal(19<<1, 1)}, nil), true) {
+		t.Error("an HEVC access unit without a VPS")
+	}
+	if !hasParams(bytes.Join([][]byte{nal(0x67), nal(0x68), nal(0x65)}, nil), false) || hasParams(nal(0x65), false) {
+		t.Error("H.264")
+	}
+}
