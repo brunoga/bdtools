@@ -52,4 +52,13 @@ func TestMerge(t *testing.T) {
 	if !HasRPU(got) || HasRPU(bl) {
 		t.Error("HasRPU wrong")
 	}
+	// And back: the enhancement layer as the disc carries it, less its
+	// access unit delimiter.
+	wantEL := cat(sc, []byte{33 << 1, 1, 0xbb}, sc, []byte{1 << 1, 1, 0xcc}, sc, []byte{62 << 1, 1, 0xdd})
+	if el := SplitEL(got); !bytes.Equal(el, wantEL) {
+		t.Errorf("SplitEL =\n% x\nwant\n% x", el, wantEL)
+	}
+	if SplitEL(bl) != nil {
+		t.Error("an enhancement layer out of a base layer")
+	}
 }

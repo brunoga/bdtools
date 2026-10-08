@@ -37,6 +37,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   carries its picture's RPU, converted from profile 7 as dovi_tool's mode
   2 does (byte-identical on every RPU of the test clips), with the profile
   8.1 configuration record. The RPU reader and writer are in Go.
+- A Dolby Vision full enhancement layer (FEL) is composed into the picture
+  in a conversion: the base layer mapped by each RPU and corrected by the
+  enhancement layer (decoded on a second NVDEC session, upsampled), in Go
+  with AVX2 kernels, run beside decoding and encoding (a few percent
+  slower than the base layer alone). `--dv-fel drop` keeps the base layer
+  as it is.
 
 ### Fixed
 

@@ -135,6 +135,28 @@ func Merge(bl, el []byte) []byte {
 	return out
 }
 
+// SplitEL takes the enhancement layer out of a single-track access unit
+// (Annex B): the enhancement layer's NAL units, unwrapped from their type 63
+// headers, and the RPU, as the disc's PID 0x1015 would carry them. nil when
+// there is no enhancement layer.
+func SplitEL(au []byte) []byte {
+	var el []byte
+	for _, n := range nalUnits(au) {
+		if len(n) < 3 {
+			continue
+		}
+		switch n[0] >> 1 & 0x3f {
+		case NALEL:
+			el = append(append(el, 0, 0, 0, 1), n[2:]...)
+		case NALRPU:
+			if el != nil {
+				el = append(append(el, 0, 0, 0, 1), n...)
+			}
+		}
+	}
+	return el
+}
+
 // HasRPU reports whether an access unit (Annex B) carries an RPU.
 func HasRPU(au []byte) bool { return FindRPU(au) != nil }
 

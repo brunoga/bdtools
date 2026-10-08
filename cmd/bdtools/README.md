@@ -161,6 +161,7 @@ scheduler such as pipeliner retry it.
 | `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the H.264 decoder here), `gpu`, or `cpu` (H.264 only) |
+| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture, or `drop` it (the HDR10 base layer as it is) |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
@@ -333,8 +334,28 @@ byte-identical to dovi_tool's. In a 30-second 4K FEL encode, every frame
 carried its own picture's RPU. AV1 and H.264 output keep the HDR10 picture
 without Dolby Vision, with a warning.
 
-Still to come: the full enhancement layer composed into the picture
-(profile 7 FEL's 12-bit result), rather than set aside.
+A full enhancement layer (FEL) is composed into the picture, which is
+what a profile 7 FEL disc is for: the base layer goes through each frame's
+RPU mapping, and the enhancement layer — decoded on the GPU beside it,
+upsampled from 1080p — adds its residual. The result is the picture the
+disc's Dolby Vision signal describes, coded like the HDR10 base layer, so
+it is encoded as HDR10 and the profile 8.1 RPU carries the identity
+mapping that makes it that picture. The composition is Go with AVX2
+kernels: 400 fps for 4K on 24 cores alone, and run beside the decoders
+and NVENC it costs a few percent (137 fps against 143 for the base layer
+alone on a 4K test clip). `--dv-fel drop` leaves the enhancement layer
+out and encodes the base layer as it is; a minimal enhancement layer (MEL)
+adds nothing, and its mapping is kept in the RPU.
+
+The arithmetic follows libplacebo's reshaping and FEL composition and
+vs-nlq's dequantisation (the residual agrees with vs-nlq's to 1/65536 over
+every code). How the enhancement layer is upsampled no reference states:
+here it is a Catmull-Rom filter, co-sited across and centred down, the
+siting libplacebo found on discs; on a FEL test clip, co-sited across
+gave visibly fewer edge artefacts than centred, and down the two were
+alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
+made from ffmpeg's decodes of the two layers, and 28 dB from the base
+layer alone (that clip's enhancement layer brightens its credits).
 
 ## Choosing tracks
 
