@@ -1,4 +1,4 @@
-//go:build linux && (amd64 || arm64)
+//go:build (linux || windows) && (amd64 || arm64)
 
 package gpu
 
@@ -18,7 +18,7 @@ import (
 // from within cuvidParseVideoData, on the calling thread, which holds the
 // decoder's CUDA context for the duration.
 
-var nvdecLibs = map[string][]string{"linux": {"libnvcuvid.so.1", "libnvcuvid.so"}}
+var nvdecLibs = map[string][]string{"linux": {"libnvcuvid.so.1", "libnvcuvid.so"}, "windows": {"nvcuvid.dll"}}
 
 type nvdecAPI struct {
 	createParser, parse, destroyParser   uintptr
@@ -196,8 +196,8 @@ func (d *nvdec) feed(au []byte, pts int64, flags uint32) error {
 	}
 	err := d.withContext(func() error {
 		pkt := newStruct(cuvSizePacket)
-		pkt.u64(cuvPktFlags, uint64(flags))
-		pkt.u64(cuvPktSize, uint64(len(au)))
+		pkt.ulong(cuvPktFlags, uint64(flags))
+		pkt.ulong(cuvPktSize, uint64(len(au)))
 		var data cstruct
 		if len(au) > 0 {
 			data = newStruct(len(au)) // C must not hold a pointer into a Go slice it did not get as one
@@ -260,15 +260,15 @@ func (d *nvdec) sequence(format uintptr) uintptr {
 		FullRange: f[cuvFmtSignalFlags]&cuvFmtFullRangeMask != 0}
 
 	ci := newStruct(cuvSizeCreateInfo)
-	ci.u64(cuvCIWidth, uint64(codedW))
-	ci.u64(cuvCIHeight, uint64(codedH))
-	ci.u64(cuvCISurfaces, uint64(surfaces)) //nolint:gosec // small
+	ci.ulong(cuvCIWidth, uint64(codedW))
+	ci.ulong(cuvCIHeight, uint64(codedH))
+	ci.ulong(cuvCISurfaces, uint64(surfaces)) //nolint:gosec // small
 	ci.u32(cuvCICodec, f.getU32(cuvFmtCodec))
 	ci.u32(cuvCIChroma, uint32(f[cuvFmtChroma]))
-	ci.u64(cuvCIFlags, cuvCreatePreferCUVID)
-	ci.u64(cuvCIDepth, uint64(f[cuvFmtDepthLuma]))
-	ci.u64(cuvCIMaxWidth, uint64(codedW))
-	ci.u64(cuvCIMaxHeight, uint64(codedH))
+	ci.ulong(cuvCIFlags, cuvCreatePreferCUVID)
+	ci.ulong(cuvCIDepth, uint64(f[cuvFmtDepthLuma]))
+	ci.ulong(cuvCIMaxWidth, uint64(codedW))
+	ci.ulong(cuvCIMaxHeight, uint64(codedH))
 	ci.u16(cuvCIDisplayArea, uint16(left))     //nolint:gosec // display area
 	ci.u16(cuvCIDisplayArea+2, uint16(top))    //nolint:gosec // display area
 	ci.u16(cuvCIDisplayArea+4, uint16(right))  //nolint:gosec // display area
@@ -283,9 +283,9 @@ func (d *nvdec) sequence(format uintptr) uintptr {
 		deint = cuvDeinterlaceAdaptive
 	}
 	ci.u32(cuvCIDeinterlace, deint)
-	ci.u64(cuvCITargetWidth, uint64(d.width))   //nolint:gosec // a picture size
-	ci.u64(cuvCITargetHeight, uint64(d.height)) //nolint:gosec // a picture size
-	ci.u64(cuvCIOutputSurfaces, 2)
+	ci.ulong(cuvCITargetWidth, uint64(d.width))   //nolint:gosec // a picture size
+	ci.ulong(cuvCITargetHeight, uint64(d.height)) //nolint:gosec // a picture size
+	ci.ulong(cuvCIOutputSurfaces, 2)
 	dec := newStruct(8)
 	if r := call(d.a.createDecoder, dec.ptr(), ci.ptr()); r != 0 {
 		d.err = fmt.Errorf("%w: cuvidCreateDecoder (%s %dx%d, %d-bit): %d", ErrDecodeUnavailable, d.cfg.Codec, codedW, codedH, d.depth, r)
@@ -414,4 +414,14 @@ func (d *nvdec) Close() error {
 	d.ctx = 0
 	nvdecSessions.Delete(d.id)
 	return nil
+}
+
+// ulong stores a tcu_ulong: an unsigned long, 8 bytes on 64-bit Linux and 4
+// on Windows.
+func (s cstruct) ulong(off int, v uint64) {
+	if cuvULong == 4 {
+		s.u32(off, uint32(v)) //nolint:gosec // the field is 4 bytes here
+		return
+	}
+	s.u64(off, v)
 }
