@@ -1,3 +1,5 @@
+//go:build amd64 && !purego
+
 #include "textflag.h"
 
 // func cpuidAsm(leaf, sub uint32) (eax, ebx, ecx, edx uint32)
