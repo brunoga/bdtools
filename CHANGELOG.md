@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-08
+
 ### Added
 
 - 2D Blu-rays, Ultra HD included, and 2D Matroska files: converted as a 2D
@@ -21,13 +23,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   IN. `--name-details` names it `Remux`.
 - A stream that states no frame rate takes the container's (a playlist's,
   or a Matroska track's frame duration or frame spacing).
-
 - HDR10 and HDR10+ are kept through a conversion: the colour signalling
   (BT.2020, PQ/HLG) stated by every encoder (NVENC, VAAPI, VideoToolbox,
   x265, SVT-AV1, ffmpeg) and in Matroska's Colour element; the mastering
   display and content light level on every keyframe; HDR10+'s dynamic
   metadata on every frame it was on. HEVC as SEI, AV1 as metadata OBUs.
-
 - Dolby Vision profile 7 (an Ultra HD disc's, FEL or MEL) is kept by a
   `--remux` into Matroska: the enhancement layer (PID 0x1015) and RPU go
   into the HEVC track as players expect them, with the Dolby Vision
@@ -50,19 +50,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   makes up for the base layer's encoding error; `--dv-fel reencode`
   re-encodes the source's. `--dv-el-crf` sets its quality.
 
-### Fixed
-
-- NVDEC gave a stream's first picture a later picture's timestamp when it
-  dropped leading pictures after it (a Matroska file starting on a CRA):
-  the start of the picture was placed up to a few frames early. Each
-  picture now carries its own access unit's timestamp.
-- A Matroska remux no longer repeats the track header's parameter sets
-  ahead of a first picture that has its own.
-
 ### Changed
 
 - `--bit-depth` defaults to the source's: 10 for a 10-bit source when the
   codec can, 8 otherwise (Blu-ray 3D included, so 3D output is unchanged).
+
+### Known limits
+
+- Decoding a 2D source other than H.264 (Ultra HD HEVC, VC-1, MPEG-2)
+  needs NVDEC, so Linux with an NVIDIA GPU; so do the Dolby Vision and HDR
+  conversions of such sources. Remuxes and 3D conversions work everywhere.
+  See "What works where" in the README.
 
 ## [0.6.0] - 2026-10-08
 
@@ -305,7 +303,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/brunoga/bdtools/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/brunoga/bdtools/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/brunoga/bdtools/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/brunoga/bdtools/compare/v0.5.1...v0.5.2

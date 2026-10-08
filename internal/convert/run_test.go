@@ -868,7 +868,10 @@ func TestRunnerKeepsFELLayers(t *testing.T) {
 	for _, mode := range []FEL{FELKeep, FELReencode} {
 		out := filepath.Join(t.TempDir(), "out.mkv")
 		o := DefaultOptions()
-		o.Input, o.Output, o.Encoder, o.NativeGPU, o.Codec, o.CRF, o.DVFEL = fs.path, out, EncoderNVENC, true, CodecH265, 30, mode
+		// A coarse base layer on smooth pictures (an error a half-size
+		// enhancement layer can make up for) and a fine enhancement layer.
+		o.Input, o.Output, o.Encoder, o.NativeGPU, o.Codec, o.DVFEL = fs.path, out, EncoderNVENC, true, CodecH265, mode
+		o.CRF, o.DVELCRF = 40, 8
 		var lines []string
 		if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
 			if strings.Contains(err.Error(), "GPU") {
@@ -952,11 +955,11 @@ func TestRunnerKeepsFELLayers(t *testing.T) {
 			mean[mode] += lumaPSNR(got[i].Y, ref[i].Y) / 24
 		}
 		t.Logf("%s: %.2f dB from the source's composition, on average", mode, mean[mode])
-		if mean[mode] < 40 {
+		if mean[mode] < 35 {
 			t.Errorf("%s: %.2f dB from the source's composition", mode, mean[mode])
 		}
 	}
-	if mean[FELKeep] < mean[FELReencode] {
-		t.Errorf("the rebuilt enhancement layer (%.2f dB) is no better than the re-encoded one (%.2f dB)", mean[FELKeep], mean[FELReencode])
+	if mean[FELKeep] < mean[FELReencode]+1 {
+		t.Errorf("the rebuilt enhancement layer (%.2f dB) is not clearly better than the re-encoded one (%.2f dB)", mean[FELKeep], mean[FELReencode])
 	}
 }

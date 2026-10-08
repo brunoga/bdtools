@@ -813,6 +813,32 @@ abstract: a GPU generation can carry an H.264 encoder and no HEVC one, so
 `--codec h265` can fall back to x265 on the same machine where `--codec h264`
 picks NVENC.
 
+## What works where
+
+Everything that only reads and writes streams works everywhere: remuxing
+(Dolby Vision included), demuxing, the 3D conversion (its MVC decoder is
+this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
+What differs is decoding a 2D source's video, which only NVIDIA's NVDEC
+does here so far:
+
+| | Linux (NVIDIA) | Linux (other GPU) | Windows | macOS |
+|---|---|---|---|---|
+| 3D Blu-ray → SBS | ✓ | ✓ | ✓ | ✓ |
+| Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ | ✓ |
+| 2D H.264 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | — | — | — |
+| HDR10, HDR10+ in a conversion (HEVC sources) | ✓ | — | — | — |
+| Dolby Vision 8.1 / FEL composed (`--dv-fel compose`) | ✓ | — | — | — |
+| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC) | — | — | — |
+
+Every encoder writes HDR10 and HDR10+; what needs NVDEC is decoding the
+Ultra HD HEVC they come in. Without NVDEC, a 2D source in another codec
+than H.264 is refused with that reason
+(`--remux` still works); its fallback, a software HEVC/VC-1/MPEG-2 decoder,
+is still to come. The Dolby Vision code itself (RPUs, composition) is Go,
+with AVX2 kernels on amd64 and the Go versions elsewhere (and with
+`-tags purego`).
+
 ## Hardware encoding
 
 A GPU encoder is driven **in process, through its system library**, loaded
