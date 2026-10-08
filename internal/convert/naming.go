@@ -5,27 +5,35 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // DetailTags describes a finished conversion for its file name, in the
 // order release names use: layout, resolution per eye, video codec and its
 // quality setting, encoder, then the main audio track and its channels,
-// e.g. "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1". height is the
-// source picture height (one eye).
+// e.g. "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1", or without the
+// layout for a 2D conversion. height is the source picture height (one
+// eye).
 func DetailTags(o Options, audio []Track, height int) string {
 	var tags []string
-	layout := "3D FSBS"
-	if o.Layout == LayoutHalfSBS {
-		layout = "3D HSBS"
+	switch {
+	case o.TwoD:
+	case o.Layout == LayoutHalfSBS:
+		tags = append(tags, "3D HSBS")
+	default:
+		tags = append(tags, "3D FSBS")
 	}
-	tags = append(tags, layout)
 	if height > 0 {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}
 	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC", CodecAV1: "AV1"}[o.Codec])
 	if o.tenBit() {
 		tags = append(tags, "10bit")
+	}
+	if o.Remux {
+		// The disc's own video: no quality setting or encoder to name.
+		tags = append(tags, "Remux")
+		return joinTags(tags, audio)
 	}
 	switch o.Encoder {
 	case EncoderVideoToolbox:
@@ -39,6 +47,11 @@ func DetailTags(o Options, audio []Track, height int) string {
 	tags = append(tags, map[Encoder]string{EncoderNVENC: "NVENC", EncoderVAAPI: "VAAPI",
 		EncoderVideoToolbox: "VideoToolbox", EncoderMediaFoundation: "MF",
 		EncoderSoftware: map[Codec]string{CodecH264: "x264", CodecH265: "x265", CodecAV1: "SVT-AV1"}[o.Codec]}[o.Encoder])
+	return joinTags(tags, audio)
+}
+
+// joinTags adds the main audio track's tag and joins them.
+func joinTags(tags []string, audio []Track) string {
 	if len(audio) > 0 {
 		if a := audioTag(audio[0]); a != "" {
 			tags = append(tags, a)
@@ -91,7 +104,7 @@ func audioTag(t Track) string {
 	return name
 }
 
-func qualityPercent(crf int) int { return int(100*hwenc.VTQuality(crf) + 0.5) }
+func qualityPercent(crf int) int { return int(100*gpu.VTQuality(crf) + 0.5) }
 
 // WithDetails puts tags into a file name before its extension, unless the
 // name already carries them.

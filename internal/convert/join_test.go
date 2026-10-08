@@ -71,7 +71,7 @@ func windowPictures(pes []pesInfo, in, out int64) int {
 // to different windows) and returns the output path.
 func joined(t *testing.T, form string, windows func(c clipRef) []clipRef) (string, *goSource, []clipRef) {
 	t.Helper()
-	src, err := resolveGo(bluray(form), "", nil)
+	src, err := resolveGo(bluray(form), "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

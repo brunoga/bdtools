@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // withTools makes LookPath find exactly the named programs.
@@ -75,7 +75,7 @@ func TestAV1HalfSBSFilters(t *testing.T) {
 func TestAV1GPUViaFFmpeg(t *testing.T) {
 	for enc, name := range map[Encoder]string{EncoderNVENC: "av1_nvenc", EncoderVAAPI: "av1_vaapi"} {
 		argv := strings.Join(encodeArgv(t, "linux", enc, CodecAV1), " ")
-		if !strings.Contains(argv, "-c:v "+name) || !strings.Contains(argv, fmt.Sprintf("-qp %d", hwenc.AV1QIndex(18))) {
+		if !strings.Contains(argv, "-c:v "+name) || !strings.Contains(argv, fmt.Sprintf("-qp %d", gpu.AV1QIndex(18))) {
 			t.Errorf("%s: %s", enc, argv)
 		}
 		if !strings.HasSuffix(argv, ".obu") {
@@ -105,7 +105,7 @@ func TestAV1VideoToolboxIsRefused(t *testing.T) {
 func TestAV1QualityMapping(t *testing.T) {
 	prevQ, prevC := -1, 0
 	for crf := 0; crf <= 51; crf++ {
-		q, c := hwenc.AV1QIndex(crf), svtCRF(crf)
+		q, c := gpu.AV1QIndex(crf), svtCRF(crf)
 		if q < prevQ || q < 0 || q > 255 || c < prevC || c < 1 || c > 63 {
 			t.Fatalf("crf %d: qindex %d, SVT CRF %d", crf, q, c)
 		}

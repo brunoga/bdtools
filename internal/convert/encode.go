@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -18,8 +18,8 @@ import (
 type encoderSink interface {
 	// start begins a segment written to path; first is its first picture,
 	// num/den the frame rate.
-	start(path string, first *mvc.StereoFrame, num, den int) error
-	put(sf *mvc.StereoFrame) error
+	start(path string, first picture, num, den int) error
+	put(p picture) error
 	// finish ends the segment, complete on disk.
 	finish() error
 	// abort abandons the segment and removes it. It returns the encoder's
@@ -39,7 +39,7 @@ func (e *encodeError) Unwrap() error { return e.err }
 // frames never touch the disk: for a feature film that is hundreds of
 // gigabytes. keep, when set, decides by timestamp which decoded pictures
 // are output. It returns the segments, in order.
-func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(int64) bool) ([]string, error) {
+func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep func(int64) bool) ([]string, error) {
 	var (
 		sink encoderSink
 		verb = "decoded"
@@ -73,15 +73,13 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 	}
 	ext := r.Opts.Codec.streamExt()
 
-	dec := mvc.NewDecoder(mvc.Options{Threads: r.Opts.DecodeThreads})
 	var (
-		decodeErrs int
-		prog       = r.newProgress(verb)
-		n          int // pictures kept so far, encoded or skipped
-		skipped    int // pictures outside the playlist's IN/OUT
-		num, den   int
-		open       bool
-		inSegment  int
+		prog      = r.newProgress(verb)
+		n         int // pictures kept so far, encoded or skipped
+		skipped   int // pictures outside the playlist's IN/OUT
+		num, den  int
+		open      bool
+		inSegment int
 	)
 	finishSegment := func() error {
 		open = false
@@ -91,17 +89,8 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 		i := len(r.work.m.Segments)
 		return r.work.add(segment{File: fmt.Sprintf("video-%04d%s", i, ext), Frames: inSegment})
 	}
-	st, decErr := dec.DecodeStream(src, mvc.DecodeOptions{
-		OnError: func(err error) {
-			// A damaged access unit is concealed and the decode goes on; a
-			// few are worth a line, a flood is not.
-			decodeErrs++
-			if decodeErrs <= 5 {
-				r.Report.Report("warning: %v", err)
-			}
-		},
-	}, func(sf *mvc.StereoFrame) error {
-		if keep != nil && !keep(sf.Base.PTS) {
+	decErr := src.run(func(sf picture) error {
+		if keep != nil && !keep(sf.pts) {
 			skipped++
 			return nil
 		}
@@ -109,9 +98,14 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 			return err
 		}
 		if n == 0 {
-			r.noteFirstPicture(sf.Base.PTS)
-			r.Height = sf.Base.Height
-			num, den = dec.FrameRate()
+			r.noteFirstPicture(sf.pts)
+			_, h, depth := sf.size()
+			r.Height = h
+			r.resolveDepth(depth)
+			num, den = src.frameRate()
+			if num <= 0 && r.rateNum > 0 {
+				num, den = r.rateNum, r.rateDen
+			}
 			if num <= 0 {
 				num, den = 24000, 1001
 				r.Report.Report("warning: the stream carries no frame rate; assuming 24000/1001")
@@ -165,10 +159,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 		}
 		return nil, fmt.Errorf("decoding: %w", decErr)
 	}
+	decodeErrs := src.errors()
 	switch {
 	case n == 0:
 		return nil, fmt.Errorf("the video decoded to no frames")
-	case st.DependentFrames == 0:
+	case !r.flat && src.dependentFrames() == 0:
 		return nil, fmt.Errorf("the dependent view decoded to nothing: the source does not look like 3D")
 	case n < skip:
 		return nil, fmt.Errorf("the source has %d frames, fewer than the %d an earlier run encoded: "+
@@ -190,23 +185,20 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src mvc.Source, keep func(
 // into the encoder's input buffer.
 type gpuSink struct {
 	r    *Runner
-	kind hwenc.Kind
+	kind gpu.Kind
 	path string
 	f    *os.File
-	enc  hwenc.Encoder
+	enc  gpu.Encoder
 }
 
-func (s *gpuSink) start(path string, first *mvc.StereoFrame, num, den int) error {
+func (s *gpuSink) start(path string, first picture, num, den int) error {
 	f, err := os.Create(path) //nolint:gosec // our work directory
 	if err != nil {
 		return err
 	}
 	o := s.r.Opts
-	w, h := 2*first.Base.Width, first.Base.Height
-	if o.Layout == LayoutHalfSBS {
-		w = first.Base.Width
-	}
-	enc, err := hwenc.Open(s.kind, hwenc.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
+	w, h := s.r.frameSize(first)
+	enc, err := gpu.Open(s.kind, gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
 		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth}, f)
 	if err != nil {
 		_ = f.Close()
@@ -217,8 +209,11 @@ func (s *gpuSink) start(path string, first *mvc.StereoFrame, num, den int) error
 	return nil
 }
 
-func (s *gpuSink) put(sf *mvc.StereoFrame) error {
-	return s.enc.Encode(func(p *hwenc.Picture) { drawSBS(p, sf, s.r.Opts.SwapLR, s.r.Opts.Layout == LayoutHalfSBS) })
+func (s *gpuSink) put(p picture) error {
+	if s.r.flat {
+		return s.enc.Encode(func(dst *gpu.Picture) { drawFlat(dst, p) })
+	}
+	return s.enc.Encode(func(dst *gpu.Picture) { drawSBS(dst, p.stereo, s.r.Opts.SwapLR, s.r.Opts.Layout == LayoutHalfSBS) })
 }
 
 func (s *gpuSink) finish() error {
@@ -248,12 +243,13 @@ type programSink struct {
 	path   string
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	y4m    *mvc.Y4MWriter
+	y4m    *mvc.Y4MWriter // a 3D pair, side by side
+	flat   *flatY4M       // a 2D picture
 	stderr strings.Builder
 	failed bool // writing to it failed: it has stopped
 }
 
-func (s *programSink) start(path string, _ *mvc.StereoFrame, num, den int) error {
+func (s *programSink) start(path string, _ picture, num, den int) error {
 	step := encodeStep(s.r.Opts, path)
 	s.cmd = exec.CommandContext(s.ctx, s.bin, step.Argv[1:]...) //nolint:gosec // bin came from LookPath
 	stdin, err := s.cmd.StdinPipe()
@@ -266,6 +262,11 @@ func (s *programSink) start(path string, _ *mvc.StereoFrame, num, den int) error
 		return fmt.Errorf("starting the encoder: %w", err)
 	}
 	s.path, s.stdin, s.failed = path, stdin, false
+	if s.r.flat {
+		s.flat, s.y4m = newFlatY4M(stdin, s.r.Opts.BitDepth, num, den), nil
+		return nil
+	}
+	s.flat = nil
 	s.y4m = mvc.NewY4MWriter(stdin, mvc.LayoutSideBySide)
 	s.y4m.SwapViews = s.r.Opts.SwapLR
 	s.y4m.Depth = s.r.Opts.BitDepth
@@ -273,8 +274,14 @@ func (s *programSink) start(path string, _ *mvc.StereoFrame, num, den int) error
 	return nil
 }
 
-func (s *programSink) put(sf *mvc.StereoFrame) error {
-	if err := s.y4m.Write(sf); err != nil {
+func (s *programSink) put(p picture) error {
+	var err error
+	if s.flat != nil {
+		err = s.flat.write(p)
+	} else {
+		err = s.y4m.Write(p.stereo)
+	}
+	if err != nil {
 		s.failed = true
 		return err
 	}
@@ -282,7 +289,12 @@ func (s *programSink) put(sf *mvc.StereoFrame) error {
 }
 
 func (s *programSink) finish() error {
-	flushErr := s.y4m.Flush()
+	var flushErr error
+	if s.flat != nil {
+		flushErr = s.flat.flush()
+	} else {
+		flushErr = s.y4m.Flush()
+	}
 	_ = s.stdin.Close()
 	if err := s.cmd.Wait(); err != nil {
 		return fmt.Errorf("%w\n%s", err, strings.TrimSpace(s.stderr.String()))

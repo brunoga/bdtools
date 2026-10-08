@@ -33,19 +33,19 @@ type fakeSink struct {
 	f      *os.File
 }
 
-func (s *fakeSink) start(path string, _ *mvc.StereoFrame, _, _ int) error {
+func (s *fakeSink) start(path string, _ picture, _, _ int) error {
 	f, err := os.Create(path) //nolint:gosec // test
 	s.path, s.f = path, f
 	s.starts++
 	return err
 }
 
-func (s *fakeSink) put(sf *mvc.StereoFrame) error {
+func (s *fakeSink) put(sf picture) error {
 	if s.failAt > 0 && len(s.pts)+1 == s.failAt {
 		return errors.New("the encoder fell over")
 	}
-	s.pts = append(s.pts, sf.Base.PTS)
-	_, err := fmt.Fprintf(s.f, "%d\n", sf.Base.PTS)
+	s.pts = append(s.pts, sf.pts)
+	_, err := fmt.Fprintf(s.f, "%d\n", sf.pts)
 	return err
 }
 
@@ -60,7 +60,7 @@ func (s *fakeSink) abort() error {
 // with sink, as runBuiltin would.
 func encodeFixture(t *testing.T, o Options, work *work, sink encoderSink) ([]string, []string, error) {
 	t.Helper()
-	src, err := resolveGo(bluray("disc.iso"), "", nil)
+	src, err := resolveGo(bluray("disc.iso"), "", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func encodeFixture(t *testing.T, o Options, work *work, sink encoderSink) ([]str
 	var lines []string
 	r := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
 	r.work, r.sink = work, sink
-	segs, encErr := r.decodeAndEncode(context.Background(), mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, g.KeepFrame)
+	segs, encErr := r.decodeAndEncode(context.Background(), newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, 0, nil), g.KeepFrame)
 	_, _ = g.finish()
 	return segs, lines, encErr
 }
@@ -319,7 +319,7 @@ type failingSink struct {
 	n, failAt int
 }
 
-func (s *failingSink) put(sf *mvc.StereoFrame) error {
+func (s *failingSink) put(sf picture) error {
 	if s.n++; s.n == s.failAt {
 		return errors.New("stopped")
 	}

@@ -2,11 +2,12 @@ package convert
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"runtime"
 	"sync"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -24,16 +25,16 @@ const (
 // Valid reports whether g is a known value.
 func (g GPUAPI) Valid() bool { return g == GPUBuiltin || g == GPUFFmpeg }
 
-func hwKind(e Encoder) (hwenc.Kind, bool) {
+func hwKind(e Encoder) (gpu.Kind, bool) {
 	switch e {
 	case EncoderNVENC:
-		return hwenc.NVENC, true
+		return gpu.NVENC, true
 	case EncoderVAAPI:
-		return hwenc.VAAPI, true
+		return gpu.VAAPI, true
 	case EncoderVideoToolbox:
-		return hwenc.VideoToolbox, true
+		return gpu.VideoToolbox, true
 	case EncoderMediaFoundation:
-		return hwenc.MediaFoundation, true
+		return gpu.MediaFoundation, true
 	}
 	return "", false
 }
@@ -44,14 +45,14 @@ func hwKind(e Encoder) (hwenc.Kind, bool) {
 var ProbeNative = probeNative
 
 // hw is the codec as the GPU encoders name it.
-func (c Codec) hw() hwenc.Codec {
+func (c Codec) hw() gpu.Codec {
 	switch c {
 	case CodecH265:
-		return hwenc.HEVC
+		return gpu.HEVC
 	case CodecAV1:
-		return hwenc.AV1
+		return gpu.AV1
 	}
-	return hwenc.H264
+	return gpu.H264
 }
 
 func probeNative(enc Encoder, codec Codec, depth int, device string) bool {
@@ -60,14 +61,14 @@ func probeNative(enc Encoder, codec Codec, depth int, device string) bool {
 		return false
 	}
 	const w, h = 256, 128
-	e, err := hwenc.Open(k, hwenc.Config{Codec: codec.hw(), Width: w, Height: h, FPSNum: 24, FPSDen: 1, QP: 30,
+	e, err := gpu.Open(k, gpu.Config{Codec: codec.hw(), Width: w, Height: h, FPSNum: 24, FPSDen: 1, QP: 30,
 		Device: device, BitDepth: depth}, io.Discard)
 	if err != nil {
 		return false
 	}
 	grey := mvc.StereoFrame{Base: greyFrame(w/2, h)}
 	for i := 0; i < 2; i++ {
-		if e.Encode(func(p *hwenc.Picture) { drawSBS(p, &grey, false, false) }) != nil {
+		if e.Encode(func(p *gpu.Picture) { drawSBS(p, &grey, false, false) }) != nil {
 			_ = e.Close()
 			return false
 		}
@@ -102,7 +103,7 @@ func ResolveGPU(o *Options) {
 // planes with Cb and Cr interleaved. With half, each view is squeezed to
 // half its width. Bands of rows go to a few goroutines: one core spends
 // milliseconds a frame here, which a GPU encoding at 150+ fps notices.
-func drawSBS(p *hwenc.Picture, sf *mvc.StereoFrame, swap, half bool) {
+func drawSBS(p *gpu.Picture, sf *mvc.StereoFrame, swap, half bool) {
 	a, b := sf.Base, sf.Dependent
 	if b == nil {
 		b = a
@@ -131,7 +132,7 @@ func drawSBS(p *hwenc.Picture, sf *mvc.StereoFrame, swap, half bool) {
 // 10-bit value four times it (what 8-bit video is at 10 bits), little-endian
 // in the top ten bits of two bytes. Squeezing keeps the filter's two extra
 // bits rather than rounding them away.
-func drawRows10(p *hwenc.Picture, a, b *mvc.Frame, half bool, from, to int) {
+func drawRows10(p *gpu.Picture, a, b *mvc.Frame, half bool, from, to int) {
 	w := a.Width
 	ow := w
 	if half {
@@ -207,7 +208,7 @@ func squeeze10(dst, src []byte, step int) {
 }
 
 // drawRows draws chroma rows [from, to) and the luma rows they cover.
-func drawRows(p *hwenc.Picture, a, b *mvc.Frame, half bool, from, to int) {
+func drawRows(p *gpu.Picture, a, b *mvc.Frame, half bool, from, to int) {
 	w := a.Width
 	ow := w
 	if half {
@@ -287,4 +288,25 @@ func clip8(v int) byte {
 		return 255
 	}
 	return byte(v)
+}
+
+// ProbeDecoder reports whether a GPU decoder of kind k works here for the
+// codec, opening one (the answer is kept: it takes a GPU context). A
+// variable, so tests can decide what the machine has.
+var ProbeDecoder = probeDecoder
+
+var decoderProbes sync.Map // gpu.Kind/codec -> bool
+
+func probeDecoder(k gpu.Kind, codec gpu.VideoCodec) bool {
+	key := fmt.Sprint(k, codec)
+	if ok, done := decoderProbes.Load(key); done {
+		return ok.(bool)
+	}
+	d, err := gpu.OpenDecoder(k, gpu.DecodeConfig{Codec: codec}, func(*gpu.DecodedPicture) error { return nil })
+	ok := err == nil
+	if ok {
+		_ = d.Close()
+	}
+	decoderProbes.Store(key, ok)
+	return ok
 }

@@ -9,12 +9,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/brunoga/bdtools/internal/esinfo"
 	"github.com/brunoga/bdtools/internal/mkv"
-	"github.com/brunoga/bdtools/mvc"
 )
 
 // Matroska sources: a Blu-ray 3D remuxed to MKV (MakeMKV, mkvmerge), read in
@@ -43,6 +43,9 @@ type mkvSource struct {
 	// dependent is the track number of a separate MVC track, 0 when the
 	// video track carries both views.
 	dependent uint64
+	// rateNum and rateDen are the video's frame rate: the track's frame
+	// duration, or the spacing of its first frames.
+	rateNum, rateDen int
 }
 
 func openMatroska(path string) (*os.File, *mkv.Reader, error) {
@@ -81,6 +84,7 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		}
 	}
 	done := 0
+	videoTimes := map[uint64][]time.Duration{}
 	for read := 0; done < wanted && read < 20000; read++ {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -94,7 +98,10 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			continue
 		}
 		if t.Type == mkv.TypeVideo {
-			samples[p.Track] = append(samples[p.Track], annexB(p.Data, nalLengthSize(t.CodecPrivate))...)
+			if len(videoTimes[p.Track]) < 64 {
+				videoTimes[p.Track] = append(videoTimes[p.Track], p.Time)
+			}
+			samples[p.Track] = append(samples[p.Track], annexB(p.Data, videoNALSize(t))...)
 		} else {
 			samples[p.Track] = append(samples[p.Track], p.Data...)
 		}
@@ -103,6 +110,14 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		}
 	}
 
+	for _, t := range r.Tracks {
+		if t.Type == mkv.TypeVideo && src.rateNum == 0 {
+			src.rateNum, src.rateDen = rateFromDuration(t.DefaultDuration)
+			if src.rateNum == 0 {
+				src.rateNum, src.rateDen = rateFromDuration(frameSpacing(videoTimes[t.Number]))
+			}
+		}
+	}
 	var tracks []Track
 	for _, t := range r.Tracks {
 		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced} //nolint:gosec // track numbers are small
@@ -119,6 +134,12 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 				tracks = append(tracks, dep)
 			}
 			continue
+		case "V_MPEGH/ISO/HEVC":
+			tr.Type, tr.StreamID = "HEVC", "V_MPEGH/ISO/HEVC"
+			tr.Info = fmt.Sprintf("H.265/HEVC Resolution: %dx%d", t.Width, t.Height)
+			if len(t.CodecPrivate) > 17 {
+				tr.Info += fmt.Sprintf(" %d-bit", 8+int(t.CodecPrivate[17]&7))
+			}
 		case "V_MPEG4/ISO/MVC":
 			// A separate dependent-view track, paired by timestamp.
 			tr.Type, tr.StreamID = "MVC", "V_MPEG4/ISO/MVC"
@@ -164,6 +185,69 @@ func nalLengthSize(avcC []byte) int {
 		return 4
 	}
 	return int(avcC[4]&3) + 1
+}
+
+// frameSpacing is a frame's duration as the first frames' timestamps
+// space them: the smallest gap between two in display order (blocks come in
+// decoding order, and a dropped frame only widens a gap).
+func frameSpacing(times []time.Duration) time.Duration {
+	if len(times) < 2 {
+		return 0
+	}
+	s := append([]time.Duration(nil), times...)
+	slices.Sort(s)
+	var gap time.Duration
+	for i := 1; i < len(s); i++ {
+		if d := s[i] - s[i-1]; d > 0 && (gap == 0 || d < gap) {
+			gap = d
+		}
+	}
+	return gap
+}
+
+// videoNALSize is the NAL length field size of a video track's blocks.
+func videoNALSize(t *mkv.ReadTrack) int {
+	if t.CodecID == "V_MPEGH/ISO/HEVC" {
+		if len(t.CodecPrivate) < 23 {
+			return 4
+		}
+		return int(t.CodecPrivate[21]&3) + 1
+	}
+	return nalLengthSize(t.CodecPrivate)
+}
+
+// videoParams is a video track's parameter sets in Annex B, to go ahead of
+// its first picture.
+func videoParams(t *mkv.ReadTrack) []byte {
+	if t.CodecID != "V_MPEGH/ISO/HEVC" {
+		return avcCParams(t.CodecPrivate)
+	}
+	// hvcC: arrays of NAL units after its 23-byte header.
+	p := t.CodecPrivate
+	if len(p) < 23 {
+		return nil
+	}
+	var out []byte
+	n, b := int(p[22]), p[23:]
+	for range n {
+		if len(b) < 3 {
+			break
+		}
+		count := int(b[1])<<8 | int(b[2])
+		b = b[3:]
+		for range count {
+			if len(b) < 2 {
+				return out
+			}
+			l := int(b[0])<<8 | int(b[1])
+			if len(b) < 2+l {
+				return out
+			}
+			out = append(append(out, 0, 0, 0, 1), b[2:2+l]...)
+			b = b[2+l:]
+		}
+	}
+	return out
 }
 
 // avcCParams returns an avcC's parameter sets in Annex B.
@@ -265,8 +349,8 @@ func (g *mkvDemux) start() error {
 	}
 	g.f, g.r = f, r
 	if t := r.Track(g.video); t != nil {
-		g.nalSize = nalLengthSize(t.CodecPrivate)
-		g.params = avcCParams(t.CodecPrivate)
+		g.nalSize = videoNALSize(t)
+		g.params = videoParams(t)
 	}
 	if err := os.MkdirAll(g.tmp, 0o750); err != nil { //nolint:gosec // the operator's work directory
 		return err
@@ -464,15 +548,24 @@ func (w *rawWAV) header(dataLen uint32) error {
 
 // runMatroska is runBuiltin for a Matroska source.
 func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
-	if r.Opts.Remux {
-		return fmt.Errorf("--remux copies a disc's own MVC stream into an m2ts; %s is already a remux", filepath.Base(r.Opts.Input))
+	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
+		return fmt.Errorf("--remux of %s: a Matroska source remuxes into a .mkv (2D), not a transport stream", filepath.Base(r.Opts.Input))
 	}
 	r.Report.Report("probing %s", r.Opts.Input)
 	src, tracks, err := probeMatroska(ctx, r.Opts.Input)
 	if err != nil {
 		return err
 	}
-	sel, err := SelectTracks(tracks)
+	r.flat = r.Opts.TwoD || !threeD(tracks)
+	r.Opts.TwoD = r.flat
+	if r.Opts.Remux && !r.flat {
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: add --2d to remux its base view alone")
+	}
+	selectTracks := SelectTracks
+	if r.flat {
+		selectTracks = SelectTracks2D
+	}
+	sel, err := selectTracks(tracks)
 	if err != nil {
 		return err
 	}
@@ -484,11 +577,17 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		sel.Audio = withFallbacks(sel.Audio, all, r.Report)
 	}
 	r.Selected = sel
-	r.Report.Report("source: video track %d (both views), %d audio, %d subtitle", sel.Base.ID, len(sel.Audio), len(sel.Subtitles))
+	if r.flat {
+		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+		r.check2D()
+	} else {
+		r.Report.Report("source: video track %d (both views), %d audio, %d subtitle", sel.Base.ID, len(sel.Audio), len(sel.Subtitles))
+	}
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
 	r.length = src.duration
+	r.rateNum, r.rateDen = src.rateNum, src.rateDen
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
 	if r.Opts.Subs3D.threeD() {
@@ -506,7 +605,15 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		}
 		return err
 	}
-	video, decErr := r.decodeAndEncode(ctx, mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, nil)
+	if r.Opts.Remux {
+		return r.remuxToMKV(ctx, sel.Base, g.Next, nil, g.finish, src.chapters)
+	}
+	pics, err := r.pictures(sel.Base, g.Next)
+	if err != nil {
+		_ = g.f.Close()
+		return err
+	}
+	video, decErr := r.decodeAndEncode(ctx, pics, nil)
 	extras, finErr := g.finish()
 	if decErr != nil {
 		return decErr

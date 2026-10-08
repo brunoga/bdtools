@@ -34,7 +34,9 @@ func (r *Runner) remuxBuiltin(ctx context.Context, src *goSource, sel Selection)
 	}
 	keep := map[uint16]bool{}
 	for _, t := range append(append([]Track{sel.Base, sel.Dependent}, sel.Audio...), sel.Subtitles...) {
-		keep[uint16(t.ID)] = true //nolint:gosec // track ids are PIDs
+		if t.StreamID != "" { // a 2D source has no dependent view
+			keep[uint16(t.ID)] = true //nolint:gosec // track ids are PIDs
+		}
 	}
 	// A title of several clips must carry the kept tracks on the same PIDs
 	// in every clip, as discs do: one program table describes the result.

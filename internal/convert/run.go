@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/mkv"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -60,6 +61,11 @@ type Runner struct {
 	work *work
 	// sink, when set, takes the place of the encoder. For tests.
 	sink encoderSink
+	// flat is set for a 2D conversion: one picture, not a stereo pair.
+	flat bool
+	// rateNum and rateDen are the frame rate the container states, for a
+	// stream that does not.
+	rateNum, rateDen int
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
@@ -130,7 +136,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if isMatroska(r.Opts.Input) {
 		return r.runMatroska(ctx, tmp)
 	}
-	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Report)
+	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Opts.TwoD, r.Report)
 	if err != nil {
 		return err
 	}
@@ -144,7 +150,13 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if err != nil {
 		return err
 	}
-	sel, err := SelectTracks(tracks)
+	r.flat = r.Opts.TwoD || !threeD(tracks)
+	r.Opts.TwoD = r.flat
+	selectTracks := SelectTracks
+	if r.flat {
+		selectTracks = SelectTracks2D
+	}
+	sel, err := selectTracks(tracks)
 	if err != nil {
 		return err
 	}
@@ -152,15 +164,26 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return err
 	}
 	r.Selected = sel
-	if r.Opts.Remux {
+	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
 		return r.remuxBuiltin(ctx, src, sel)
 	}
-	r.Report.Report("source: base view track %d, dependent view track %d, %d audio, %d subtitle",
-		sel.Base.ID, sel.Dependent.ID, len(sel.Audio), len(sel.Subtitles))
+	if r.Opts.Remux && !r.flat {
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
+			"remux to .m2ts, or add --2d for its base view alone")
+	}
+	if r.flat {
+		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle",
+			sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+		r.check2D()
+	} else {
+		r.Report.Report("source: base view track %d, dependent view track %d, %d audio, %d subtitle",
+			sel.Base.ID, sel.Dependent.ID, len(sel.Audio), len(sel.Subtitles))
+	}
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
 	r.length = src.duration
+	r.rateNum, r.rateDen = src.frameRate()
 	g := newGoDemux(src, sel, tmp, r.Report)
 	r.timeline = g.timeline
 	if r.Opts.Subs3D.threeD() {
@@ -171,7 +194,14 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if err := g.start(); err != nil {
 		return err
 	}
-	video, decErr := r.decodeAndEncode(ctx, mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, g.KeepFrame)
+	if r.Opts.Remux {
+		return r.remuxToMKV(ctx, sel.Base, g.Next, g.KeepFrame, g.finish, g.src.chapters)
+	}
+	pics, err := r.pictures(sel.Base, g.Next)
+	if err != nil {
+		return err
+	}
+	video, decErr := r.decodeAndEncode(ctx, pics, g.KeepFrame)
 	extras, finErr := g.finish()
 	if decErr != nil {
 		return decErr
@@ -180,6 +210,43 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return finErr
 	}
 	return r.mux(ctx, video, extras, g.src.chapters)
+}
+
+// pictures chooses the decoder for a source's video. A 3D pair goes to the
+// MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
+// (NVDEC now), else, for H.264, to the H.264 decoder here; other codecs
+// need the GPU for now.
+func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
+	cpu := func() pictureSource {
+		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
+	}
+	if !r.flat {
+		return cpu(), nil
+	}
+	codec, ok := map[string]gpu.VideoCodec{"V_MPEG4/ISO/AVC": gpu.DecodeH264, "V_MPEGH/ISO/HEVC": gpu.DecodeHEVC,
+		"V_MS/VFW/FOURCC": gpu.DecodeVC1, "V_MPEG2": gpu.DecodeMPEG2}[video.StreamID]
+	if !ok {
+		return nil, fmt.Errorf("no decoder for %s video", video.Type)
+	}
+	if r.Opts.Decoder != DecoderCPU && ProbeDecoder(gpu.NVENC, codec) {
+		r.Report.Report("decoding %s on the GPU (NVDEC)", video.Type)
+		return &gpuPictures{kind: gpu.NVENC, codec: codec, next: next}, nil
+	}
+	if r.Opts.Decoder == DecoderGPU {
+		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)
+	}
+	if codec != gpu.DecodeH264 {
+		return nil, fmt.Errorf("decoding %s needs a GPU decoder (NVIDIA's, for now); none works here", video.Type)
+	}
+	return cpu(), nil
+}
+
+// check2D says what a 2D conversion leaves aside.
+func (r *Runner) check2D() {
+	if r.Opts.Subs3D.threeD() {
+		r.Report.Report("2D: --subs-3d does not apply; the subtitles are kept as they are")
+		r.Opts.Subs3D = Subs3DOff
+	}
 }
 
 // ListTracks resolves the source and returns everything it contains, with no
@@ -198,7 +265,7 @@ func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
 	}
 	// Reading the playlists and the first megabytes of the feature's stream
 	// is enough, wherever the disc is: nothing is extracted.
-	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Report)
+	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Opts.TwoD, r.Report)
 	if err != nil {
 		return nil, err
 	}

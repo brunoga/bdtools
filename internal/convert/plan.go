@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/gpu"
 )
 
 // Layout is how the two eyes are arranged in the output frame.
@@ -64,6 +64,16 @@ type Options struct {
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
+	// Decoder chooses how a 2D source's video is decoded: on a GPU when one
+	// can (DecoderAuto, the default), only on a GPU, or only with the
+	// H.264 decoder here (H.264 sources only). A 3D source always goes to
+	// the MVC decoder here: no GPU decodes MVC.
+	Decoder Decoder
+	// TwoD converts the source as a 2D film: the picture, or a 3D source's
+	// base view (its left eye, or the right one where the disc says so),
+	// on its own. A source with no MVC dependent view is converted so in
+	// any case.
+	TwoD bool
 	// Subs3D is what becomes of the subtitles: kept as they are, drawn
 	// once for a player to place in 3D itself (Subs3DOff, the default);
 	// drawn into both halves of the frame at the depth the disc gives them,
@@ -96,6 +106,15 @@ type Options struct {
 	// process.
 	NativeGPU bool
 }
+
+// Decoder says how a 2D source's video is decoded: see Options.Decoder.
+type Decoder string
+
+const (
+	DecoderAuto Decoder = ""
+	DecoderGPU  Decoder = "gpu"
+	DecoderCPU  Decoder = "cpu"
+)
 
 // Subs3D says what becomes of the subtitles: see Options.Subs3D.
 type Subs3D string
@@ -178,11 +197,11 @@ func (o Options) Validate(goos string) error {
 			"a playlist or an m2ts) or a Matroska remux of one", filepath.Base(o.Input))
 	}
 	if o.Remux {
-		// MVC has no home in Matroska that players agree on, so a remux
-		// stays in the transport stream the disc already uses.
-		if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".m2ts" && ext != ".ts" {
-			return fmt.Errorf("a remux output must be a .m2ts or .ts (got %q); "+
-				"MVC video cannot go into a .mkv that players agree on", ext)
+		// MVC has no home in Matroska that players agree on, so a 3D remux
+		// stays in the transport stream the disc already uses; a 2D one can
+		// be either (whether the source is 3D is known once it is read).
+		if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".m2ts" && ext != ".ts" && ext != ".mkv" {
+			return fmt.Errorf("a remux output must be a .mkv (2D), or a .m2ts or .ts (got %q)", ext)
 		}
 		// Everything below describes the decode-and-encode path, which a
 		// remux does not take. Saying so beats silently ignoring settings.
@@ -225,6 +244,11 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.CRF < 0 || o.CRF > 51 {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
+	}
+	switch o.Decoder {
+	case DecoderAuto, "auto", DecoderGPU, DecoderCPU:
+	default:
+		return fmt.Errorf("--decoder %q: want auto, gpu or cpu", o.Decoder)
 	}
 	switch o.Subs3D {
 	case "", Subs3DOff, Subs3DOn, Subs3DBoth:
@@ -394,7 +418,7 @@ func encodeStep(opts Options, out string) Step {
 	// The GPU encoders take AV1's quantiser as its 0-255 index.
 	qp := opts.CRF
 	if opts.Codec == CodecAV1 {
-		qp = hwenc.AV1QIndex(opts.CRF)
+		qp = gpu.AV1QIndex(opts.CRF)
 	}
 	// At 10 bits the GPU encoders take P010 and HEVC is Main 10; the
 	// software ones take the 10-bit planar format.
@@ -427,7 +451,7 @@ func encodeStep(opts Options, out string) Step {
 	case EncoderVideoToolbox:
 		// VideoToolbox's quality runs the other way, 1 to 100 with higher
 		// better; -q:v takes it, and the in-process encoder maps the same.
-		return ff(append([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, gpu10...), "")
+		return ff(append([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*gpu.VTQuality(opts.CRF) + 0.5))}, gpu10...), "")
 	case EncoderNVENC:
 		return ff(append([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(qp)}, gpu10...), "")
 	case EncoderMediaFoundation:
@@ -435,7 +459,7 @@ func encodeStep(opts Options, out string) Step {
 		// better, mapped from --crf as for VideoToolbox; hw_encoding refuses
 		// Microsoft's software MFT.
 		return ff([]string{"-c:v", name, "-hw_encoding", "1", "-rate_control", "quality",
-			"-quality", fmt.Sprint(int(100*hwenc.VTQuality(opts.CRF) + 0.5))}, "")
+			"-quality", fmt.Sprint(int(100*gpu.VTQuality(opts.CRF) + 0.5))}, "")
 	default:
 		if opts.Codec == CodecAV1 {
 			if opts.EncodesViaFFmpeg() {

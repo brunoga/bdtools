@@ -35,18 +35,21 @@ func TestRemuxPlanIsASingleStep(t *testing.T) {
 	}
 }
 
-// MVC has no home in Matroska that players agree on, so a .mkv output would be
-// a file nothing could play. Saying so beats producing one.
-func TestRemuxRefusesAnMkvOutput(t *testing.T) {
-	_, err := BuildPlan("linux", opts("linux", func(o *Options) {
-		o.Remux = true
-		o.Output = "/media/out/Film.mkv"
-	}))
-	if err == nil {
-		t.Fatal("a remux to .mkv must be refused")
+// MVC has no home in Matroska that players agree on, so a 3D source's remux
+// into a .mkv is refused, saying what to do instead; with --2d its base view
+// remuxes into one.
+func TestRemuxIntoMatroskaIs2D(t *testing.T) {
+	run := func(twoD bool) error {
+		o := DefaultOptions()
+		o.Input, o.Output, o.Remux, o.TwoD = bluray("disc.iso"), filepath.Join(t.TempDir(), "Film.mkv"), true, twoD
+		return NewRunner(CurrentGOOS, o, nil).Run(t.Context())
 	}
-	if !strings.Contains(err.Error(), ".m2ts") {
-		t.Errorf("the error should name the format to use, got: %v", err)
+	err := run(false)
+	if err == nil || !strings.Contains(err.Error(), ".m2ts") || !strings.Contains(err.Error(), "--2d") {
+		t.Errorf("a 3D remux into .mkv: %v", err)
+	}
+	if err := run(true); err != nil {
+		t.Errorf("--2d --remux into .mkv: %v", err)
 	}
 }
 
