@@ -160,7 +160,7 @@ scheduler such as pipeliner retry it.
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
-| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else H.264 here and other codecs with ffmpeg), `gpu`, or `cpu` (never the GPU) |
+| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc` or `software`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` − 6 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
@@ -266,8 +266,9 @@ process through its system library like the encoders, decodes H.264, HEVC
 at 4K (580 fps for 10-bit HEVC on an RTX 5090, copied back for the encoder).
 Its H.264 and HEVC pictures are bit-identical to ffmpeg's software
 decoders'; MPEG-2's within the tolerance its inverse transform allows (that
-standard is not bit-exact between decoders). Without a GPU decoder, H.264,
-MPEG-2 and VC-1 go to the decoders here (Go), and HEVC to ffmpeg (see
+standard is not bit-exact between decoders). Without a GPU decoder, every
+codec goes to the decoders here (Go), and HEVC of a profile they do not
+decode (the format range extensions, never on a disc) to ffmpeg (see
 [What works where](#what-works-where)). `--decoder` overrides the choice.
 
 The output keeps the source's bit depth unless `--bit-depth` says otherwise:
@@ -822,17 +823,16 @@ Everything that only reads and writes streams works everywhere: remuxing
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
 A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
 NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC) — else H.264, MPEG-2 and VC-1 by the decoders here and
-HEVC by ffmpeg:
+(macOS: H.264, HEVC) — else by the decoders here, in Go:
 
-| | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere, with ffmpeg | elsewhere, without |
-|---|---|---|---|
-| 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
-| Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |
-| 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
-| 2D HEVC (Ultra HD) | ✓ (NVDEC) | ✓ (ffmpeg) | — |
-| HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
-| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) | — |
+| | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere |
+|---|---|---|
+| 3D Blu-ray → SBS | ✓ | ✓ |
+| Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ |
+| 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD) | ✓ (NVDEC) | ✓ (decoded here) |
+| HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ |
+| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) |
 
 On Windows, NVDEC's structures are laid out as Windows lays them out (an
 `unsigned long` is 4 bytes there), generated from NVIDIA's headers like
@@ -857,6 +857,19 @@ conformance streams ffmpeg tests with, on a Blu-ray sample, and on four
 minutes of a VC-1 Blu-ray remux (5,755 pictures, fades included). About
 110 fps for 1080p on one core. A Matroska remux of a VC-1 Blu-ray (VFW
 FourCC `WVC1`, with its PCM in `A_MS/ACM`) converts like the disc.
+
+The HEVC decoder here is Go as well: Main and Main 10, everything Ultra HD
+Blu-ray uses (and tiles, wavefronts, dependent slices, weighted
+prediction, scaling lists, PCM and lossless blocks besides). Its pictures
+are byte-identical to ffmpeg's on all 152 of the JCT-VC conformance
+streams for those profiles and on 4K HDR10 and Dolby Vision clips. It
+decodes a picture's slices in parallel (discs cut each picture into
+several), and the rows of a wavefront picture, then filters in parallel
+bands: about 75 fps for an Ultra HD disc's 4K stream on 24 threads,
+against ffmpeg's 300 with its assembly (a 4K Dolby Vision FEL conversion,
+both layers decoded here and composed, encodes at 38 fps on NVENC). A
+stream of the format range extensions (4:2:2, 4:4:4, never on a disc)
+goes to ffmpeg instead, converted to 4:2:0.
 
 Decoding through ffmpeg gives each picture its own timestamp (the stream
 goes to it as a transport stream with them, and `-stats_enc_pre` gives them

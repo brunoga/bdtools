@@ -1,14 +1,22 @@
 package convert
 
 import (
+	"encoding/binary"
+	"fmt"
+	"runtime"
+	"sync"
+	"sync/atomic"
+
 	"github.com/brunoga/bdtools/internal/deint"
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/hevc"
 	"github.com/brunoga/bdtools/internal/mpeg2"
 	"github.com/brunoga/bdtools/internal/vc1"
 )
 
 // The decoders written here, as gpu.Decoders: MPEG-2 and VC-1 (with
-// interlaced pictures deinterlaced, as NVDEC and the ffmpeg path do).
+// interlaced pictures deinterlaced, as NVDEC and the ffmpeg path do), and
+// HEVC.
 
 // planarPicture is a decoded picture as the decoders here give it: 8-bit
 // 4:2:0 planes.
@@ -156,3 +164,126 @@ func (g *goVC1) Flush() error {
 }
 
 func (g *goVC1) Close() error { return nil }
+
+// goHEVC is the HEVC decoder here. Blu-ray HEVC is progressive, so its
+// pictures go straight out: NV12 at 8 bits, P010 above. A stream it does
+// not decode (the format range extensions) goes to fallback from there.
+type goHEVC struct {
+	d        *hevc.Decoder
+	picture  func(*gpu.DecodedPicture) error
+	y, uv    []byte
+	fallback func() (gpu.Decoder, error)
+	other    gpu.Decoder
+}
+
+func openGoHEVC(picture func(*gpu.DecodedPicture) error, fallback func() (gpu.Decoder, error)) *goHEVC {
+	return &goHEVC{d: hevc.New(), picture: picture, fallback: fallback}
+}
+
+func (g *goHEVC) take(p *hevc.Picture) error {
+	w, h := p.Width, p.Height
+	cw, ch := (w+1)/2, (h+1)/2
+	bps, depth := 1, 8
+	if p.BitDepth > 8 {
+		bps, depth = 2, 10
+	}
+	shift := 16 - p.BitDepth
+	pitch := (w + w&1) * bps
+	if len(g.y) != pitch*h || len(g.uv) != pitch*ch {
+		g.y, g.uv = make([]byte, pitch*h), make([]byte, pitch*ch)
+	}
+	// In bands of rows, a 4K picture being a few dozen megabytes to move.
+	inBands(h, func(r0, r1 int) {
+		for r := r0; r < r1; r++ {
+			src := p.Y[r*p.StrideY : r*p.StrideY+w]
+			if bps == 1 {
+				dst := g.y[r*pitch : r*pitch+w]
+				for x, v := range src {
+					dst[x] = byte(v)
+				}
+			} else {
+				dst := g.y[r*pitch : r*pitch+2*w]
+				for x, v := range src {
+					binary.LittleEndian.PutUint16(dst[2*x:], v<<shift)
+				}
+			}
+		}
+		for r := r0 / 2; r < min(ch, (r1+1)/2); r++ {
+			cb, cr := p.Cb[r*p.StrideC:r*p.StrideC+cw], p.Cr[r*p.StrideC:r*p.StrideC+cw]
+			if bps == 1 {
+				dst := g.uv[r*pitch : r*pitch+2*cw]
+				for x := range cw {
+					dst[2*x], dst[2*x+1] = byte(cb[x]), byte(cr[x])
+				}
+			} else {
+				dst := g.uv[r*pitch : r*pitch+4*cw]
+				for x := range cw {
+					binary.LittleEndian.PutUint16(dst[4*x:], cb[x]<<shift)
+					binary.LittleEndian.PutUint16(dst[4*x+2:], cr[x]<<shift)
+				}
+			}
+		}
+	})
+	return g.picture(&gpu.DecodedPicture{Width: w, Height: h, Depth: depth, Y: g.y, UV: g.uv, Pitch: pitch, PTS: p.PTS,
+		FrameRateNum: p.FrameRateNum, FrameRateDen: p.FrameRateDen,
+		Color: gpu.ColorInfo{Primaries: p.Primaries, Transfer: p.Transfer, Matrix: p.Matrix, FullRange: p.FullRange}})
+}
+
+func (g *goHEVC) Decode(au []byte, pts int64) error {
+	if g.other != nil {
+		return g.other.Decode(au, pts)
+	}
+	err := g.d.Decode(au, pts, g.take)
+	if !hevc.IsUnsupported(err) || g.fallback == nil {
+		return err
+	}
+	// The stream changes to one not decoded here at an IRAP access unit
+	// (its first, as a rule), which the fallback can start from.
+	if err := g.d.Flush(g.take); err != nil {
+		return err
+	}
+	other, ferr := g.fallback()
+	if ferr != nil {
+		return fmt.Errorf("%w, and %w", err, ferr)
+	}
+	g.other = other
+	return other.Decode(au, pts)
+}
+
+func (g *goHEVC) Flush() error {
+	if g.other != nil {
+		return g.other.Flush()
+	}
+	return g.d.Flush(g.take)
+}
+
+func (g *goHEVC) Close() error {
+	if g.other != nil {
+		return g.other.Close()
+	}
+	return nil
+}
+
+// inBands runs fn over rows [0, h) in bands of 64 (even, for the chroma
+// rows), on as many goroutines as there are processors.
+func inBands(h int, fn func(r0, r1 int)) {
+	const band = 64
+	n := (h + band - 1) / band
+	workers := min(runtime.GOMAXPROCS(0), n)
+	if workers < 2 {
+		fn(0, h)
+		return
+	}
+	var next atomic.Int32
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for b := int(next.Add(1)) - 1; b < n; b = int(next.Add(1)) - 1 {
+				fn(b*band, min(h, (b+1)*band))
+			}
+		}()
+	}
+	wg.Wait()
+}
