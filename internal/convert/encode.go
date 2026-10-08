@@ -247,7 +247,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 		if elQP == 0 {
 			elQP = max(o.CRF-elCRFOffset, 0)
 		}
-		l, bl, err := openLayers(o.DVFEL, s.kind, cfg, elQP, path, f)
+		l, bl, err := openLayers(o.DVFEL, s.kind, s.r.openDecoder, cfg, elQP, path, f)
 		if err != nil {
 			_ = f.Close()
 			_ = os.Remove(path)

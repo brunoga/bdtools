@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Decoding through ffmpeg where no GPU decoder works: 2D HEVC (Ultra HD),
+  VC-1 and MPEG-2 sources, with their HDR10, HDR10+ and Dolby Vision, now
+  convert on every platform with ffmpeg 6.1 or later. Each picture keeps
+  its own timestamp; the pictures are the ones NVDEC gives.
+
+### Fixed
+
+- NVDEC's frame rate is stated reduced (24000/1001, not 96000/4004).
+
 ## [0.7.0] - 2026-10-08
 
 ### Added

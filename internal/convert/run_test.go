@@ -2,6 +2,7 @@ package convert
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -457,9 +458,15 @@ func TestRunnerCarriesHDR10(t *testing.T) {
 			"master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400", src); err != nil {
 		t.Skipf("making an HDR10 source: %v", err)
 	}
+	for _, dec := range []Decoder{DecoderAuto, DecoderCPU} { // the GPU's, else ffmpeg's; ffmpeg's
+		t.Run("decoder="+cmp.Or(string(dec), "auto"), func(t *testing.T) { carriesHDR10(t, src, dec) })
+	}
+}
+
+func carriesHDR10(t *testing.T, src string, dec Decoder) {
 	out := filepath.Join(t.TempDir(), "out.mkv")
 	o := DefaultOptions()
-	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = src, out, EncoderSoftware, CodecH265, 25, "ultrafast"
+	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset, o.Decoder = src, out, EncoderSoftware, CodecH265, 25, "ultrafast", dec
 	if err := NewRunner(CurrentGOOS, o, nil).Run(t.Context()); err != nil {
 		if strings.Contains(err.Error(), "GPU") {
 			t.Skipf("no GPU decoder: %v", err)
@@ -820,9 +827,15 @@ func (fs felSource) composition(t *testing.T, bl, el []byte) []*dovi.Picture {
 // as dovi.Composer makes it. Skips without ffmpeg, x265 and a GPU decoder.
 func TestRunnerComposesFEL(t *testing.T) {
 	fs := makeFELSource(t, 10)
+	for _, dec := range []Decoder{DecoderAuto, DecoderCPU} { // the GPU's, else ffmpeg's; ffmpeg's
+		t.Run("decoder="+cmp.Or(string(dec), "auto"), func(t *testing.T) { composesFEL(t, fs, dec) })
+	}
+}
+
+func composesFEL(t *testing.T, fs felSource, dec Decoder) {
 	out := filepath.Join(t.TempDir(), "out.mkv")
 	o := DefaultOptions()
-	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = fs.path, out, EncoderSoftware, CodecH265, 4, "ultrafast"
+	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset, o.Decoder = fs.path, out, EncoderSoftware, CodecH265, 4, "ultrafast", dec
 	var lines []string
 	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
 		if strings.Contains(err.Error(), "GPU") {

@@ -43,13 +43,13 @@ type felComposer struct {
 	err                         error // the first composition failure
 }
 
-func newFELComposer(kind gpu.Kind, report Reporter, pass bool) (*felComposer, error) {
+func newFELComposer(open decoderOpener, report Reporter, pass bool) (*felComposer, error) {
 	f := &felComposer{report: report, els: map[int64]*dovi.Picture{}, outs: make(chan *dovi.Picture, felBuffers),
 		pass: pass, elBack: make(chan *dovi.Picture, felBuffers+felLead+8)}
 	for range felBuffers {
 		f.outs <- nil // made at the picture's size on first use
 	}
-	dec, err := gpu.OpenDecoder(kind, gpu.DecodeConfig{Codec: gpu.DecodeHEVC}, f.keep)
+	dec, err := open(gpu.DecodeConfig{Codec: gpu.DecodeHEVC, LowDelay: true}, f.keep)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,10 @@ func (f *felComposer) put(pic picture, each func(picture) error) error {
 				}
 				f.outs <- c.buf
 				if c.el != nil {
-					f.elBack <- c.el
+					select { // for reuse; the collector has it otherwise
+					case f.elBack <- c.el:
+					default:
+					}
 				}
 			}
 		}()
@@ -172,6 +175,13 @@ func (f *felComposer) finish() error {
 // layer picture (nil when there is none) to go with it.
 func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []byte) (*gpu.DecodedPicture, *dovi.Picture) {
 	el := f.els[p.PTS]
+	if w, ok := f.dec.(interface{ Wait(int64) error }); ok && el == nil {
+		// A decoder that gives its pictures when it can (ffmpeg): wait
+		// for this one's.
+		if err := w.Wait(p.PTS); err == nil {
+			el = f.els[p.PTS]
+		}
+	}
 	// Enhancement layer pictures before this one will not be wanted.
 	for pts, e := range f.els {
 		if pts <= p.PTS {

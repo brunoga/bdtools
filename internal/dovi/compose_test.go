@@ -85,7 +85,7 @@ func TestComposeResidualMatchesVsNLQ(t *testing.T) {
 	q, denom := u.Mapping.NLQ, int64(u.CoefLog2Denom) //nolint:gosec // small
 	const eld = 10
 	for ci := range 3 {
-		slope := int64(q.SlopeInt[ci])<<denom + int64(q.Slope[ci])   //nolint:gosec // small
+		slope := int64(q.SlopeInt[ci])<<denom + int64(q.Slope[ci])    //nolint:gosec // small
 		thresh := int64(q.ThreshInt[ci])<<denom + int64(q.Thresh[ci]) //nolint:gosec // small
 		inMax := int64(q.InMaxInt[ci])<<denom + int64(q.InMax[ci])    //nolint:gosec // small
 		for code := range 1024 {

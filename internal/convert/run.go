@@ -85,6 +85,9 @@ type Runner struct {
 	// layer (profile 7), and rpus are the source's.
 	felLayered bool
 	closers    []func() // what the mux opened and closes at its end
+	// openDecoder opens decoders like the one decoding the source (for
+	// Dolby Vision's enhancement layer and the profile 7 decode loop).
+	openDecoder decoderOpener
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
@@ -233,8 +236,8 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 
 // pictures chooses the decoder for a source's video. A 3D pair goes to the
 // MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
-// (NVDEC now), else, for H.264, to the H.264 decoder here; other codecs
-// need the GPU for now.
+// (NVDEC now); else H.264 to the decoder here, and the other codecs to
+// ffmpeg.
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
@@ -247,19 +250,37 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	if !ok {
 		return nil, fmt.Errorf("no decoder for %s video", video.Type)
 	}
+	decoded := func(open decoderOpener) pictureSource {
+		r.openDecoder = open
+		return &gpuPictures{open: open, codec: codec, next: next, report: r.Report,
+			composeFEL: r.Opts.DVFEL != FELDrop, passFEL: r.Opts.DVFEL.layered()}
+	}
 	if r.Opts.Decoder != DecoderCPU && ProbeDecoder(gpu.NVENC, codec) {
 		r.Report.Report("decoding %s on the GPU (NVDEC)", video.Type)
-		return &gpuPictures{kind: gpu.NVENC, codec: codec, next: next, report: r.Report,
-			composeFEL: r.Opts.DVFEL != FELDrop, passFEL: r.Opts.DVFEL.layered()}, nil
+		return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+			return gpu.OpenDecoder(gpu.NVENC, cfg, picture)
+		}), nil
 	}
 	if r.Opts.Decoder == DecoderGPU {
 		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)
 	}
-	if codec != gpu.DecodeH264 {
-		return nil, fmt.Errorf("decoding %s needs a GPU decoder (NVIDIA's, for now); none works here", video.Type)
+	if codec == gpu.DecodeH264 {
+		return cpu(), nil
 	}
-	return cpu(), nil
+	dec := toolFFmpeg
+	dec.Purpose = "decode " + video.Type + " video without a GPU decoder"
+	bin, err := r.resolve(dec)
+	if err != nil {
+		return nil, fmt.Errorf("decoding %s needs a GPU decoder (NVIDIA's, for now) or ffmpeg: %w", video.Type, err)
+	}
+	r.Report.Report("decoding %s with ffmpeg (no GPU decoder for it here)", video.Type)
+	return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+		return openFFDecoder(bin, cfg, picture)
+	}), nil
 }
+
+// decoderOpener opens a decoder of a codec: the GPU's or ffmpeg's.
+type decoderOpener func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error)
 
 // check2D says what a 2D conversion leaves aside.
 func (r *Runner) check2D() {

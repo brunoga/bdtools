@@ -26,9 +26,9 @@ const (
 // the parameter sets kept in-band as well as in the codec private data.
 type VideoSource struct {
 	// extras gives units to add to a frame, by its display index.
-	extras   func(display int64, key bool) [][]byte
+	extras func(display int64, key bool) [][]byte
 	// trailer gives units to end a frame with, by its display index.
-	trailer func(display int64) ([][]byte, error)
+	trailer  func(display int64) ([][]byte, error)
 	codec    Codec
 	r        *bufio.Reader
 	frameDur time.Duration
