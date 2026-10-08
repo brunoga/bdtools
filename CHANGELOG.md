@@ -28,6 +28,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   display and content light level on every keyframe; HDR10+'s dynamic
   metadata on every frame it was on. HEVC as SEI, AV1 as metadata OBUs.
 
+- Dolby Vision profile 7 (an Ultra HD disc's, FEL or MEL) is kept by a
+  `--remux` into Matroska: the enhancement layer (PID 0x1015) and RPU go
+  into the HEVC track as players expect them, with the Dolby Vision
+  configuration record. A Matroska source keeps its Dolby Vision in a
+  remux, and a `.m2ts` remux keeps the enhancement layer's stream. A
+  conversion encodes the HDR10 base layer, with a warning.
+
 ### Changed
 
 - `--bit-depth` defaults to the source's: 10 for a 10-bit source when the

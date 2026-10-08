@@ -441,6 +441,9 @@ func probeGo(ctx context.Context, src *goSource) ([]Track, error) {
 			t.Info = describeVideoES(b, s.Type == m2ts.TypeMVC)
 		case m2ts.TypeHEVC:
 			t.Type, t.StreamID, t.Info = "HEVC", "V_MPEGH/ISO/HEVC", "H.265/HEVC"
+			if s.PID == dvELPID {
+				t.Type, t.StreamID, t.Info = "DV EL", streamDVEL, "Dolby Vision enhancement layer"
+			}
 		case m2ts.TypeVC1:
 			t.Type, t.StreamID, t.Info = "VC-1", "V_MS/VFW/FOURCC", "SMPTE VC-1"
 		case m2ts.TypeMPEG2Video:
@@ -483,11 +486,14 @@ func probeGo(ctx context.Context, src *goSource) ([]Track, error) {
 	return tracks, nil
 }
 
+// dvELPID is where a UHD Blu-ray carries a Dolby Vision enhancement layer.
+const dvELPID = 0x1015
+
 func kindOrder(t Track) int {
 	switch t.Kind() {
 	case KindBaseView:
 		return 0
-	case KindDependentView:
+	case KindDependentView, KindEnhancement:
 		return 1
 	case KindAudio:
 		return 2
@@ -677,6 +683,7 @@ type goDemux struct {
 	depF    io.ReadSeekCloser
 	basePID uint16
 	depPID  uint16
+	hevc    bool // the video is HEVC
 	eof     bool
 	// depth, when 3D subtitles are made, collects the dependent view's
 	// offset metadata on the output's timeline.
@@ -698,6 +705,7 @@ func newGoDemux(src *goSource, sel Selection, tmp string, report Reporter) *goDe
 	g := &goDemux{src: src, sel: sel, report: report, tmp: tmp, writers: map[uint16]*esWriter{},
 		deps: map[int64][]byte{}, dropped: map[uint16]int64{}, held: map[uint16]*m2ts.PES{}, maxDep: -1}
 	g.basePID, g.depPID = uint16(sel.Base.ID), uint16(sel.Dependent.ID) //nolint:gosec // track ids are PIDs
+	g.hevc = sel.Base.StreamID == "V_MPEGH/ISO/HEVC"
 	var acc int64
 	for _, c := range src.clips {
 		in, out := c.inTime, c.outTime
@@ -966,10 +974,10 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 							delete(g.deps, k)
 						}
 					}
-				} else if hasSlice(h.data) && g.depPID != 0 {
+				} else if hasSlice(h.data, g.hevc) && g.depPID != 0 {
 					g.noDep++
 				}
-				if hasSlice(h.data) {
+				if hasSlice(h.data, g.hevc) {
 					g.aus++
 				}
 				if g.depth != nil && d != nil && h.pts >= 0 {
@@ -1007,14 +1015,18 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 // hasSlice reports whether an access unit holds a coded picture: a stream
 // can end with a PES of only SEI, which is not a picture and has no
 // dependent view to pair with.
-func hasSlice(au []byte) bool {
+func hasSlice(au []byte, hevc bool) bool {
 	for i := 0; i+3 < len(au); {
 		j := bytes.Index(au[i:], []byte{0, 0, 1})
 		if j < 0 || i+j+3 >= len(au) {
 			return false
 		}
 		i += j + 3
-		if t := au[i] & 0x1f; t == 1 || t == 5 {
+		if hevc {
+			if au[i]>>1&0x3f < 32 {
+				return true
+			}
+		} else if t := au[i] & 0x1f; t == 1 || t == 5 {
 			return true
 		}
 	}
@@ -1058,7 +1070,11 @@ func (g *goDemux) finish() ([]extra, error) {
 		g.report.Report("trimmed the audio and subtitles outside the played section (up to %d KiB per track): a player never plays them", most>>10)
 	}
 	if g.noDep > 0 {
-		g.report.Report("warning: %d of %d pictures had no dependent view", g.noDep, g.aus)
+		what := "dependent view"
+		if g.sel.Dependent.Kind() == KindEnhancement {
+			what = "Dolby Vision enhancement layer"
+		}
+		g.report.Report("warning: %d of %d pictures had no %s", g.noDep, g.aus, what)
 	}
 	return g.extras, firstErr
 }

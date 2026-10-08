@@ -63,6 +63,9 @@ type ReadTrack struct {
 	// BitsPerChannel is the Colour element's bit depth, zero when the file
 	// does not say.
 	BitsPerChannel int
+	// BlockAdditions are the track's BlockAdditionMappings (Dolby Vision's
+	// configuration).
+	BlockAdditions []BlockAddition
 	// Audio.
 	SampleRate float64
 	Channels   int
@@ -287,6 +290,20 @@ func parseTrack(b []byte) (ReadTrack, error) {
 				}
 				return nil
 			})
+		case idBlockAddMapping:
+			var a BlockAddition
+			_ = eachChild(v, func(id uint32, v []byte) error {
+				switch id {
+				case idBlockAddIDName:
+					a.Name = string(v)
+				case idBlockAddIDType:
+					a.Type = uint32(readUint(v)) //nolint:gosec // a four-character code
+				case idBlockAddIDExtra:
+					a.ExtraData = append([]byte(nil), v...)
+				}
+				return nil
+			})
+			t.BlockAdditions = append(t.BlockAdditions, a)
 		case idAudio:
 			return eachChild(v, func(id uint32, v []byte) error {
 				switch id {

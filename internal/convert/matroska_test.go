@@ -86,7 +86,7 @@ func mvcMatroska(t *testing.T) string {
 			data = binary.BigEndian.AppendUint32(data, uint32(len(n))) //nolint:gosec // small
 			data = append(data, n...)
 		}
-		if !hasSlice(au) && len(video) > 0 {
+		if !hasSlice(au, false) && len(video) > 0 {
 			// The dependent view's unit: it joins its base view's block.
 			video[len(video)-1].Data = append(video[len(video)-1].Data, data...)
 			continue

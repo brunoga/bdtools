@@ -119,3 +119,28 @@ func TestAudioKeepsItsSourceOrder(t *testing.T) {
 		t.Errorf("subtitles = %+v, want track 20", sel.Subtitles)
 	}
 }
+
+// A 2D selection takes a Dolby Vision enhancement layer as the dependent
+// track when the video is HEVC, and leaves it when it is not.
+func TestSelectTracks2DTakesTheDolbyVisionLayer(t *testing.T) {
+	bl := Track{ID: 0x1011, StreamID: "V_MPEGH/ISO/HEVC"}
+	el := Track{ID: 0x1015, StreamID: streamDVEL}
+	audio := Track{ID: 0x1100, StreamID: "A_AC3"}
+	sel, err := SelectTracks2D([]Track{bl, el, audio})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.Base.ID != bl.ID || sel.Dependent.ID != el.ID || sel.Dependent.Kind() != KindEnhancement || len(sel.Audio) != 1 {
+		t.Errorf("selection %+v", sel)
+	}
+	sel, err = SelectTracks2D([]Track{{ID: 0x1011, StreamID: "V_MPEG4/ISO/AVC"}, el})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.Dependent.StreamID != "" {
+		t.Errorf("an H.264 picture took an enhancement layer: %+v", sel)
+	}
+	if threeD([]Track{bl, el}) {
+		t.Error("a Dolby Vision source counted as 3D")
+	}
+}

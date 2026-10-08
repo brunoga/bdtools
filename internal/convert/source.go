@@ -41,7 +41,15 @@ const (
 	KindAudio
 	// KindSubtitle is a subtitle track, carried through unchanged.
 	KindSubtitle
+	// KindEnhancement is a Dolby Vision enhancement layer (a UHD Blu-ray's
+	// PID 0x1015): the enhancement picture and the RPU, which only mean
+	// something beside the base layer.
+	KindEnhancement
 )
+
+// streamDVEL is the stream ID a Dolby Vision enhancement layer is listed
+// under.
+const streamDVEL = "V_DOLBYVISION/EL"
 
 // Kind reports what the conversion does with this track.
 //
@@ -53,6 +61,8 @@ func (t Track) Kind() Kind {
 	switch {
 	case t.StreamID == "V_MPEG4/ISO/MVC":
 		return KindDependentView
+	case t.StreamID == streamDVEL:
+		return KindEnhancement
 	case t.StreamID == "V_MPEG4/ISO/AVC", t.StreamID == "V_MPEGH/ISO/HEVC", t.StreamID == "V_MS/VFW/FOURCC",
 		t.StreamID == "V_MPEG2":
 		// The picture of a 2D source, or the base view of a 3D one.
@@ -116,7 +126,8 @@ func SelectTracks(tracks []Track) (Selection, error) {
 // SelectTracks2D picks what a 2D conversion needs: the main video (the
 // first, which on a Blu-ray is the primary video, PID 0x1011; a 3D source's
 // base view), whatever its codec, and the audio and subtitles. An MVC
-// dependent view is left out.
+// dependent view is left out; a Dolby Vision enhancement layer is taken as
+// the dependent track.
 func SelectTracks2D(tracks []Track) (Selection, error) {
 	var sel Selection
 	for _, t := range tracks {
@@ -124,6 +135,10 @@ func SelectTracks2D(tracks []Track) (Selection, error) {
 		case KindBaseView:
 			if sel.Base.StreamID == "" {
 				sel.Base = t
+			}
+		case KindEnhancement:
+			if sel.Dependent.StreamID == "" {
+				sel.Dependent = t
 			}
 		case KindAudio:
 			sel.Audio = append(sel.Audio, t)
@@ -133,6 +148,9 @@ func SelectTracks2D(tracks []Track) (Selection, error) {
 	}
 	if sel.Base.StreamID == "" {
 		return Selection{}, fmt.Errorf("no video track this can decode (found %s)", describeVideo(tracks))
+	}
+	if sel.Dependent.StreamID != "" && sel.Base.StreamID != "V_MPEGH/ISO/HEVC" {
+		sel.Dependent = Track{} // an enhancement layer only goes with HEVC
 	}
 	return sel, nil
 }
