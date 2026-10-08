@@ -136,13 +136,24 @@ func Merge(bl, el []byte) []byte {
 }
 
 // HasRPU reports whether an access unit (Annex B) carries an RPU.
-func HasRPU(au []byte) bool {
+func HasRPU(au []byte) bool { return FindRPU(au) != nil }
+
+// FindRPU returns an access unit's (Annex B) RPU NAL unit, without start
+// code, or nil.
+func FindRPU(au []byte) []byte {
+	var rpu []byte
 	for _, n := range nalUnits(au) {
 		if len(n) > 0 && n[0]>>1&0x3f == NALRPU {
-			return true
+			rpu = n
 		}
 	}
-	return false
+	return rpu
+}
+
+// Profile81 is the configuration of a profile 8.1 stream: an HDR10 base
+// layer and an RPU. Its level, when 0, is to be worked out.
+func Profile81() Config {
+	return Config{VersionMajor: 1, Profile: 8, RPU: true, BL: true, Compatibility: 1}
 }
 
 // nalUnits splits an Annex B stream into NAL units, without start codes or

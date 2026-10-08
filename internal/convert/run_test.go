@@ -3,14 +3,18 @@ package convert
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/mkv"
 )
 
@@ -552,5 +556,123 @@ func TestRunnerRefusesAnImageWithNoBDMV(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "empty.iso") && !strings.Contains(err.Error(), "UDF") {
 		t.Errorf("error should name the image or the format, got: %v", err)
+	}
+}
+
+// A Dolby Vision profile 7 source converts to profile 8.1: every frame of
+// the encode ends with its own picture's RPU, converted, and the track has
+// the profile 8.1 configuration. The source is an HEVC Matroska file whose
+// frames carry a FEL disc's RPUs in turn. Skips without ffmpeg, x265 and a
+// GPU decoder for HEVC.
+func TestRunnerCarriesDolbyVision(t *testing.T) {
+	for _, tool := range []string{"ffmpeg", "x265"} {
+		if _, err := LookPath(tool); err != nil {
+			t.Skipf("%s not installed", tool)
+		}
+	}
+	dir := t.TempDir()
+	es := filepath.Join(dir, "bl.hevc")
+	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=1",
+		"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params",
+		"log-level=error:bframes=3:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", es); err != nil {
+		t.Skipf("making the base layer: %v", err)
+	}
+	fixture, err := os.ReadFile(filepath.Join("..", "dovi", "testdata", "fel-cmv29.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rpus, want [][]byte
+	for _, p := range bytes.Split(fixture, []byte{0, 0, 0, 1})[1:] {
+		nal := append([]byte{dovi.NALRPU << 1, 1}, p...)
+		rpus = append(rpus, nal)
+		u, err := dovi.ParseNAL(nal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := u.ToProfile81(); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, u.NAL())
+	}
+	// The source: each frame, by display index, ends with RPU i mod n.
+	src := filepath.Join(dir, "p7.mkv")
+	f, err := os.Open(es) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := mkv.NewVideoSource(f, mkv.HEVC, 24, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.SetTrailer(func(display int64) [][]byte { return [][]byte{rpus[int(display)%len(rpus)]} })
+	w, err := os.Create(src) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mkv.Mux(w, []mkv.Source{v}, mkv.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Close(), w.Close()
+
+	out := filepath.Join(dir, "out.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = src, out, EncoderSoftware, CodecH265, 25, "ultrafast"
+	var lines []string
+	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
+		if strings.Contains(err.Error(), "GPU") {
+			t.Skipf("no GPU decoder: %v", err)
+		}
+		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+	}
+	in, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+	r, err := mkv.NewReader(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg *dovi.Config
+	for _, a := range r.Tracks[0].BlockAdditions {
+		if a.Type == mkv.FourCC("dvvC") {
+			c, err := dovi.ParseConfig(a.ExtraData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg = &c
+		}
+	}
+	if cfg == nil || cfg.Profile != 8 || cfg.Compatibility != 1 || cfg.EL || !cfg.RPU {
+		t.Errorf("configuration %+v, want profile 8.1 (dvvC)", cfg)
+	}
+	type frame struct {
+		at  time.Duration
+		rpu []byte
+	}
+	var frames []frame
+	for {
+		p, err := r.Next()
+		if err != nil {
+			break
+		}
+		var last []byte
+		for b := p.Data; len(b) >= 4; {
+			n := int(binary.BigEndian.Uint32(b))
+			if n > len(b)-4 {
+				break
+			}
+			last, b = b[4:4+n], b[4+n:]
+		}
+		frames = append(frames, frame{p.Time, last})
+	}
+	sort.Slice(frames, func(i, j int) bool { return frames[i].at < frames[j].at })
+	if len(frames) != 24 {
+		t.Fatalf("%d frames, want 24\n%s", len(frames), strings.Join(lines, "\n"))
+	}
+	for i, fr := range frames {
+		if !bytes.Equal(fr.rpu, want[i%len(want)]) {
+			t.Fatalf("frame %d does not end with its picture's RPU, converted", i)
+		}
 	}
 }

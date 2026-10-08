@@ -71,6 +71,7 @@ const (
 	cuvPPProgressive       = 0
 	cuvPPTopFirst          = 8
 	cuvPicCurrIdx          = 8
+	cuvPicSecondField      = 20
 	cuvSizeCaps            = 88
 	cuvCapsCodec           = 0
 	cuvCapsChroma          = 4

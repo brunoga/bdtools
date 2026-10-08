@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/mvc"
@@ -24,6 +25,9 @@ type picture struct {
 	// hdr10Plus is the picture's HDR10+ metadata (a T.35 payload), nil
 	// when it has none.
 	hdr10Plus []byte
+	// rpu is the picture's Dolby Vision RPU NAL unit as the source has it,
+	// nil when there is none.
+	rpu []byte
 }
 
 // size is the picture's (one view's) size and sample depth.
@@ -92,18 +96,24 @@ type gpuPictures struct {
 	next     func() (base, dep []byte, pts int64, err error)
 	num, den int
 	static   hdr.Static
-	dynamic  map[int64][]byte // HDR10+ by timestamp, until the picture comes out
+	dynamic  map[int64]dynamicMD // by timestamp, until the picture comes out
+}
+
+// dynamicMD is a picture's own metadata, held from its access unit until
+// the decoder gives the picture out.
+type dynamicMD struct {
+	hdr10Plus, rpu []byte
 }
 
 func (g *gpuPictures) run(each func(picture) error) error {
-	g.dynamic = map[int64][]byte{}
+	g.dynamic = map[int64]dynamicMD{}
 	dec, err := gpu.OpenDecoder(g.kind, gpu.DecodeConfig{Codec: g.codec}, func(p *gpu.DecodedPicture) error {
 		if g.num == 0 && p.FrameRateNum > 0 && p.FrameRateDen > 0 {
 			g.num, g.den = p.FrameRateNum, p.FrameRateDen
 		}
 		pic := picture{gpu: p, pts: p.PTS}
 		if d, ok := g.dynamic[p.PTS]; ok {
-			pic.hdr10Plus = d
+			pic.hdr10Plus, pic.rpu = d.hdr10Plus, d.rpu
 			delete(g.dynamic, p.PTS)
 		}
 		return each(pic)
@@ -113,7 +123,7 @@ func (g *gpuPictures) run(each func(picture) error) error {
 	}
 	defer func() { _ = dec.Close() }()
 	for {
-		base, _, pts, err := g.next()
+		base, dep, pts, err := g.next()
 		if errors.Is(err, io.EOF) {
 			return dec.Flush()
 		}
@@ -131,8 +141,14 @@ func (g *gpuPictures) run(each func(picture) error) error {
 			if g.static.Light == nil {
 				g.static.Light = md.Static.Light
 			}
-			if md.HDR10Plus != nil {
-				g.dynamic[pts] = md.HDR10Plus
+			// Dolby Vision's RPU: in the enhancement layer's access unit
+			// on a disc, in the picture's own in Matroska.
+			rpu := dovi.FindRPU(dep)
+			if rpu == nil {
+				rpu = dovi.FindRPU(base)
+			}
+			if md.HDR10Plus != nil || rpu != nil {
+				g.dynamic[pts] = dynamicMD{hdr10Plus: md.HDR10Plus, rpu: rpu}
 			}
 		}
 		if err := dec.Decode(base, pts); err != nil {

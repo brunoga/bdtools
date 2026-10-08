@@ -8,6 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -194,13 +197,77 @@ func TestNVDECMatchesFFmpeg(t *testing.T) {
 					t.Fatalf("picture %d differs from ffmpeg's", i)
 				}
 			}
-			for i := 1; i < len(pts); i++ {
-				if pts[i] <= pts[i-1] {
-					t.Fatalf("timestamps out of order: %v", pts)
+			// Each picture carries the timestamp its own access unit was
+			// given (the unit's decoding index here).
+			order := displayUnits(t, c.path, c.format, b, units, c.codec)
+			if len(order) != len(pts) {
+				t.Fatalf("ffprobe lists %d pictures, NVDEC gave %d", len(order), len(pts))
+			}
+			for i, p := range pts {
+				if p != int64(order[i])*3754 {
+					t.Fatalf("picture %d has the timestamp of access unit %d, not its own (%d)", i, p/3754, order[i])
 				}
 			}
 		})
 	}
+}
+
+// displayUnits gives, for each picture in display order, the index of the
+// access unit (among units, slices of b) that coded it, from the stream
+// positions ffprobe reports. ffprobe's position is where the picture's
+// packet starts, parameter sets included, which the units here may hold
+// apart: the picture's unit is the first with a coded picture in it.
+func displayUnits(t *testing.T, path, format string, b []byte, units [][]byte, codec VideoCodec) []int {
+	t.Helper()
+	out, err := exec.CommandContext(t.Context(), "ffprobe", "-v", "error", "-f", format, "-i", path, //nolint:gosec // test
+		"-show_entries", "frame=pkt_pos", "-of", "csv=p=0").Output()
+	if err != nil {
+		t.Skipf("ffprobe: %v", err)
+	}
+	var starts []int
+	for _, u := range units {
+		starts = append(starts, cap(b)-cap(u)) // where the unit starts in b
+	}
+	var order []int
+	for _, l := range strings.Fields(string(out)) {
+		pos, err := strconv.Atoi(strings.Trim(l, ","))
+		if err != nil {
+			t.Fatalf("ffprobe position %q", l)
+		}
+		// The first unit starting at or after the position (the parser's
+		// position may include a start code's leading zeros).
+		i := sort.SearchInts(starts, pos)
+		for i < len(units)-1 && !codesPicture(units[i], codec) {
+			i++
+		}
+		order = append(order, i)
+	}
+	return order
+}
+
+// codesPicture reports whether an access unit holds a coded picture.
+func codesPicture(u []byte, codec VideoCodec) bool {
+	for i := 0; i+3 < len(u); i++ {
+		if u[i] != 0 || u[i+1] != 0 || u[i+2] != 1 {
+			continue
+		}
+		h := u[i+3]
+		switch codec {
+		case DecodeHEVC:
+			if h>>1&0x3f < 32 {
+				return true
+			}
+		case DecodeH264:
+			if t := h & 0x1f; t == 1 || t == 5 {
+				return true
+			}
+		default: // MPEG-2: a picture start code
+			if h == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mpeg2Units splits an MPEG-2 video stream into pictures: each from a

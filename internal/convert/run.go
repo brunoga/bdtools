@@ -77,6 +77,10 @@ type Runner struct {
 	// dovi is the Dolby Vision configuration the output's video carries
 	// (a remux keeps it); its level, when 0, is worked out at the mux.
 	dovi *dovi.Config
+	// rpus are a conversion's Dolby Vision RPUs (profile 8.1 NAL units) by
+	// display index, rpuFailed how many could not be converted.
+	rpus      map[int64][]byte
+	rpuFailed int
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
@@ -192,12 +196,6 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	}
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
-	}
-	if sel.Dependent.Kind() == KindEnhancement && !r.Opts.Remux {
-		r.Report.Report("warning: a re-encode does not carry Dolby Vision yet: the HDR10 base layer is converted " +
-			"(--remux keeps it)")
-		sel.Dependent = Track{}
-		r.Selected = sel
 	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.frameRate()
