@@ -22,8 +22,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   HDR10, HDR10+ and Dolby Vision (FEL composed, or kept as profile 7
   layers), convert with no GPU and no ffmpeg. Byte-identical to ffmpeg's
   decode on the 152 JCT-VC conformance streams of those profiles; slices,
-  wavefront rows and the loop filters decode in parallel (about 75 fps for
-  a disc's 4K stream on 24 threads). Streams of the format range
+  wavefront rows and the loop filters decode in parallel, with AVX2
+  kernels for motion compensation (about 115 fps for a disc's 4K stream on
+  24 threads). Streams of the format range
   extensions still go to ffmpeg.
 - Matroska remuxes of VC-1 Blu-rays: the `V_MS/VFW/FOURCC` (WVC1) track, and
   PCM audio in `A_MS/ACM`.

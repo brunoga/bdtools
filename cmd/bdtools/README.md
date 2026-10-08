@@ -865,9 +865,10 @@ are byte-identical to ffmpeg's on all 152 of the JCT-VC conformance
 streams for those profiles and on 4K HDR10 and Dolby Vision clips. It
 decodes a picture's slices in parallel (discs cut each picture into
 several), and the rows of a wavefront picture, then filters in parallel
-bands: about 75 fps for an Ultra HD disc's 4K stream on 24 threads,
-against ffmpeg's 300 with its assembly (a 4K Dolby Vision FEL conversion,
-both layers decoded here and composed, encodes at 38 fps on NVENC). A
+bands, with AVX2 kernels for motion compensation on amd64: about 115 fps
+for an Ultra HD disc's 4K stream on 24 threads, against ffmpeg's 300 (a 4K
+Dolby Vision FEL conversion, both layers decoded here and composed,
+encodes at 51 fps on NVENC, its video identical to NVDEC's). A
 stream of the format range extensions (4:2:2, 4:4:4, never on a disc)
 goes to ffmpeg instead, converted to 4:2:0.
 

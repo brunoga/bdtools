@@ -1,7 +1,6 @@
 package convert
 
 import (
-	"encoding/binary"
 	"fmt"
 	"runtime"
 	"sync"
@@ -182,48 +181,17 @@ func openGoHEVC(picture func(*gpu.DecodedPicture) error, fallback func() (gpu.De
 
 func (g *goHEVC) take(p *hevc.Picture) error {
 	w, h := p.Width, p.Height
-	cw, ch := (w+1)/2, (h+1)/2
+	ch := (h + 1) / 2
 	bps, depth := 1, 8
 	if p.BitDepth > 8 {
 		bps, depth = 2, 10
 	}
-	shift := 16 - p.BitDepth
 	pitch := (w + w&1) * bps
 	if len(g.y) != pitch*h || len(g.uv) != pitch*ch {
 		g.y, g.uv = make([]byte, pitch*h), make([]byte, pitch*ch)
 	}
 	// In bands of rows, a 4K picture being a few dozen megabytes to move.
-	inBands(h, func(r0, r1 int) {
-		for r := r0; r < r1; r++ {
-			src := p.Y[r*p.StrideY : r*p.StrideY+w]
-			if bps == 1 {
-				dst := g.y[r*pitch : r*pitch+w]
-				for x, v := range src {
-					dst[x] = byte(v)
-				}
-			} else {
-				dst := g.y[r*pitch : r*pitch+2*w]
-				for x, v := range src {
-					binary.LittleEndian.PutUint16(dst[2*x:], v<<shift)
-				}
-			}
-		}
-		for r := r0 / 2; r < min(ch, (r1+1)/2); r++ {
-			cb, cr := p.Cb[r*p.StrideC:r*p.StrideC+cw], p.Cr[r*p.StrideC:r*p.StrideC+cw]
-			if bps == 1 {
-				dst := g.uv[r*pitch : r*pitch+2*cw]
-				for x := range cw {
-					dst[2*x], dst[2*x+1] = byte(cb[x]), byte(cr[x])
-				}
-			} else {
-				dst := g.uv[r*pitch : r*pitch+4*cw]
-				for x := range cw {
-					binary.LittleEndian.PutUint16(dst[4*x:], cb[x]<<shift)
-					binary.LittleEndian.PutUint16(dst[4*x+2:], cr[x]<<shift)
-				}
-			}
-		}
-	})
+	inBands(h, func(r0, r1 int) { p.Pack(g.y, g.uv, pitch, r0, r1) })
 	return g.picture(&gpu.DecodedPicture{Width: w, Height: h, Depth: depth, Y: g.y, UV: g.uv, Pitch: pitch, PTS: p.PTS,
 		FrameRateNum: p.FrameRateNum, FrameRateDen: p.FrameRateDen,
 		Color: gpu.ColorInfo{Primaries: p.Primaries, Transfer: p.Transfer, Matrix: p.Matrix, FullRange: p.FullRange}})
