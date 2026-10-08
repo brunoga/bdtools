@@ -72,6 +72,10 @@ type Options struct {
 	// H.264 decoder here (H.264 sources only). A 3D source always goes to
 	// the MVC decoder here: no GPU decodes MVC.
 	Decoder Decoder
+	// DVFEL is what a conversion does with a Dolby Vision full
+	// enhancement layer: compose it into the picture (FELCompose, the
+	// default) or leave it out (FELDrop, the HDR10 base layer as it is).
+	DVFEL FEL
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
 	// on its own. A source with no MVC dependent view is converted so in
@@ -117,6 +121,15 @@ const (
 	DecoderAuto Decoder = ""
 	DecoderGPU  Decoder = "gpu"
 	DecoderCPU  Decoder = "cpu"
+)
+
+// FEL says what becomes of a Dolby Vision full enhancement layer: see
+// Options.DVFEL.
+type FEL string
+
+const (
+	FELCompose FEL = ""
+	FELDrop    FEL = "drop"
 )
 
 // Subs3D says what becomes of the subtitles: see Options.Subs3D.
@@ -252,6 +265,11 @@ func (o Options) Validate(goos string) error {
 	case DecoderAuto, "auto", DecoderGPU, DecoderCPU:
 	default:
 		return fmt.Errorf("--decoder %q: want auto, gpu or cpu", o.Decoder)
+	}
+	switch o.DVFEL {
+	case FELCompose, "compose", FELDrop:
+	default:
+		return fmt.Errorf("--dv-fel %q: want compose or drop", o.DVFEL)
 	}
 	switch o.Subs3D {
 	case "", Subs3DOff, Subs3DOn, Subs3DBoth:

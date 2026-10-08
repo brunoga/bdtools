@@ -97,6 +97,12 @@ type gpuPictures struct {
 	num, den int
 	static   hdr.Static
 	dynamic  map[int64]dynamicMD // by timestamp, until the picture comes out
+	report   Reporter
+	// composeFEL composes a Dolby Vision full enhancement layer into the
+	// pictures; fel does it, once the first RPU has said there is one.
+	composeFEL bool
+	felChecked bool
+	fel        *felComposer
 }
 
 // dynamicMD is a picture's own metadata, held from its access unit until
@@ -116,16 +122,50 @@ func (g *gpuPictures) run(each func(picture) error) error {
 			pic.hdr10Plus, pic.rpu = d.hdr10Plus, d.rpu
 			delete(g.dynamic, p.PTS)
 		}
+		if g.fel != nil {
+			return g.fel.put(pic, each)
+		}
 		return each(pic)
 	})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = dec.Close() }()
+	defer func() {
+		if g.fel != nil {
+			g.fel.stop()
+			g.fel.close()
+		}
+	}()
+	// With an enhancement layer, the base layer is decoded felLead access
+	// units behind it: its decoder may hold pictures back longer (in a
+	// stream whose layers are coded differently), and each base layer
+	// picture needs its enhancement layer picture there when it comes out.
+	type heldAU struct {
+		au  []byte
+		pts int64
+	}
+	var held []heldAU
 	for {
 		base, dep, pts, err := g.next()
 		if errors.Is(err, io.EOF) {
-			return dec.Flush()
+			if g.fel != nil {
+				if err := g.fel.dec.Flush(); err != nil {
+					return err
+				}
+				for _, h := range held {
+					if err := dec.Decode(h.au, h.pts); err != nil {
+						return err
+					}
+				}
+			}
+			if err := dec.Flush(); err != nil {
+				return err
+			}
+			if g.fel != nil {
+				return g.fel.finish()
+			}
+			return nil
 		}
 		if err != nil {
 			return err
@@ -150,12 +190,57 @@ func (g *gpuPictures) run(each func(picture) error) error {
 			if md.HDR10Plus != nil || rpu != nil {
 				g.dynamic[pts] = dynamicMD{hdr10Plus: md.HDR10Plus, rpu: rpu}
 			}
+			if rpu != nil && g.composeFEL && !g.felChecked {
+				g.felChecked = true
+				if u, err := dovi.ParseNAL(rpu); err == nil && u.FEL() {
+					if g.fel, err = newFELComposer(g.kind, g.report); err != nil {
+						g.report.Report("warning: the Dolby Vision full enhancement layer cannot be composed: %v", err)
+					} else {
+						g.report.Report("Dolby Vision full enhancement layer: composing it into the picture")
+					}
+				}
+			}
+			if g.fel != nil {
+				el := dep
+				if el == nil {
+					el = dovi.SplitEL(base) // Matroska's single track
+				}
+				if len(el) > 0 {
+					if err := g.fel.dec.Decode(el, pts); err != nil {
+						// Go on with the base layer alone.
+						g.report.Report("warning: the enhancement layer stopped decoding (%v): the base layer goes on without it", err)
+						if err := g.fel.finish(); err != nil {
+							return err
+						}
+						g.fel.close()
+						g.fel = nil
+						for _, h := range held {
+							if err := dec.Decode(h.au, h.pts); err != nil {
+								return err
+							}
+						}
+						held = nil
+					}
+				}
+			}
+		}
+		if g.fel != nil {
+			held = append(held, heldAU{base, pts})
+			if len(held) <= felLead {
+				continue
+			}
+			base, pts = held[0].au, held[0].pts
+			held = held[1:]
 		}
 		if err := dec.Decode(base, pts); err != nil {
 			return err
 		}
 	}
 }
+
+// felLead is how many access units the enhancement layer decodes ahead of
+// the base layer.
+const felLead = 16
 
 func (g *gpuPictures) frameRate() (int, int) { return g.num, g.den }
 func (g *gpuPictures) errors() int           { return 0 }

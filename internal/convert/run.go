@@ -245,7 +245,8 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	}
 	if r.Opts.Decoder != DecoderCPU && ProbeDecoder(gpu.NVENC, codec) {
 		r.Report.Report("decoding %s on the GPU (NVDEC)", video.Type)
-		return &gpuPictures{kind: gpu.NVENC, codec: codec, next: next}, nil
+		return &gpuPictures{kind: gpu.NVENC, codec: codec, next: next, report: r.Report,
+			composeFEL: r.Opts.DVFEL == FELCompose}, nil
 	}
 	if r.Opts.Decoder == DecoderGPU {
 		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)

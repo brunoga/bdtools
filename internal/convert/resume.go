@@ -199,8 +199,9 @@ func (r *Runner) resumeKey() (string, error) {
 		SwapLR    bool
 		BitDepth  int
 		Segment   int
+		DVFEL     FEL `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames})
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL})
 	if err != nil {
 		return "", err
 	}
