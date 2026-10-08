@@ -15,8 +15,8 @@ import (
 
 // Decoding with VideoToolbox: a decompression session, made from the
 // stream's parameter sets, takes each access unit as a sample buffer of
-// length-prefixed NAL units and hands each picture to a callback (here,
-// within the call that decodes it, or the one that ends the stream). Each
+// length-prefixed NAL units and hands each picture to a callback, within
+// the call that decodes it, in decoding order. Each
 // access unit's timestamp goes with it as the frame's refcon, and comes
 // back with its picture. H.264 and HEVC; VideoToolbox decodes neither VC-1
 // nor (on every Mac) MPEG-2, which ffmpeg does instead.
@@ -217,7 +217,9 @@ func (d *vtDec) Decode(au []byte, pts int64) error {
 	}
 	defer d.a.release(sbuf)
 	var info uint32
-	st := d.a.decode(d.session, sbuf, vtDecodeTemporalProcessing, uintptr(pts), &info) //nolint:gosec // a timestamp, passed through
+	// Synchronous, in decoding order: the pictures are put in display
+	// order here (see hand).
+	st := d.a.decode(d.session, sbuf, 0, uintptr(pts), &info) //nolint:gosec // a timestamp, passed through
 	if st != 0 {
 		return d.fail("VTDecompressionSessionDecodeFrame", st)
 	}
