@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   VC-1 and MPEG-2 sources, with their HDR10, HDR10+ and Dolby Vision, now
   convert on every platform with ffmpeg 6.1 or later. Each picture keeps
   its own timestamp; the pictures are the ones NVDEC gives.
+- An MPEG-2 decoder in Go, with a Go deinterlacer (yadif's algorithm): MPEG-2
+  Blu-rays and DVDs convert with no GPU and no ffmpeg. Within the
+  transform's tolerance of ffmpeg's decode on the ISO conformance streams.
 - VideoToolbox decoding on macOS (H.264 and HEVC, 10-bit included),
   checked picture by picture against ffmpeg's decode on CI's Macs.
 - NVDEC on Windows (its structures as Windows lays them out, generated

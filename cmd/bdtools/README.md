@@ -823,15 +823,15 @@ Everything that only reads and writes streams works everywhere: remuxing
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
 A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
 NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC) — else H.264 by the decoder here and the other codecs
-by ffmpeg:
+(macOS: H.264, HEVC) — else H.264 and MPEG-2 by the decoders here and the
+other codecs by ffmpeg:
 
 | | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere, with ffmpeg | elsewhere, without |
 |---|---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |
-| 2D H.264 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
-| 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
+| 2D H.264 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD), VC-1 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) | — |
 
@@ -839,6 +839,15 @@ On Windows, NVDEC's structures are laid out as Windows lays them out (an
 `unsigned long` is 4 bytes there), generated from NVIDIA's headers like
 Linux's and checked by a test; it has not yet been run on a Windows machine
 with an NVIDIA GPU, and where it fails, ffmpeg takes over.
+
+The MPEG-2 decoder here is Go (the standard's Main Profile: frame and
+field pictures, every prediction mode), its interlaced pictures
+deinterlaced in Go as yadif does it (within 68 dB of ffmpeg's yadif). On
+the ISO conformance streams and ffmpeg's test streams each picture is
+within the inverse transform's tolerance of ffmpeg's (64 dB and up;
+MPEG-2's transform is not bit-exact between decoders). Dual prime
+prediction follows the standard, but no test stream had any. It is slower
+than the GPU: about 30 fps for 1080i, for now.
 
 Decoding through ffmpeg gives each picture its own timestamp (the stream
 goes to it as a transport stream with them, and `-stats_enc_pre` gives them
