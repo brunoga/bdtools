@@ -10,7 +10,10 @@ import "errors"
 type spsInfo struct {
 	// color is the VUI's colour description (2, unspecified, when there
 	// is none).
-	color                      ColorInfo
+	color ColorInfo
+	// reorder is how many pictures can come before one in decoding order
+	// that is shown after them (0 when the SPS does not say).
+	reorder                    int
 	codedW, codedH             int
 	cropL, cropR, cropT, cropB int // in luma samples
 	depth                      int
@@ -133,14 +136,14 @@ func hevcSPS(nal []byte) (spsInfo, error) {
 		first = 0
 	}
 	for i := first; i <= maxSub; i++ {
-		r.ue()
-		r.ue()
-		r.ue()
+		r.ue()             // sps_max_dec_pic_buffering_minus1
+		s.reorder = r.ue() // sps_max_num_reorder_pics
+		r.ue()             // sps_max_latency_increase_plus1
 	}
 	for range 6 { // coding and transform block sizes, hierarchy depths
 		r.ue()
 	}
-	scaling := r.u(1) != 0 // scaling_list_enabled_flag
+	scaling := r.u(1) != 0      // scaling_list_enabled_flag
 	if scaling && r.u(1) != 0 { // sps_scaling_list_data_present_flag
 		for size := range 4 {
 			step := 1

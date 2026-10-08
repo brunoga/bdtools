@@ -97,10 +97,10 @@ func ffmpegFrames(t *testing.T, path, format, pixfmt string, w, h int) []string 
 
 // decodeAll decodes a stream with a GPU decoder of kind k, each picture's
 // planes with the pictures' timestamps.
-func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte) ([]string, []int64, *DecodedPicture) {
+func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte, pts []int64) ([]string, []int64, *DecodedPicture) {
 	t.Helper()
 	var sums []string
-	var pts []int64
+	var got []int64
 	var last DecodedPicture
 	d, err := OpenDecoder(k, DecodeConfig{Codec: codec}, func(p *DecodedPicture) error {
 		var b bytes.Buffer
@@ -115,7 +115,7 @@ func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte) ([]string
 			b.Write(p.UV[y*p.Pitch : y*p.Pitch+row])
 		}
 		sums = append(sums, b.String())
-		pts = append(pts, p.PTS)
+		got = append(got, p.PTS)
 		last = *p
 		return nil
 	})
@@ -127,14 +127,14 @@ func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte) ([]string
 	}
 	defer func() { _ = d.Close() }()
 	for i, u := range units {
-		if err := d.Decode(u, int64(i)*3754); err != nil {
+		if err := d.Decode(u, pts[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := d.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	return sums, pts, &last
+	return sums, got, &last
 }
 
 // NVDEC decodes exactly what ffmpeg's software decoders do, in display
@@ -189,7 +189,17 @@ func matchesFFmpeg(t *testing.T, k Kind, codec VideoCodec, path, format, pixfmt 
 	if c.codec == DecodeMPEG2 {
 		units = mpeg2Units(b)
 	}
-	got, pts, last := decodeAll(t, k, c.codec, units)
+	// Each access unit's timestamp is its picture's place in display
+	// order, as a demuxer's presentation times are.
+	order := displayUnits(t, c.path, c.format, b, units, c.codec)
+	fed := make([]int64, len(units))
+	for i := range fed {
+		fed[i] = -1 // no picture
+	}
+	for rank, u := range order {
+		fed[u] = int64(rank) * 3754
+	}
+	got, pts, last := decodeAll(t, k, c.codec, units, fed)
 	if last.Width != c.w || last.Height != c.h || last.Depth != c.depth {
 		t.Errorf("pictures %dx%d at %d bits, want %dx%d at %d", last.Width, last.Height, last.Depth, c.w, c.h, c.depth)
 	}
@@ -209,15 +219,14 @@ func matchesFFmpeg(t *testing.T, k Kind, codec VideoCodec, path, format, pixfmt 
 			t.Fatalf("picture %d differs from ffmpeg's", i)
 		}
 	}
-	// Each picture carries the timestamp its own access unit was
-	// given (the unit's decoding index here).
-	order := displayUnits(t, c.path, c.format, b, units, c.codec)
+	// Each picture, in display order, carries the timestamp its own
+	// access unit was given.
 	if len(order) != len(pts) {
 		t.Fatalf("ffprobe lists %d pictures, the decoder gave %d", len(order), len(pts))
 	}
 	for i, p := range pts {
-		if p != int64(order[i])*3754 {
-			t.Fatalf("picture %d has the timestamp of access unit %d, not its own (%d)", i, p/3754, order[i])
+		if p != int64(i)*3754 {
+			t.Fatalf("picture %d has the timestamp of display place %d", i, p/3754)
 		}
 	}
 }

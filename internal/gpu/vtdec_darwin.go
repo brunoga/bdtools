@@ -3,6 +3,7 @@
 package gpu
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"sync"
@@ -127,6 +128,19 @@ type vtDec struct {
 	mu    sync.Mutex
 	ready []*DecodedPicture // copied out by the callback, in display order
 	err   error             // the first error the callback met
+	// VideoToolbox gives pictures in decoding order: they are held and
+	// given on in timestamp order (the callers' are presentation times),
+	// as many as the stream can reorder.
+	held []*DecodedPicture
+}
+
+// window is how many pictures to hold: the SPS's reordering depth, or
+// H.264's most when it does not say.
+func (d *vtDec) window() int {
+	if d.info.reorder > 0 || d.hevc() {
+		return d.info.reorder
+	}
+	return 16
 }
 
 func openVTDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (Decoder, error) {
@@ -207,7 +221,7 @@ func (d *vtDec) Decode(au []byte, pts int64) error {
 	if st != 0 {
 		return d.fail("VTDecompressionSessionDecodeFrame", st)
 	}
-	return d.hand()
+	return d.hand(false)
 }
 
 func (d *vtDec) fail(what string, st int32) error {
@@ -389,9 +403,9 @@ func (d *vtDec) color(pb uintptr) ColorInfo {
 	return c
 }
 
-// hand gives on the pictures the callback has copied out, in the order
-// VideoToolbox gave them: display order, with temporal processing.
-func (d *vtDec) hand() error {
+// hand gives on the pictures the callback has copied out, in timestamp
+// order: all of them at the end.
+func (d *vtDec) hand(all bool) error {
 	d.mu.Lock()
 	ready, err := d.ready, d.err
 	d.ready = nil
@@ -400,6 +414,14 @@ func (d *vtDec) hand() error {
 		return err
 	}
 	for _, p := range ready {
+		i, _ := slices.BinarySearchFunc(d.held, p.PTS, func(h *DecodedPicture, pts int64) int {
+			return cmp.Compare(h.PTS, pts)
+		})
+		d.held = slices.Insert(d.held, i, p)
+	}
+	for len(d.held) > 0 && (all || len(d.held) > d.window()) {
+		p := d.held[0]
+		d.held = d.held[1:]
 		if err := d.picture(p); err != nil {
 			d.err = err
 			return err
@@ -418,7 +440,7 @@ func (d *vtDec) Flush() error {
 		}
 		_ = d.a.wait(d.session)
 	}
-	return d.hand()
+	return d.hand(true)
 }
 
 func (d *vtDec) Close() error {
