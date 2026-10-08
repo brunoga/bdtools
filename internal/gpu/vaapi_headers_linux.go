@@ -150,6 +150,22 @@ func (e *vaapi) h264Headers() []byte {
 	return append(out, nal([]byte{0x68}, p.trailing())...)
 }
 
+// videoSignalType writes a VUI's video_signal_type_present_flag and, with a
+// colour to state, the colour description.
+func (e *vaapi) videoSignalType(s *bitWriter) {
+	c := e.cfg.Color
+	s.flag(c != nil)
+	if c == nil {
+		return
+	}
+	s.u(3, 5) // video_format: unspecified
+	s.flag(c.FullRange)
+	s.flag(true)                    // colour_description_present
+	s.u(8, uint32(c.Primaries)&255) //nolint:gosec // a code point
+	s.u(8, uint32(c.Transfer)&255)  //nolint:gosec // a code point
+	s.u(8, uint32(c.Matrix)&255)    //nolint:gosec // a code point
+}
+
 // hevcPTL writes profile_tier_level for Main (or Main 10) with no
 // sub-layers.
 func (e *vaapi) hevcPTL(w *bitWriter) {
@@ -224,12 +240,12 @@ func (e *vaapi) hevcHeaders() []byte {
 	s.flag(false) // long_term_ref_pics_present
 	s.flag(c.tmvp)
 	s.flag(c.strongIntra)
-	s.flag(true) // vui_parameters_present
-	s.flag(true) // aspect_ratio_info_present
-	s.u(8, 1)    // square pixels
-	s.flag(false)
-	s.flag(false)
-	s.flag(false)
+	s.flag(true)  // vui_parameters_present
+	s.flag(true)  // aspect_ratio_info_present
+	s.u(8, 1)     // square pixels
+	s.flag(false) // overscan_info_present
+	e.videoSignalType(s)
+	s.flag(false)                 // chroma_loc_info_present
 	s.flag(false)                 // neutral_chroma_indication
 	s.flag(false)                 // field_seq
 	s.flag(false)                 // frame_field_info_present

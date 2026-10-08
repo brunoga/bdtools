@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -66,6 +67,12 @@ type Runner struct {
 	// rateNum and rateDen are the frame rate the container states, for a
 	// stream that does not.
 	rateNum, rateDen int
+	// colour is the source's colour signalling (a 2D GPU-decoded source),
+	// hdrStatic its static HDR metadata and hdr10Plus its HDR10+ metadata by
+	// output frame, all carried into the output.
+	colour    *gpu.ColorInfo
+	hdrStatic hdr.Static
+	hdr10Plus map[int64][]byte
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap

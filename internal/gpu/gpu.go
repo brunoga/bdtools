@@ -43,6 +43,9 @@ type Config struct {
 	// the encoder works at finer precision, which shows as less banding and
 	// a few percent fewer bits for the same quality. H.264 is 8-bit only.
 	BitDepth int
+	// Color, when set, is the colour signalling the stream states (its
+	// VUI, or AV1's colour config): an HDR source's BT.2020 and PQ, say.
+	Color *ColorInfo
 }
 
 // Picture is the frame an encoder wants filled: a full-resolution luma

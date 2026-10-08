@@ -275,9 +275,32 @@ takes 8), a Blu-ray at 8. A stream that states no frame rate takes the
 container's: the playlist's on a disc, the frame duration or the spacing of
 the first frames in Matroska.
 
-Still to come: HDR10 and HDR10+ metadata carried into the encode, Ultra HD
-discs' Dolby Vision (profile 7, FEL and MEL) kept by a remux or converted,
-and a lossless remux of 2D video into MKV.
+### HDR10 and HDR10+
+
+An HDR source stays HDR. Its colour signalling (BT.2020, PQ or HLG) is
+stated by every encoder — in the stream's own header (NVENC's and
+VideoToolbox's settings, the headers written for VAAPI, x265's and
+SVT-AV1's options, ffmpeg's frame parameters) and in Matroska's Colour
+element. Its metadata is read from the source's SEI as it is decoded and
+put into the encode by the muxer, on the frame it belongs to whatever order
+the encoder put the frames in:
+
+- HDR10's static metadata — the mastering display and the content light
+  level (MaxCLL, MaxFALL) — on every keyframe, and in the Colour element;
+- HDR10+'s dynamic metadata on every frame that carried it.
+
+HEVC carries them as SEI messages, AV1 as metadata OBUs (converted to AV1's
+units). Checked with every encoder here (NVENC and VAAPI, HEVC and AV1,
+x265): the output states BT.2020/PQ and the source's exact mastering display
+and light levels, and on a 50-second HDR10+ sample every one of the 1,200
+frames carries the source's metadata. An HDR source encoded at 8 bits (or
+in H.264, which carries none of this here) gets a warning.
+
+A remux keeps all of it untouched in the stream; its Matroska Colour
+element is not written yet.
+
+Still to come: Ultra HD discs' Dolby Vision (profile 7, FEL and MEL), kept
+by a remux or converted.
 
 ## Choosing tracks
 

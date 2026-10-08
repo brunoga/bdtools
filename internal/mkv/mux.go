@@ -8,6 +8,8 @@ import (
 	"io"
 	"math"
 	"time"
+
+	"github.com/brunoga/bdtools/internal/hdr"
 )
 
 // TrackType is a Matroska track type.
@@ -35,6 +37,9 @@ type Track struct {
 	// StereoMode is the Matroska stereo layout: 1 is side by side, left
 	// eye first.
 	StereoMode int
+	// Colour, when set, is the video's colour signalling and HDR metadata,
+	// written as Matroska's Colour element.
+	Colour *Colour
 	// DisplayWidth and DisplayHeight, when set, are the shape a frame is
 	// shown at (zero leaves Matroska's default, the pixel size). For a
 	// stereo frame, players built on ffmpeg (Kodi, mpv) and mkvmerge take
@@ -410,6 +415,9 @@ func trackEntry(n int, t Track) []byte {
 			v = elemUint(v, idDisplayWidth, uint64(t.DisplayWidth))
 			v = elemUint(v, idDisplayHeight, uint64(t.DisplayHeight))
 		}
+		if t.Colour != nil {
+			v = elem(v, idColour, t.Colour.element())
+		}
 		b = elem(b, idVideo, v)
 	case TypeAudio:
 		var a []byte
@@ -449,4 +457,44 @@ func void(n int) []byte {
 	b := putID(nil, idVoid)
 	b = putSizeLen(b, uint64(n-9), 8)
 	return append(b, make([]byte, n-9)...)
+}
+
+// Colour is a video track's colour signalling (H.273 code points: 2 is
+// unspecified) and its HDR10 metadata.
+type Colour struct {
+	Matrix, Transfer, Primaries int
+	FullRange                   bool
+	Static                      hdr.Static
+}
+
+// element is the Colour element's body.
+func (c *Colour) element() []byte {
+	var b []byte
+	b = elemUint(b, idMatrix, uint64(c.Matrix))       //nolint:gosec // a code point
+	b = elemUint(b, idTransfer, uint64(c.Transfer))   //nolint:gosec // a code point
+	b = elemUint(b, idPrimaries, uint64(c.Primaries)) //nolint:gosec // a code point
+	rng := uint64(1)                                  // broadcast range
+	if c.FullRange {
+		rng = 2
+	}
+	b = elemUint(b, idRange, rng)
+	if l := c.Static.Light; l != nil {
+		b = elemUint(b, idMaxCLL, uint64(l.MaxCLL))
+		b = elemUint(b, idMaxFALL, uint64(l.MaxFALL))
+	}
+	if m := c.Static.Mastering; m != nil {
+		// Chromaticities as numbers, from the SEI's 0.00002 and 0.0001 cd/m²;
+		// the SEI orders the primaries green, blue, red.
+		var mm []byte
+		for i, p := range []int{2, 0, 1} {
+			mm = elemFloat(mm, uint32(0x55D1+2*i), float64(m.Primaries[p][0])/50000)
+			mm = elemFloat(mm, uint32(0x55D2+2*i), float64(m.Primaries[p][1])/50000) //nolint:gosec // element ids
+		}
+		mm = elemFloat(mm, 0x55D7, float64(m.WhitePoint[0])/50000)
+		mm = elemFloat(mm, 0x55D8, float64(m.WhitePoint[1])/50000)
+		mm = elemFloat(mm, 0x55D9, float64(m.MaxLuma)/10000)
+		mm = elemFloat(mm, 0x55DA, float64(m.MinLuma)/10000)
+		b = elem(b, idMastering, mm)
+	}
+	return b
 }

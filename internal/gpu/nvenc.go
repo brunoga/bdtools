@@ -186,6 +186,16 @@ func (e *nvenc) open() error {
 		cfg.u32(cc+nvH264IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 	case HEVC:
 		cfg.u32(cc+nvHEVCIDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+		if c := e.cfg.Color; c != nil {
+			vui := cc + nvHEVCVUI
+			cfg.u32(vui+nvVUISignalPresent, 1)
+			cfg.u32(vui+nvVUIFormat, nvVUIFormatUnspecified)
+			cfg.u32(vui+nvVUIFullRange, b2u(c.FullRange))
+			cfg.u32(vui+nvVUIColourPresent, 1)
+			cfg.u32(vui+nvVUIPrimaries, uint32(c.Primaries)) //nolint:gosec // a code point
+			cfg.u32(vui+nvVUITransfer, uint32(c.Transfer))   //nolint:gosec // a code point
+			cfg.u32(vui+nvVUIMatrix, uint32(c.Matrix))       //nolint:gosec // a code point
+		}
 		if e.cfg.BitDepth == 10 {
 			cfg.bytes(nvCfgProfileGUID, nvHEVCMain10GUID)
 			f := cfg.getU32(cc + nvHEVCFlags)
@@ -205,6 +215,12 @@ func (e *nvenc) open() error {
 		f |= 1<<nvAV1ChromaFormatBit | 1<<nvAV1RepeatSeqHdrBit
 		d := uint32(e.cfg.BitDepth - 8) //nolint:gosec // 0 or 2
 		f |= d<<nvAV1InputBitDepthBit | d<<nvAV1PixelBitDepthBit
+		if c := e.cfg.Color; c != nil {
+			cfg.u32(cc+nvAV1Primaries, uint32(c.Primaries)) //nolint:gosec // a code point
+			cfg.u32(cc+nvAV1Transfer, uint32(c.Transfer))   //nolint:gosec // a code point
+			cfg.u32(cc+nvAV1Matrix, uint32(c.Matrix))       //nolint:gosec // a code point
+			cfg.u32(cc+nvAV1Range, b2u(c.FullRange))
+		}
 		cfg.u32(cc+nvAV1Flags, f)
 	}
 

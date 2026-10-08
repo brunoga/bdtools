@@ -51,7 +51,14 @@ const (
 	idDisplayWidth    = 0x54B0
 	idDisplayHeight   = 0x54BA
 	idColour          = 0x55B0
+	idMatrix          = 0x55B1
 	idBitsPerChannel  = 0x55B2
+	idRange           = 0x55B9
+	idTransfer        = 0x55BA
+	idPrimaries       = 0x55BB
+	idMaxCLL          = 0x55BC
+	idMaxFALL         = 0x55BD
+	idMastering       = 0x55D0
 	idAudio           = 0xE1
 	idSamplingFreq    = 0xB5
 	idChannels        = 0x9F

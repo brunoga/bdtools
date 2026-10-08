@@ -25,6 +25,8 @@ const (
 // length-prefixed as Matroska stores them, access unit delimiters dropped and
 // the parameter sets kept in-band as well as in the codec private data.
 type VideoSource struct {
+	// extras gives units to add to a frame, by its display index.
+	extras   func(display int64, key bool) [][]byte
 	codec    Codec
 	r        *bufio.Reader
 	frameDur time.Duration
@@ -123,6 +125,16 @@ func (v *VideoSource) Next() (Frame, error) {
 	f := v.ready[0]
 	v.ready = v.ready[1:]
 	nals := f.nals
+	if v.extras != nil {
+		if more := v.extras(f.dispIdx, f.key); len(more) > 0 {
+			// After an access unit delimiter, ahead of everything else.
+			at := 0
+			if len(nals) > 0 && isAUD(nals[0], v.codec) {
+				at = 1
+			}
+			nals = append(append(append([][]byte(nil), nals[:at]...), more...), nals[at:]...)
+		}
+	}
 	if f.key && !v.hasParams(nals) {
 		// A keyframe carries the parameter sets, so playback can start there.
 		nals = append(v.params.raw(v.codec), nals...)
@@ -169,6 +181,27 @@ func (v *VideoSource) at(n int64) time.Duration { return v.delay + time.Duration
 // output for as if it were twice as wide.
 func (v *VideoSource) SetDisplaySize(w, h int) {
 	v.track.DisplayWidth, v.track.DisplayHeight = w, h
+}
+
+// SetColour sets the track's colour signalling and HDR metadata.
+func (v *VideoSource) SetColour(c *Colour) { v.track.Colour = c }
+
+// SetExtras has extras give, for each frame by its display index, units to
+// add to it: NAL units (without start codes) ahead of an H.264 or HEVC
+// picture's, or OBUs after an AV1 temporal unit's sequence header. HDR
+// metadata goes in this way, on the frame it belongs to whatever order the
+// encoder put the frames in.
+func (v *VideoSource) SetExtras(extras func(display int64, key bool) [][]byte) { v.extras = extras }
+
+// isAUD reports whether a NAL unit is an access unit delimiter.
+func isAUD(nal []byte, c Codec) bool {
+	if len(nal) == 0 {
+		return false
+	}
+	if c == HEVC {
+		return nal[0]>>1&0x3f == 35
+	}
+	return nal[0]&0x1f == 9
 }
 
 // SetDelay starts the picture later: for a source whose first picture comes

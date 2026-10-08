@@ -65,3 +65,11 @@ func guid(d1 uint32, d2, d3 uint16, d4 [8]byte) []byte {
 	copy(b[8:], d4[:])
 	return b
 }
+
+// b2u is a C boolean.
+func b2u(b bool) uint32 {
+	if b {
+		return 1
+	}
+	return 0
+}

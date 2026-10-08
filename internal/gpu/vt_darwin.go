@@ -185,6 +185,17 @@ func loadVTLibs() (*vtAPI, error) {
 		{"VideoToolbox", "kVTProfileLevel_H264_High_AutoLevel"},
 		{"VideoToolbox", "kVTProfileLevel_HEVC_Main_AutoLevel"},
 		{"VideoToolbox", "kVTProfileLevel_HEVC_Main10_AutoLevel"},
+		{"VideoToolbox", "kVTCompressionPropertyKey_ColorPrimaries"},
+		{"VideoToolbox", "kVTCompressionPropertyKey_TransferFunction"},
+		{"VideoToolbox", "kVTCompressionPropertyKey_YCbCrMatrix"},
+		{"CoreVideo", "kCVImageBufferColorPrimaries_ITU_R_709_2"},
+		{"CoreVideo", "kCVImageBufferColorPrimaries_ITU_R_2020"},
+		{"CoreVideo", "kCVImageBufferColorPrimaries_P3_D65"},
+		{"CoreVideo", "kCVImageBufferTransferFunction_ITU_R_709_2"},
+		{"CoreVideo", "kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ"},
+		{"CoreVideo", "kCVImageBufferTransferFunction_ITU_R_2100_HLG"},
+		{"CoreVideo", "kCVImageBufferYCbCrMatrix_ITU_R_709_2"},
+		{"CoreVideo", "kCVImageBufferYCbCrMatrix_ITU_R_2020"},
 	} {
 		a.keys[k.name] = constant(k.lib, k.name)
 	}
@@ -295,6 +306,25 @@ func openVideoToolbox(cfg Config, w io.Writer) (Encoder, error) {
 		if st := a.setProperty(session, a.keys[p.key], p.value); st != 0 {
 			_ = e.Close()
 			return nil, fmt.Errorf("videotoolbox: setting %s: %d", p.key, st)
+		}
+	}
+	// The colour signalling, where VideoToolbox has a name for it.
+	if c := cfg.Color; c != nil {
+		for _, p := range []struct{ key, value string }{
+			{"kVTCompressionPropertyKey_ColorPrimaries", map[int]string{1: "kCVImageBufferColorPrimaries_ITU_R_709_2",
+				9: "kCVImageBufferColorPrimaries_ITU_R_2020", 12: "kCVImageBufferColorPrimaries_P3_D65"}[c.Primaries]},
+			{"kVTCompressionPropertyKey_TransferFunction", map[int]string{1: "kCVImageBufferTransferFunction_ITU_R_709_2",
+				16: "kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ", 18: "kCVImageBufferTransferFunction_ITU_R_2100_HLG"}[c.Transfer]},
+			{"kVTCompressionPropertyKey_YCbCrMatrix", map[int]string{1: "kCVImageBufferYCbCrMatrix_ITU_R_709_2",
+				9: "kCVImageBufferYCbCrMatrix_ITU_R_2020"}[c.Matrix]},
+		} {
+			if p.value == "" {
+				continue
+			}
+			if st := a.setProperty(session, a.keys[p.key], a.keys[p.value]); st != 0 {
+				_ = e.Close()
+				return nil, fmt.Errorf("videotoolbox: setting %s: %d", p.key, st)
+			}
 		}
 	}
 	if st := a.prepare(session); st != 0 {
