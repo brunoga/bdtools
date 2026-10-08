@@ -365,7 +365,7 @@ func (d *vtDec) copyOut(pb uintptr, pts int64) (*DecodedPicture, error) {
 		}
 	}
 	return &DecodedPicture{Width: w, Height: h, Depth: d.info.depth, Y: buf[:row*h], UV: buf[row*h:], Pitch: row,
-		PTS: pts, Color: d.color(pb)}, nil
+		PTS: pts, Color: d.color(pb), FrameRateNum: d.info.rateNum, FrameRateDen: d.info.rateDen}, nil
 }
 
 // color is the stream's colour: the SPS's, else the picture's colour

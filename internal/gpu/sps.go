@@ -13,7 +13,9 @@ type spsInfo struct {
 	color ColorInfo
 	// reorder is how many pictures can come before one in decoding order
 	// that is shown after them (0 when the SPS does not say).
-	reorder                    int
+	reorder int
+	// rateNum and rateDen are the VUI's frame rate, 0 when it has none.
+	rateNum, rateDen           int
 	codedW, codedH             int
 	cropL, cropR, cropT, cropB int // in luma samples
 	depth                      int
@@ -210,6 +212,22 @@ func hevcSPS(nal []byte) (spsInfo, error) {
 	r.u(2)           // sps_temporal_mvp_enabled_flag, strong_intra_smoothing_enabled_flag
 	if r.u(1) != 0 { // vui_parameters_present_flag
 		s.color = vuiColor(r)
+		if r.u(1) != 0 { // chroma_loc_info_present_flag
+			r.ue()
+			r.ue()
+		}
+		r.u(3)           // neutral_chroma_indication_flag, field_seq_flag, frame_field_info_present_flag
+		if r.u(1) != 0 { // default_display_window_flag
+			for range 4 {
+				r.ue()
+			}
+		}
+		if r.u(1) != 0 { // vui_timing_info_present_flag
+			tick, scale := r.u(32), r.u(32)
+			if tick > 0 && r.err == nil {
+				s.rateNum, s.rateDen = scale, tick
+			}
+		}
 	}
 	return s, r.err
 }
@@ -316,6 +334,16 @@ func h264SPS(nal []byte) (spsInfo, error) {
 	s.color = ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
 	if r.u(1) != 0 { // vui_parameters_present_flag
 		s.color = vuiColor(r)
+		if r.u(1) != 0 { // chroma_loc_info_present_flag
+			r.ue()
+			r.ue()
+		}
+		if r.u(1) != 0 { // timing_info_present_flag
+			tick, scale := r.u(32), r.u(32)
+			if tick > 0 && r.err == nil {
+				s.rateNum, s.rateDen = scale, 2*tick // a tick is a field
+			}
+		}
 	}
 	return s, r.err
 }

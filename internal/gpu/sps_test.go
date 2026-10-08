@@ -67,6 +67,9 @@ func TestSPSInfo(t *testing.T) {
 			if info.color != want {
 				t.Errorf("colour %+v, want %+v", info.color, want)
 			}
+			if info.rateNum == 0 || info.rateNum != 24*info.rateDen {
+				t.Errorf("frame rate %d/%d, want 24", info.rateNum, info.rateDen)
+			}
 		})
 	}
 }
