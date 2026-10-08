@@ -821,11 +821,12 @@ picks NVENC.
 Everything that only reads and writes streams works everywhere: remuxing
 (Dolby Vision included), demuxing, the 3D conversion (its MVC decoder is
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
-A 2D source's video is decoded on NVIDIA's NVDEC where there is one
-(Linux and Windows), else H.264 by the decoder here and the other codecs by
-ffmpeg:
+A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
+NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
+(macOS: H.264, HEVC) — else H.264 by the decoder here and the other codecs
+by ffmpeg:
 
-| | NVIDIA (Linux, Windows) | elsewhere, with ffmpeg | elsewhere, without |
+| | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere, with ffmpeg | elsewhere, without |
 |---|---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |

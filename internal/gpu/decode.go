@@ -73,6 +73,8 @@ func OpenDecoder(k Kind, cfg DecodeConfig, picture func(*DecodedPicture) error) 
 	switch k {
 	case NVENC: // the NVIDIA GPU: NVDEC
 		return openNVDEC(cfg, picture)
+	case VideoToolbox:
+		return openVTDecoder(cfg, picture)
 	}
 	return nil, ErrDecodeUnavailable
 }

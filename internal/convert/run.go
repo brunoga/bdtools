@@ -255,11 +255,18 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 		return &gpuPictures{open: open, codec: codec, next: next, report: r.Report,
 			composeFEL: r.Opts.DVFEL != FELDrop, passFEL: r.Opts.DVFEL.layered()}
 	}
-	if r.Opts.Decoder != DecoderCPU && ProbeDecoder(gpu.NVENC, codec) {
-		r.Report.Report("decoding %s on the GPU (NVDEC)", video.Type)
-		return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
-			return gpu.OpenDecoder(gpu.NVENC, cfg, picture)
-		}), nil
+	if r.Opts.Decoder != DecoderCPU {
+		for _, k := range []struct {
+			kind gpu.Kind
+			name string
+		}{{gpu.NVENC, "NVDEC"}, {gpu.VideoToolbox, "VideoToolbox"}} {
+			if ProbeDecoder(k.kind, codec) {
+				r.Report.Report("decoding %s on the GPU (%s)", video.Type, k.name)
+				return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+					return gpu.OpenDecoder(k.kind, cfg, picture)
+				}), nil
+			}
+		}
 	}
 	if r.Opts.Decoder == DecoderGPU {
 		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)
