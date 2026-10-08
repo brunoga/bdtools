@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
 )
 
@@ -67,6 +68,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	default:
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
+	r.carryHDR(v)
 	if r.videoDelay > 0 {
 		v.SetDelay(r.videoDelay)
 		r.Report.Report("the picture starts %.3f s in, as on the source", r.videoDelay.Seconds())
@@ -262,4 +264,54 @@ func (r *Runner) reportTimeline(sources []mkv.Source, spans []mkv.Span) {
 				(v.Last + frame).Seconds(), r.length.Seconds())
 		}
 	}
+}
+
+// carryHDR gives the output video the source's colour signalling and HDR
+// metadata: the Colour element, and in the stream the static metadata on
+// every keyframe and HDR10+'s on every frame it was on.
+func (r *Runner) carryHDR(v *mkv.VideoSource) {
+	if r.colour == nil && r.hdrStatic.Empty() && r.hdr10Plus == nil {
+		return
+	}
+	if c := r.colour; c != nil {
+		v.SetColour(&mkv.Colour{Matrix: c.Matrix, Transfer: c.Transfer, Primaries: c.Primaries, FullRange: c.FullRange,
+			Static: r.hdrStatic})
+	}
+	if r.Opts.Codec == CodecH264 && (!r.hdrStatic.Empty() || r.hdr10Plus != nil) {
+		r.Report.Report("warning: H.264 output: the source's HDR metadata is not carried (use --codec h265 or av1)")
+		return
+	}
+	av1 := r.Opts.Codec == CodecAV1
+	var static []byte
+	if !r.hdrStatic.Empty() {
+		if av1 {
+			static = hdr.AV1StaticOBUs(r.hdrStatic)
+		} else {
+			static = hdr.HEVCStaticSEI(r.hdrStatic)
+		}
+	}
+	var parts []string
+	if static != nil {
+		parts = append(parts, "HDR10 metadata")
+	}
+	if len(r.hdr10Plus) > 0 {
+		parts = append(parts, fmt.Sprintf("HDR10+ on %d frames", len(r.hdr10Plus)))
+	}
+	if len(parts) > 0 {
+		r.Report.Report("carrying the source's %s", strings.Join(parts, " and "))
+	}
+	v.SetExtras(func(display int64, key bool) [][]byte {
+		var out [][]byte
+		if key && static != nil {
+			out = append(out, static)
+		}
+		if d := r.hdr10Plus[display]; d != nil {
+			if av1 {
+				out = append(out, hdr.AV1T35OBU(d))
+			} else {
+				out = append(out, hdr.HEVCT35SEI(d))
+			}
+		}
+		return out
+	})
 }

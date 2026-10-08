@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -20,6 +21,9 @@ type picture struct {
 	stereo *mvc.StereoFrame
 	gpu    *gpu.DecodedPicture
 	pts    int64
+	// hdr10Plus is the picture's HDR10+ metadata (a T.35 payload), nil
+	// when it has none.
+	hdr10Plus []byte
 }
 
 // size is the picture's (one view's) size and sample depth.
@@ -41,6 +45,9 @@ type pictureSource interface {
 	errors() int
 	// stereo reports whether pictures carry a dependent view, after run.
 	dependentFrames() int
+	// hdrStatic is the stream's static HDR metadata, once pictures have
+	// come out.
+	hdrStatic() hdr.Static
 }
 
 // mvcPictures decodes with this repository's H.264/MVC decoder.
@@ -74,21 +81,32 @@ func (m *mvcPictures) run(each func(picture) error) error {
 func (m *mvcPictures) frameRate() (int, int) { return m.dec.FrameRate() }
 func (m *mvcPictures) errors() int           { return m.errs }
 func (m *mvcPictures) dependentFrames() int  { return m.st.DependentFrames }
+func (m *mvcPictures) hdrStatic() hdr.Static { return hdr.Static{} }
 
-// gpuPictures decodes on a GPU, fed access units by a demuxer.
+// gpuPictures decodes on a GPU, fed access units by a demuxer. On the way
+// it reads an HEVC stream's HDR metadata: the static once, HDR10+ for each
+// picture.
 type gpuPictures struct {
 	kind     gpu.Kind
 	codec    gpu.VideoCodec
 	next     func() (base, dep []byte, pts int64, err error)
 	num, den int
+	static   hdr.Static
+	dynamic  map[int64][]byte // HDR10+ by timestamp, until the picture comes out
 }
 
 func (g *gpuPictures) run(each func(picture) error) error {
+	g.dynamic = map[int64][]byte{}
 	dec, err := gpu.OpenDecoder(g.kind, gpu.DecodeConfig{Codec: g.codec}, func(p *gpu.DecodedPicture) error {
 		if g.num == 0 && p.FrameRateNum > 0 && p.FrameRateDen > 0 {
 			g.num, g.den = p.FrameRateNum, p.FrameRateDen
 		}
-		return each(picture{gpu: p, pts: p.PTS})
+		pic := picture{gpu: p, pts: p.PTS}
+		if d, ok := g.dynamic[p.PTS]; ok {
+			pic.hdr10Plus = d
+			delete(g.dynamic, p.PTS)
+		}
+		return each(pic)
 	})
 	if err != nil {
 		return err
@@ -105,6 +123,18 @@ func (g *gpuPictures) run(each func(picture) error) error {
 		if len(base) == 0 {
 			continue
 		}
+		if g.codec == gpu.DecodeHEVC {
+			md := hdr.ParseHEVC(base)
+			if g.static.Mastering == nil {
+				g.static.Mastering = md.Static.Mastering
+			}
+			if g.static.Light == nil {
+				g.static.Light = md.Static.Light
+			}
+			if md.HDR10Plus != nil {
+				g.dynamic[pts] = md.HDR10Plus
+			}
+		}
 		if err := dec.Decode(base, pts); err != nil {
 			return err
 		}
@@ -114,6 +144,7 @@ func (g *gpuPictures) run(each func(picture) error) error {
 func (g *gpuPictures) frameRate() (int, int) { return g.num, g.den }
 func (g *gpuPictures) errors() int           { return 0 }
 func (g *gpuPictures) dependentFrames() int  { return 0 }
+func (g *gpuPictures) hdrStatic() hdr.Static { return g.static }
 
 // drawFlat draws a 2D picture into an encoder's picture, converting between
 // 8 and 10 bits when the two differ.

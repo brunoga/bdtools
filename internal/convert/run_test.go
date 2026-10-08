@@ -364,6 +364,44 @@ func TestRunnerRemuxes2DToMatroska(t *testing.T) {
 	}
 }
 
+// An HDR10 source keeps its HDR: the colour signalling and the mastering
+// display and light level metadata, in the stream and in the Matroska
+// Colour element. Skips without ffmpeg, x265 and a GPU decoder for HEVC.
+func TestRunnerCarriesHDR10(t *testing.T) {
+	for _, tool := range []string{"ffmpeg", "ffprobe", "x265"} {
+		if _, err := LookPath(tool); err != nil {
+			t.Skipf("%s not installed", tool)
+		}
+	}
+	src := filepath.Join(t.TempDir(), "hdr10.mkv")
+	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=1",
+		"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params",
+		"log-level=error:hdr10=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"+
+			"master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400", src); err != nil {
+		t.Skipf("making an HDR10 source: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "out.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = src, out, EncoderSoftware, CodecH265, 25, "ultrafast"
+	if err := NewRunner(CurrentGOOS, o, nil).Run(t.Context()); err != nil {
+		if strings.Contains(err.Error(), "GPU") {
+			t.Skipf("no GPU decoder: %v", err)
+		}
+		t.Fatal(err)
+	}
+	probe, err := exec.CommandContext(t.Context(), "ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1", //nolint:gosec // test
+		"-show_frames", "-show_streams", "-of", "flat", out).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`color_transfer="smpte2084"`, `color_primaries="bt2020"`, `pix_fmt="yuv420p10le"`,
+		`red_x="34000/50000"`, `max_luminance="10000000/10000"`, `max_content=1000`, `max_average=400`} {
+		if !strings.Contains(string(probe), want) {
+			t.Errorf("no %s in the output", want)
+		}
+	}
+}
+
 // --- helpers for the end-to-end tests ---------------------------------------
 
 func runCmd(t *testing.T, name string, args ...string) error {

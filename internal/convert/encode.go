@@ -102,6 +102,16 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			_, h, depth := sf.size()
 			r.Height = h
 			r.resolveDepth(depth)
+			if sf.gpu != nil {
+				c := sf.gpu.Color
+				r.colour = &c
+				if c.Primaries != 2 || c.Transfer != 2 || c.Matrix != 2 { // something stated
+					r.Opts.Color = &c
+				}
+				if (c.Transfer == 16 || c.Transfer == 18) && r.Opts.BitDepth == 8 {
+					r.Report.Report("warning: an HDR source at 8 bits bands visibly; --bit-depth 10 (the default for it) keeps its precision")
+				}
+			}
 			num, den = src.frameRate()
 			if num <= 0 && r.rateNum > 0 {
 				num, den = r.rateNum, r.rateDen
@@ -116,6 +126,12 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			prog.begin(num, den, skip)
 		}
 		n++
+		if sf.hdr10Plus != nil {
+			if r.hdr10Plus == nil {
+				r.hdr10Plus = map[int64][]byte{}
+			}
+			r.hdr10Plus[int64(n-1)] = sf.hdr10Plus
+		}
 		if n <= skip {
 			return nil
 		}
@@ -160,6 +176,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		return nil, fmt.Errorf("decoding: %w", decErr)
 	}
 	decodeErrs := src.errors()
+	r.hdrStatic = src.hdrStatic()
 	switch {
 	case n == 0:
 		return nil, fmt.Errorf("the video decoded to no frames")
@@ -199,7 +216,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	o := s.r.Opts
 	w, h := s.r.frameSize(first)
 	enc, err := gpu.Open(s.kind, gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
-		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth}, f)
+		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth, Color: o.Color}, f)
 	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)

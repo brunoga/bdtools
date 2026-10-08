@@ -64,6 +64,9 @@ type Options struct {
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
+	// Color is the colour signalling the output states, set from a 2D
+	// source's (an HDR film's BT.2020 and PQ); nil states none.
+	Color *gpu.ColorInfo
 	// Decoder chooses how a 2D source's video is decoded: on a GPU when one
 	// can (DecoderAuto, the default), only on a GPU, or only with the
 	// H.264 decoder here (H.264 sources only). A 3D source always goes to
@@ -282,7 +285,7 @@ func (o Options) tenBit() bool { return o.BitDepth == 10 }
 // the standalone binary — the same encoder library, reached by a route that
 // can filter — rather than being refused, which is what used to happen.
 func (o Options) NeedsFilters() bool {
-	return o.Layout == LayoutHalfSBS
+	return o.Layout == LayoutHalfSBS && !o.TwoD
 }
 
 // EncodesViaFFmpeg reports whether ffmpeg runs the encode: always for a
@@ -336,8 +339,18 @@ const halfFilter = "scale=iw/2:ih"
 // (VAAPI's upload). Empty when there is nothing to do.
 func videoFilters(opts Options, encoderChain string) string {
 	var parts []string
-	if opts.Layout == LayoutHalfSBS {
+	if opts.Layout == LayoutHalfSBS && !opts.TwoD {
 		parts = append(parts, halfFilter)
+	}
+	if c := opts.Color; c != nil {
+		// The frames carry the colour, which this ffmpeg's encoders take
+		// rather than its -color_* options.
+		rng := "tv"
+		if c.FullRange {
+			rng = "pc"
+		}
+		parts = append(parts, fmt.Sprintf("setparams=color_primaries=%d:color_trc=%d:colorspace=%d:range=%s",
+			c.Primaries, c.Transfer, c.Matrix, rng))
 	}
 	if encoderChain != "" {
 		parts = append(parts, encoderChain)
@@ -421,7 +434,9 @@ func encodeStep(opts Options, out string) Step {
 		qp = gpu.AV1QIndex(opts.CRF)
 	}
 	// At 10 bits the GPU encoders take P010 and HEVC is Main 10; the
-	// software ones take the 10-bit planar format.
+	// software ones take the 10-bit planar format. A source's colour
+	// signalling goes along: through ffmpeg in its filters (see
+	// videoFilters), to x265 and SVT-AV1 as their options.
 	var gpu10, sw10 []string
 	if opts.tenBit() {
 		gpu10, sw10 = []string{"-pix_fmt", "p010le"}, []string{"-pix_fmt", "yuv420p10le"}
@@ -472,12 +487,16 @@ func encodeStep(opts Options, out string) Step {
 			// SvtAv1EncApp reads Y4M from stdin and writes IVF, which the
 			// muxer reads as well as bare OBUs. At 10 bits the Y4M is 10-bit,
 			// which it takes the depth from.
-			return Step{Name: "encode", Argv: []string{
+			argv := []string{
 				"SvtAv1EncApp", "-i", "stdin",
 				"--crf", fmt.Sprint(svtCRF(opts.CRF)),
 				"--preset", fmt.Sprint(svtPreset(opts.Preset)),
-				"-b", out,
-			}}
+			}
+			if c := opts.Color; c != nil {
+				argv = append(argv, "--color-primaries", fmt.Sprint(c.Primaries), "--transfer-characteristics", fmt.Sprint(c.Transfer),
+					"--matrix-coefficients", fmt.Sprint(c.Matrix), "--color-range", fmt.Sprint(b2i(c.FullRange)))
+			}
+			return Step{Name: "encode", Argv: append(argv, "-b", out)}
 		}
 		if opts.NeedsFilters() {
 			// The standalone encoders cannot rescale or rearrange the frame,
@@ -503,6 +522,14 @@ func encodeStep(opts Options, out string) Step {
 				// The input's depth comes from the Y4M header; the output's
 				// must be asked for, from a build with 10-bit support.
 				argv = append(argv, "--output-depth", "10")
+			}
+			if c := opts.Color; c != nil {
+				rng := "limited"
+				if c.FullRange {
+					rng = "full"
+				}
+				argv = append(argv, "--colorprim", fmt.Sprint(c.Primaries), "--transfer", fmt.Sprint(c.Transfer),
+					"--colormatrix", fmt.Sprint(c.Matrix), "--range", rng)
 			}
 			return Step{Name: "encode", Argv: append(argv, "--output", out)}
 		}
@@ -532,4 +559,11 @@ func (p *Plan) String() string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

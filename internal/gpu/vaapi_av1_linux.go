@@ -108,14 +108,20 @@ func (e *vaapi) av1SequenceHeader() []byte {
 	s.flag(false) // enable_superres
 	s.flag(true)  // enable_cdef
 	s.flag(false) // enable_restoration
-	// color_config: 8- or 10-bit 4:2:0, no colour description.
+	// color_config: 8- or 10-bit 4:2:0, the colour described when known.
 	s.flag(e.cfg.BitDepth == 10) // high_bitdepth
 	s.flag(false)                // mono_chrome
-	s.flag(false)                // color_description_present_flag
-	s.flag(false)                // color_range: studio
-	s.u(2, 0)                    // chroma_sample_position: unknown
-	s.flag(false)                // separate_uv_delta_q
-	s.flag(false)                // film_grain_params_present
+	c := e.cfg.Color
+	s.flag(c != nil) // color_description_present_flag
+	if c != nil {
+		s.u(8, uint32(c.Primaries)&255) //nolint:gosec // a code point
+		s.u(8, uint32(c.Transfer)&255)  //nolint:gosec // a code point
+		s.u(8, uint32(c.Matrix)&255)    //nolint:gosec // a code point
+	}
+	s.flag(c != nil && c.FullRange) // color_range
+	s.u(2, 0)                       // chroma_sample_position: unknown
+	s.flag(false)                   // separate_uv_delta_q
+	s.flag(false)                   // film_grain_params_present
 	return av1OBU(av1OBUSequence, s.trailing())
 }
 

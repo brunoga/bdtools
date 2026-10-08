@@ -22,6 +22,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A stream that states no frame rate takes the container's (a playlist's,
   or a Matroska track's frame duration or frame spacing).
 
+- HDR10 and HDR10+ are kept through a conversion: the colour signalling
+  (BT.2020, PQ/HLG) stated by every encoder (NVENC, VAAPI, VideoToolbox,
+  x265, SVT-AV1, ffmpeg) and in Matroska's Colour element; the mastering
+  display and content light level on every keyframe; HDR10+'s dynamic
+  metadata on every frame it was on. HEVC as SEI, AV1 as metadata OBUs.
+
 ### Changed
 
 - `--bit-depth` defaults to the source's: 10 for a 10-bit source when the

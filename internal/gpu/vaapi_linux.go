@@ -691,13 +691,6 @@ func (e *vaapi) log2MaxPOCLsb() int {
 	return n
 }
 
-func b2u(b bool) uint32 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // vaapiQPS is qps for ffmpeg's VAAPI encoders, whose defaults differ: I
 // pictures at the P quantiser, B at 6/5 of it.
 func vaapiQPS(qp int) (i, p, b int) {

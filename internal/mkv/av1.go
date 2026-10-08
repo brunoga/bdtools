@@ -443,8 +443,43 @@ func (v *VideoSource) nextAV1() (Frame, error) {
 		}
 		f = Frame{Keyframe: key, Data: tu}
 	}
+	if v.extras != nil {
+		if more := v.extras(v.decoded, f.Keyframe); len(more) > 0 {
+			f.Data = insertOBUs(f.Data, more)
+		}
+	}
 	f.PTS = v.at(v.decoded)
 	f.Order = f.PTS
 	v.decoded++
 	return f, nil
+}
+
+// insertOBUs puts OBUs into a temporal unit after its sequence header, or
+// at its start.
+func insertOBUs(tu []byte, obus [][]byte) []byte {
+	at := 0
+	if len(tu) > 1 && tu[0]>>3&0xf == obuSequenceHeader && tu[0]&2 != 0 {
+		size, n := leb128(tu[1:])
+		if n > 0 && 1+n+int(size) <= len(tu) { //nolint:gosec // bounded by the check
+			at = 1 + n + int(size) //nolint:gosec // as above
+		}
+	}
+	out := append([]byte(nil), tu[:at]...)
+	for _, o := range obus {
+		out = append(out, o...)
+	}
+	return append(out, tu[at:]...)
+}
+
+// leb128 reads an unsigned LEB128 value, returning it and its length (0
+// when b ends inside it).
+func leb128(b []byte) (uint64, int) {
+	var v uint64
+	for i := 0; i < len(b) && i < 8; i++ {
+		v |= uint64(b[i]&0x7f) << (7 * i)
+		if b[i]&0x80 == 0 {
+			return v, i + 1
+		}
+	}
+	return 0, 0
 }
