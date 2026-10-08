@@ -544,31 +544,16 @@ func (sd *sliceDec) motionCompensate(x0, y0, w, h int, f *mvField) {
 		}
 		maxV := 1<<depth - 1
 		shift1 := 14 - depth
+		out := pl[by*stride+bx:]
+		l0, l1 := sd.pred.l[0][:bw*bh], sd.pred.l[1][:bw*bh]
 		if !weighted {
-			if f.pred == 3 {
-				shift2 := 15 - depth
-				off := 1 << (shift2 - 1)
-				for y := range bh {
-					row := pl[(by+y)*stride+bx : (by+y)*stride+bx+bw]
-					a := sd.pred.l[0][y*bw : y*bw+bw]
-					b := sd.pred.l[1][y*bw : y*bw+bw]
-					for x := range bw {
-						row[x] = uint16(clip3(0, maxV, (int(a[x])+int(b[x])+off)>>shift2))
-					}
-				}
-			} else {
-				l := 0
-				if f.pred == 2 {
-					l = 1
-				}
-				off := 1 << (shift1 - 1)
-				for y := range bh {
-					row := pl[(by+y)*stride+bx : (by+y)*stride+bx+bw]
-					a := sd.pred.l[l][y*bw : y*bw+bw]
-					for x := range bw {
-						row[x] = uint16(clip3(0, maxV, (int(a[x])+off)>>shift1))
-					}
-				}
+			switch f.pred {
+			case 3:
+				putBlock(out, stride, l0, l1, bw, bw, bh, 1, 1, 1<<shift1, uint(shift1+1), 0, maxV)
+			case 1:
+				putBlock(out, stride, l0, l0, bw, bw, bh, 1, 0, 1<<(shift1-1), uint(shift1), 0, maxV)
+			default:
+				putBlock(out, stride, l1, l1, bw, bw, bh, 1, 0, 1<<(shift1-1), uint(shift1), 0, maxV)
 			}
 			continue
 		}
@@ -587,34 +572,18 @@ func (sd *sliceDec) motionCompensate(x0, y0, w, h int, f *mvField) {
 		if f.pred == 3 {
 			w0, o0 := wo(0)
 			w1, o1 := wo(1)
-			for y := range bh {
-				row := pl[(by+y)*stride+bx : (by+y)*stride+bx+bw]
-				a := sd.pred.l[0][y*bw : y*bw+bw]
-				b := sd.pred.l[1][y*bw : y*bw+bw]
-				for x := range bw {
-					v := (int(a[x])*w0 + int(b[x])*w1 + (o0+o1+1)<<log2WD) >> (log2WD + 1)
-					row[x] = uint16(clip3(0, maxV, v))
-				}
-			}
+			putBlock(out, stride, l0, l1, bw, bw, bh, w0, w1, (o0+o1+1)<<log2WD, uint(log2WD+1), 0, maxV)
 			continue
 		}
-		l := 0
+		l, a := 0, l0
 		if f.pred == 2 {
-			l = 1
+			l, a = 1, l1
 		}
 		w0, o0 := wo(l)
-		for y := range bh {
-			row := pl[(by+y)*stride+bx : (by+y)*stride+bx+bw]
-			a := sd.pred.l[l][y*bw : y*bw+bw]
-			for x := range bw {
-				var v int
-				if log2WD >= 1 {
-					v = ((int(a[x])*w0 + 1<<(log2WD-1)) >> log2WD) + o0
-				} else {
-					v = int(a[x])*w0 + o0
-				}
-				row[x] = uint16(clip3(0, maxV, v))
-			}
+		if log2WD >= 1 {
+			putBlock(out, stride, a, a, bw, bw, bh, w0, 0, 1<<(log2WD-1), uint(log2WD), o0, maxV)
+		} else {
+			putBlock(out, stride, a, a, bw, bw, bh, w0, 0, 0, 0, o0, maxV)
 		}
 	}
 }
@@ -657,117 +626,28 @@ func (sd *sliceDec) interpolate(ref *picture, ci, x0, y0, w, h int, v mv, dst []
 		}
 		src, sstride, off = buf, sw, 0
 	}
-	shift1 := uint(depth - 8)
 	if xFrac == 0 && yFrac == 0 {
-		shift3 := uint(14 - depth)
-		o := off + half*sstride + half
-		for y := range h {
-			row := src[o+y*sstride : o+y*sstride+w]
-			d := dst[y*w : y*w+w]
-			for x, v := range row {
-				d[x] = int16(v) << shift3
-			}
-		}
+		copyBlock(dst, w, w, h, src[off+half*sstride+half:], sstride, uint(14-depth))
 		return
 	}
+	shift1 := uint(depth - 8)
+	var cx, cy *tapPairs
+	pairs := taps / 2
 	if taps == 8 {
-		switch {
-		case yFrac == 0:
-			c := &lumaFilter[xFrac]
-			o := off + half*sstride
-			for y := range h {
-				filter8H(dst[y*w:y*w+w], src[o+y*sstride:], c, shift1)
-			}
-		case xFrac == 0:
-			c := &lumaFilter[yFrac]
-			o := off + half
-			for y := range h {
-				filter8V(dst[y*w:y*w+w], src[o+y*sstride:], sstride, c, shift1)
-			}
-		default:
-			cx, cy := &lumaFilter[xFrac], &lumaFilter[yFrac]
-			tmp := sd.pred.tmp[:sh*w]
-			for y := range sh {
-				filter8H(tmp[y*w:y*w+w], src[off+y*sstride:], cx, shift1)
-			}
-			for y := range h {
-				filter8V16(dst[y*w:y*w+w], tmp[y*w:], w, cy)
-			}
-		}
-		return
+		cx, cy = &lumaPairs[xFrac], &lumaPairs[yFrac]
+	} else {
+		cx, cy = &chromaPairs[xFrac], &chromaPairs[yFrac]
 	}
 	switch {
 	case yFrac == 0:
-		c := &chromaFilter[xFrac]
-		o := off + half*sstride
-		for y := range h {
-			filter4H(dst[y*w:y*w+w], src[o+y*sstride:], c, shift1)
-		}
+		hFilter(dst, w, w, h, src[off+half*sstride:], sstride, cx, pairs, shift1)
 	case xFrac == 0:
-		c := &chromaFilter[yFrac]
-		o := off + half
-		for y := range h {
-			filter4V(dst[y*w:y*w+w], src[o+y*sstride:], sstride, c, shift1)
-		}
+		vFilter(dst, w, w, h, src[off+half:], sstride, cy, pairs, shift1)
 	default:
-		cx, cy := &chromaFilter[xFrac], &chromaFilter[yFrac]
 		tmp := sd.pred.tmp[:sh*w]
-		for y := range sh {
-			filter4H(tmp[y*w:y*w+w], src[off+y*sstride:], cx, shift1)
-		}
-		for y := range h {
-			filter4V16(dst[y*w:y*w+w], tmp[y*w:], w, cy)
-		}
+		hFilter(tmp, w, w, sh, src[off:], sstride, cx, pairs, shift1)
+		vFilter16(dst, w, w, h, tmp, w, cy, pairs)
 	}
 }
 
 // The interpolation filters' rows: dst[x] from src[x .. x+taps-1].
-
-func filter8H(dst []int16, src []uint16, c *[8]int, shift uint) {
-	c0, c1, c2, c3, c4, c5, c6, c7 := c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]
-	src = src[:len(dst)+7]
-	for x := range dst {
-		s := src[x : x+8 : x+8]
-		dst[x] = int16((c0*int(s[0]) + c1*int(s[1]) + c2*int(s[2]) + c3*int(s[3]) +
-			c4*int(s[4]) + c5*int(s[5]) + c6*int(s[6]) + c7*int(s[7])) >> shift)
-	}
-}
-
-func filter8V(dst []int16, src []uint16, stride int, c *[8]int, shift uint) {
-	c0, c1, c2, c3, c4, c5, c6, c7 := c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]
-	for x := range dst {
-		dst[x] = int16((c0*int(src[x]) + c1*int(src[x+stride]) + c2*int(src[x+2*stride]) + c3*int(src[x+3*stride]) +
-			c4*int(src[x+4*stride]) + c5*int(src[x+5*stride]) + c6*int(src[x+6*stride]) + c7*int(src[x+7*stride])) >> shift)
-	}
-}
-
-func filter8V16(dst []int16, src []int16, stride int, c *[8]int) {
-	c0, c1, c2, c3, c4, c5, c6, c7 := c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]
-	for x := range dst {
-		dst[x] = int16((c0*int(src[x]) + c1*int(src[x+stride]) + c2*int(src[x+2*stride]) + c3*int(src[x+3*stride]) +
-			c4*int(src[x+4*stride]) + c5*int(src[x+5*stride]) + c6*int(src[x+6*stride]) + c7*int(src[x+7*stride])) >> 6)
-	}
-}
-
-func filter4H(dst []int16, src []uint16, c *[4]int, shift uint) {
-	c0, c1, c2, c3 := c[0], c[1], c[2], c[3]
-	src = src[:len(dst)+3]
-	for x := range dst {
-		s := src[x : x+4 : x+4]
-		dst[x] = int16((c0*int(s[0]) + c1*int(s[1]) + c2*int(s[2]) + c3*int(s[3])) >> shift)
-	}
-}
-
-func filter4V(dst []int16, src []uint16, stride int, c *[4]int, shift uint) {
-	c0, c1, c2, c3 := c[0], c[1], c[2], c[3]
-	for x := range dst {
-		dst[x] = int16((c0*int(src[x]) + c1*int(src[x+stride]) + c2*int(src[x+2*stride]) + c3*int(src[x+3*stride])) >> shift)
-	}
-}
-
-func filter4V16(dst []int16, src []int16, stride int, c *[4]int) {
-	c0, c1, c2, c3 := c[0], c[1], c[2], c[3]
-	for x := range dst {
-		dst[x] = int16((c0*int(src[x]) + c1*int(src[x+stride]) + c2*int(src[x+2*stride]) + c3*int(src[x+3*stride])) >> 6)
-	}
-}
