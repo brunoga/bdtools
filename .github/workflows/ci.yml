@@ -117,9 +117,9 @@ jobs:
         run: |
           VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "dev")
           go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mvcdec
-          # mvctools reasons about the platform it runs on, so it has to build
+          # bdtools reasons about the platform it runs on, so it has to build
           # for every platform it claims to support, not just the host.
-          go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mvctools
+          go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/bdtools
           go vet ./...
 
       - name: Verify go.mod is tidy

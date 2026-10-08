@@ -1,12 +1,13 @@
-# mvc — pure Go H.264 / MVC stereo decoder, and mvctools
+# bdtools — Blu-ray tools in pure Go
 
-A high-performance H.264 (AVC) decoder written in pure Go with support for
+A Blu-ray 3D converter, and the decoder behind it. The decoder, package
+[`mvc`](mvc), is a high-performance H.264 (AVC) decoder written in pure Go with support for
 **Multiview Video Coding** (MVC, ITU-T H.264 Annex H) as used on 3D Blu-ray.
 For every access unit it outputs **two full-resolution frames** — the base
 view and the dependent view — ready to be consumed by other code.
 
 It ships two commands: `mvcdec`, which decodes a stream to raw YUV or Y4M,
-and [`mvctools`](cmd/mvctools/README.md), which turns a Blu-ray 3D disc,
+and [`bdtools`](cmd/bdtools/README.md), which turns a Blu-ray 3D disc,
 image or playlist into a side-by-side MKV (or remuxes it), reading the disc in
 place with its own demuxer and decoder, handing the frames to x264, x265 or
 SVT-AV1 or straight to the GPU's encoder (NVENC, VAAPI, VideoToolbox, Media
@@ -29,7 +30,7 @@ interrupted run where it stopped.
 ## Build
 
 ```sh
-go build ./cmd/mvcdec ./cmd/mvctools
+go build ./cmd/mvcdec ./cmd/bdtools
 ```
 
 On amd64 the hot paths are hand-written Go assembly (`*_amd64.s`, assembled
@@ -48,6 +49,11 @@ and Windows on amd64, arm64 and arm/v7 (see `.goreleaser.yml`).
 ## Library usage
 
 ```go
+import (
+	"github.com/brunoga/bdtools/m2ts"
+	"github.com/brunoga/bdtools/mvc"
+)
+
 dec := mvc.NewDecoder(mvc.Options{})       // Threads: 0 = all CPUs
 dm := m2ts.NewDemuxer(file)                 // Blu-ray .m2ts / .ssif
 for {
@@ -119,12 +125,12 @@ mvcdec -base left.yuv -dep right.yuv movie.m2ts
 exchanges the views. The Y4M frame rate comes from the stream's VUI timing
 (`-fps num:den` overrides it).
 
-## mvctools
+## bdtools
 
 ```sh
-mvctools --check                                   # which external tools are installed
-mvctools --input "Life of Pi (2012).iso" --output "Life of Pi (2012) 3D.mkv"
-mvctools --remux --input disc.iso --output film.m2ts --audio-lang eng --audio-best
+bdtools --check                                   # which external tools are installed
+bdtools --input "Life of Pi (2012).iso" --output "Life of Pi (2012) 3D.mkv"
+bdtools --remux --input disc.iso --output film.m2ts --audio-lang eng --audio-best
 ```
 
 Converts a Blu-ray 3D disc image, BDMV folder, playlist or m2ts — or a
@@ -136,9 +142,9 @@ process as well, through its own system library, so with one the conversion
 needs no tools at all; otherwise the only external tool is x264, x265 or
 SvtAv1EncApp (or ffmpeg, for software half-SBS), and a remux needs none. HEVC and AV1 can be
 encoded at 10 bits (`--bit-depth 10`). See
-[cmd/mvctools](cmd/mvctools/README.md).
+[cmd/bdtools](cmd/bdtools/README.md).
 A container with the whole toolchain is published as
-`ghcr.io/brunoga/mvctools` for amd64 and arm64.
+`ghcr.io/brunoga/bdtools` for amd64 and arm64.
 
 ## Probing a source before downloading it
 
@@ -212,13 +218,13 @@ concealed from the previous reference picture); decoding is fuzzed with
 ## Testing
 
 ```sh
-go test -race ./...                            # assembly kernels vs Go, conformance, mvctools
+go test -race ./...                            # assembly kernels vs Go, conformance, bdtools
 go test -tags purego ./...                     # the pure-Go decoder every other platform runs
 MVC_BENCH_FILE=clip.264 go test -bench File -run X
 ```
 
 `testdata/bluray` is a synthetic Blu-ray 3D (a folder and a UDF image) the
-built-in demuxer is tested on with no tools installed. The `mvctools`
+built-in demuxer is tested on with no tools installed. The `bdtools`
 end-to-end tests convert it, and a Matroska remux built from the MVC
 fixtures, through x264; they skip when x264 is not on `PATH`.
 
@@ -231,16 +237,16 @@ Blu-ray content where no other decoder outputs the dependent view.
 
 | file | contents |
 |---|---|
-| `decoder.go` | public API, NAL dispatch, picture/AU management, workers |
-| `params.go`, `slice.go` | SPS / subset SPS / PPS, slice headers |
-| `dpb.go` | POC, reference marking, reference lists, MVC inter-view refs |
-| `cabac*.go`, `cavlc.go`, `mb*.go`, `recon.go` | entropy decoding, macroblock layer |
-| `mvpred.go`, `inter.go`, `intra.go`, `transform.go`, `deblock.go` | prediction and reconstruction |
-| `*_amd64.s`, `*_amd64.go` | assembly kernels and their dispatch; `*_noasm.go`, `*_generic.go` the Go fallbacks |
-| `aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
-| `stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
-| `cmd/mvcdec`, `cmd/mvctools` | the commands |
-| `internal/convert` | the Blu-ray 3D conversion pipeline behind mvctools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
+| `mvc/decoder.go` | public API, NAL dispatch, picture/AU management, workers |
+| `mvc/params.go`, `mvc/slice.go` | SPS / subset SPS / PPS, slice headers |
+| `mvc/dpb.go` | POC, reference marking, reference lists, MVC inter-view refs |
+| `mvc/cabac*.go`, `cavlc.go`, `mb*.go`, `recon.go` | entropy decoding, macroblock layer |
+| `mvc/mvpred.go`, `inter.go`, `intra.go`, `transform.go`, `deblock.go` | prediction and reconstruction |
+| `mvc/*_amd64.s`, `*_amd64.go` | assembly kernels and their dispatch; `*_noasm.go`, `*_generic.go` the Go fallbacks |
+| `mvc/aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
+| `mvc/stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
+| `cmd/mvcdec`, `cmd/bdtools` | the commands |
+| `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
 | `internal/hwenc` | the GPU encoders, driven in process through their system libraries: NVENC, VAAPI, VideoToolbox, Media Foundation |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |

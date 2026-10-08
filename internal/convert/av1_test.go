@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
 )
 
 // withTools makes LookPath find exactly the named programs.

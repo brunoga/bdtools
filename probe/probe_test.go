@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 func testdata(parts ...string) string {

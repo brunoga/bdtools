@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/m2ts"
 )
 
 // Joining the clips of a title for a remux: each clip is cut to its

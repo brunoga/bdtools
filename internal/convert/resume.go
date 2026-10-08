@@ -70,7 +70,7 @@ type work struct {
 // workDirName is the work directory for an output: beside it (or under
 // --temp), named after it, so the same command finds it again.
 func workDirName(tmp, output string) string {
-	return filepath.Join(tmp, "."+filepath.Base(output)+".mvctools")
+	return filepath.Join(tmp, "."+filepath.Base(output)+".bdtools")
 }
 
 // openWork makes or reopens the work directory. What an earlier run left

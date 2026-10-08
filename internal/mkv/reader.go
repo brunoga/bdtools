@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Reading Matroska: a streaming reader for the sources mvctools takes in —
+// Reading Matroska: a streaming reader for the sources bdtools takes in —
 // a Blu-ray 3D remuxed to MKV, whose video track carries each MVC access
 // unit whole, base and dependent view together. It reads the headers up to
 // the first cluster, then returns the blocks in file order, unlaced and

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/bdmv"
-	"github.com/brunoga/mvc/internal/hwenc"
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/internal/bdmv"
+	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/m2ts"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // The built-in demuxer is tested on a synthetic Blu-ray (testdata/bluray):

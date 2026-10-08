@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/mvc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // These drive the real decoder against real MVC elementary streams. Asserting

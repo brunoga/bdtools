@@ -1,6 +1,6 @@
 // Package hwenc drives GPU video encoders through their system libraries —
 // NVENC (NVIDIA's driver), VAAPI (Mesa, Intel's media driver), VideoToolbox
-// (macOS) and Media Foundation (Windows) — loaded at run time, so mvctools
+// (macOS) and Media Foundation (Windows) — loaded at run time, so bdtools
 // needs neither cgo nor ffmpeg for hardware encoding. Each encoder takes NV12
 // pictures (P010 for 10-bit) and writes an Annex B H.264 or HEVC stream, or
 // an AV1 stream of OBUs in the low-overhead format (each with its size),

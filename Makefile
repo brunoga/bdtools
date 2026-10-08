@@ -7,7 +7,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
 build:
 	go build $(LDFLAGS) -o mvcdec ./cmd/mvcdec
-	go build $(LDFLAGS) -o mvctools ./cmd/mvctools
+	go build $(LDFLAGS) -o bdtools ./cmd/bdtools
 
 test:
 	go test -race $(PKG)
@@ -27,7 +27,7 @@ cover:
 	go tool cover -html=$(COVER) -o coverage.html
 
 clean:
-	rm -f mvcdec mvctools $(COVER) coverage.html
+	rm -f mvcdec bdtools $(COVER) coverage.html
 
 docker-build:
-	docker build -f Dockerfile.mvctools --build-arg VERSION=$(VERSION) -t mvctools .
+	docker build -f Dockerfile.bdtools --build-arg VERSION=$(VERSION) -t bdtools .

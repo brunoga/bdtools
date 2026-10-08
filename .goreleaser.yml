@@ -25,11 +25,11 @@ builds:
       - goos: darwin
         goarch: arm
 
-  # mvctools decides which external tools a platform needs, so it ships for
+  # bdtools decides which external tools a platform needs, so it ships for
   # every platform it reasons about rather than only the one it was built on.
-  - id: mvctools
-    main: ./cmd/mvctools
-    binary: mvctools
+  - id: bdtools
+    main: ./cmd/bdtools
+    binary: bdtools
     env:
       - CGO_ENABLED=0
     ldflags:
@@ -51,13 +51,13 @@ builds:
         goarch: arm
 
 archives:
-  - name_template: "mvc_{{.Version}}_{{.Os}}_{{.Arch}}{{if .Arm}}v{{.Arm}}{{end}}"
+  - name_template: "bdtools_{{.Version}}_{{.Os}}_{{.Arch}}{{if .Arm}}v{{.Arm}}{{end}}"
     files:
       - README.md
       - CHANGELOG.md
       - LICENSE
-      - src: cmd/mvctools/README.md
-        dst: mvctools.md
+      - src: cmd/bdtools/README.md
+        dst: bdtools.md
         info:
           mode: 0644
     format_overrides:

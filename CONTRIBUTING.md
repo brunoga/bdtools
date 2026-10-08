@@ -13,7 +13,7 @@ Thanks for your interest in contributing.
 
 ```sh
 go build ./cmd/mvcdec
-go build ./cmd/mvctools
+go build ./cmd/bdtools
 ```
 
 ## Running tests

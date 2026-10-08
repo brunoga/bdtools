@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // encoderSink is where a segment's stacked pictures go: a GPU encoder in

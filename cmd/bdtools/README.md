@@ -1,4 +1,4 @@
-# mvctools
+# bdtools
 
 Converts a frame-packed Blu-ray 3D source (MVC) into a side-by-side MKV that an
 ordinary decoder can play, or remuxes it with the tracks you want and nothing
@@ -62,9 +62,9 @@ whole film takes about a minute and a half.
 ## Usage
 
 ```sh
-mvctools --check                       # preflight: what is installed, what is not
-mvctools --dry-run --input 00800.m2ts --output "Life of Pi (2012).mkv"
-mvctools --input 00800.m2ts --output "Life of Pi (2012).mkv"
+bdtools --check                       # preflight: what is installed, what is not
+bdtools --dry-run --input 00800.m2ts --output "Life of Pi (2012).mkv"
+bdtools --input 00800.m2ts --output "Life of Pi (2012).mkv"
 ```
 
 ### What you can point it at
@@ -95,8 +95,8 @@ clip once sees through those. Between copies of the feature the one with
 chapters wins, then the one in fewer pieces.
 
 ```
-mvctools: reading the disc image in place (no mount, no extraction)
-mvctools: chose 00800.mpls (1h28m3s) from 46 playlists, 24 of them 3D
+bdtools: reading the disc image in place (no mount, no extraction)
+bdtools: chose 00800.mpls (1h28m3s) from 46 playlists, 24 of them 3D
 ```
 
 **The eye order comes from the disc too.** The playlist says whether the base
@@ -108,18 +108,18 @@ it when given explicitly.
 It reports as it goes, because a feature film takes hours:
 
 ```
-mvctools: probing STREAM/SSIF/00272.ssif
-mvctools: source: base view track 4113, dependent view track 4114, 1 audio, 1 subtitle
-mvctools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
-mvctools: decoding and encoding (h265, nvenc on the GPU, in process)
-mvctools: frame rate 24000/1001
-mvctools: about 116664 frames to encode (1h21m6s at 23.976 fps)
-mvctools: 7939 of 116664 frames encoded (6.8%), 264.6 fps, 6m51s left
-mvctools: encoded 116642 frames (260.3 fps)
-mvctools: muxing /media/3dmovies/Toy Story (1995).mkv
-mvctools: muxed 10m0s
-mvctools: timeline: picture 0.898-4865.800 s, A_TRUEHD 0.000-4865.841 s
-mvctools: done: /media/3dmovies/Toy Story (1995).mkv
+bdtools: probing STREAM/SSIF/00272.ssif
+bdtools: source: base view track 4113, dependent view track 4114, 1 audio, 1 subtitle
+bdtools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
+bdtools: decoding and encoding (h265, nvenc on the GPU, in process)
+bdtools: frame rate 24000/1001
+bdtools: about 116664 frames to encode (1h21m6s at 23.976 fps)
+bdtools: 7939 of 116664 frames encoded (6.8%), 264.6 fps, 6m51s left
+bdtools: encoded 116642 frames (260.3 fps)
+bdtools: muxing /media/3dmovies/Toy Story (1995).mkv
+bdtools: muxed 10m0s
+bdtools: timeline: picture 0.898-4865.800 s, A_TRUEHD 0.000-4865.841 s
+bdtools: done: /media/3dmovies/Toy Story (1995).mkv
 ```
 
 A non-zero exit means the conversion did not happen, which is what lets a
@@ -258,7 +258,7 @@ never play is the largest saving available that costs no picture quality.
 Start by seeing what is there:
 
 ```sh
-mvctools --list --input "Toy Story 1995 3D.iso" --temp /scratch
+bdtools --list --input "Toy Story 1995 3D.iso" --temp /scratch
 ```
 
 ```
@@ -279,7 +279,7 @@ Then narrow it. Language and codec are **both** required when both are given,
 so the pair names one track rather than the union of two sets:
 
 ```sh
-mvctools --input disc.iso --output out.mkv \
+bdtools --input disc.iso --output out.mkv \
         --audio-lang eng --audio-codec truehd --subs-lang eng
 ```
 
@@ -312,7 +312,7 @@ language filter — this is "the best English track", not "the best track, if it
 happens to be English":
 
 ```sh
-mvctools --input disc.iso --output out.mkv \
+bdtools --input disc.iso --output out.mkv \
         --audio-lang eng --audio-best --subs-lang eng,pt-br
 ```
 
@@ -332,7 +332,7 @@ The chosen track is logged, because a decision made on your behalf should be
 visible rather than inferred from the finished file hours later:
 
 ```
-mvctools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
+bdtools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
 ```
 
 `--audio-best` does not apply to subtitles. Several are routinely wanted at
@@ -418,10 +418,10 @@ went away — continues where it left off when the same command is run
 again. The video is encoded in segments of 2,500 frames (ten keyframe
 intervals, under two minutes of film), each a complete stream from its own
 encoder run, into a work directory beside the output named after it
-(`.Film (2016).mkv.mvctools`, or under `--temp`). A manifest there lists
+(`.Film (2016).mkv.bdtools`, or under `--temp`). A manifest there lists
 the segments that finished.
 
-Run again, mvctools decodes from the start, since a picture cannot be
+Run again, bdtools decodes from the start, since a picture cannot be
 decoded without the ones before it, but encodes only from the first frame
 no segment holds; the decoder alone runs at several times an encoder's
 speed, so catching up an hour of film takes a minute or two. The audio and
@@ -442,7 +442,7 @@ fails keeps only the segments, and says how many frames they hold.
 tracks the filters leave out:
 
 ```sh
-mvctools --remux --input disc.iso --output "Film (2012) 3D.m2ts" \
+bdtools --remux --input disc.iso --output "Film (2012) 3D.m2ts" \
          --audio-lang eng --audio-best --subs-lang eng
 ```
 
@@ -590,7 +590,7 @@ gives a stream that cannot decode at all.
 A source that is not 3D is refused by name rather than failing obscurely:
 
 ```
-mvctools: no MVC track: this source is not 3D (found V_MPEG4/ISO/AVC (track 4113))
+bdtools: no MVC track: this source is not 3D (found V_MPEG4/ISO/AVC (track 4113))
 ```
 
 So are two MVC tracks, an MVC track with no AVC base view, and an elementary
@@ -682,21 +682,21 @@ recent GPUs is `intel-media-va-driver-non-free` on Debian and Ubuntu.
 
 ## Docker
 
-`Dockerfile.mvctools` carries the whole toolchain, for amd64 and arm64, on
+`Dockerfile.bdtools` carries the whole toolchain, for amd64 and arm64, on
 Debian. A release publishes it:
 
 ```sh
-docker run --rm -v /media:/media ghcr.io/brunoga/mvctools:latest --check
+docker run --rm -v /media:/media ghcr.io/brunoga/bdtools:latest --check
 ```
 
 Or build it yourself:
 
 ```sh
-docker build -f Dockerfile.mvctools -t mvctools .
-docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.mvctools -t mvctools .
+docker build -f Dockerfile.bdtools -t bdtools .
+docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.bdtools -t bdtools .
 ```
 
-The demuxer, decoder and muxer are part of the `mvctools` binary, with the
+The demuxer, decoder and muxer are part of the `bdtools` binary, with the
 decoder's assembly kernels chosen at run time by what the CPU supports; the
 image adds x264, x265, ffmpeg (with NVENC, VAAPI and libsvtav1, which
 software AV1 uses), libva, and the VAAPI drivers for Intel (non-free, amd64)
@@ -722,7 +722,7 @@ conversion starts rather than at its encode.
 
 ### Running the conversion out of the image
 
-mvctools knows nothing about Docker: it runs its tools from its own PATH, so
+bdtools knows nothing about Docker: it runs its tools from its own PATH, so
 inside the image it just works. That means you can skip installing the toolchain
 on the host and let a scheduler drive the image instead — pipeliner's `exec`
 sink takes an `args` list, so `docker` becomes the command and nothing needs
@@ -733,7 +733,7 @@ output("exec", upstream=once, command="docker",
        args=["run", "--rm",
              "--volume", "/media:/media",
              "--gpus", "all",                    # or --device /dev/dri for VAAPI
-             "ghcr.io/brunoga/mvctools:latest",
+             "ghcr.io/brunoga/bdtools:latest",
              "--input", "{file_location}",
              "--output", "{sbs_path}", "--quiet"])
 ```
@@ -755,7 +755,7 @@ no quoting:
 src  = input("filesystem", path="/media/3d-staging", recursive=True, mask="*.iso")
 meta = process("metainfo_file", upstream=src)
 conv = output("exec", upstream=meta,
-              command="/usr/local/bin/mvctools",
+              command="/usr/local/bin/bdtools",
               args=["--input", "{file_location}",
                     "--output", "/media/3dmovies/{title} ({video_year}).mkv"])
 pipeline("convert-3d", schedule="0 4 * * *")

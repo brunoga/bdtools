@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/m2ts"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // Decode a 3D Blu-ray transport stream into pairs of full frames.

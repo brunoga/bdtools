@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
 )
 
 // DetailTags describes a finished conversion for its file name, in the

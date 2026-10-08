@@ -1,4 +1,4 @@
-// Package mkv writes Matroska files: the muxer behind mvctools' default
+// Package mkv writes Matroska files: the muxer behind bdtools' default
 // output, taking an encoder's raw H.264 or HEVC stream and the audio and
 // subtitle tracks a Blu-ray demux produces.
 package mkv

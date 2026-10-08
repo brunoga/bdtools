@@ -19,9 +19,9 @@ import (
 	"os"
 	"time"
 
-	pversion "github.com/brunoga/mvc/internal/version"
+	pversion "github.com/brunoga/bdtools/internal/version"
 
-	"github.com/brunoga/mvc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 var (

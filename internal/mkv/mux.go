@@ -157,7 +157,7 @@ func (m *muxer) run(opts Options) error {
 		defer func() { *opts.Spans = m.spans }()
 	}
 	if opts.WritingApp == "" {
-		opts.WritingApp = "mvctools"
+		opts.WritingApp = "bdtools"
 	}
 	// EBML header.
 	var h []byte

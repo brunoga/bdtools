@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/m2ts"
 )
 
 // Format is the container of a stereo source.

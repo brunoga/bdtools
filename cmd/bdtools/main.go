@@ -1,4 +1,4 @@
-// Command mvctools converts a frame-packed Blu-ray 3D source (MVC) into a
+// Command bdtools converts a frame-packed Blu-ray 3D source (MVC) into a
 // side-by-side MKV that an ordinary decoder can play.
 //
 // MVC keeps the second eye as a dependent view of an AVC base view. Very few
@@ -13,9 +13,9 @@
 //
 // Usage:
 //
-//	mvctools --check
-//	mvctools --dry-run --input 00800.m2ts --output "Life of Pi (2012).mkv"
-//	mvctools --input BDMV/PLAYLIST/00800.mpls --output "Life of Pi (2012).mkv"
+//	bdtools --check
+//	bdtools --dry-run --input 00800.m2ts --output "Life of Pi (2012).mkv"
+//	bdtools --input BDMV/PLAYLIST/00800.mpls --output "Life of Pi (2012).mkv"
 //
 // The source is a .iso disc image, a BDMV directory (or its parent), a .mpls
 // playlist, an .m2ts, or a Matroska remux of a 3D disc. Everything is read in
@@ -34,8 +34,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/brunoga/mvc/internal/convert"
-	pversion "github.com/brunoga/mvc/internal/version"
+	"github.com/brunoga/bdtools/internal/convert"
+	pversion "github.com/brunoga/bdtools/internal/version"
 )
 
 // version is overridden at build time with
@@ -49,7 +49,7 @@ func main() {
 }
 
 func run(argv []string, stdout, stderr *os.File) int {
-	fs := flag.NewFlagSet("mvctools", flag.ContinueOnError)
+	fs := flag.NewFlagSet("bdtools", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
 		check    = fs.Bool("check", false, "report which external tools are present and which are missing, then exit")
@@ -85,8 +85,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "mvctools %s — Blu-ray 3D to side-by-side MKV\n\n", pversion.Resolve(version))
-		fmt.Fprintf(stderr, "usage: mvctools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
+		fmt.Fprintf(stderr, "bdtools %s — Blu-ray 3D to side-by-side MKV\n\n", pversion.Resolve(version))
+		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
 			"Converts a Blu-ray 3D (MVC) source into a side-by-side MKV that an\n"+
 			"ordinary decoder can play. The disc is read, decoded and muxed in\n"+
 			"process, and a GPU encodes in process; without one, x264 or x265 does.\n"+
@@ -97,7 +97,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	if *showVer {
-		fmt.Fprintf(stdout, "mvctools %s\n", pversion.Resolve(version))
+		fmt.Fprintf(stdout, "bdtools %s\n", pversion.Resolve(version))
 		return 0
 	}
 
@@ -110,12 +110,12 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	cod := convert.Codec(*codec)
 	if !cod.Valid() {
-		fmt.Fprintf(stderr, "mvctools: unknown codec %q\n", cod)
+		fmt.Fprintf(stderr, "bdtools: unknown codec %q\n", cod)
 		return 2
 	}
 	enc := convert.ParseEncoder(*encoder)
 	if !convert.SupportsEncoder(goos, enc) {
-		fmt.Fprintf(stderr, "mvctools: encoder %q is not available on %s\n", enc, goos)
+		fmt.Fprintf(stderr, "bdtools: encoder %q is not available on %s\n", enc, goos)
 		return 2
 	}
 	if enc == convert.EncoderAuto {
@@ -124,7 +124,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	ga := convert.GPUAPI(*gpuAPI)
 	if !ga.Valid() {
-		fmt.Fprintf(stderr, "mvctools: unknown GPU API %q (want builtin or ffmpeg)\n", ga)
+		fmt.Fprintf(stderr, "bdtools: unknown GPU API %q (want builtin or ffmpeg)\n", ga)
 		return 2
 	}
 
@@ -162,12 +162,12 @@ func run(argv []string, stdout, stderr *os.File) int {
 	// require.
 	if *list {
 		if o.Input == "" {
-			fmt.Fprintf(stderr, "mvctools: --list needs --input\n")
+			fmt.Fprintf(stderr, "bdtools: --list needs --input\n")
 			return 2
 		}
 		tracks, err := convert.NewRunner(goos, o, nil).ListTracks(ctx)
 		if err != nil {
-			fmt.Fprintf(stderr, "mvctools: %v\n", err)
+			fmt.Fprintf(stderr, "bdtools: %v\n", err)
 			return 1
 		}
 		fmt.Fprintf(stdout, "%-5s %-18s %-5s %-20s %s\n", "track", "kind", "lang", "codec", "info")
@@ -177,7 +177,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 
 	plan, err := convert.BuildPlan(goos, o)
 	if err != nil {
-		fmt.Fprintf(stderr, "mvctools: %v\n", err)
+		fmt.Fprintf(stderr, "bdtools: %v\n", err)
 		fs.Usage()
 		return 2
 	}
@@ -191,12 +191,12 @@ func run(argv []string, stdout, stderr *os.File) int {
 	// that a missing tool discovered at step three is a wasted evening.
 	if rep := convert.DetectFor(ctx, goos, o); !rep.OK() {
 		fmt.Fprint(stderr, rep.String())
-		fmt.Fprintf(stderr, "\nmvctools: refusing to start with tools missing; see --check\n")
+		fmt.Fprintf(stderr, "\nbdtools: refusing to start with tools missing; see --check\n")
 		return 1
 	}
 
 	report := convert.Reporter(func(format string, args ...any) {
-		fmt.Fprintf(stderr, "mvctools: "+format+"\n", args...)
+		fmt.Fprintf(stderr, "bdtools: "+format+"\n", args...)
 	})
 	if *quiet {
 		report = nil
@@ -214,7 +214,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		}
 	})
 	if err := runner.Run(ctx); err != nil {
-		fmt.Fprintf(stderr, "mvctools: %v\n", err)
+		fmt.Fprintf(stderr, "bdtools: %v\n", err)
 		return 1
 	}
 
