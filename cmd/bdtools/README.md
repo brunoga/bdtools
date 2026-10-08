@@ -160,7 +160,7 @@ scheduler such as pipeliner retry it.
 | `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
 | `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
-| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the H.264 decoder here), `gpu`, or `cpu` (H.264 only) |
+| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else H.264 here and other codecs with ffmpeg), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265 --encoder nvenc`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` − 6 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
@@ -818,25 +818,26 @@ picks NVENC.
 Everything that only reads and writes streams works everywhere: remuxing
 (Dolby Vision included), demuxing, the 3D conversion (its MVC decoder is
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
-What differs is decoding a 2D source's video, which only NVIDIA's NVDEC
-does here so far:
+A 2D source's video is decoded on NVIDIA's NVDEC where there is one, else
+H.264 by the decoder here and the other codecs by ffmpeg:
 
-| | Linux (NVIDIA) | Linux (other GPU) | Windows | macOS |
-|---|---|---|---|---|
-| 3D Blu-ray → SBS | ✓ | ✓ | ✓ | ✓ |
-| Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ | ✓ |
-| 2D H.264 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) | ✓ (decoded here) |
-| 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | — | — | — |
-| HDR10, HDR10+ in a conversion (HEVC sources) | ✓ | — | — | — |
-| Dolby Vision 8.1 / FEL composed (`--dv-fel compose`) | ✓ | — | — | — |
-| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC) | — | — | — |
+| | Linux (NVIDIA) | elsewhere, with ffmpeg | elsewhere, without |
+|---|---|---|---|
+| 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
+| Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |
+| 2D H.264 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD), VC-1, MPEG-2 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
+| HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
+| Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC) | NVENC only, for now | — |
 
-Every encoder writes HDR10 and HDR10+; what needs NVDEC is decoding the
-Ultra HD HEVC they come in. Without NVDEC, a 2D source in another codec
-than H.264 is refused with that reason
-(`--remux` still works); its fallback, a software HEVC/VC-1/MPEG-2 decoder,
-is still to come. The Dolby Vision code itself (RPUs, composition) is Go,
-with AVX2 kernels on amd64 and the Go versions elsewhere (and with
+Decoding through ffmpeg gives each picture its own timestamp (the stream
+goes to it as a transport stream with them, and `-stats_enc_pre` gives them
+back, so ffmpeg 6.1 or later), and the same pictures: a 4K FEL clip
+converted through it came out byte-identical to one decoded on NVDEC, and
+a Blu-ray's VC-1 decoded the same on both but for a cut-short last
+picture, which NVDEC conceals. Interlaced pictures are deinterlaced
+(bwdif), as NVDEC does. The Dolby Vision code itself (RPUs, composition)
+is Go, with AVX2 kernels on amd64 and the Go versions elsewhere (and with
 `-tags purego`).
 
 ## Hardware encoding

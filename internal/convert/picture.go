@@ -95,7 +95,7 @@ func (m *mvcPictures) hdrStatic() hdr.Static { return hdr.Static{} }
 // it reads an HEVC stream's HDR metadata: the static once, HDR10+ for each
 // picture.
 type gpuPictures struct {
-	kind     gpu.Kind
+	open     decoderOpener
 	codec    gpu.VideoCodec
 	next     func() (base, dep []byte, pts int64, err error)
 	num, den int
@@ -119,7 +119,7 @@ type dynamicMD struct {
 
 func (g *gpuPictures) run(each func(picture) error) error {
 	g.dynamic = map[int64]dynamicMD{}
-	dec, err := gpu.OpenDecoder(g.kind, gpu.DecodeConfig{Codec: g.codec}, func(p *gpu.DecodedPicture) error {
+	dec, err := g.open(gpu.DecodeConfig{Codec: g.codec}, func(p *gpu.DecodedPicture) error {
 		if g.num == 0 && p.FrameRateNum > 0 && p.FrameRateDen > 0 {
 			g.num, g.den = p.FrameRateNum, p.FrameRateDen
 		}
@@ -199,7 +199,7 @@ func (g *gpuPictures) run(each func(picture) error) error {
 			if rpu != nil && g.composeFEL && !g.felChecked {
 				g.felChecked = true
 				if u, err := dovi.ParseNAL(rpu); err == nil && u.FEL() {
-					if g.fel, err = newFELComposer(g.kind, g.report, g.passFEL); err != nil {
+					if g.fel, err = newFELComposer(g.open, g.report, g.passFEL); err != nil {
 						g.report.Report("warning: the Dolby Vision full enhancement layer cannot be decoded: %v", err)
 					} else if g.passFEL {
 						g.report.Report("Dolby Vision full enhancement layer: keeping it as a layer of its own")
@@ -250,7 +250,30 @@ func (g *gpuPictures) run(each func(picture) error) error {
 // the base layer.
 const felLead = 16
 
-func (g *gpuPictures) frameRate() (int, int) { return g.num, g.den }
+func (g *gpuPictures) frameRate() (int, int) { return normalRate(g.num, g.den) }
+
+// normalRate is a decoder's frame rate as video states it: reduced (NVDEC
+// gives 23.976 fps as 96000/4004), and when it is not exactly a standard
+// rate, the standard one it is within 0.2% of, if any.
+func normalRate(num, den int) (int, int) {
+	if num <= 0 || den <= 0 {
+		return 0, 0
+	}
+	a, b := num, den
+	for b != 0 {
+		a, b = b, a%b
+	}
+	num, den = num/a, den/a
+	for _, r := range standardRates {
+		if r[0] == num && r[1] == den {
+			return num, den
+		}
+	}
+	if n, d := rateFromDuration(time.Duration(int64(time.Second) * int64(den) / int64(num))); n > 0 {
+		return n, d
+	}
+	return num, den
+}
 func (g *gpuPictures) errors() int           { return 0 }
 func (g *gpuPictures) dependentFrames() int  { return 0 }
 func (g *gpuPictures) hdrStatic() hdr.Static { return g.static }

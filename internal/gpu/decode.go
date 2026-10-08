@@ -20,6 +20,10 @@ func (c VideoCodec) String() string {
 // DecodeConfig describes the stream to decode.
 type DecodeConfig struct {
 	Codec VideoCodec
+	// LowDelay asks for pictures soon after their access units, at some
+	// cost in speed, where a decoder holds them back (ffmpeg's frame
+	// threads): for a stream decoded beside another and paired with it.
+	LowDelay bool
 }
 
 // ColorInfo is a stream's colour signalling, as its sequence header states

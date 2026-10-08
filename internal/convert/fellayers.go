@@ -88,7 +88,7 @@ func elSegmentPath(path string) string {
 // openLayers starts the enhancement layer's encoder (and for keep, the
 // base layer's decode loop) for a segment whose base layer goes to blPath.
 // It returns the writer the base layer's encoder writes to.
-func openLayers(mode FEL, kind gpu.Kind, cfg gpu.Config, elQP int, blPath string, bl io.Writer) (*felLayers, io.Writer, error) {
+func openLayers(mode FEL, kind gpu.Kind, open decoderOpener, cfg gpu.Config, elQP int, blPath string, bl io.Writer) (*felLayers, io.Writer, error) {
 	l := &felLayers{mode: mode, elPath: elSegmentPath(blPath), w: cfg.Width / 2, h: cfg.Height / 2}
 	f, err := os.Create(l.elPath) //nolint:gosec // our work directory
 	if err != nil {
@@ -106,7 +106,7 @@ func openLayers(mode FEL, kind gpu.Kind, cfg gpu.Config, elQP int, blPath string
 		return l, bl, nil
 	}
 	l.held = map[int]*heldLayers{}
-	if l.loop, err = gpu.OpenDecoder(kind, gpu.DecodeConfig{Codec: gpu.DecodeHEVC}, l.decoded); err != nil {
+	if l.loop, err = open(gpu.DecodeConfig{Codec: gpu.DecodeHEVC}, l.decoded); err != nil {
 		l.abort()
 		return nil, nil, fmt.Errorf("opening the decoder of the encoded base layer: %w", err)
 	}
@@ -122,7 +122,10 @@ func openLayers(mode FEL, kind gpu.Kind, cfg gpu.Config, elQP int, blPath string
 					ok = false
 				}
 			}
-			l.back <- h
+			select { // for reuse; the collector has it otherwise
+			case l.back <- h:
+			default:
+			}
 		}
 	}()
 	return l, io.MultiWriter(bl, (*accessUnits)(&l.written)), nil
