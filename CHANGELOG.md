@@ -14,6 +14,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An MPEG-2 decoder in Go, with a Go deinterlacer (yadif's algorithm): MPEG-2
   Blu-rays and DVDs convert with no GPU and no ffmpeg. Within the
   transform's tolerance of ffmpeg's decode on the ISO conformance streams.
+- A VC-1 decoder in Go (Advanced Profile: progressive, interlaced frame and
+  field pictures): VC-1 Blu-rays convert with no GPU and no ffmpeg, each
+  picture byte-identical to ffmpeg's decode (the SMPTE conformance streams,
+  and minutes of a real disc). About 110 fps for 1080p.
+- Matroska remuxes of VC-1 Blu-rays: the `V_MS/VFW/FOURCC` (WVC1) track, and
+  PCM audio in `A_MS/ACM`.
 - VideoToolbox decoding on macOS (H.264 and HEVC, 10-bit included),
   checked picture by picture against ffmpeg's decode on CI's Macs.
 - NVDEC on Windows (its structures as Windows lays them out, generated

@@ -247,6 +247,7 @@ Blu-ray content where no other decoder outputs the dependent view.
 | `mvc/stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/bdtools` | the commands |
 | `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
+| `internal/mpeg2`, `internal/vc1`, `internal/deint` | MPEG-2 and VC-1 decoders in Go, and a deinterlacer, for 2D sources without a GPU decoder |
 | `internal/gpu` | the GPU encoders and decoders, driven in process through their system libraries: NVENC and NVDEC, VAAPI, VideoToolbox, Media Foundation |
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |

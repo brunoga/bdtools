@@ -236,8 +236,8 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 
 // pictures chooses the decoder for a source's video. A 3D pair goes to the
 // MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
-// (NVDEC, VideoToolbox); else H.264 and MPEG-2 to the decoders here, and
-// the other codecs to ffmpeg.
+// (NVDEC, VideoToolbox); else H.264, MPEG-2 and VC-1 to the decoders here,
+// and HEVC to ffmpeg.
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
@@ -277,6 +277,9 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	case gpu.DecodeMPEG2:
 		r.Report.Report("decoding %s here", video.Type)
 		return decoded(openGoMPEG2), nil
+	case gpu.DecodeVC1:
+		r.Report.Report("decoding %s here", video.Type)
+		return decoded(openGoVC1), nil
 	}
 	dec := toolFFmpeg
 	dec.Purpose = "decode " + video.Type + " video without a GPU decoder"

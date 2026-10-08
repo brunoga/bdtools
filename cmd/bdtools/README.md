@@ -266,10 +266,9 @@ process through its system library like the encoders, decodes H.264, HEVC
 at 4K (580 fps for 10-bit HEVC on an RTX 5090, copied back for the encoder).
 Its H.264 and HEVC pictures are bit-identical to ffmpeg's software
 decoders'; MPEG-2's within the tolerance its inverse transform allows (that
-standard is not bit-exact between decoders). VC-1 awaits a real disc to be
-tried on. Without a GPU
-decoder, H.264 goes to the decoder here; the other codecs need the GPU for
-now. `--decoder` overrides the choice.
+standard is not bit-exact between decoders). Without a GPU decoder, H.264,
+MPEG-2 and VC-1 go to the decoders here (Go), and HEVC to ffmpeg (see
+[What works where](#what-works-where)). `--decoder` overrides the choice.
 
 The output keeps the source's bit depth unless `--bit-depth` says otherwise:
 a 10-bit Ultra HD picture is encoded at 10 bits (with HEVC or AV1; H.264
@@ -823,15 +822,15 @@ Everything that only reads and writes streams works everywhere: remuxing
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
 A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
 NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC) — else H.264 and MPEG-2 by the decoders here and the
-other codecs by ffmpeg:
+(macOS: H.264, HEVC) — else H.264, MPEG-2 and VC-1 by the decoders here and
+HEVC by ffmpeg:
 
 | | NVIDIA (Linux, Windows), Mac (H.264, HEVC) | elsewhere, with ffmpeg | elsewhere, without |
 |---|---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ | ✓ |
-| 2D H.264 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
-| 2D HEVC (Ultra HD), VC-1 | ✓ (NVDEC) | ✓ (ffmpeg) | — |
+| 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) | ✓ (decoded here) |
+| 2D HEVC (Ultra HD) | ✓ (NVDEC) | ✓ (ffmpeg) | — |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ | — |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) | — |
 
@@ -848,6 +847,16 @@ within the inverse transform's tolerance of ffmpeg's (64 dB and up;
 MPEG-2's transform is not bit-exact between decoders). Dual prime
 prediction follows the standard, but no test stream had any. It is slower
 than the GPU: about 30 fps for 1080i, for now.
+
+The VC-1 decoder here is Go too: the Advanced Profile Blu-ray and HD DVD
+use, progressive, interlaced frame and field pictures (every macroblock
+type, intensity compensation, overlap smoothing, the loop filter),
+interlaced pictures deinterlaced as MPEG-2's are. VC-1's transform is
+exact, and its pictures are byte-identical to ffmpeg's: on the SMPTE
+conformance streams ffmpeg tests with, on a Blu-ray sample, and on four
+minutes of a VC-1 Blu-ray remux (5,755 pictures, fades included). About
+110 fps for 1080p on one core. A Matroska remux of a VC-1 Blu-ray (VFW
+FourCC `WVC1`, with its PCM in `A_MS/ACM`) converts like the disc.
 
 Decoding through ffmpeg gives each picture its own timestamp (the stream
 goes to it as a transport stream with them, and `-stats_enc_pre` gives them

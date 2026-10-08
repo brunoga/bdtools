@@ -143,40 +143,63 @@ func TestFFDecoderVC1(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatalf("ffmpeg decoding the sample: %v", err)
 	}
-	f, err := os.Open(path) //nolint:gosec // test
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = f.Close() }()
-	r := m2ts.NewReader(f)
-	r.Select(0x1011)
-	var got []byte
-	dec, err := openFFDecoder(bin, gpu.DecodeConfig{Codec: gpu.DecodeVC1}, func(p *gpu.DecodedPicture) error {
-		for y := range p.Height {
-			got = append(got, p.Y[y*p.Pitch:y*p.Pitch+p.Width]...)
-		}
-		for y := range p.Height / 2 {
-			got = append(got, p.UV[y*p.Pitch:y*p.Pitch+p.Width]...)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = dec.Close() }()
-	for {
-		p, err := r.Next()
-		if err != nil {
-			break
-		}
-		if err := dec.Decode(p.Payload, p.PTS); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := dec.Flush(); err != nil {
-		t.Logf("flush: %v", err) // the sample's last picture is cut short
-	}
-	if n := min(len(got), len(want)); n == 0 || !bytes.Equal(got[:n], want[:n]) {
-		t.Errorf("%d bytes of pictures, ffmpeg's %d, or other pictures", len(got), len(want))
+	for _, c := range []struct {
+		name string
+		open decoderOpener
+	}{
+		{"ffmpeg", func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+			return openFFDecoder(bin, cfg, picture)
+		}},
+		{"the decoder here", openGoVC1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f, err := os.Open(path) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+			r := m2ts.NewReader(f)
+			r.Select(0x1011)
+			var got []byte
+			dec, err := c.open(gpu.DecodeConfig{Codec: gpu.DecodeVC1}, func(p *gpu.DecodedPicture) error {
+				for y := range p.Height {
+					got = append(got, p.Y[y*p.Pitch:y*p.Pitch+p.Width]...)
+				}
+				for y := range p.Height / 2 {
+					got = append(got, p.UV[y*p.Pitch:y*p.Pitch+p.Width]...)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = dec.Close() }()
+			for {
+				p, err := r.Next()
+				if err != nil {
+					break
+				}
+				if err := dec.Decode(p.Payload, p.PTS); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := dec.Flush(); err != nil {
+				t.Logf("flush: %v", err) // the sample's last picture is cut short
+			}
+			// The sample's last access unit is cut short: decoders may
+			// conceal it differently. It is a B picture, the one before the
+			// last in display order.
+			const size = 1920 * 1080 * 3 / 2
+			n := min(len(got), len(want)) - 2*size
+			if n <= 0 || !bytes.Equal(got[:n], want[:n]) {
+				for i := 0; i+size <= n; i += size {
+					if !bytes.Equal(got[i:i+size], want[i:i+size]) {
+						t.Errorf("picture %d differs", i/size)
+						break
+					}
+				}
+				t.Errorf("%d bytes of pictures, ffmpeg's %d, or other pictures", len(got), len(want))
+			}
+		})
 	}
 }

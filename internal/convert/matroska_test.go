@@ -303,3 +303,37 @@ func TestHasParams(t *testing.T) {
 		t.Error("H.264")
 	}
 }
+
+// A VC-1 track is a VFW one of FourCC WVC1, its headers after the
+// BITMAPINFOHEADER (a size byte may come first); A_MS/ACM PCM is read from
+// its WAVEFORMATEX(TENSIBLE) when the track header lacks the format.
+func TestMatroskaVC1AndACM(t *testing.T) {
+	bih := make([]byte, 40)
+	copy(bih[16:], "WVC1")
+	hdrs := []byte{0, 0, 1, 0x0f, 0xaa, 0, 0, 1, 0x0e, 0xbb}
+	v := &mkv.ReadTrack{CodecID: "V_MS/VFW/FOURCC", CodecPrivate: append(append(append([]byte(nil), bih...), 10), hdrs...)}
+	if !isVC1(v) {
+		t.Fatal("a WVC1 track is not VC-1")
+	}
+	if got := vc1Headers(v); !bytes.Equal(got, hdrs) {
+		t.Errorf("headers %x, want %x", got, hdrs)
+	}
+	copy(v.CodecPrivate[16:], "WMV3")
+	if isVC1(v) {
+		t.Error("a WMV3 track is VC-1")
+	}
+	wfx := make([]byte, 40)
+	binary.LittleEndian.PutUint16(wfx, 0xfffe)
+	binary.LittleEndian.PutUint16(wfx[2:], 6)
+	binary.LittleEndian.PutUint32(wfx[4:], 48000)
+	binary.LittleEndian.PutUint16(wfx[14:], 24)
+	binary.LittleEndian.PutUint16(wfx[24:], 1) // KSDATAFORMAT_SUBTYPE_PCM
+	a := &mkv.ReadTrack{CodecID: "A_MS/ACM", CodecPrivate: wfx}
+	if ch, rate, bits, ok := pcmFormat(a); !ok || ch != 6 || rate != 48000 || bits != 24 {
+		t.Errorf("pcmFormat = %d, %d, %d, %v", ch, rate, bits, ok)
+	}
+	binary.LittleEndian.PutUint16(wfx[24:], 3) // IEEE float
+	if _, _, _, ok := pcmFormat(a); ok {
+		t.Error("float audio taken for PCM")
+	}
+}
