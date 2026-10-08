@@ -639,14 +639,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
-	if c := src.dovi[uint64(sel.Base.ID)]; c != nil { //nolint:gosec // a track number
-		if r.Opts.Remux {
-			r.dovi = c
-			r.Report.Report("keeping Dolby Vision profile %d", c.Profile)
-		} else {
-			r.Report.Report("warning: a re-encode does not carry Dolby Vision yet: the base layer is converted " +
-				"(--remux keeps it)")
-		}
+	if c := src.dovi[uint64(sel.Base.ID)]; c != nil && r.Opts.Remux { //nolint:gosec // a track number
+		r.dovi = c
+		r.Report.Report("keeping Dolby Vision profile %d", c.Profile)
 	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.rateNum, src.rateDen

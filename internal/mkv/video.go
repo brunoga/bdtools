@@ -27,6 +27,8 @@ const (
 type VideoSource struct {
 	// extras gives units to add to a frame, by its display index.
 	extras   func(display int64, key bool) [][]byte
+	// trailer gives units to end a frame with, by its display index.
+	trailer func(display int64) [][]byte
 	codec    Codec
 	r        *bufio.Reader
 	frameDur time.Duration
@@ -135,6 +137,11 @@ func (v *VideoSource) Next() (Frame, error) {
 			nals = append(append(append([][]byte(nil), nals[:at]...), more...), nals[at:]...)
 		}
 	}
+	if v.trailer != nil {
+		if more := v.trailer(f.dispIdx); len(more) > 0 {
+			nals = append(append([][]byte(nil), nals...), more...)
+		}
+	}
 	if f.key && !v.hasParams(nals) {
 		// A keyframe carries the parameter sets, so playback can start there.
 		nals = append(v.params.raw(v.codec), nals...)
@@ -182,6 +189,10 @@ func (v *VideoSource) at(n int64) time.Duration { return v.delay + time.Duration
 func (v *VideoSource) SetDisplaySize(w, h int) {
 	v.track.DisplayWidth, v.track.DisplayHeight = w, h
 }
+
+// SetTrailer has trailer give, for each frame by its display index, NAL
+// units to end it with: Dolby Vision's RPU goes last in its access unit.
+func (v *VideoSource) SetTrailer(trailer func(display int64) [][]byte) { v.trailer = trailer }
 
 // SetBlockAdditions sets the track's BlockAdditionMappings.
 func (v *VideoSource) SetBlockAdditions(a []BlockAddition) { v.track.BlockAdditions = a }

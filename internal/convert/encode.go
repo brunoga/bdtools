@@ -136,6 +136,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			}
 			r.hdr10Plus[int64(n-1)] = sf.hdr10Plus
 		}
+		if sf.rpu != nil {
+			r.keepRPU(int64(n-1), sf.rpu)
+		}
 		if n <= skip {
 			return nil
 		}

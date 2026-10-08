@@ -32,8 +32,20 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--remux` into Matroska: the enhancement layer (PID 0x1015) and RPU go
   into the HEVC track as players expect them, with the Dolby Vision
   configuration record. A Matroska source keeps its Dolby Vision in a
-  remux, and a `.m2ts` remux keeps the enhancement layer's stream. A
-  conversion encodes the HDR10 base layer, with a warning.
+  remux, and a `.m2ts` remux keeps the enhancement layer's stream.
+- Dolby Vision through a conversion to HEVC, as profile 8.1: each frame
+  carries its picture's RPU, converted from profile 7 as dovi_tool's mode
+  2 does (byte-identical on every RPU of the test clips), with the profile
+  8.1 configuration record. The RPU reader and writer are in Go.
+
+### Fixed
+
+- NVDEC gave a stream's first picture a later picture's timestamp when it
+  dropped leading pictures after it (a Matroska file starting on a CRA):
+  the start of the picture was placed up to a few frames early. Each
+  picture now carries its own access unit's timestamp.
+- A Matroska remux no longer repeats the track header's parameter sets
+  ahead of a first picture that has its own.
 
 ### Changed
 

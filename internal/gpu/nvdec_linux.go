@@ -112,6 +112,15 @@ type nvdec struct {
 	color          ColorInfo
 	rateNum, rateD int
 
+	// feeding is the timestamp of the access unit being parsed, and pts
+	// each decode surface's picture's, set as it is decoded. The parser's
+	// own display timestamps are the pending ones handed out in ascending
+	// order, not each picture's: when it drops leading pictures (RASL after
+	// a stream's first CRA), theirs stay pending and the pictures shown
+	// take them.
+	feeding int64
+	pts     map[uint32]int64
+
 	ready []*DecodedPicture // copied out, waiting to be handed on
 	free  []nvdecHost
 	used  []nvdecHost
@@ -196,6 +205,7 @@ func (d *nvdec) feed(au []byte, pts int64, flags uint32) error {
 			pkt.uptr(cuvPktPayload, data.ptr())
 		}
 		pkt.u64(cuvPktTimestamp, uint64(pts)) //nolint:gosec // a timestamp, passed through
+		d.feeding = pts
 		r := call(d.a.parse, d.parser, pkt.ptr())
 		runtime.KeepAlive(data)
 		if d.err != nil {
@@ -289,6 +299,13 @@ func (d *nvdec) decode(params uintptr) uintptr {
 	if d.dec == 0 {
 		return 0
 	}
+	if d.pts == nil {
+		d.pts = map[uint32]int64{}
+	}
+	pp := cstruct(cbytes(params, cuvPicSecondField+4))
+	if pp.getU32(cuvPicSecondField) == 0 { // a field pair is its first field's
+		d.pts[pp.getU32(cuvPicCurrIdx)] = d.feeding
+	}
 	if r := call(d.a.decodePic, d.dec, params); r != 0 {
 		d.err = fmt.Errorf("nvdec: cuvidDecodePicture: %d", r)
 		return 0
@@ -348,8 +365,12 @@ func (d *nvdec) display(info uintptr) uintptr {
 		return 0
 	}
 	b := cbytes(host.p, size)
+	pts, ok := d.pts[di.getU32(cuvDIIndex)]
+	if !ok {
+		pts = int64(di.getPtr(cuvDITimestamp)) //nolint:gosec // passed through
+	}
 	d.ready = append(d.ready, &DecodedPicture{Width: d.width, Height: d.height, Depth: d.depth,
-		Y: b[:row*d.height], UV: b[row*d.height:], Pitch: row, PTS: int64(di.getPtr(cuvDITimestamp)), //nolint:gosec // passed through
+		Y: b[:row*d.height], UV: b[row*d.height:], Pitch: row, PTS: pts,
 		Color: d.color, FrameRateNum: d.rateNum, FrameRateDen: d.rateD})
 	return 1
 }

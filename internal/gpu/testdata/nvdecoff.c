@@ -43,7 +43,7 @@ int main(void) {
 	O(CUVIDPARSERDISPINFO, top_field_first, "cuvDITopFirst"); O(CUVIDPARSERDISPINFO, timestamp, "cuvDITimestamp");
 	S(CUVIDPROCPARAMS, "cuvSizeProcParams");
 	O(CUVIDPROCPARAMS, progressive_frame, "cuvPPProgressive"); O(CUVIDPROCPARAMS, top_field_first, "cuvPPTopFirst");
-	O(CUVIDPICPARAMS, CurrPicIdx, "cuvPicCurrIdx");
+	O(CUVIDPICPARAMS, CurrPicIdx, "cuvPicCurrIdx"); O(CUVIDPICPARAMS, second_field, "cuvPicSecondField");
 	S(CUVIDDECODECAPS, "cuvSizeCaps");
 	O(CUVIDDECODECAPS, eCodecType, "cuvCapsCodec"); O(CUVIDDECODECAPS, eChromaFormat, "cuvCapsChroma");
 	O(CUVIDDECODECAPS, nBitDepthMinus8, "cuvCapsDepth"); O(CUVIDDECODECAPS, bIsSupported, "cuvCapsSupported");

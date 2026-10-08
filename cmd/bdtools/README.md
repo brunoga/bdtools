@@ -320,10 +320,21 @@ On a Dolby Vision test clip (4K, FEL), the MKV remux carried every picture
 through unchanged, and ffprobe reads the result as profile 7, level 6, with
 the enhancement layer and RPU present.
 
-A conversion does not carry Dolby Vision yet: it encodes the HDR10 base
-layer, with its HDR10 metadata, and says so. Still to come: profile 8.1 in
-a conversion (the RPU rewritten for the base layer alone), then the full
-enhancement layer composed into the picture.
+A conversion (with `--codec h265`) carries Dolby Vision as profile 8.1: it
+encodes the HDR10 base layer, and each frame ends with its own picture's
+RPU, rewritten for the base layer alone the way dovi_tool's mode 2 does it
+(the enhancement layer's quantisation dropped; with a full enhancement
+layer, the mapping made the identity; profile 8.1's colour matrices). The
+track gets the profile 8.1 configuration record. Players that know Dolby
+Vision tone map the picture with its RPUs; others play it as HDR10. The
+RPUs are read and written here, in Go: on the test clips' 11,574 RPUs,
+writing each back gives the same bytes, and each converted one is
+byte-identical to dovi_tool's. In a 30-second 4K FEL encode, every frame
+carried its own picture's RPU. AV1 and H.264 output keep the HDR10 picture
+without Dolby Vision, with a warning.
+
+Still to come: the full enhancement layer composed into the picture
+(profile 7 FEL's 12-bit result), rather than set aside.
 
 ## Choosing tracks
 
