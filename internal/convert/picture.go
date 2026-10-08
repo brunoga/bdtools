@@ -28,6 +28,10 @@ type picture struct {
 	// rpu is the picture's Dolby Vision RPU NAL unit as the source has it,
 	// nil when there is none.
 	rpu []byte
+	// el is the picture's Dolby Vision enhancement layer picture, when the
+	// layers are kept apart (--dv-fel keep or reencode); valid, like the
+	// picture, during the call that delivers it.
+	el *dovi.Picture
 }
 
 // size is the picture's (one view's) size and sample depth.
@@ -99,8 +103,10 @@ type gpuPictures struct {
 	dynamic  map[int64]dynamicMD // by timestamp, until the picture comes out
 	report   Reporter
 	// composeFEL composes a Dolby Vision full enhancement layer into the
-	// pictures; fel does it, once the first RPU has said there is one.
+	// pictures, or with passFEL passes it on beside them; fel does it, once
+	// the first RPU has said there is one.
 	composeFEL bool
+	passFEL    bool
 	felChecked bool
 	fel        *felComposer
 }
@@ -193,8 +199,10 @@ func (g *gpuPictures) run(each func(picture) error) error {
 			if rpu != nil && g.composeFEL && !g.felChecked {
 				g.felChecked = true
 				if u, err := dovi.ParseNAL(rpu); err == nil && u.FEL() {
-					if g.fel, err = newFELComposer(g.kind, g.report); err != nil {
-						g.report.Report("warning: the Dolby Vision full enhancement layer cannot be composed: %v", err)
+					if g.fel, err = newFELComposer(g.kind, g.report, g.passFEL); err != nil {
+						g.report.Report("warning: the Dolby Vision full enhancement layer cannot be decoded: %v", err)
+					} else if g.passFEL {
+						g.report.Report("Dolby Vision full enhancement layer: keeping it as a layer of its own")
 					} else {
 						g.report.Report("Dolby Vision full enhancement layer: composing it into the picture")
 					}

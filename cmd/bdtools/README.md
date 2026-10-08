@@ -161,7 +161,8 @@ scheduler such as pipeliner retry it.
 | `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the H.264 decoder here), `gpu`, or `cpu` (H.264 only) |
-| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture, or `drop` it (the HDR10 base layer as it is) |
+| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265 --encoder nvenc`); or `drop` it (the HDR10 base layer as it is) |
+| `--dv-el-crf` | `--crf` − 6 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
@@ -346,6 +347,47 @@ and NVENC it costs a few percent (137 fps against 143 for the base layer
 alone on a 4K test clip). `--dv-fel drop` leaves the enhancement layer
 out and encodes the base layer as it is; a minimal enhancement layer (MEL)
 adds nothing, and its mapping is kept in the RPU.
+
+#### Keeping the enhancement layer as a layer
+
+A conversion can also keep profile 7 — the HDR10 base layer and the full
+enhancement layer apart, with the disc's RPUs unchanged — for players that
+compose FEL themselves (most play profile 7 as its base layer). Two
+methods, with `--codec h265 --encoder nvenc`:
+
+- `--dv-fel keep` rebuilds the enhancement layer for the base layer as it
+  was encoded, the way Dolby's encoder makes one. The base layer's
+  bitstream is decoded again as NVENC writes it, and each picture's
+  enhancement layer is the source's residual plus what our base layer,
+  through the RPU's mapping, falls short of the source's: so the
+  composition makes up for the base layer's encoding error, as far as an
+  enhancement layer half its size and quantised by the RPU can.
+- `--dv-fel reencode` re-encodes the source's enhancement layer as it is.
+  It was made for the disc's base layer, so our base layer's encoding error
+  passes through the composition uncorrected; it is the faster one.
+
+The enhancement layer is encoded on a second NVENC session set up like the
+first, so that the two streams' pictures are coded in the same order with
+the same types, as Dolby Vision requires; the mux checks it. Its quality is
+`--dv-el-crf` (by default `--crf` less 6: its residual is a few codes
+either side of its offset, which the base layer's quantiser would mostly
+flatten). `--remux` keeps the disc's layers as they are.
+
+On a 30-second 4K FEL clip (`--crf 18`), measured by composing each
+output's layers and comparing with the source's composition (luma PSNR,
+three frames):
+
+| | composition | size | speed |
+|---|---|---|---|
+| `compose` (profile 8.1) | 55.6–59.7 dB | 8.3 MB | 137 fps |
+| `keep`, `--dv-el-crf 12` | 56.8–59.7 dB | 5 + 7 MB | 87 fps |
+| `reencode`, `--dv-el-crf 12` | 55.9–58.7 dB | 5 + 6 MB | 135 fps |
+| `keep`, `--dv-el-crf 6` | 58.6–60.9 dB | 5 + 19 MB | |
+
+Two layers are not cheaper than one for the same picture: what profile 7
+keeps is the enhancement layer for a player to compose itself, at its 12
+bits. Rebuilt, the enhancement layer is consistently about a dB nearer the
+source than re-encoded.
 
 The arithmetic follows libplacebo's reshaping and FEL composition and
 vs-nlq's dequantisation (the residual agrees with vs-nlq's to 1/65536 over

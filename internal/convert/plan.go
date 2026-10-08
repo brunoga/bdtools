@@ -74,8 +74,14 @@ type Options struct {
 	Decoder Decoder
 	// DVFEL is what a conversion does with a Dolby Vision full
 	// enhancement layer: compose it into the picture (FELCompose, the
-	// default) or leave it out (FELDrop, the HDR10 base layer as it is).
+	// default; profile 8.1 out), keep it as a layer (FELKeep, rebuilt for
+	// the encoded base layer, or FELReencode, the source's re-encoded;
+	// profile 7 out), or leave it out (FELDrop, the HDR10 base layer as it
+	// is).
 	DVFEL FEL
+	// DVELCRF is the enhancement layer's quality when it is kept as a layer
+	// (0: CRF less 6).
+	DVELCRF int
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
 	// on its own. A source with no MVC dependent view is converted so in
@@ -128,9 +134,15 @@ const (
 type FEL string
 
 const (
-	FELCompose FEL = ""
-	FELDrop    FEL = "drop"
+	FELCompose  FEL = ""
+	FELKeep     FEL = "keep"
+	FELReencode FEL = "reencode"
+	FELDrop     FEL = "drop"
 )
+
+// layered reports whether the output keeps the enhancement layer apart:
+// profile 7.
+func (f FEL) layered() bool { return f == FELKeep || f == FELReencode }
 
 // Subs3D says what becomes of the subtitles: see Options.Subs3D.
 type Subs3D string
@@ -266,10 +278,17 @@ func (o Options) Validate(goos string) error {
 	default:
 		return fmt.Errorf("--decoder %q: want auto, gpu or cpu", o.Decoder)
 	}
+	if o.DVELCRF < 0 || o.DVELCRF > 51 {
+		return fmt.Errorf("--dv-el-crf %d out of range 0-51", o.DVELCRF)
+	}
 	switch o.DVFEL {
 	case FELCompose, "compose", FELDrop:
+	case FELKeep, FELReencode:
+		if !o.Remux && (o.Codec != CodecH265 || o.Encoder != EncoderNVENC) {
+			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc", o.DVFEL)
+		}
 	default:
-		return fmt.Errorf("--dv-fel %q: want compose or drop", o.DVFEL)
+		return fmt.Errorf("--dv-fel %q: want compose, keep, reencode or drop", o.DVFEL)
 	}
 	switch o.Subs3D {
 	case "", Subs3DOff, Subs3DOn, Subs3DBoth:

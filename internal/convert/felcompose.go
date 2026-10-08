@@ -14,6 +14,10 @@ import (
 // enhancement layer is meant to give, coded like the HDR10 base layer: so
 // it is encoded as HDR10, and its RPU, converted to profile 8.1, carries
 // the identity mapping (dovi.RPU.ToProfile81) that makes it that picture.
+//
+// To keep the layers apart instead (--dv-fel keep or reencode, profile 7
+// out), the pictures pass through: the base layer copied, with its
+// enhancement layer picture alongside for the encoder (see fellayers.go).
 
 type felComposer struct {
 	dec    gpu.Decoder
@@ -30,12 +34,18 @@ type felComposer struct {
 	done   chan struct{}
 	closed bool
 
+	// pass hands the layers on rather than composing them; elBack returns
+	// enhancement layer pictures the encoding side is done with.
+	pass   bool
+	elBack chan *dovi.Picture
+
 	composed, missing, unusable int
 	err                         error // the first composition failure
 }
 
-func newFELComposer(kind gpu.Kind, report Reporter) (*felComposer, error) {
-	f := &felComposer{report: report, els: map[int64]*dovi.Picture{}, outs: make(chan *dovi.Picture, felBuffers)}
+func newFELComposer(kind gpu.Kind, report Reporter, pass bool) (*felComposer, error) {
+	f := &felComposer{report: report, els: map[int64]*dovi.Picture{}, outs: make(chan *dovi.Picture, felBuffers),
+		pass: pass, elBack: make(chan *dovi.Picture, felBuffers+felLead+8)}
 	for range felBuffers {
 		f.outs <- nil // made at the picture's size on first use
 	}
@@ -51,6 +61,14 @@ func newFELComposer(kind gpu.Kind, report Reporter) (*felComposer, error) {
 func (f *felComposer) keep(p *gpu.DecodedPicture) error {
 	if p.Depth != 10 {
 		return nil
+	}
+	for more := true; more; {
+		select {
+		case e := <-f.elBack:
+			f.free = append(f.free, e)
+		default:
+			more = false
+		}
 	}
 	var el *dovi.Picture
 	if n := len(f.free); n > 0 && f.free[n-1].Width == p.Width && f.free[n-1].Height == p.Height {
@@ -80,6 +98,7 @@ const felBuffers = 3
 type composedPicture struct {
 	pic picture
 	buf *dovi.Picture
+	el  *dovi.Picture // passed on, to come back by elBack
 }
 
 // put composes pic (from the base layer decoder, its planes valid only
@@ -100,6 +119,9 @@ func (f *felComposer) put(pic picture, each func(picture) error) error {
 					}
 				}
 				f.outs <- c.buf
+				if c.el != nil {
+					f.elBack <- c.el
+				}
 			}
 		}()
 	}
@@ -114,8 +136,10 @@ func (f *felComposer) put(pic picture, each func(picture) error) error {
 	if buf == nil || buf.Width != p.Width || buf.Height != p.Height {
 		buf = newPicture(p.Width, p.Height)
 	}
-	pic.gpu = f.compose(buf, p, pic.rpu)
-	f.queue <- composedPicture{pic, buf}
+	var el *dovi.Picture
+	pic.gpu, el = f.compose(buf, p, pic.rpu)
+	pic.el = el
+	f.queue <- composedPicture{pic, buf, el}
 	return nil
 }
 
@@ -144,8 +168,9 @@ func (f *felComposer) finish() error {
 
 // compose writes the base layer picture p composed with its enhancement
 // layer picture and RPU into out (p as it is when either is missing), and
-// gives it as a picture.
-func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []byte) *gpu.DecodedPicture {
+// gives it as a picture. Passing, it copies p and gives its enhancement
+// layer picture (nil when there is none) to go with it.
+func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []byte) (*gpu.DecodedPicture, *dovi.Picture) {
 	el := f.els[p.PTS]
 	// Enhancement layer pictures before this one will not be wanted.
 	for pts, e := range f.els {
@@ -156,11 +181,21 @@ func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []by
 			}
 		}
 	}
+	var passed *dovi.Picture
+	if f.pass && p.Depth == 10 {
+		passed, el = el, nil // the encoding side's now; nothing composed
+		if passed == nil {
+			f.missing++
+		} else {
+			f.composed++
+		}
+	}
 	if el != nil {
 		defer func() { f.free = append(f.free, el) }()
 	}
 	var err error
 	switch {
+	case f.pass:
 	case el == nil || rpu == nil || p.Depth != 10:
 		f.missing++
 	default:
@@ -179,7 +214,7 @@ func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []by
 			}
 		}
 	}
-	if el == nil || rpu == nil || p.Depth != 10 || err != nil {
+	if f.pass || el == nil || rpu == nil || p.Depth != 10 || err != nil {
 		// The base layer as it is, copied: the decoder's planes do not
 		// outlive the call.
 		bps := (p.Depth + 7) / 8
@@ -194,12 +229,16 @@ func (f *felComposer) compose(out *dovi.Picture, p *gpu.DecodedPicture, rpu []by
 	}
 	q := *p
 	q.Y, q.UV, q.Pitch = out.Y, out.UV, out.Pitch
-	return &q
+	return &q, passed
 }
 
 func (f *felComposer) close() {
 	_ = f.dec.Close()
-	f.report.Report("composed the full enhancement layer into %d pictures", f.composed)
+	if f.pass {
+		f.report.Report("kept the full enhancement layer of %d pictures", f.composed)
+	} else {
+		f.report.Report("composed the full enhancement layer into %d pictures", f.composed)
+	}
 	if f.missing > 0 {
 		f.report.Report("warning: %d pictures had no enhancement layer or RPU to compose with: their base layer is kept", f.missing)
 	}

@@ -43,6 +43,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with AVX2 kernels, run beside decoding and encoding (a few percent
   slower than the base layer alone). `--dv-fel drop` keeps the base layer
   as it is.
+- Or the full enhancement layer is kept as a layer: profile 7 out, the
+  source's RPUs unchanged, the enhancement layer on a second NVENC session
+  coded in step with the base layer. `--dv-fel keep` rebuilds it for the
+  encoded base layer (decoded again as it is written), so the composition
+  makes up for the base layer's encoding error; `--dv-fel reencode`
+  re-encodes the source's. `--dv-el-crf` sets its quality.
 
 ### Fixed
 

@@ -606,7 +606,7 @@ func TestRunnerCarriesDolbyVision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v.SetTrailer(func(display int64) [][]byte { return [][]byte{rpus[int(display)%len(rpus)]} })
+	v.SetTrailer(func(display int64) ([][]byte, error) { return [][]byte{rpus[int(display)%len(rpus)]}, nil })
 	w, err := os.Create(src) //nolint:gosec // test
 	if err != nil {
 		t.Fatal(err)
@@ -679,42 +679,53 @@ func TestRunnerCarriesDolbyVision(t *testing.T) {
 	}
 }
 
-// A Dolby Vision profile 7 FEL source is composed: the encode is the base
-// layer mapped and corrected by the enhancement layer, picture by picture,
-// as dovi.Composer makes it. The source is a Matroska file of two HEVC
-// layers coded alike, interleaved as Matroska carries them, with a FEL
-// disc's RPUs in turn. Skips without ffmpeg, x265 and a GPU decoder.
-func TestRunnerComposesFEL(t *testing.T) {
+// felSource is a Dolby Vision profile 7 FEL source for tests: a Matroska
+// file of two HEVC layers coded alike (the enhancement layer half the
+// size), interleaved as Matroska carries them, with a FEL disc's RPUs in
+// turn. It skips without ffmpeg and x265.
+type felSource struct {
+	path       string // the Matroska file
+	blES, elES string // the layers' elementary streams
+	rpus       [][]byte
+	w, h       int
+}
+
+func makeFELSource(t *testing.T, blCRF int) felSource {
+	t.Helper()
 	for _, tool := range []string{"ffmpeg", "x265"} {
 		if _, err := LookPath(tool); err != nil {
 			t.Skipf("%s not installed", tool)
 		}
 	}
 	dir := t.TempDir()
+	const w, h = 640, 360 // NVDEC's smallest HEVC is 144x144: the enhancement layer is 320x180
 	x265 := "log-level=error:bframes=3:b-adapt=0:scenecut=0:keyint=24:min-keyint=24:open-gop=0"
-	encode := func(name, src string, w, h int) string {
+	encode := func(name, src string, w, h, crf int, vf string) string {
 		p := filepath.Join(dir, name)
 		if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-			fmt.Sprintf("%s=s=%dx%d:r=24:d=1", src, w, h), "-c:v", "libx265", "-pix_fmt", "yuv420p10le",
+			fmt.Sprintf("%s=s=%dx%d:r=24:d=1", src, w, h), "-vf", vf,
+			"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-crf", fmt.Sprint(crf),
 			"-x265-params", x265+":colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", p); err != nil {
 			t.Skipf("making %s: %v", name, err)
 		}
 		return p
 	}
-	blES, elES := encode("bl.hevc", "testsrc2", 640, 360), encode("el.hevc", "rgbtestsrc", 320, 180)
-
+	// An enhancement layer is a residual: a few codes either side of the
+	// RPU's offset (512), as a disc's is.
+	lowContrast := "format=yuv420p,lutyuv=y=128+(val-128)/10:u=128+(val-128)/10:v=128+(val-128)/10"
+	fs := felSource{blES: encode("bl.hevc", "gradients", w, h, blCRF, "null"),
+		elES: encode("el.hevc", "testsrc2", w/2, h/2, 10, lowContrast), w: w, h: h}
 	fixture, err := os.ReadFile(filepath.Join("..", "dovi", "testdata", "fel-cmv29.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rpus [][]byte
 	for _, p := range bytes.Split(fixture, []byte{0, 0, 0, 1})[1:] {
-		rpus = append(rpus, append([]byte{dovi.NALRPU << 1, 1}, p...))
+		fs.rpus = append(fs.rpus, append([]byte{dovi.NALRPU << 1, 1}, p...))
 	}
 	// The enhancement layer's NAL units by display index, behind type 63
 	// headers.
 	elFrames := map[int64][][]byte{}
-	ef, err := os.Open(elES) //nolint:gosec // test
+	ef, err := os.Open(fs.elES) //nolint:gosec // test
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,9 +746,8 @@ func TestRunnerComposesFEL(t *testing.T) {
 		}
 	}
 	_ = ef.Close()
-
-	src := filepath.Join(dir, "fel.mkv")
-	bf, err := os.Open(blES) //nolint:gosec // test
+	fs.path = filepath.Join(dir, "fel.mkv")
+	bf, err := os.Open(fs.blES) //nolint:gosec // test
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,19 +755,74 @@ func TestRunnerComposesFEL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v.SetTrailer(func(d int64) [][]byte { return append(append([][]byte(nil), elFrames[d]...), rpus[int(d)%len(rpus)]) })
-	w, err := os.Create(src) //nolint:gosec // test
+	v.SetTrailer(func(d int64) ([][]byte, error) {
+		return append(append([][]byte(nil), elFrames[d]...), fs.rpus[int(d)%len(fs.rpus)]), nil
+	})
+	out, err := os.Create(fs.path) //nolint:gosec // test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := mkv.Mux(w, []mkv.Source{v}, mkv.Options{}); err != nil {
+	if err := mkv.Mux(out, []mkv.Source{v}, mkv.Options{}); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = bf.Close(), w.Close()
+	_, _ = bf.Close(), out.Close()
+	return fs
+}
 
-	out := filepath.Join(dir, "out.mkv")
+// rawP010 decodes a stream's pictures, in display order, as P010.
+func rawP010(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-i", path, "-pix_fmt", "p010le", "-f", "rawvideo", "-").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func p010Picture(b []byte, w, h int) *dovi.Picture {
+	return &dovi.Picture{Width: w, Height: h, Y: b[:w*h*2], UV: b[w*h*2 : w*h*3], Pitch: 2 * w}
+}
+
+func lumaPSNR(a, b []byte) float64 {
+	var se float64
+	for i := 0; i+1 < len(a); i += 2 {
+		d := float64(int(binary.LittleEndian.Uint16(a[i:])>>6) - int(binary.LittleEndian.Uint16(b[i:])>>6))
+		se += d * d
+	}
+	return 10 * math.Log10(1023*1023*float64(len(a)/2)/max(se, 1e-9))
+}
+
+// composition is the picture a source's layers compose to, frame by frame.
+func (fs felSource) composition(t *testing.T, bl, el []byte) []*dovi.Picture {
+	t.Helper()
+	bs, es := fs.w*fs.h*3, fs.w*fs.h*3/4
+	var out []*dovi.Picture
+	for i := 0; (i+1)*bs <= len(bl) && (i+1)*es <= len(el); i++ {
+		u, err := dovi.ParseNAL(fs.rpus[i%len(fs.rpus)])
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := dovi.NewComposer(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := p010Picture(make([]byte, bs), fs.w, fs.h)
+		if err := c.Compose(p, p010Picture(bl[i*bs:], fs.w, fs.h), p010Picture(el[i*es:], fs.w/2, fs.h/2)); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// A Dolby Vision profile 7 FEL source is composed: the encode is the base
+// layer mapped and corrected by the enhancement layer, picture by picture,
+// as dovi.Composer makes it. Skips without ffmpeg, x265 and a GPU decoder.
+func TestRunnerComposesFEL(t *testing.T) {
+	fs := makeFELSource(t, 10)
+	out := filepath.Join(t.TempDir(), "out.mkv")
 	o := DefaultOptions()
-	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = src, out, EncoderSoftware, CodecH265, 4, "ultrafast"
+	o.Input, o.Output, o.Encoder, o.Codec, o.CRF, o.Preset = fs.path, out, EncoderSoftware, CodecH265, 4, "ultrafast"
 	var lines []string
 	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
 		if strings.Contains(err.Error(), "GPU") {
@@ -768,53 +833,130 @@ func TestRunnerComposesFEL(t *testing.T) {
 	if !slices.Contains(lines, "composed the full enhancement layer into 24 pictures") {
 		t.Fatalf("the enhancement layer was not composed:\n%s", strings.Join(lines, "\n"))
 	}
-
-	// The reference: each layer decoded by ffmpeg, composed here.
-	raw := func(path string) []byte {
-		b, err := exec.CommandContext(t.Context(), "ffmpeg", "-v", "error", "-i", path, "-pix_fmt", "p010le", "-f", "rawvideo", "-").Output() //nolint:gosec // test
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
+	bl := rawP010(t, fs.blES)
+	ref := fs.composition(t, bl, rawP010(t, fs.elES))
+	enc := rawP010(t, out)
+	bs, ys := fs.w*fs.h*3, fs.w*fs.h*2
+	if len(ref) != 24 || len(enc) != 24*bs {
+		t.Fatalf("%d pictures composed, %d bytes encoded", len(ref), len(enc))
 	}
-	bl, el, enc := raw(blES), raw(elES), raw(out)
-	const bw, bh = 640, 360
-	bs, es := bw*bh*3, bw*bh*3/4 // P010 frame sizes
-	if len(bl) != 24*bs || len(el) != 24*es || len(enc) != 24*bs {
-		t.Fatalf("frame data %d, %d, %d bytes", len(bl), len(el), len(enc))
-	}
-	psnr := func(a, b []byte) float64 {
-		var se float64
-		for i := 0; i+1 < len(a); i += 2 {
-			d := float64(int(binary.LittleEndian.Uint16(a[i:])>>6) - int(binary.LittleEndian.Uint16(b[i:])>>6))
-			se += d * d
-		}
-		return 10 * math.Log10(1023*1023*float64(len(a)/2)/max(se, 1e-9))
-	}
-	for i := range 24 {
-		u, err := dovi.ParseNAL(rpus[i%len(rpus)])
-		if err != nil {
-			t.Fatal(err)
-		}
-		c, err := dovi.NewComposer(u)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pic := func(b []byte, w, h int) *dovi.Picture {
-			return &dovi.Picture{Width: w, Height: h, Y: b[:w*h*2], UV: b[w*h*2:], Pitch: 2 * w}
-		}
-		ref := pic(make([]byte, bs), bw, bh)
-		if err := c.Compose(ref, pic(bl[i*bs:(i+1)*bs], bw, bh), pic(el[i*es:(i+1)*es], bw/2, bh/2)); err != nil {
-			t.Fatal(err)
-		}
-		ys := len(ref.Y) // luma
+	for i, r := range ref {
 		got := enc[i*bs : i*bs+ys]
-		p, pb := psnr(got, ref.Y), psnr(got, bl[i*bs:i*bs+ys])
+		p, pb := lumaPSNR(got, r.Y), lumaPSNR(got, bl[i*bs:i*bs+ys])
 		if i%8 == 0 {
 			t.Logf("picture %d: %.1f dB from the composition, %.1f dB from the base layer", i, p, pb)
 		}
 		if p < 45 || p < pb+3 {
 			t.Errorf("picture %d: %.1f dB from the composition, %.1f dB from the base layer", i, p, pb)
 		}
+	}
+}
+
+// --dv-fel keep and reencode keep Dolby Vision's layers apart: profile 7
+// out, the source's RPUs unchanged, each frame with its enhancement layer
+// behind type 63 headers. The output's layers compose to near the source's
+// composition, and nearer with the enhancement layer rebuilt for the
+// encoded base layer (keep) than with the source's re-encoded (reencode).
+// Skips without ffmpeg, x265, NVDEC and NVENC.
+func TestRunnerKeepsFELLayers(t *testing.T) {
+	fs := makeFELSource(t, 10)
+	if !ProbeNative(EncoderNVENC, CodecH265, 10, "") {
+		t.Skip("no NVENC")
+	}
+	ref := fs.composition(t, rawP010(t, fs.blES), rawP010(t, fs.elES))
+	mean := map[FEL]float64{}
+	for _, mode := range []FEL{FELKeep, FELReencode} {
+		out := filepath.Join(t.TempDir(), "out.mkv")
+		o := DefaultOptions()
+		o.Input, o.Output, o.Encoder, o.NativeGPU, o.Codec, o.CRF, o.DVFEL = fs.path, out, EncoderNVENC, true, CodecH265, 30, mode
+		var lines []string
+		if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
+			if strings.Contains(err.Error(), "GPU") {
+				t.Skipf("no GPU decoder: %v", err)
+			}
+			t.Fatalf("%s: %v\n%s", mode, err, strings.Join(lines, "\n"))
+		}
+		// Profile 7 with the enhancement layer, and the layers apart again.
+		in, err := os.Open(out) //nolint:gosec // test
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := mkv.NewReader(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg *dovi.Config
+		for _, a := range r.Tracks[0].BlockAdditions {
+			if c, err := dovi.ParseConfig(a.ExtraData); err == nil && a.Type == mkv.FourCC("dvcC") {
+				cfg = &c
+			}
+		}
+		if cfg == nil || cfg.Profile != 7 || !cfg.EL || cfg.Compatibility != 6 {
+			t.Errorf("%s: configuration %+v, want profile 7 with an enhancement layer", mode, cfg)
+		}
+		type frame struct {
+			at     time.Duration
+			bl, el []byte
+			rpu    []byte
+		}
+		var frames []frame
+		for {
+			p, err := r.Next()
+			if err != nil {
+				break
+			}
+			var f frame
+			f.at = p.Time
+			for b := p.Data; len(b) >= 4; {
+				n := int(binary.BigEndian.Uint32(b))
+				nal := b[4 : 4+n]
+				switch nal[0] >> 1 & 0x3f {
+				case dovi.NALEL:
+					f.el = append(append(f.el, 0, 0, 0, 1), nal[2:]...)
+				case dovi.NALRPU:
+					f.rpu = nal
+				default:
+					f.bl = append(append(f.bl, 0, 0, 0, 1), nal...)
+				}
+				b = b[4+n:]
+			}
+			frames = append(frames, f)
+		}
+		_ = in.Close()
+		if len(frames) != 24 {
+			t.Fatalf("%s: %d frames", mode, len(frames))
+		}
+		dir := t.TempDir()
+		blOut, elOut := filepath.Join(dir, "bl.hevc"), filepath.Join(dir, "el.hevc")
+		var blb, elb []byte
+		for _, f := range frames { // decoding order
+			blb, elb = append(blb, f.bl...), append(elb, f.el...)
+		}
+		if err := os.WriteFile(blOut, blb, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(elOut, elb, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sort.Slice(frames, func(i, j int) bool { return frames[i].at < frames[j].at })
+		for i, f := range frames {
+			if !bytes.Equal(f.rpu, fs.rpus[i%len(fs.rpus)]) {
+				t.Fatalf("%s: frame %d does not carry its source RPU unchanged", mode, i)
+			}
+		}
+		got := fs.composition(t, rawP010(t, blOut), rawP010(t, elOut))
+		if len(got) != 24 {
+			t.Fatalf("%s: %d pictures composed from the output", mode, len(got))
+		}
+		for i := range got {
+			mean[mode] += lumaPSNR(got[i].Y, ref[i].Y) / 24
+		}
+		t.Logf("%s: %.2f dB from the source's composition, on average", mode, mean[mode])
+		if mean[mode] < 40 {
+			t.Errorf("%s: %.2f dB from the source's composition", mode, mean[mode])
+		}
+	}
+	if mean[FELKeep] < mean[FELReencode] {
+		t.Errorf("the rebuilt enhancement layer (%.2f dB) is no better than the re-encoded one (%.2f dB)", mean[FELKeep], mean[FELReencode])
 	}
 }

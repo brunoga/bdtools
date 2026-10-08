@@ -232,3 +232,127 @@ func TestUpsampleSiting(t *testing.T) {
 		}
 	}
 }
+
+// smoothPicture is a picture of gentle gradients, which a half-size
+// enhancement layer can correct.
+func smoothPicture(w, h int, phase float64, lo, hi int) *Picture {
+	p := newPicture(w, h)
+	span := float64(hi - lo)
+	for y := range h {
+		for x := range w {
+			v := 0.5 + 0.25*math.Sin(float64(x)/23+phase) + 0.2*math.Cos(float64(y)/17-phase)
+			setSample(p.Y, y*w+x, lo+int(v*span))
+		}
+	}
+	for y := range h / 2 {
+		for x := range w / 2 {
+			v := 0.5 + 0.2*math.Sin(float64(x+y)/13+phase)
+			setSample(p.UV, y*w+2*x, lo+int(v*span))
+			setSample(p.UV, y*w+2*x+1, hi-int(v*span))
+		}
+	}
+	return p
+}
+
+func lumaPSNR(a, b *Picture) float64 {
+	var se float64
+	n := len(a.Y) / 2
+	for i := range n {
+		d := float64(getSample(a.Y, i) - getSample(b.Y, i))
+		se += d * d
+	}
+	return 10 * math.Log10(1023*1023*float64(n)/max(se, 1e-9))
+}
+
+// An enhancement layer rebuilt for an altered base layer makes the
+// composition again: far closer than the source's enhancement layer put
+// with the new base layer.
+func TestRebuild(t *testing.T) {
+	c, err := NewComposer(fixtureRPU(t, "fel-cmv29.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const w, h = 256, 128
+	bl := smoothPicture(w, h, 0, 100, 900)
+	el := smoothPicture(w/2, h/2, 1, 480, 560)
+	want := newPicture(w, h)
+	if err := c.Compose(want, bl, el); err != nil {
+		t.Fatal(err)
+	}
+	// The base layer as an encoder might give it back: off by a few codes,
+	// smoothly.
+	blNew := newPicture(w, h)
+	for y := range h {
+		for x := range w {
+			d := int(6 * math.Sin(float64(x)/40+float64(y)/30))
+			setSample(blNew.Y, y*w+x, min(max(getSample(bl.Y, y*w+x)+d, 0), 1023))
+		}
+	}
+	copy(blNew.UV, bl.UV)
+	elNew := newPicture(w/2, h/2)
+	if err := c.Rebuild(elNew, bl, el, blNew); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, naive := newPicture(w, h), newPicture(w, h)
+	if err := c.Compose(rebuilt, blNew, elNew); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Compose(naive, blNew, el); err != nil {
+		t.Fatal(err)
+	}
+	pr, pn := lumaPSNR(rebuilt, want), lumaPSNR(naive, want)
+	t.Logf("rebuilt %.1f dB, source enhancement layer %.1f dB", pr, pn)
+	if pr < 50 || pr < pn+6 {
+		t.Errorf("rebuilt %.1f dB from the composition, the source's enhancement layer %.1f dB", pr, pn)
+	}
+	// With the base layer unchanged, the rebuilt layer gives the same
+	// picture back.
+	if err := c.Rebuild(elNew, bl, el, bl); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Compose(rebuilt, bl, elNew); err != nil {
+		t.Fatal(err)
+	}
+	if p := lumaPSNR(rebuilt, want); p < 55 {
+		t.Errorf("unchanged base layer: %.1f dB", p)
+	}
+}
+
+func BenchmarkRebuild4K(b *testing.B) {
+	c, err := NewComposer(fixtureRPU(b, "fel-cmv29.bin"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	r := rand.New(rand.NewPCG(5, 6))
+	bl, blNew := randomPicture(3840, 2160, r, 64, 940), randomPicture(3840, 2160, r, 64, 940)
+	el := randomPicture(1920, 1080, r, 400, 624)
+	dst := newPicture(1920, 1080)
+	b.ResetTimer()
+	for range b.N {
+		_ = c.Rebuild(dst, bl, el, blNew)
+	}
+	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "fps")
+}
+
+// The quantiser picks, for any residual, a code whose dequantised residual
+// is as near as any code's.
+func TestQuantiserNearest(t *testing.T) {
+	c, err := NewComposer(fixtureRPU(t, "fel-cmv29.bin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := c.quantiser()
+	for ci := range 3 {
+		for i := -6000; i <= 6000; i++ {
+			r := float32(i) / 10000
+			got := c.residual[ci][q.nearest(ci, r)]
+			best := float32(math.Inf(1))
+			for code := range 1024 {
+				best = min(best, float32(math.Abs(float64(c.residual[ci][code]-r))))
+			}
+			if d := float32(math.Abs(float64(got - r))); d > best+1e-6 {
+				t.Fatalf("component %d, residual %v: code's residual %v is %v off, the best %v", ci, r, got, d, best)
+			}
+		}
+	}
+}

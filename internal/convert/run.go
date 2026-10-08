@@ -81,6 +81,10 @@ type Runner struct {
 	// display index, rpuFailed how many could not be converted.
 	rpus      map[int64][]byte
 	rpuFailed int
+	// felLayered: the output keeps Dolby Vision's enhancement layer as a
+	// layer (profile 7), and rpus are the source's.
+	felLayered bool
+	closers    []func() // what the mux opened and closes at its end
 	// depth is the source's offset metadata, when 3D subtitles are made,
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
@@ -246,7 +250,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	if r.Opts.Decoder != DecoderCPU && ProbeDecoder(gpu.NVENC, codec) {
 		r.Report.Report("decoding %s on the GPU (NVDEC)", video.Type)
 		return &gpuPictures{kind: gpu.NVENC, codec: codec, next: next, report: r.Report,
-			composeFEL: r.Opts.DVFEL == FELCompose}, nil
+			composeFEL: r.Opts.DVFEL != FELDrop, passFEL: r.Opts.DVFEL.layered()}, nil
 	}
 	if r.Opts.Decoder == DecoderGPU {
 		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)

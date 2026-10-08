@@ -185,7 +185,7 @@ func TestOpenWorkKeepsOnlyWholeSegments(t *testing.T) {
 	if err := os.WriteFile(w.segmentPath(3, ".265"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	w.m.Segments = append(w.m.Segments, segment{"video-0002.265", 2}, segment{"video-0003.265", 2})
+	w.m.Segments = append(w.m.Segments, segment{File: "video-0002.265", Frames: 2}, segment{File: "video-0003.265", Frames: 2})
 	if err := w.save(); err != nil {
 		t.Fatal(err)
 	}
