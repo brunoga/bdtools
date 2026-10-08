@@ -127,7 +127,6 @@ type vtDec struct {
 	mu    sync.Mutex
 	ready []*DecodedPicture // copied out by the callback, in display order
 	err   error             // the first error the callback met
-	order []*DecodedPicture // held to put in timestamp order
 }
 
 func openVTDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (Decoder, error) {
@@ -173,6 +172,9 @@ func (d *vtDec) Decode(au []byte, pts int64) error {
 				changed = true
 			}
 		case d.hevc() && t == 35, !d.hevc() && t == 9: // access unit delimiters
+		case !d.hevc() && (t == 14 || t == 15 || t == 20):
+			// MVC's prefix, subset SPS and dependent view slices (a 3D
+			// disc's base view carries prefixes): VideoToolbox refuses them.
 		default:
 			sample = append(sample, byte(len(n)>>24), byte(len(n)>>16), byte(len(n)>>8), byte(len(n)))
 			sample = append(sample, n...)
@@ -205,7 +207,7 @@ func (d *vtDec) Decode(au []byte, pts int64) error {
 	if st != 0 {
 		return d.fail("VTDecompressionSessionDecodeFrame", st)
 	}
-	return d.hand(false)
+	return d.hand()
 }
 
 func (d *vtDec) fail(what string, st int32) error {
@@ -352,10 +354,14 @@ func (d *vtDec) copyOut(pb uintptr, pts int64) (*DecodedPicture, error) {
 		PTS: pts, Color: d.color(pb)}, nil
 }
 
-// color reads the picture's colour attachments as H.273 code points.
+// color is the stream's colour: the SPS's, else the picture's colour
+// attachments' (Apple's software decoders attach none).
 func (d *vtDec) color(pb uintptr) ColorInfo {
+	if c := d.info.color; c.Primaries != 2 || c.Transfer != 2 || c.Matrix != 2 {
+		return c
+	}
 	a := d.a
-	c := ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
+	c := ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2, FullRange: d.info.color.FullRange}
 	get := func(key string) uintptr { return a.attachment(pb, a.attachKeys[key], nil) }
 	k := a.keys
 	switch get("kCVImageBufferColorPrimariesKey") {
@@ -383,13 +389,9 @@ func (d *vtDec) color(pb uintptr) ColorInfo {
 	return c
 }
 
-// vtReorder is how many pictures are held to put them in timestamp order,
-// should VideoToolbox give any out of it.
-const vtReorder = 4
-
-// hand gives on the pictures the callback has copied out: in timestamp
-// order, all of them at the end.
-func (d *vtDec) hand(all bool) error {
+// hand gives on the pictures the callback has copied out, in the order
+// VideoToolbox gave them: display order, with temporal processing.
+func (d *vtDec) hand() error {
 	d.mu.Lock()
 	ready, err := d.ready, d.err
 	d.ready = nil
@@ -397,19 +399,7 @@ func (d *vtDec) hand(all bool) error {
 	if err != nil {
 		return err
 	}
-	d.order = append(d.order, ready...)
-	slices.SortStableFunc(d.order, func(a, b *DecodedPicture) int {
-		switch {
-		case a.PTS < b.PTS:
-			return -1
-		case a.PTS > b.PTS:
-			return 1
-		}
-		return 0
-	})
-	for len(d.order) > 0 && (all || len(d.order) > vtReorder) {
-		p := d.order[0]
-		d.order = d.order[1:]
+	for _, p := range ready {
 		if err := d.picture(p); err != nil {
 			d.err = err
 			return err
@@ -428,7 +418,7 @@ func (d *vtDec) Flush() error {
 		}
 		_ = d.a.wait(d.session)
 	}
-	return d.hand(true)
+	return d.hand()
 }
 
 func (d *vtDec) Close() error {

@@ -8,6 +8,9 @@ import "errors"
 
 // spsInfo is a sequence parameter set's picture.
 type spsInfo struct {
+	// color is the VUI's colour description (2, unspecified, when there
+	// is none).
+	color                      ColorInfo
 	codedW, codedH             int
 	cropL, cropR, cropT, cropB int // in luma samples
 	depth                      int
@@ -122,7 +125,112 @@ func hevcSPS(nal []byte) (spsInfo, error) {
 		s.cropL, s.cropR, s.cropT, s.cropB = r.ue()*subW, r.ue()*subW, r.ue()*subH, r.ue()*subH
 	}
 	s.depth = r.ue() + 8 // bit_depth_luma_minus8
+	s.color = ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
+	r.ue() // bit_depth_chroma_minus8
+	pocBits := r.ue() + 4
+	first := maxSub
+	if r.u(1) != 0 { // sps_sub_layer_ordering_info_present_flag
+		first = 0
+	}
+	for i := first; i <= maxSub; i++ {
+		r.ue()
+		r.ue()
+		r.ue()
+	}
+	for range 6 { // coding and transform block sizes, hierarchy depths
+		r.ue()
+	}
+	scaling := r.u(1) != 0 // scaling_list_enabled_flag
+	if scaling && r.u(1) != 0 { // sps_scaling_list_data_present_flag
+		for size := range 4 {
+			step := 1
+			if size == 3 {
+				step = 3
+			}
+			for m := 0; m < 6; m += step {
+				if r.u(1) == 0 { // scaling_list_pred_mode_flag
+					r.ue()
+					continue
+				}
+				n := min(64, 1<<(4+size<<1))
+				if size > 1 {
+					r.se()
+				}
+				for range n {
+					r.se()
+				}
+			}
+		}
+	}
+	r.u(2)           // amp_enabled_flag, sample_adaptive_offset_enabled_flag
+	if r.u(1) != 0 { // pcm_enabled_flag
+		r.u(8)
+		r.ue()
+		r.ue()
+		r.u(1)
+	}
+	sets := r.ue()
+	deltas := make([]int, sets) // NumDeltaPocs of each set
+	for i := range sets {
+		if i != 0 && r.u(1) != 0 { // inter_ref_pic_set_prediction_flag
+			r.u(1) // delta_rps_sign
+			r.ue() // abs_delta_rps_minus1
+			n := 0
+			for range deltas[i-1] + 1 {
+				used := r.u(1)
+				delta := 1
+				if used == 0 {
+					delta = r.u(1) // use_delta_flag
+				}
+				if used != 0 || delta != 0 {
+					n++
+				}
+			}
+			deltas[i] = n
+		} else {
+			neg, pos := r.ue(), r.ue()
+			for range neg + pos {
+				r.ue()
+				r.u(1)
+			}
+			deltas[i] = neg + pos
+		}
+		if r.err != nil {
+			return s, r.err
+		}
+	}
+	if r.u(1) != 0 { // long_term_ref_pics_present_flag
+		for range r.ue() {
+			r.u(pocBits + 1)
+		}
+	}
+	r.u(2)           // sps_temporal_mvp_enabled_flag, strong_intra_smoothing_enabled_flag
+	if r.u(1) != 0 { // vui_parameters_present_flag
+		s.color = vuiColor(r)
+	}
 	return s, r.err
+}
+
+// vuiColor reads the start of VUI parameters, the same in both codecs, up
+// to the colour description.
+func vuiColor(r *bits) ColorInfo {
+	c := ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
+	if r.u(1) != 0 { // aspect_ratio_info_present_flag
+		if r.u(8) == 255 {
+			r.u(32)
+		}
+	}
+	if r.u(1) != 0 { // overscan_info_present_flag
+		r.u(1)
+	}
+	if r.u(1) != 0 { // video_signal_type_present_flag
+		r.u(3)
+		c.FullRange = r.u(1) != 0
+		if r.u(1) != 0 { // colour_description_present_flag
+			c.Primaries, c.Transfer, c.Matrix = r.u(8), r.u(8), r.u(8)
+		}
+	}
+	return c
 }
 
 // h264SPS reads an H.264 SPS NAL unit (with its 1-byte header).
@@ -201,6 +309,10 @@ func h264SPS(nal []byte) (spsInfo, error) {
 			cy *= 2
 		}
 		s.cropL, s.cropR, s.cropT, s.cropB = r.ue()*cx, r.ue()*cx, r.ue()*cy, r.ue()*cy
+	}
+	s.color = ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
+	if r.u(1) != 0 { // vui_parameters_present_flag
+		s.color = vuiColor(r)
 	}
 	return s, r.err
 }
