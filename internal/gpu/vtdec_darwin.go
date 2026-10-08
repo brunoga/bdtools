@@ -43,7 +43,7 @@ type vtDecAPI struct {
 	width      func(pb uintptr) int
 	height     func(pb uintptr) int
 	attachment func(buf, key uintptr, mode unsafe.Pointer) uintptr
-	keys       map[string]uintptr
+	attachKeys map[string]uintptr // the colour attachments' keys
 }
 
 var (
@@ -62,7 +62,7 @@ func loadVTDec() (*vtDecAPI, error) {
 			vtDecErr = err
 			return
 		}
-		a := &vtDecAPI{vtAPI: base, keys: map[string]uintptr{}}
+		a := &vtDecAPI{vtAPI: base, attachKeys: map[string]uintptr{}}
 		libs := map[string]uintptr{}
 		for _, n := range []string{"CoreVideo", "CoreMedia", "VideoToolbox"} {
 			h, err := openLib(vtFrameworks + n + ".framework/" + n)
@@ -105,7 +105,7 @@ func loadVTDec() (*vtDecAPI, error) {
 				vtDecErr = fmt.Errorf("%w (%v)", ErrDecodeUnavailable, err)
 				return
 			}
-			a.keys[k] = *(*uintptr)(cptr(p))
+			a.attachKeys[k] = *(*uintptr)(cptr(p))
 		}
 		vtDecLoaded = a
 		vtDecCallback = purego.NewCallback(vtDecOutput)
@@ -356,8 +356,8 @@ func (d *vtDec) copyOut(pb uintptr, pts int64) (*DecodedPicture, error) {
 func (d *vtDec) color(pb uintptr) ColorInfo {
 	a := d.a
 	c := ColorInfo{Primaries: 2, Transfer: 2, Matrix: 2}
-	get := func(key string) uintptr { return a.attachment(pb, a.keys[key], nil) }
-	k := a.vtAPI.keys
+	get := func(key string) uintptr { return a.attachment(pb, a.attachKeys[key], nil) }
+	k := a.keys
 	switch get("kCVImageBufferColorPrimariesKey") {
 	case k["kCVImageBufferColorPrimaries_ITU_R_709_2"]:
 		c.Primaries = 1
