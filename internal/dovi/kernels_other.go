@@ -4,6 +4,8 @@ package dovi
 
 type mmrTable struct{}
 
+func (k *mmrRow) prepare() {}
+
 // row predicts a row of chroma samples from their luma, Cb and Cr.
 func (k *mmrRow) row(ob, or, sy, sb, sr []float32) { k.rowGo(ob, or, sy, sb, sr) }
 

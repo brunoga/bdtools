@@ -74,7 +74,7 @@ type mmrRow struct {
 	coef     [2][21]float32
 	lo, hi   [2]float32
 	order    int
-	table    *mmrTable // the kernel's layout, made on first use
+	table    *mmrTable // the kernel's layout
 }
 
 type chromaMap struct {
@@ -185,6 +185,7 @@ func NewComposer(u *RPU) (*Composer, error) {
 				copy(k.coef[i][7*j:], p.coef[j][:])
 			}
 		}
+		k.prepare()
 		c.mmr = k
 	}
 	if q := m.NLQ; q != nil && u.residual() && !q.MEL() {

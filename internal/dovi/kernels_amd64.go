@@ -36,28 +36,31 @@ func mmrRowAVX2(t *mmrTable, ob, or, sy, sb, sr *float32, n int)
 // row predicts a row of chroma samples from their luma, Cb and Cr.
 func (k *mmrRow) row(ob, or, sy, sb, sr []float32) {
 	n := len(ob) &^ 7
-	if !useAVX2 || n == 0 {
+	if !useAVX2 || n == 0 || k.table == nil {
 		k.rowGo(ob, or, sy, sb, sr)
 		return
-	}
-	if k.table == nil {
-		t := &mmrTable{}
-		for c := range 2 {
-			for i := range 21 {
-				for l := range 8 {
-					t.coef[c][i][l] = k.coef[c][i]
-				}
-			}
-			for l := range 8 {
-				t.constant[c][l], t.lo[c][l], t.hi[c][l] = k.constant[c], k.lo[c], k.hi[c]
-			}
-		}
-		k.table = t
 	}
 	mmrRowAVX2(k.table, &ob[0], &or[0], &sy[0], &sb[0], &sr[0], n)
 	if n < len(ob) {
 		k.rowGo(ob[n:], or[n:], sy[n:], sb[n:], sr[n:])
 	}
+}
+
+// prepare lays the coefficients out for the kernel, before rows are
+// shared out.
+func (k *mmrRow) prepare() {
+	t := &mmrTable{}
+	for c := range 2 {
+		for i := range 21 {
+			for l := range 8 {
+				t.coef[c][i][l] = k.coef[c][i]
+			}
+		}
+		for l := range 8 {
+			t.constant[c][l], t.lo[c][l], t.hi[c][l] = k.constant[c], k.lo[c], k.hi[c]
+		}
+	}
+	k.table = t
 }
 
 //go:noescape
