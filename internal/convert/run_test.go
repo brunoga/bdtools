@@ -320,6 +320,12 @@ func TestRunnerConverts2DSources(t *testing.T) {
 			t.Errorf("output %s", got[:7])
 		}
 	})
+	t.Run("MPEG-2, the decoder here", func(t *testing.T) {
+		mpeg2 := make2D("mpeg2.m2ts", "-c:v", "mpeg2video", "-bf", "2", "-q:v", "3")
+		if got := convert(t, mpeg2, CodecH264, DecoderCPU); !bytes.HasPrefix(got, []byte("8-bit ")) {
+			t.Errorf("output %s", got[:7])
+		}
+	})
 }
 
 // A 2D remux into Matroska carries the source's video untouched: it
