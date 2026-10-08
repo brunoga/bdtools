@@ -52,15 +52,16 @@ jobs:
           cache: true
 
       - name: Install ffmpeg and x265
-        # The VideoToolbox decoder is checked picture by picture against
-        # ffmpeg's decode, and the conversions encode with x265.
+        # The VideoToolbox decoder and the HEVC one here are checked picture
+        # by picture against ffmpeg's decode (of x265's streams), and the
+        # conversions encode with x265.
         run: brew install ffmpeg x265
 
       - name: Test VideoToolbox
         # The virtual Macs have no media engine, so the VideoToolbox tests
         # fall back to Apple's software encoder and decoders: the same API
         # and code.
-        run: go test -timeout 300s ./internal/gpu/... ./internal/convert/...
+        run: go test -timeout 300s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
 
   test-windows:
     name: Test (Windows)

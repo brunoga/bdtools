@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/brunoga/bdtools/internal/gpu"
@@ -14,33 +15,58 @@ import (
 	"github.com/brunoga/bdtools/m2ts"
 )
 
-// The ffmpeg decoder gives each picture of a stream, in display order, as
-// ffmpeg decodes the file itself, with the timestamp its access unit was
-// given. Skips without ffmpeg.
+// The ffmpeg decoder, and the decoders here, give each picture of a stream,
+// in display order, as ffmpeg decodes the file itself, with the timestamp
+// its access unit was given. Skips without ffmpeg.
 func TestFFDecoder(t *testing.T) {
 	bin, err := LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("ffmpeg not installed")
 	}
+	ff := func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+		return openFFDecoder(bin, cfg, picture)
+	}
+	var fellBack bool
+	goHEVC := func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+		return openGoHEVC(picture, func() (gpu.Decoder, error) {
+			fellBack = true
+			return openFFDecoder(bin, cfg, picture)
+		}), nil
+	}
+	x265 := func(pixfmt string) []string {
+		return []string{"-c:v", "libx265", "-pix_fmt", pixfmt, "-x265-params", "log-level=error:bframes=3"}
+	}
 	dir := t.TempDir()
 	for _, c := range []struct {
-		name   string
-		codec  gpu.VideoCodec
-		args   []string
-		pixfmt string
-		depth  int
+		name     string
+		codec    gpu.VideoCodec
+		args     []string
+		pixfmt   string
+		depth    int
+		open     decoderOpener
+		fallback bool // the decoder here hands the stream to ffmpeg
+		inexact  bool // a decoder not bit-exact with ffmpeg's (MPEG-2's IDCT)
 	}{
-		{"hevc10", gpu.DecodeHEVC, []string{"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-x265-params", "log-level=error:bframes=3"}, "p010le", 10},
-		{"h264", gpu.DecodeH264, []string{"-c:v", "libx264", "-bf", "3"}, "nv12", 8},
-		{"mpeg2", gpu.DecodeMPEG2, []string{"-c:v", "mpeg2video", "-bf", "2"}, "nv12", 8},
+		{"hevc10", gpu.DecodeHEVC, x265("yuv420p10le"), "p010le", 10, ff, false, false},
+		{"hevc10 here", gpu.DecodeHEVC, x265("yuv420p10le"), "p010le", 10, goHEVC, false, false},
+		{"hevc8 here", gpu.DecodeHEVC, x265("yuv420p"), "nv12", 8, goHEVC, false, false},
+		{"hevc444 here", gpu.DecodeHEVC, x265("yuv444p"), "nv12", 8, goHEVC, true, false},
+		{"h264", gpu.DecodeH264, []string{"-c:v", "libx264", "-bf", "3"}, "nv12", 8, ff, false, false},
+		{"mpeg2", gpu.DecodeMPEG2, []string{"-c:v", "mpeg2video", "-bf", "2"}, "nv12", 8, ff, false, false},
+		{"mpeg2 here", gpu.DecodeMPEG2, []string{"-c:v", "mpeg2video", "-bf", "2"}, "nv12", 8, openGoMPEG2, false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			src := filepath.Join(dir, c.name+".mkv")
+			fellBack = false
+			src := filepath.Join(dir, strings.ReplaceAll(c.name, " ", "_")+".mkv")
 			args := append([]string{"-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2"}, c.args...)
 			if out, err := exec.CommandContext(t.Context(), bin, append(args, src)...).CombinedOutput(); err != nil { //nolint:gosec // test
 				t.Skipf("making the stream: %v %s", err, out)
 			}
-			want, err := exec.CommandContext(t.Context(), bin, "-v", "error", "-i", src, "-pix_fmt", c.pixfmt, "-f", "rawvideo", "-").Output() //nolint:gosec // test
+			ref := []string{"-v", "error", "-i", src}
+			if c.fallback { // to 4:2:0 as the decoder converts it
+				ref = append(ref, "-vf", "format=yuv420p")
+			}
+			want, err := exec.CommandContext(t.Context(), bin, append(ref, "-pix_fmt", c.pixfmt, "-f", "rawvideo", "-")...).Output() //nolint:gosec // test
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +87,7 @@ func TestFFDecoder(t *testing.T) {
 			}
 			var got []byte
 			var pts, fed []int64
-			dec, err := openFFDecoder(bin, gpu.DecodeConfig{Codec: c.codec}, func(p *gpu.DecodedPicture) error {
+			dec, err := c.open(gpu.DecodeConfig{Codec: c.codec}, func(p *gpu.DecodedPicture) error {
 				if p.Depth != c.depth {
 					return fmt.Errorf("depth %d", p.Depth)
 				}
@@ -103,7 +129,7 @@ func TestFFDecoder(t *testing.T) {
 			if err := dec.Flush(); err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(got, want) {
+			if !bytes.Equal(got, want) && (!c.inexact || len(got) != len(want)) {
 				t.Errorf("%d bytes of pictures, ffmpeg's %d, or other pictures", len(got), len(want))
 			}
 			slices.Sort(fed)
@@ -112,6 +138,9 @@ func TestFFDecoder(t *testing.T) {
 			}
 			if !slices.Equal(pts, fed) {
 				t.Errorf("timestamps\n%v\nwant\n%v", pts, fed)
+			}
+			if fellBack != c.fallback {
+				t.Errorf("fell back to ffmpeg: %v", fellBack)
 			}
 		})
 	}

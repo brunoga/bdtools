@@ -236,8 +236,8 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 
 // pictures chooses the decoder for a source's video. A 3D pair goes to the
 // MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
-// (NVDEC, VideoToolbox); else H.264, MPEG-2 and VC-1 to the decoders here,
-// and HEVC to ffmpeg.
+// (NVDEC, VideoToolbox); else to the decoders here, with ffmpeg for HEVC
+// they do not decode.
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
@@ -281,19 +281,22 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 		r.Report.Report("decoding %s here", video.Type)
 		return decoded(openGoVC1), nil
 	}
-	dec := toolFFmpeg
-	dec.Purpose = "decode " + video.Type + " video without a GPU decoder"
-	bin, err := r.resolve(dec)
-	if err != nil {
-		return nil, fmt.Errorf("decoding %s needs a GPU decoder (NVIDIA's, for now) or ffmpeg: %w", video.Type, err)
-	}
-	r.Report.Report("decoding %s with ffmpeg (no GPU decoder for it here)", video.Type)
+	r.Report.Report("decoding %s here", video.Type)
 	return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
-		return openFFDecoder(bin, cfg, picture)
+		return openGoHEVC(picture, func() (gpu.Decoder, error) {
+			dec := toolFFmpeg
+			dec.Purpose = "decode " + video.Type + " video of a profile not decoded here"
+			bin, err := r.resolve(dec)
+			if err != nil {
+				return nil, err
+			}
+			r.Report.Report("decoding %s with ffmpeg (a profile not decoded here)", video.Type)
+			return openFFDecoder(bin, cfg, picture)
+		}), nil
 	}), nil
 }
 
-// decoderOpener opens a decoder of a codec: the GPU's or ffmpeg's.
+// decoderOpener opens a decoder of a codec: the GPU's, ffmpeg's or one here.
 type decoderOpener func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error)
 
 // check2D says what a 2D conversion leaves aside.

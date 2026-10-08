@@ -90,6 +90,7 @@ func openFFDecoder(bin string, cfg gpu.DecodeConfig, picture func(*gpu.DecodedPi
 	}
 	// Interlaced pictures (VC-1 and MPEG-2 discs are often 1080i) are
 	// deinterlaced to one frame each, as NVDEC does; progressive ones pass.
+	// Other chroma formats and depths become the 4:2:0 ones taken here.
 	threads := "0" // ffmpeg's choice: as many frame threads, and pictures held back, as processors
 	if cfg.LowDelay {
 		threads = "4"
@@ -97,7 +98,7 @@ func openFFDecoder(bin string, cfg gpu.DecodeConfig, picture func(*gpu.DecodedPi
 	// Close ends it: the decoder's life is its caller's, not a context's.
 	d.cmd = exec.CommandContext(context.Background(), bin, "-hide_banner", "-nostats", "-loglevel", "info", //nolint:gosec // the ffmpeg we resolved
 		"-threads", threads, "-f", "mpegts", "-i", "pipe:0", "-map", "0:v:0", "-copyts", "-fps_mode", "passthrough",
-		"-vf", "bwdif=mode=send_frame:deint=interlaced", "-enc_time_base", "1/90000", "-f", "rawvideo",
+		"-vf", "bwdif=mode=send_frame:deint=interlaced,format=yuv420p|yuvj420p|yuv420p10le", "-enc_time_base", "1/90000", "-f", "rawvideo",
 		"-stats_enc_pre", "pipe:3", "-stats_enc_pre_fmt", "{pts} {tb}", "pipe:1")
 	d.cmd.ExtraFiles = []*os.File{statsW}
 	d.cmd.Stderr = d.stderr
