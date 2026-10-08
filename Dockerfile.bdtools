@@ -1,11 +1,11 @@
-# ── mvctools image ───────────────────────────────────────────────────────────
+# ── bdtools image ───────────────────────────────────────────────────────────
 #
 # Multi-architecture: everything here is built from source or packaged for every
 # architecture, so this image works on amd64 and on arm64 (Apple Silicon, a
 # Raspberry Pi 4/5).
 #
 # The demuxer (Blu-ray and Matroska), the MVC decoder and the Matroska muxer
-# are part of mvctools itself (pure Go, with assembly kernels on amd64), and a
+# are part of bdtools itself (pure Go, with assembly kernels on amd64), and a
 # GPU is driven through its own library, so the toolchain is the software
 # encoders and ffmpeg (software half-SBS, and GPUs without their library).
 
@@ -19,7 +19,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN GOARM="${TARGETVARIANT#v}" CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
-    go build -ldflags="-s -w -X main.version=${VERSION}" -o mvctools ./cmd/mvctools
+    go build -ldflags="-s -w -X main.version=${VERSION}" -o bdtools ./cmd/bdtools
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 # Debian, not Alpine: a GPU's own libraries — NVIDIA's libnvidia-encode and
@@ -45,10 +45,10 @@ RUN sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' /
 ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
 
-COPY --from=gobuild /build/mvctools /usr/local/bin/mvctools
+COPY --from=gobuild /build/bdtools /usr/local/bin/bdtools
 
 # Where a caller mounts the source and the destination library.
 VOLUME ["/media"]
 
-ENTRYPOINT ["/usr/local/bin/mvctools"]
+ENTRYPOINT ["/usr/local/bin/bdtools"]
 CMD ["--check"]

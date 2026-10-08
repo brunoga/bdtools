@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/esinfo"
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/esinfo"
+	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // Matroska sources: a Blu-ray 3D remuxed to MKV (MakeMKV, mkvmerge), read in

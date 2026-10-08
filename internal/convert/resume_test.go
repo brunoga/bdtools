@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // withSegments makes segments n pictures long for a test.

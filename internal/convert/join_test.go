@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/m2ts"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // basePES lists the base view's PES of a clip in file order: timestamps and

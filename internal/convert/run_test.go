@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 func runnerOpts(t *testing.T) Options {
@@ -93,7 +93,7 @@ func TestRunnerCleansUpItsWorkDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".mvctools") {
+		if strings.HasSuffix(e.Name(), ".bdtools") {
 			t.Errorf("left a work directory behind: %s", e.Name())
 		}
 	}
@@ -223,7 +223,7 @@ func checkConverted(t *testing.T, out, work string, names ...string) {
 	}
 	entries, _ := os.ReadDir(work)
 	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".mvctools") {
+		if strings.HasSuffix(e.Name(), ".bdtools") {
 			t.Errorf("work directory left behind: %s", e.Name())
 		}
 	}

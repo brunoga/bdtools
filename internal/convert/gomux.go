@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // muxBuiltin writes the MKV in process: the encoded video, then each audio
@@ -169,7 +169,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	err = mkv.Mux(out, sources, mkv.Options{
 		Spans:      &spans,
 		Chapters:   chs,
-		WritingApp: "mvctools",
+		WritingApp: "bdtools",
 		Progress: func(t time.Duration) {
 			if ctx.Err() == nil && t%(10*time.Minute) < time.Minute {
 				r.Report.Report("muxed %s", t.Round(time.Minute))

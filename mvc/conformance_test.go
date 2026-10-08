@@ -103,7 +103,7 @@ func decodeFile(data []byte, opts Options) (frames int, base, dep hash128, nDep 
 }
 
 func TestConformance(t *testing.T) {
-	dir := "testdata/conformance"
+	dir := "../testdata/conformance"
 	for _, e := range readManifest(t, filepath.Join(dir, "manifest.txt")) {
 		e := e
 		t.Run(e.name, func(t *testing.T) {

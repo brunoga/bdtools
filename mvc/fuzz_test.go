@@ -11,7 +11,7 @@ func FuzzDecode(f *testing.F) {
 		"2d/BA1_Sony_D", "2d/CABA1_Sony_D", "2d/CVSE2_Sony_B", "2d/FRExt1_Panasonic_D",
 		"2d/HCAFR1_HHI_C", "2d/CABAST3_Sony_E", "2d/MR1_BT_A", "mvc/MVCDS-4",
 	} {
-		data, err := os.ReadFile("testdata/conformance/" + n + ".264")
+		data, err := os.ReadFile("../testdata/conformance/" + n + ".264")
 		if err != nil {
 			continue
 		}

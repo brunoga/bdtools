@@ -1,6 +1,6 @@
 # Build artifacts
 /mvcdec
-/mvctools
+/bdtools
 *.test
 *.prof
 

@@ -30,7 +30,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
 )
 
 // Tool is an external program the conversion depends on.

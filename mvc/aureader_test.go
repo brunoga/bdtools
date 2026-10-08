@@ -11,7 +11,7 @@ import (
 // with DecodeAU gives the same output as decoding the whole stream.
 func TestAUReader(t *testing.T) {
 	for _, n := range []string{"mvc/MVCDS-4", "2d/CVSE2_Sony_B", "2d/MR1_BT_A", "mvc/MVCRP_2"} {
-		data, err := os.ReadFile("testdata/conformance/" + n + ".264")
+		data, err := os.ReadFile("../testdata/conformance/" + n + ".264")
 		if err != nil {
 			t.Skip(err)
 		}

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brunoga/mvc/internal/convert"
+	"github.com/brunoga/bdtools/internal/convert"
 )
 
 func TestAppendCodecToName(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
 )
 
 // Layout is how the two eyes are arranged in the output frame.

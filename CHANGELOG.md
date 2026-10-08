@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The project is now **bdtools** (github.com/brunoga/bdtools), the first
+  step towards 2D and Ultra HD Blu-ray. The command `mvctools` is now
+  `bdtools`, and its image `ghcr.io/brunoga/bdtools`. The module path is
+  `github.com/brunoga/bdtools`; the decoder moved to its own package,
+  `github.com/brunoga/bdtools/mvc` (still package `mvc`), and `probe` and
+  `m2ts` are `github.com/brunoga/bdtools/probe` and `.../m2ts`. An
+  interrupted conversion's work directory is now `.<output>.bdtools`, so a
+  run interrupted under the old name starts over.
+
 ## [0.5.3] - 2026-10-07
 
 ### Changed
@@ -233,14 +244,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/mvc/compare/v0.5.3...HEAD
-[0.5.3]: https://github.com/brunoga/mvc/compare/v0.5.2...v0.5.3
-[0.5.2]: https://github.com/brunoga/mvc/compare/v0.5.1...v0.5.2
-[0.5.1]: https://github.com/brunoga/mvc/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/brunoga/mvc/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/brunoga/mvc/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/brunoga/mvc/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/brunoga/mvc/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/brunoga/mvc/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/brunoga/mvc/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/brunoga/mvc/releases/tag/v0.1.0
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/brunoga/bdtools/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/brunoga/bdtools/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/brunoga/bdtools/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/brunoga/bdtools/compare/v0.4.1...v0.5.0
+[0.4.1]: https://github.com/brunoga/bdtools/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/brunoga/bdtools/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/brunoga/bdtools/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/brunoga/bdtools/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/brunoga/bdtools/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/brunoga/bdtools/releases/tag/v0.1.0

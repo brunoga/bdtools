@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/bdmv"
-	"github.com/brunoga/mvc/internal/esinfo"
-	"github.com/brunoga/mvc/internal/mkv"
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/internal/bdmv"
+	"github.com/brunoga/bdtools/internal/esinfo"
+	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/m2ts"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // The built-in demuxer: reads a Blu-ray — an image, a BDMV, a playlist, or a

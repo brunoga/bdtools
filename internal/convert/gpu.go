@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // GPUAPI selects how a hardware encoder is driven.

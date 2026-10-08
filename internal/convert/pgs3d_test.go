@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // Run-length data decodes to what was encoded, whatever the runs.

@@ -1,4 +1,4 @@
-module github.com/brunoga/mvc
+module github.com/brunoga/bdtools
 
 go 1.26.2
 

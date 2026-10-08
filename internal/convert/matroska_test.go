@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // frameSource is an mkv.Source over prepared frames.

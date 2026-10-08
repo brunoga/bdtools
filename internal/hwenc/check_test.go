@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/brunoga/mvc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // checkDecode decodes an H.264 stream with the repository's decoder and

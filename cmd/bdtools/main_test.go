@@ -39,7 +39,7 @@ func TestVersion(t *testing.T) {
 	if code != 0 {
 		t.Errorf("exit = %d, want 0", code)
 	}
-	if !strings.Contains(out, "mvctools") {
+	if !strings.Contains(out, "bdtools") {
 		t.Errorf("stdout = %q, should name the tool", out)
 	}
 }
@@ -189,7 +189,7 @@ func TestCheckForABuiltinRemux(t *testing.T) {
 // The help starts with a banner naming the tool and its version.
 func TestHelpHasABanner(t *testing.T) {
 	_, errOut, _ := capture(t, "-h")
-	if !strings.HasPrefix(errOut, "mvctools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "side-by-side") {
+	if !strings.HasPrefix(errOut, "bdtools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "side-by-side") {
 		t.Errorf("help starts %q", strings.SplitN(errOut, "\n", 2)[0])
 	}
 }

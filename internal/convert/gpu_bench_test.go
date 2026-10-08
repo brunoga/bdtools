@@ -5,8 +5,8 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/hwenc"
+	"github.com/brunoga/bdtools/internal/hwenc"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 func squeezeRef(dst, src []byte) {

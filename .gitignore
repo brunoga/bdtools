@@ -1,8 +1,8 @@
 # compiled binaries
 /mvcdec
-/mvctools
+/bdtools
 /cmd/mvcdec/mvcdec
-/cmd/mvctools/mvctools
+/cmd/bdtools/bdtools
 *.test
 *.prof
 

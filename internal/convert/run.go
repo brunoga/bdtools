@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoga/mvc"
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // Reporter receives progress. A conversion runs for hours, so it has to say

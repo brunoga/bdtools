@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Use [GitHub private vulnerability reporting](https://github.com/brunoga/mvc/security/advisories/new) to report the issue confidentially. You will receive an acknowledgement within 48 hours and a resolution timeline within 7 days.
+Use [GitHub private vulnerability reporting](https://github.com/brunoga/bdtools/security/advisories/new) to report the issue confidentially. You will receive an acknowledgement within 48 hours and a resolution timeline within 7 days.
 
 Please include:
 
@@ -22,7 +22,7 @@ of which read untrusted input: a video stream is attacker-controlled data.
   (`FuzzDecode`) and recovers from panics in slice decoding. A reproducible
   panic, hang, or unbounded memory growth on any input is a bug we want to
   hear about.
-- **mvctools** runs at most one external program, the encoder (x264/x265 or
+- **bdtools** runs at most one external program, the encoder (x264/x265 or
   ffmpeg), with arguments built from file paths and options; nothing is
   passed through a shell. With a GPU it runs none, loading the GPU's own
   library instead. It reads disc images in place and writes only under the

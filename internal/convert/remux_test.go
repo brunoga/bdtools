@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // A remux is one step: nothing is decoded, stacked or encoded.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoga/mvc/m2ts"
+	"github.com/brunoga/bdtools/m2ts"
 )
 
 // remuxBuiltin copies the disc's own streams out with the unwanted tracks

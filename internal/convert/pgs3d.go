@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/brunoga/mvc/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // Subtitles for a side-by-side frame. A Blu-ray's PGS subtitles are drawn
