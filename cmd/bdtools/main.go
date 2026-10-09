@@ -56,7 +56,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
 		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, or an MKV")
 		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
-		output   = fs.String("output", "", "destination .mkv")
+		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC)")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
@@ -90,13 +90,20 @@ func run(argv []string, stdout, stderr *os.File) int {
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "bdtools %s — Blu-ray to MKV: 3D side by side, or 2D\n\n", pversion.Resolve(version))
-		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] --input SRC --output DST.mkv\n\n"+
+		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] [--remux] --input SRC --output DST.mkv (or .m2ts for an MVC --remux)\n\n"+
 			"Converts a Blu-ray into an MKV: a 3D (MVC) source side by side, so an\n"+
-			"ordinary decoder can play it, or a 2D one (Ultra HD included) as it is,\n"+
-			"with the tracks you choose. The disc is read, decoded and muxed in\n"+
-			"process, and a GPU decodes and encodes in process; without one, the\n"+
-			"H.264 decoder here and x264, x265 or SVT-AV1 do.\n"+
-			"Run --check to see what is installed.\n\nflags:\n")
+			"ordinary decoder can play it, or a 2D one (Ultra HD included, HDR10,\n"+
+			"HDR10+ and Dolby Vision kept) as it is, with the tracks you choose;\n"+
+			"or remuxes it (--remux) with no re-encoding. The disc is read, decoded\n"+
+			"and muxed in process, and a GPU decodes and encodes in process; without\n"+
+			"one, the decoders here (H.264/MVC, HEVC, MPEG-2, VC-1) and x264, x265 or\n"+
+			"SVT-AV1 do. Run --check to see what is installed.\n\n"+
+			"examples:\n"+
+			"  bdtools --list --input disc.iso\n"+
+			"  bdtools --input disc.iso --output \"Film (2012) 3D FSBS.mkv\" --codec h265 --audio-best\n"+
+			"  bdtools --input uhd.iso --output \"Film (2021).mkv\" --codec h265\n"+
+			"  bdtools --remux --input uhd.iso --output \"Film (2021).mkv\" --audio-lang eng\n"+
+			"More: https://github.com/brunoga/bdtools/tree/main/cmd/bdtools#common-tasks\n\nflags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(argv); err != nil {

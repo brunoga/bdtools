@@ -1,4 +1,4 @@
-# Contributing to mvc
+# Contributing to bdtools
 
 Thanks for your interest in contributing.
 
@@ -36,12 +36,20 @@ golangci-lint run
 
 ## Decoder changes
 
-The decoder is verified bit-exactly: `TestConformance` hashes the output of
-every stream under `testdata/conformance` against `manifest.txt`. A change
-that alters any hash is a decoding change and needs a reason. The assembly
-kernels in `*_amd64.s` each have a Go counterpart (`*_noasm.go`,
-`*_generic.go`) and a test comparing the two on random input; keep both in
-step.
+The H.264/MVC decoder is verified bit-exactly: `TestConformance` hashes the
+output of every stream under `testdata/conformance` against `manifest.txt`.
+A change that alters any hash is a decoding change and needs a reason. The
+HEVC, MPEG-2 and VC-1 decoders compare against ffmpeg on streams made in
+the tests, and on their standards' conformance suites when pointed at them
+(`BDTOOLS_HEVC_SAMPLES`, `BDTOOLS_MPEG2_SAMPLES`, `BDTOOLS_VC1_SAMPLES`;
+see the README's Testing section); run those after a change to a decoder.
+The assembly kernels in `*_amd64.s` each have a Go counterpart
+(`*_noasm.go`, `*_generic.go`, `*_other.go`) and a test comparing the two
+on random input; keep both in step.
+
+A GPU library's structures are mirrored in Go and checked against its C
+headers; regenerate the layout files from the headers rather than editing
+offsets by hand.
 
 ## Commit messages
 
