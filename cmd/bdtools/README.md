@@ -1,27 +1,212 @@
 # bdtools
 
-Converts a frame-packed Blu-ray 3D source (MVC) into a side-by-side MKV that an
-ordinary decoder can play, or remuxes it with the tracks you want and nothing
-else. It converts 2D Blu-rays too, Ultra HD included — see
-[2D Blu-rays](#2d-blu-rays).
+Turns Blu-rays into files any player handles:
 
-MVC stores the second eye as a *dependent view* of an AVC base view. Very few
-players decode it — **Plex does not**, and neither does libavcodec, which drops
-the dependent view outright — so a 3D Blu-ray sits in a library unwatchable
-despite carrying a full 1080p image per eye. Side-by-side puts both eyes into a
-single frame any H.264/HEVC decoder handles, at the cost of a re-encode.
+- **3D Blu-ray → side-by-side MKV.** The disc's MVC video (the second eye
+  coded as a *dependent view* of the first) is decoded here and both eyes
+  stacked into one frame, full or half width, that an ordinary decoder plays —
+  subtitles kept flat or drawn in 3D at the disc's depth.
+- **2D and Ultra HD Blu-ray → MKV**, re-encoded in H.264, HEVC or AV1, 8 or
+  10 bits, keeping HDR10, HDR10+ and Dolby Vision (profile 8.1, the full
+  enhancement layer composed into the picture, or profile 7 with the layers
+  kept apart).
+- **Remuxes**, with no re-encoding: a 3D disc's MVC into one `.m2ts`, a 2D or
+  Ultra HD disc (Dolby Vision included) or an existing MKV into an MKV with
+  just the tracks you want.
+
+It reads `.iso` images and BDMV folders in place (no mounting, no
+extraction), playlists, `.m2ts`/`.ssif` streams, AVCHD 3D recordings and
+Matroska remuxes (MakeMKV's, mkvmerge's), and picks the feature itself. The
+demuxer, the decoders (H.264/MVC, HEVC, MPEG-2 and VC-1, all in Go), the
+Dolby Vision processing and the Matroska muxer are built in; a GPU decodes
+and encodes in process through its own system library (NVIDIA, Intel, AMD,
+Apple), so with one a conversion runs no other program at all. Without one,
+x264, x265 or SVT-AV1 encode. An interrupted conversion resumes where it
+stopped.
+
+MVC is the reason this exists: very few players decode it — **Plex does
+not**, and neither does libavcodec, which drops the dependent view outright —
+so a 3D Blu-ray sits in a library unwatchable despite carrying a full 1080p
+image per eye. Side by side puts both eyes in one frame every H.264/HEVC
+decoder handles, at the cost of a re-encode.
 
 ## Status
 
-Complete, and tested end to end against a real MVC source — see
-[Testing without a disc](#testing-without-a-disc).
+Complete for what a Blu-ray holds, on Linux, macOS and Windows (amd64,
+arm64; Linux arm/v7 too):
+
+- 3D conversion and remux: tested end to end on synthetic discs in CI and on
+  real 3D Blu-rays (whole films; the MVC decoder is byte-identical to the
+  edge264 reference on every picture of one).
+- 2D conversion of H.264, HEVC (Main, Main 10), MPEG-2 and VC-1 video, on the
+  GPU or in Go: every decoder here is checked against its standard's
+  conformance streams (byte-identical to ffmpeg where the standard is
+  bit-exact) — see [What works where](#what-works-where).
+- HDR10, HDR10+ and Dolby Vision carried through conversions and remuxes.
+- Not yet: a Matroska remux of VC-1 or MPEG-2 video (convert it, or remux it
+  to `.m2ts`); VAAPI decoding of VC-1 (decoded in Go, or on NVDEC, instead).
+
+## Common tasks
+
+Each example is a complete command; only the paths are yours. `bdtools
+--help` lists every flag, and [Usage](#usage) explains each one.
+
+**Check what is installed** (the answer depends on the options, so pass the
+ones you will use):
+
+```sh
+bdtools --check
+bdtools --check --encoder software --codec h265
+```
+
+**See what a disc holds** before choosing tracks — instant, even over a
+network share:
+
+```sh
+bdtools --list --input "Avatar (2009) 3D.iso"
+```
+
+**A 3D Blu-ray to a full side-by-side MKV** (1080p per eye; H.264, on the
+GPU when there is one):
+
+```sh
+bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv"
+```
+
+**Smaller, in HEVC at 10 bits, with only the best English audio and English
+subtitles drawn in 3D** — what a TV or headset in side-by-side mode needs:
+
+```sh
+bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv" \
+        --codec h265 --bit-depth 10 --crf 20 \
+        --audio-lang eng --audio-best --subs-lang eng --subs-3d on
+```
+
+**Half side by side** for players that only take that (Plex, most phones),
+naming the file after what it holds:
+
+```sh
+bdtools --input disc.iso --output "Frozen (2013).mkv" --layout half --name-details
+# -> Frozen (2013) 3D HSBS 1080p H264 QP18 NVENC TrueHD 7.1.mkv
+```
+
+**A 3D disc as a 2D film** (its base view, one eye):
+
+```sh
+bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009).mkv" --2d --codec h265
+```
+
+**A specific title** when the disc's choice is not the one you want (`--list`
+reports which playlist it chose and how many there are):
+
+```sh
+bdtools --input disc.iso --playlist 00801 --output "Film (Extended).mkv"
+```
+
+**An Ultra HD Blu-ray, HDR10 or HDR10+, to HEVC** — 10 bits and the HDR
+metadata are kept without asking:
+
+```sh
+bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --codec h265
+```
+
+**Dolby Vision.** A conversion makes profile 8.1, the full enhancement layer
+composed into the picture; or keep profile 7's layers for a player that
+composes them (NVENC or x265); or leave Dolby Vision out:
+
+```sh
+bdtools --input uhd.iso --output film.mkv --codec h265                          # profile 8.1
+bdtools --input uhd.iso --output film.mkv --codec h265 --dv-fel keep --encoder nvenc
+bdtools --input uhd.iso --output film.mkv --codec h265 --dv-fel drop            # HDR10 only
+```
+
+**AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
+SVT-AV1 otherwise):
+
+```sh
+bdtools --input disc.iso --output film.mkv --codec av1 --crf 22
+```
+
+**No GPU at all**, or not this one: software encoding at a faster preset,
+decoding in Go:
+
+```sh
+bdtools --input disc.iso --output film.mkv --encoder software --preset medium --decoder cpu
+```
+
+**A remux, no re-encoding.** A 3D disc's MVC to one `.m2ts` (for a player
+that decodes MVC); a 2D or Ultra HD disc to an MKV, Dolby Vision profile 7
+kept whole:
+
+```sh
+bdtools --remux --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D.m2ts" --audio-lang eng --audio-best
+bdtools --remux --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --audio-lang eng --subs-lang eng
+```
+
+**Drop tracks from an existing MKV** without touching its video:
+
+```sh
+bdtools --remux --input "Film (2012).mkv" --output "Film (2012) eng.mkv" --audio-lang eng --audio-best --subs-lang eng
+```
+
+**Keep the lossy core** of a lossless track as a track of its own (the AC-3
+inside TrueHD, the DTS inside DTS-HD), for a player that cannot decode the
+lossless one:
+
+```sh
+bdtools --input disc.iso --output film.mkv --audio-lang eng --audio-best --keep-fallback
+```
+
+**Scratch space elsewhere** (a fast local disk when the output is on a
+network share), and keeping it for a look afterwards:
+
+```sh
+bdtools --input /nas/disc.iso --output /nas/film.mkv --temp /scratch --keep-temp
+```
+
+**Resume after an interruption:** run the same command again; it continues
+from the last finished segment. `--restart` starts over:
+
+```sh
+bdtools --input disc.iso --output film.mkv            # stopped at 40%...
+bdtools --input disc.iso --output film.mkv            # ...continues from there
+bdtools --input disc.iso --output film.mkv --restart  # from the beginning
+```
+
+**See what would run** without running it:
+
+```sh
+bdtools --dry-run --input disc.iso --output film.mkv --encoder software
+```
+
+**A whole folder of discs**, one after another (a non-zero exit means that
+one did not convert; it resumes when run again):
+
+```sh
+for iso in /media/3d-staging/*.iso; do
+  name=$(basename "$iso" .iso)
+  bdtools --quiet --input "$iso" --output "/media/3dmovies/$name.mkv" --codec h265 --audio-best \
+    || echo "failed: $iso"
+done
+```
+
+**In Docker**, with the whole toolchain (NVIDIA through the container
+toolkit; Intel and AMD through the render node):
+
+```sh
+docker run --rm --gpus all -v /media:/media ghcr.io/brunoga/bdtools:latest \
+  --input "/media/discs/Film.iso" --output "/media/films/Film.mkv" --codec h265
+docker run --rm --device /dev/dri -v /media:/media ghcr.io/brunoga/bdtools:latest \
+  --input "/media/discs/Film.iso" --output "/media/films/Film.mkv"
+```
 
 ## The pipeline
 
 ```
 demuxer    read the disc in place; the video goes to the decoder, audio,    ─┐
            subtitles and chapters to the work directory — built in          │
-decoder    decode both eyes and stack them side by side — built in          ├ one pass
+decoder    3D: decode both eyes, stack them side by side — built in;        ├ one pass
+           2D: on the GPU in process, or the decoders here (Go)             │
 encoder    a GPU in process (NVENC, VAAPI, VideoToolbox, Media Foundation), │
            drawn straight into its buffers; or x264 / x265 / SVT-AV1 fed    │
            Y4M through a pipe; in segments, so a stopped run can resume    ─┘
@@ -31,8 +216,11 @@ muxer      write the MKV: video, audio, subtitles (flat, or drawn in 3D),
 
 With a GPU nothing outside the process runs at all. ffmpeg is used only for
 software half-SBS (its scaler), for software AV1 when SvtAv1EncApp is not
-installed (its libsvtav1), and as a fallback for a GPU whose library is
-missing — see [Hardware encoding](#hardware-encoding).
+installed (its libsvtav1), as a fallback for a GPU whose library is
+missing — see [Hardware encoding](#hardware-encoding) — and to decode the
+two kinds of 2D video the decoders here do not take when no GPU decoder
+does: interlaced H.264 and HEVC's format range extensions (neither of which a
+Blu-ray uses for HEVC; 1080i H.264 discs exist).
 
 The disc is read **once and in place**: a `.iso` straight out of the image, a
 folder straight from its files. Nothing is extracted and neither view is
@@ -139,7 +327,7 @@ scheduler such as pipeliner retry it.
 | `--restart` | — | Encode from the start, ignoring the video an interrupted run left — see [Resuming](#resuming-an-interrupted-conversion) |
 | `--quiet` | — | Only report errors |
 | `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
-| `--output` | — | Destination `.mkv` |
+| `--output` | — | Destination `.mkv` (or `.m2ts`, `.ts` for a `--remux` keeping a 3D disc's MVC) |
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
@@ -696,14 +884,15 @@ that will only take that, and costs half the horizontal detail by definition.
 
 ## Tools, and why each is needed
 
-At most one: the encoder. The demux, the decode and the mux are built in
-(libavcodec drops the MVC dependent view outright, so ffmpeg could not stand
-in for the first two), and a GPU encodes through its driver's own library, in
-process.
+Usually at most one: the encoder. The demux, the decode and the mux are built
+in (libavcodec drops the MVC dependent view outright, so ffmpeg could not
+stand in for the first two), and a GPU encodes through its driver's own
+library, in process.
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
-| **x264** / **x265** / **SvtAv1EncApp** *or* **ffmpeg** | Re-encodes the stacked frames when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264, x265 or SvtAv1EncApp follows `--codec`; ffmpeg instead for software half-SBS (its scaler), for AV1 without SvtAv1EncApp (its libsvtav1), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
+| **x264** / **x265** / **SvtAv1EncApp** *or* **ffmpeg** | Re-encodes the picture when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264, x265 or SvtAv1EncApp follows `--codec`; ffmpeg instead for software half-SBS (its scaler), for AV1 without SvtAv1EncApp (its libsvtav1), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
+| **ffmpeg** (6.1 or later), rarely | Decodes 2D video the decoders here do not | Only interlaced H.264 (1080i discs) and HEVC's format range extensions (4:2:2, 4:4:4, which no disc uses), and only when no GPU decoder (NVDEC, VideoToolbox) takes them; asked for by name when needed |
 
 A `--remux` needs nothing at all.
 
@@ -776,7 +965,9 @@ The views are identified by **stream ID**, not by order or track number: a disc
 is not obliged to list them in any order, and taking the wrong one as the base
 gives a stream that cannot decode at all.
 
-A source that is not 3D is refused by name rather than failing obscurely:
+A source that is not 3D is converted as a 2D film (see
+[2D Blu-rays](#2d-blu-rays)). An MVC remux of one (`--remux` to `.m2ts`
+expects both views) is refused by name rather than failing obscurely:
 
 ```
 bdtools: no MVC track: this source is not 3D (found V_MPEG4/ISO/AVC (track 4113))
@@ -832,8 +1023,8 @@ Everything that only reads and writes streams works everywhere: remuxing
 this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
 A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
 NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC), VAAPI (Linux, Intel and AMD: HEVC) — else by the
-decoders here, in Go:
+(macOS: H.264, HEVC), VAAPI (Linux, Intel and AMD: HEVC, progressive H.264
+and MPEG-2, the parsers here driving it) — else by the decoders here, in Go:
 
 | | NVIDIA (Linux, Windows), Mac (H.264, HEVC), VAAPI (HEVC, H.264, MPEG-2) | elsewhere |
 |---|---|---|
@@ -843,6 +1034,23 @@ decoders here, in Go:
 | 2D HEVC (Ultra HD) | ✓ (NVDEC, VideoToolbox, VAAPI) | ✓ (decoded here) |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) |
+
+Which decoder takes what, in the order they are tried (`--decoder cpu`
+skips the GPUs, `--decoder gpu` refuses anything else):
+
+| Video | NVDEC | VideoToolbox | VAAPI | Here, in Go | ffmpeg |
+|---|---|---|---|---|---|
+| H.264/MVC (3D) | | | | ✓ always | |
+| H.264, progressive | ✓ | ✓ | ✓ | ✓ | |
+| H.264, interlaced (1080i) | ✓ | ✓ | | | ✓ |
+| HEVC Main, Main 10 (Ultra HD) | ✓ | ✓ | ✓ | ✓ | |
+| HEVC format range extensions (4:2:2, 4:4:4: never on a disc) | | | | | ✓ (without NVDEC or VideoToolbox) |
+| MPEG-2 (frame and field pictures) | ✓ | | ✓ | ✓ | |
+| VC-1 Advanced Profile | ✓ | | | ✓ | |
+| Dolby Vision enhancement layer | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Interlaced MPEG-2, VC-1 and H.264 come out deinterlaced, one frame per
+frame, as NVDEC gives them.
 
 On Windows, NVDEC's structures are laid out as Windows lays them out (an
 `unsigned long` is 4 bytes there), generated from NVIDIA's headers like

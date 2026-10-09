@@ -54,6 +54,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   software`), where there is no NVENC: x265 runs in process for both layers,
   set up to code them alike.
 
+### Changed
+
+- The READMEs describe the tools as they are now (2D, Ultra HD, HDR and
+  Dolby Vision, the decoders and which takes what), and `bdtools`' starts
+  with examples of common tasks; `bdtools --help` shows a few.
+
 ### Fixed
 
 - NVDEC's frame rate is stated reduced (24000/1001, not 96000/4004).
