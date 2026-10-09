@@ -21,11 +21,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An HEVC decoder in Go (Main and Main 10): 2D Ultra HD Blu-rays, with
   HDR10, HDR10+ and Dolby Vision (FEL composed, or kept as profile 7
   layers), convert with no GPU and no ffmpeg. Byte-identical to ffmpeg's
-  decode on the 152 JCT-VC conformance streams of those profiles; slices,
-  wavefront rows and the loop filters decode in parallel, with AVX2
-  kernels for motion compensation (about 115 fps for a disc's 4K stream on
-  24 threads). Streams of the format range
-  extensions still go to ffmpeg.
+  decode on the 152 JCT-VC conformance streams of those profiles. Pictures
+  decode several at a time (frame threading, each CTB row loop filtered as
+  it is decoded), and within a picture its slices and wavefront rows in
+  parallel, with AVX2 kernels for motion compensation: about 250 fps for a
+  disc's 4K stream on 24 threads, the speed of ffmpeg's decoder. Streams of
+  the format range extensions still go to ffmpeg.
 - VAAPI decoding of HEVC on Linux (Intel and AMD GPUs), with the HEVC
   parser here driving it: byte-identical to ffmpeg on the 152 conformance
   streams on an Intel GPU, 95 fps for a disc's 4K stream with about one CPU

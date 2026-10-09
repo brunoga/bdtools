@@ -2,7 +2,6 @@ package hevc
 
 import (
 	"runtime"
-	"sort"
 	"sync/atomic"
 )
 
@@ -61,6 +60,7 @@ type picture struct {
 	ctbSlice []int16
 	corrupt  bool // made up for a missing reference
 	surface  int  // the accelerator's, or -1
+	prog     progress
 }
 
 // Decoder decodes an H.265/HEVC elementary stream, access unit by access
@@ -83,40 +83,55 @@ type Decoder struct {
 	prevSlice  *sliceHeader
 	pts        int64
 	errors     int
-	pending    []*sliceDec // the picture's slice segments, to decode
-	lastPPS    *pps        // the PPS last activated
-	threads    int         // goroutines decoding a picture
+	lastPPS    *pps // the PPS last activated
+	threads    int  // goroutines decoding a picture
+	out        func(*Picture) error
 
-	// Loop filter scratch.
-	bsV, bsH []uint8
-	saoSrc   [3][]uint16
-	out      func(*Picture) error
-
-	pic picState
+	refs refState
+	// Frame threading: the frame of the picture being parsed, and the
+	// frames free (the rest are decoding).
+	f           *frame
+	frames      chan *frame
+	asyncErrors atomic.Int64
+	outQ        []queued
 
 	accel Accel
 	acc   accelState
 }
 
 // New makes a decoder.
-func New() *Decoder { return &Decoder{first: true, threads: runtime.GOMAXPROCS(0)} }
+func New() *Decoder {
+	d := &Decoder{first: true}
+	d.SetThreads(runtime.GOMAXPROCS(0))
+	return d
+}
+
+// SetThreads sets how many goroutines decode: the slices of a picture,
+// and pictures at once (half as many, up to 8; each holds a picture and
+// some state). Not while decoding.
+func (d *Decoder) SetThreads(n int) {
+	d.threads = max(n, 1)
+	nf := min(8, max(1, n/2))
+	d.frames = make(chan *frame, nf)
+	for range nf {
+		d.frames <- &frame{d: d, threads: d.threads}
+	}
+}
 
 // Errors is how many slices could not be decoded.
-func (d *Decoder) Errors() int { return d.errors }
+func (d *Decoder) Errors() int { return d.errors + int(d.asyncErrors.Load()) }
 
 // Decode decodes the NAL units of an access unit given at pts, giving out
 // the pictures that are due, in output order.
 func (d *Decoder) Decode(au []byte, pts int64, out func(*Picture) error) error {
 	d.out = out
 	d.pts = pts
-	// The slices queued are decoded before au, which they point into, goes.
-	defer d.decodeSlices()
 	for _, n := range nalUnits(au) {
 		if err := d.nal(&n); err != nil {
 			return err
 		}
 	}
-	return nil
+	return d.deliver(false)
 }
 
 // Flush finishes the last picture and gives out every picture still due.
@@ -127,10 +142,19 @@ func (d *Decoder) Flush(out func(*Picture) error) error {
 	}
 	for {
 		ok, err := d.bump()
-		if err != nil || !ok {
+		if err != nil {
+			return err
+		}
+		if !ok {
+			break
+		}
+	}
+	for len(d.outQ) > 0 {
+		if err := d.deliver(true); err != nil {
 			return err
 		}
 	}
+	return nil
 }
 
 func (d *Decoder) nal(n *nalUnit) error {
@@ -256,13 +280,12 @@ func (d *Decoder) slice(n *nalUnit, r *bits) error {
 // its dependent segments) on its own goroutine, as nothing is predicted
 // across slices. Each CTB's slice is known before, from the segments'
 // addresses, for the availability of neighbours.
-func (d *Decoder) decodeSlices() {
-	pend := d.pending
-	d.pending = d.pending[:0]
+func (f *frame) decodeSlices() {
+	pend := f.pending
 	if len(pend) == 0 {
 		return
 	}
-	ps, s := &d.pic, d.sps
+	ps, s := &f.ps, f.sps
 	nCtb := s.ctbW * s.ctbH
 	var tasks [][]*sliceDec
 	for k, sd := range pend {
@@ -276,7 +299,7 @@ func (d *Decoder) decodeSlices() {
 		for ts := start; ts < end; ts++ {
 			rs := p.tsToRS[ts]
 			ps.ctbSlice[rs] = sd.sliceIdx
-			d.cur.ctbSlice[rs] = sd.refIdx
+			f.pic.ctbSlice[rs] = sd.refIdx
 		}
 		if sd.h.dependent && len(tasks) > 0 {
 			sd.chain = tasks[len(tasks)-1][0].chain
@@ -287,7 +310,7 @@ func (d *Decoder) decodeSlices() {
 		}
 	}
 	var failed atomic.Int32
-	d.parallel(len(tasks), 1, func(lo, hi int) {
+	f.parallel(len(tasks), 1, func(lo, hi int) {
 		for _, task := range tasks[lo:hi] {
 			for _, sd := range task {
 				if err := sd.decode(sd.data); err != nil {
@@ -296,7 +319,7 @@ func (d *Decoder) decodeSlices() {
 			}
 		}
 	})
-	d.errors += int(failed.Load())
+	f.errors.Add(failed.Load())
 }
 
 // startPicture begins a picture: its POC, reference picture set, output
@@ -330,14 +353,15 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 		d.dpb = d.dpb[:0]
 	}
 	if d.sps != s {
-		if d.accel != nil {
-			if d.sps == nil || d.sps.width != s.width || d.sps.height != s.height || d.sps.bitDepth != s.bitDepth {
+		// Streams send their SPS again and again: the pictures serve as
+		// long as their layout is the same.
+		if o := d.sps; o == nil || o.width != s.width || o.height != s.height || o.bitDepth != s.bitDepth ||
+			o.bitDepthC != s.bitDepthC || o.ctbW != s.ctbW || o.ctbH != s.ctbH || o.log2Ctb != s.log2Ctb {
+			if d.accel != nil {
 				for _, p := range d.pool {
 					d.accel.Release(p.surface)
 				}
-				d.pool = nil
 			}
-		} else {
 			d.pool = nil
 		}
 		d.sps = s
@@ -391,17 +415,24 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 	}
 	d.first = false
 	if d.accel == nil {
-		d.beginPicture()
+		d.f = <-d.frames
+		d.f.begin(pic, s, p)
 	}
 	return nil
 }
 
 func (d *Decoder) newPicture(s *sps) (*picture, error) {
 	var pic *picture
-	if n := len(d.pool); n > 0 {
-		pic = d.pool[n-1]
-		d.pool = d.pool[:n-1]
-		pic.sps = s
+	// A picture in the pool may still be read by frames decoding.
+	for i := len(d.pool) - 1; i >= 0; i-- {
+		if d.pool[i].prog.users.Load() == 0 {
+			pic = d.pool[i]
+			d.pool = append(d.pool[:i], d.pool[i+1:]...)
+			pic.sps = s
+			break
+		}
+	}
+	if pic != nil {
 	} else if d.accel != nil {
 		surface, err := d.accel.NewSurface(s.width, s.height, s.bitDepth)
 		if err != nil {
@@ -419,6 +450,9 @@ func (d *Decoder) newPicture(s *sps) (*picture, error) {
 			surface:  -1,
 		}
 	}
+	if pic.surface < 0 {
+		pic.resetProgress(s.ctbH)
+	}
 	pic.refPOC = pic.refPOC[:0]
 	pic.refLT = pic.refLT[:0]
 	pic.corrupt = false
@@ -431,7 +465,7 @@ func (d *Decoder) newPicture(s *sps) (*picture, error) {
 // the sets for the reference lists.
 func (d *Decoder) applyRPS(h *sliceHeader, n *nalUnit, poc int) error {
 	s := d.ppss[h.ppsID].sps
-	ps := &d.pic
+	ps := &d.refs
 	ps.stCurrBefore = ps.stCurrBefore[:0]
 	ps.stCurrAfter = ps.stCurrAfter[:0]
 	ps.ltCurr = ps.ltCurr[:0]
@@ -541,6 +575,7 @@ func (d *Decoder) missingRef(s *sps, poc int) (*picture, error) {
 	pic.ref = shortTerm
 	pic.output = false
 	pic.corrupt = true
+	pic.setAllFinal()
 	d.dpb = append(d.dpb, pic)
 	return pic, nil
 }
@@ -598,13 +633,47 @@ func (d *Decoder) emit(pic *picture) error {
 	p.Y = pic.y[t*pic.strideY+l:]
 	p.Cb = pic.cb[t/2*pic.strideC+l/2:]
 	p.Cr = pic.cr[t/2*pic.strideC+l/2:]
-	return d.out(p)
+	// Given out once decoded, which the pictures decoding after it do
+	// not wait for; kept from reuse until then.
+	pic.prog.users.Add(1)
+	d.outQ = append(d.outQ, queued{pic, p})
+	return d.deliver(len(d.outQ) > 2*cap(d.frames)+2)
+}
+
+// queued is a picture due out, waiting for its decoding to end.
+type queued struct {
+	pic *picture
+	p   *Picture
+}
+
+// deliver gives out the queued pictures decoded, in order, waiting for
+// the first if wait.
+func (d *Decoder) deliver(wait bool) error {
+	for len(d.outQ) > 0 {
+		q := d.outQ[0]
+		if !q.pic.done() {
+			if !wait {
+				return nil
+			}
+			q.pic.waitAll()
+		}
+		wait = false
+		d.outQ = d.outQ[1:]
+		var err error
+		if d.out != nil {
+			err = d.out(q.p)
+		}
+		q.pic.prog.users.Add(-1)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // finishPicture completes the picture being decoded: its loop filters,
 // and its place in the buffer (C.5.2.3).
 func (d *Decoder) finishPicture() error {
-	d.decodeSlices()
 	pic := d.cur
 	if pic == nil {
 		return nil
@@ -615,7 +684,9 @@ func (d *Decoder) finishPicture() error {
 			return err
 		}
 	} else {
-		d.endPicture()
+		pic.prog.users.Add(1)
+		go d.f.run()
+		d.f = nil
 	}
 	d.cur = nil
 	s := pic.sps
@@ -648,7 +719,7 @@ func (d *Decoder) finishPicture() error {
 
 // buildRefLists makes a P or B slice's reference picture lists (8.3.4).
 func (d *Decoder) buildRefLists(h *sliceHeader) bool {
-	ps := &d.pic
+	ps := &d.refs
 	total := len(ps.stCurrBefore) + len(ps.stCurrAfter) + len(ps.ltCurr)
 	if total == 0 {
 		return false
@@ -694,5 +765,3 @@ func (d *Decoder) buildRefLists(h *sliceHeader) bool {
 	}
 	return true
 }
-
-var _ = sort.Ints

@@ -5,6 +5,7 @@ import "slices"
 // sliceDec decodes a slice segment's data.
 type sliceDec struct {
 	d   *Decoder
+	f   *frame
 	h   *sliceHeader
 	p   *pps
 	s   *sps
@@ -69,16 +70,17 @@ func (d *Decoder) decodeSlice(h *sliceHeader, n *nalUnit, r *bits) error {
 	if d.accel != nil {
 		return d.accelSlice(h, n)
 	}
-	ps := &d.pic
+	f := d.f
+	ps := &f.ps
 	ps.slices = append(ps.slices, h)
-	sd := &sliceDec{d: d, h: h, p: p, s: d.sps, pic: d.cur, ps: ps, sliceIdx: len(ps.slices) - 1}
+	sd := &sliceDec{d: d, f: f, h: h, p: p, s: d.sps, pic: d.cur, ps: ps, sliceIdx: len(ps.slices) - 1}
 	if h.typ != sliceI {
 		if !d.buildRefLists(h) {
 			return errStream
 		}
 		for l := range 2 {
-			sd.refList[l] = slices.Clone(ps.refList[l])
-			sd.refIsLT[l] = slices.Clone(ps.refIsLT[l])
+			sd.refList[l] = slices.Clone(d.refs.refList[l])
+			sd.refIsLT[l] = slices.Clone(d.refs.refIsLT[l])
 		}
 	}
 	d.recordRefs(sd)
@@ -91,8 +93,7 @@ func (d *Decoder) decodeSlice(h *sliceHeader, n *nalUnit, r *bits) error {
 		start += o
 		sd.substreams = append(sd.substreams, n.unescaped(start)-h.dataOffset)
 	}
-	sd.data = n.rbsp[h.dataOffset:]
-	d.pending = append(d.pending, sd)
+	f.addSlice(sd, n.rbsp[h.dataOffset:])
 	return nil
 }
 
@@ -102,12 +103,12 @@ func (d *Decoder) recordRefs(sd *sliceDec) {
 	var pocs [2][16]int32
 	var lts [2][16]bool
 	for l := range 2 {
-		for i, p := range d.pic.refList[l] {
+		for i, p := range d.refs.refList[l] {
 			if sd.h.typ == sliceI || i >= sd.h.numRefIdx[l] {
 				break
 			}
 			pocs[l][i] = int32(p.poc)
-			lts[l][i] = d.pic.refIsLT[l][i]
+			lts[l][i] = d.refs.refIsLT[l][i]
 		}
 	}
 	d.cur.refPOC = append(d.cur.refPOC, pocs)
@@ -179,6 +180,7 @@ func (sd *sliceDec) decode(data []byte) error {
 			return err
 		}
 		ps.ctbDecoded[sd.ctbAddrRS] = true
+		sd.f.ctbDone(ctbY)
 		// WPP storage after a tile row's second CTB (or its only one).
 		if p.entropySync {
 			col := ctbX

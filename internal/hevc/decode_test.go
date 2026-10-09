@@ -25,7 +25,7 @@ func compare(t *testing.T, path string, threads int) {
 	}
 	d := New()
 	if threads > 0 {
-		d.threads = threads
+		d.SetThreads(threads)
 	}
 	var cmd *exec.Cmd
 	var ref io.Reader

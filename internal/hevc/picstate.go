@@ -27,14 +27,17 @@ type saoParams struct {
 	offset [4]int16
 }
 
-// picState is what decoding a picture keeps: its reference sets and lists,
-// and per-block information for prediction, the loop filters and the
-// pictures that refer to it.
-type picState struct {
+// refState is the current picture's reference picture sets and a slice's
+// reference lists.
+type refState struct {
 	stCurrBefore, stCurrAfter, ltCurr []*picture
 	refList                           [2][]*picture
 	refIsLT                           [2][]bool
+}
 
+// picState is what decoding a picture keeps: per-block information for
+// prediction, the loop filters and the pictures that refer to it.
+type picState struct {
 	// Per 4x4 block (luma samples), picture wide.
 	w4, h4    int
 	predMode  []uint8 // modeInter, modeIntra, modeSkip
@@ -54,44 +57,4 @@ type picState struct {
 
 	// WPP and dependent slice storage of the context variables.
 	wppRowCtx [][numContexts]uint8 // per CTB row, without tiles
-}
-
-func (d *Decoder) beginPicture() {
-	s := d.sps
-	ps := &d.pic
-	w4 := (s.ctbW << s.log2Ctb) >> 2
-	h4 := (s.ctbH << s.log2Ctb) >> 2
-	if ps.w4 != w4 || ps.h4 != h4 {
-		ps.w4, ps.h4 = w4, h4
-		n := w4 * h4
-		ps.predMode = make([]uint8, n)
-		ps.intraMode = make([]uint8, n)
-		ps.qpY = make([]int8, n)
-		ps.noFilter = make([]bool, n)
-		ps.tuEdgeV = make([]uint8, n)
-		ps.tuEdgeH = make([]uint8, n)
-		ps.cbfLuma = make([]bool, n)
-	}
-	if len(ps.ctDepth) != s.minCbW*s.minCbH {
-		ps.ctDepth = make([]uint8, s.minCbW*s.minCbH)
-	}
-	nCtb := s.ctbW * s.ctbH
-	if len(ps.sao) != nCtb {
-		ps.sao = make([][3]saoParams, nCtb)
-		ps.ctbSlice = make([]int, nCtb)
-		ps.ctbDecoded = make([]bool, nCtb)
-		ps.wppRowCtx = make([][numContexts]uint8, s.ctbH)
-	}
-	clear(ps.ctbDecoded)
-	clear(ps.tuEdgeV)
-	clear(ps.tuEdgeH)
-	clear(ps.noFilter)
-	clear(ps.cbfLuma)
-	clear(ps.sao)
-	ps.slices = ps.slices[:0]
-	clear(d.cur.mvf)
-}
-
-func (d *Decoder) endPicture() {
-	d.loopFilter()
 }

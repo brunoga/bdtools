@@ -185,7 +185,7 @@ func (d *Decoder) accelSlice(h *sliceHeader, n *nalUnit) error {
 			}
 			a.refs = append(a.refs, p)
 		}
-		ps := &d.pic
+		ps := &d.refs
 		for _, p := range a.refs {
 			r := AccelRef{Surface: p.surface, POC: p.poc, LongTerm: p.ref == longTerm}
 			switch {
@@ -219,7 +219,7 @@ func (d *Decoder) accelSlice(h *sliceHeader, n *nalUnit) error {
 		if l >= numLists(h.typ) {
 			break
 		}
-		for _, rp := range d.pic.refList[l] {
+		for _, rp := range d.refs.refList[l] {
 			i := -1
 			for j, c := range a.refs {
 				if c == rp {

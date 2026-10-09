@@ -191,7 +191,7 @@ func TestDecodeMatchesFFmpeg(t *testing.T) {
 			if err != nil {
 				t.Skipf("making the stream (no libx265?): %v %s", err, out)
 			}
-			for _, threads := range []int{1, 4} {
+			for _, threads := range []int{1, 4, 16} {
 				compare(t, path, threads)
 			}
 		})
