@@ -225,6 +225,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 
 	runner := convert.NewRunner(goos, o, report)
+	runner.Version = pversion.Resolve(version)
 	runner.KeepTemp = *keepTemp
 	runner.Restart = *restart
 	// Whether --swap-lr was given, as opposed to merely defaulting to false:

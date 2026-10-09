@@ -94,6 +94,9 @@ type Runner struct {
 	depth          *depthMap
 	offsetSequence func(Track) int
 
+	// Version is bdtools' version, which the files written say made them.
+	Version string
+
 	// Selected records what the probe chose, readable once Run returns. A
 	// caller naming its output after the audio it got needs this: the codec
 	// is not known until the source has been probed.
