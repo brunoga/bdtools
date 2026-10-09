@@ -78,8 +78,8 @@ type Decoder struct {
 	// mbContext.mvfY), for direct prediction.
 	mvfNext  [2][]bool
 	mvfNextC [2][]bool
-	pool            []*frame
-	errors          int
+	pool     []*frame
+	errors   int
 
 	mb  mbContext
 	out func(*Picture) error

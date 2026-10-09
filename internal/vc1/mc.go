@@ -234,7 +234,6 @@ func chromaMC(dst []byte, dstride int, src []byte, sstride, w, h, x, y int, noRn
 	}
 }
 
-
 // refFrame picks direction dir's reference for a prediction from the field
 // of parity refBottom (field pictures): the frame, its intensity tables
 // and whether they apply.

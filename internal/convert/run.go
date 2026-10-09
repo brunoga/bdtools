@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -236,8 +237,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 
 // pictures chooses the decoder for a source's video. A 3D pair goes to the
 // MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
-// (NVDEC, VideoToolbox, VAAPI for HEVC); else to the decoders here, with
-// ffmpeg for HEVC they do not decode.
+// (NVDEC, VideoToolbox, VAAPI for HEVC, H.264 and MPEG-2); else to the
+// decoders here, with ffmpeg for what they do not decode (HEVC's format
+// range extensions, interlaced H.264).
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
@@ -250,6 +252,16 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	if !ok {
 		return nil, fmt.Errorf("no decoder for %s video", video.Type)
 	}
+	// Interlaced H.264 (field pictures, MBAFF: 1080i discs) the decoder
+	// here does not decode, nor VAAPI through it: the GPU's own parsers
+	// (NVDEC, VideoToolbox) or ffmpeg do.
+	interlaced := false
+	if codec == gpu.DecodeH264 {
+		var err error
+		if next, interlaced, err = peekInterlacedH264(next); err != nil {
+			return nil, err
+		}
+	}
 	decoded := func(open decoderOpener) pictureSource {
 		r.openDecoder = open
 		return &gpuPictures{open: open, codec: codec, next: next, report: r.Report,
@@ -260,6 +272,9 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 			kind gpu.Kind
 			name string
 		}{{gpu.NVENC, "NVDEC"}, {gpu.VideoToolbox, "VideoToolbox"}, {gpu.VAAPI, "VAAPI"}} {
+			if interlaced && k.kind == gpu.VAAPI {
+				continue
+			}
 			if ProbeDecoder(k.kind, codec) {
 				r.Report.Report("decoding %s on the GPU (%s)", video.Type, k.name)
 				return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
@@ -273,6 +288,18 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	}
 	switch codec {
 	case gpu.DecodeH264:
+		if interlaced {
+			return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+				dec := toolFFmpeg
+				dec.Purpose = "decode interlaced H.264 video (the decoder here decodes progressive H.264)"
+				bin, err := r.resolve(dec)
+				if err != nil {
+					return nil, err
+				}
+				r.Report.Report("decoding interlaced %s with ffmpeg", video.Type)
+				return openFFDecoder(bin, cfg, picture)
+			}), nil
+		}
 		return cpu(), nil
 	case gpu.DecodeMPEG2:
 		r.Report.Report("decoding %s here", video.Type)
@@ -294,6 +321,38 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 			return openFFDecoder(bin, cfg, picture)
 		}), nil
 	}), nil
+}
+
+// peekInterlacedH264 reads the first access unit of an H.264 stream and
+// reports whether its sequence parameter set allows interlaced pictures,
+// giving back a next that starts with that access unit again.
+func peekInterlacedH264(next func() (base, dep []byte, pts int64, err error)) (func() (base, dep []byte, pts int64, err error), bool, error) {
+	base, dep, pts, err := next()
+	if err != nil && base == nil {
+		return func() ([]byte, []byte, int64, error) { return nil, nil, 0, err }, false, nil
+	}
+	interlaced := false
+	for i := 0; i+4 < len(base); i++ {
+		if base[i] != 0 || base[i+1] != 0 || base[i+2] != 1 || base[i+3]&0x1f != 7 {
+			continue
+		}
+		end := len(base)
+		if j := bytes.Index(base[i+4:], []byte{0, 0, 1}); j >= 0 {
+			end = i + 4 + j
+		}
+		if info, e := mvc.ParseSPSInfo(base[i:end]); e == nil {
+			interlaced = !info.FrameMbsOnly
+			break
+		}
+	}
+	first := true
+	return func() ([]byte, []byte, int64, error) {
+		if first {
+			first = false
+			return base, dep, pts, err
+		}
+		return next()
+	}, interlaced, nil
 }
 
 // decoderOpener opens a decoder of a codec: the GPU's, ffmpeg's or one here.

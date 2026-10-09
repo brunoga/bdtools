@@ -67,6 +67,9 @@ type sps struct {
 	numReorderFrames     int    // -1 if absent
 	numUnitsInTick       uint32 // timing_info: 0 if absent
 	timeScale            uint32
+	// The colour description (H.273 code points; 2 when absent).
+	primaries, transfer, matrix int
+	fullRange                   bool
 	// MVC extension (subset SPS)
 	mvc mvcExt
 }
@@ -371,6 +374,7 @@ func parseSPSData(br *bitReader, s *sps) error {
 	}
 	s.maxDecFrameBuffering = -1
 	s.numReorderFrames = -1
+	s.primaries, s.transfer, s.matrix = 2, 2, 2
 	if br.flag() {
 		parseVUI(br, s)
 	}
@@ -402,9 +406,10 @@ func parseVUI(br *bitReader, s *sps) {
 		br.u1()
 	}
 	if br.flag() { // video_signal_type_present
-		br.u(4)
-		if br.flag() {
-			br.u(24)
+		br.u(3) // video_format
+		s.fullRange = br.flag()
+		if br.flag() { // colour_description_present
+			s.primaries, s.transfer, s.matrix = int(br.u(8)), int(br.u(8)), int(br.u(8))
 		}
 	}
 	if br.flag() { // chroma_loc_info_present
@@ -579,10 +584,9 @@ var normAdjust8 = [6][6]int32{
 
 // computeDequant resolves the effective scaling lists for pps under s and
 // builds the LevelScale tables.
-func (p *pps) computeDequant(s *sps) *dqTables {
-	t := &dqTables{sps: s}
-	var l4 [6][16]uint8
-	var l8 [6][64]uint8
+// scalingLists are the scaling lists in effect for the PPS with SPS s (the
+// fall-back rules of 7.4.2.2 applied), in zigzag scan order.
+func (p *pps) scalingLists(s *sps) (l4 [6][16]uint8, l8 [6][64]uint8) {
 	if !p.scalingMatrixPresent {
 		l4, l8 = s.scaling4x4, s.scaling8x8
 	} else {
@@ -626,6 +630,12 @@ func (p *pps) computeDequant(s *sps) *dqTables {
 			}
 		}
 	}
+	return l4, l8
+}
+
+func (p *pps) computeDequant(s *sps) *dqTables {
+	t := &dqTables{sps: s}
+	l4, l8 := p.scalingLists(s)
 	for list := 0; list < 6; list++ {
 		for m := 0; m < 6; m++ {
 			for k := 0; k < 16; k++ {

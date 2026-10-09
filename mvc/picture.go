@@ -63,6 +63,10 @@ type picture struct {
 	decoding    bool
 	userHeld    bool
 	nonExisting bool
+
+	// With an accelerator: the picture's surface, and its fields' POCs.
+	surface        int
+	topPOC, botPOC int32
 }
 
 // inUse reports whether the buffer is still needed (must hold poolMu).
@@ -99,7 +103,7 @@ func (p *picture) setSliceRef(i int, info *sliceRefInfo) {
 }
 
 func allocNewPicture(mbW, mbH int) *picture {
-	p := &picture{mbW: mbW, mbH: mbH, width: mbW * 16, height: mbH * 16}
+	p := &picture{mbW: mbW, mbH: mbH, width: mbW * 16, height: mbH * 16, surface: -1}
 	for c := 0; c < 3; c++ {
 		w, h, pad := p.width, p.height, padY
 		if c > 0 {

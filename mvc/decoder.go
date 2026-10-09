@@ -22,6 +22,10 @@ type Frame struct {
 	ViewID    int
 	POC       int32
 	PTS       int64 // timestamp passed to DecodeAU, or -1
+	// With an accelerator, the picture is in Surface (no planes), its
+	// cropping window at CropLeft, CropTop.
+	Surface           int
+	CropLeft, CropTop int
 
 	pic *picture
 }
@@ -136,6 +140,12 @@ type Decoder struct {
 	rawNAL    []byte
 	stash     [][]byte // dependent view NALs received before their base view
 	replaying bool
+
+	accel     Accel
+	accErr    error
+	hdrLen    int // the slice's NAL unit header's length
+	accSlices []AccelSlice
+	accData   []byte
 }
 
 // NewDecoder returns a new decoder.
@@ -243,6 +253,9 @@ func (d *Decoder) DecodeAU(data []byte, pts int64) error {
 		d.annexB = d.annexB[:0]
 	}
 	d.pts = -1
+	if err == nil {
+		err = d.accErr
+	}
 	return err
 }
 
@@ -261,6 +274,9 @@ func (d *Decoder) Flush() error {
 	d.finishAU()
 	d.flushOutput()
 	d.wg.Wait()
+	if err == nil {
+		err = d.accErr
+	}
 	return err
 }
 
@@ -304,7 +320,7 @@ func (d *Decoder) decodeNAL(nal []byte) error {
 		if nh.typ == nalSliceExt && d.opts.BaseOnly {
 			return nil
 		}
-		d.rawNAL = nal
+		d.rawNAL, d.hdrLen = nal, hl
 		d.rbsp = unescapeRBSP(d.rbsp, nal[hl:])
 		err = d.handleSlice(nh)
 		if nh.typ != nalSliceExt {
@@ -452,7 +468,7 @@ func (d *Decoder) allocPicture(mbW, mbH int) *picture {
 	d.poolMu.Lock()
 	defer d.poolMu.Unlock()
 	for _, p := range d.pics {
-		if p.mbW == mbW && p.mbH == mbH && !p.inUse() {
+		if p.mbW == mbW && p.mbH == mbH && !p.inUse() && !d.aliased(p) {
 			p.reset()
 			p.decoding = true
 			return p
@@ -466,7 +482,12 @@ func (d *Decoder) allocPicture(mbW, mbH int) *picture {
 		}
 	}
 	d.pics = keep
-	p := allocNewPicture(mbW, mbH)
+	var p *picture
+	if d.accel != nil {
+		p = d.newAccelPicture(mbW, mbH)
+	} else {
+		p = allocNewPicture(mbW, mbH)
+	}
 	p.decoding = true
 	d.pics = append(d.pics, p)
 	return p
@@ -498,11 +519,11 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 		d.fillFrameNumGap(view, h)
 	}
 	v.seen = true
-	poc, fno := v.computePOC(h)
+	poc, top, bot, fno := v.computePOC(h)
 	pic := d.allocPicture(s.widthMbs, s.heightMbs())
 	d.nextID++
 	pic.id = d.nextID
-	pic.poc = poc
+	pic.poc, pic.topPOC, pic.botPOC = poc, top, bot
 	pic.frameNum = h.frameNum
 	pic.viewID = h.nal.viewID
 	pic.viewIdx = view
@@ -512,6 +533,16 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 	pic.outputNeeded = true
 	pic.pts = d.pts
 	pic.cropLeft, pic.cropRight, pic.cropTop, pic.cropBottom = s.cropLeft, s.cropRight, s.cropTop, s.cropBottom
+	if d.accel != nil {
+		d.cur = &curPic{view: view, pic: pic, hdr: *h}
+		d.cur.hdr.mmco = append([]mmcoOp(nil), h.mmco...)
+		v.prevFrameNumOffset = fno
+		d.au.pics[view] = pic
+		if view == 0 {
+			d.au.poc = poc
+		}
+		return nil
+	}
 	fc := d.getFrameCtx(s.widthMbs, s.heightMbs())
 	fc.reset(pic, s)
 	cp := &curPic{view: view, pic: pic, fc: fc, hdr: *h, jobs: make(chan *sliceJob, 16)}
@@ -540,10 +571,18 @@ func (d *Decoder) greyPicture(mbW, mbH int) *picture {
 	if g := d.grey; g != nil && g.mbW == mbW && g.mbH == mbH {
 		return g
 	}
-	g := allocNewPicture(mbW, mbH)
+	var g *picture
+	if d.accel != nil {
+		g = d.newAccelPicture(mbW, mbH) // what the surface holds
+	} else {
+		g = allocNewPicture(mbW, mbH)
+	}
 	d.nextID++
 	g.id = d.nextID
 	initGrey(g)
+	if d.accel != nil {
+		d.greyAccel(g)
+	}
 	g.nonExisting = true
 	d.grey = g
 	return g
@@ -585,7 +624,12 @@ func (d *Decoder) fillFrameNumGap(view int, h *sliceHeader) {
 				continue
 			}
 		}
-		pic := d.allocPicture(s.widthMbs, s.heightMbs())
+		var pic *picture
+		if d.accel != nil {
+			pic = d.gapAccelPicture(v, s)
+		} else {
+			pic = d.allocPicture(s.widthMbs, s.heightMbs())
+		}
 		d.nextID++
 		pic.id = d.nextID
 		pic.frameNum = fn
@@ -596,6 +640,7 @@ func (d *Decoder) fillFrameNumGap(view int, h *sliceHeader) {
 		// POC for non-existing frames is not used for output; derive an
 		// approximation for B-frame ordering.
 		pic.poc = v.prevPocMsb + v.prevPocLsb
+		pic.topPOC, pic.botPOC = pic.poc, pic.poc
 		v.slidingWindow(s.maxNumRefFrames, fn, maxFrameNum)
 		pic.shortRef = true
 		v.refs = append(v.refs, pic)
@@ -630,10 +675,9 @@ func (d *Decoder) interViewRefs(h *sliceHeader, l int) []*picture {
 
 func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 	cp := d.cur
-	fc := cp.fc
 	pic := cp.pic
 	v := &d.views[cp.view]
-	if h.firstMb >= fc.mbW*fc.mbH || cp.nslices >= maxSlices {
+	if h.firstMb >= pic.mbW*pic.mbH || cp.nslices >= maxSlices {
 		return errInvalid
 	}
 	dq := h.pps.dequant(h.sps)
@@ -690,7 +734,7 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 				}
 			}
 			if fallback == nil {
-				fallback = d.greyPicture(fc.mbW, fc.mbH)
+				fallback = d.greyPicture(pic.mbW, pic.mbH)
 			}
 			for i, p := range lists[l] {
 				if p == nil {
@@ -699,6 +743,13 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 			}
 			job.refList[l] = append(job.refList[l], lists[l]...)
 		}
+	}
+	if d.accel != nil {
+		d.accelSlice(h, job.refList, br.bitPos(), d.hdrLen)
+		cp.nslices++
+		job.refList[0], job.refList[1] = job.refList[0][:0], job.refList[1][:0]
+		d.jobPool.Put(job)
+		return nil
 	}
 	info := &job.info
 	*info = sliceRefInfo{}
@@ -942,8 +993,15 @@ func (d *Decoder) finishPicture() {
 	}
 	d.cur = nil
 	pic := cp.pic
-	close(cp.jobs)
 	h := &cp.hdr
+	if d.accel != nil {
+		d.accelPicture(cp)
+		d.poolMu.Lock()
+		pic.decoding = false
+		d.poolMu.Unlock()
+	} else {
+		close(cp.jobs)
+	}
 	v := &d.views[cp.view]
 	if h.nal.refIdc != 0 {
 		v.markPicture(pic, h)
@@ -963,6 +1021,8 @@ func (d *Decoder) finishPicture() {
 		}
 		tempPOC := pic.poc
 		pic.poc = 0
+		pic.topPOC -= tempPOC
+		pic.botPOC -= tempPOC
 		pic.frameNum = 0
 		v.prevFrameNum = 0
 		v.prevRefFrameNum = 0
@@ -1034,6 +1094,10 @@ func (d *Decoder) outputOne() {
 }
 
 func (p *picture) frame() *Frame {
+	if p.surface >= 0 || p.planes[0] == nil {
+		return &Frame{Width: p.width - p.cropLeft - p.cropRight, Height: p.height - p.cropTop - p.cropBottom,
+			ViewID: p.viewID, POC: p.poc, PTS: p.pts, Surface: p.surface, CropLeft: p.cropLeft, CropTop: p.cropTop, pic: p}
+	}
 	f := &Frame{
 		StrideY: p.stride[0],
 		StrideC: p.stride[1],
@@ -1056,6 +1120,16 @@ func (p *picture) frame() *Frame {
 // recoverPanics converts panics caused by malformed input into errors. Tests
 // disable it to surface bugs.
 var recoverPanics = true
+
+// ColorInfo returns the colour description of the most recent sequence
+// parameter set's VUI (H.273 code points; 2, unspecified, when absent).
+func (d *Decoder) ColorInfo() (primaries, transfer, matrix int, fullRange bool) {
+	s := d.sps[d.lastSPS]
+	if s == nil || !s.valid {
+		return 2, 2, 2, false
+	}
+	return s.primaries, s.transfer, s.matrix, s.fullRange
+}
 
 // FrameRate returns the frame rate carried by the most recent sequence
 // parameter set's VUI timing information, as a fraction (e.g. 24000/1001),
