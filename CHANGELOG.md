@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-09
+
 ### Fixed
 
 - Kodi playing a 3D conversion drew the flat subtitle tracks' wide lines
@@ -378,7 +380,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/brunoga/bdtools/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/brunoga/bdtools/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/brunoga/bdtools/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/brunoga/bdtools/compare/v0.5.3...v0.6.0
