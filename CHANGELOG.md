@@ -32,6 +32,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   streams on an Intel GPU, 95 fps for a disc's 4K stream with about one CPU
   core. A 4K Dolby Vision FEL conversion decoded, composed and encoded on
   an Intel iGPU runs at 47 fps.
+- VAAPI decoding of MPEG-2, the MPEG-2 parser here driving it, its interlaced
+  frames deinterlaced here as with the decoder in Go: frame and field
+  pictures within the inverse transform's tolerance of the decoder in Go
+  (71 to 80 dB on the conformance streams).
+- Matroska remuxes of MPEG-2 discs (the `V_MPEG2` track).
 - Matroska remuxes of VC-1 Blu-rays: the `V_MS/VFW/FOURCC` (WVC1) track, and
   PCM audio in `A_MS/ACM`.
 - VideoToolbox decoding on macOS (H.264 and HEVC, 10-bit included),

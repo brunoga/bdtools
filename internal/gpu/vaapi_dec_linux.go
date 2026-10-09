@@ -11,11 +11,13 @@ import (
 	"unsafe"
 
 	"github.com/brunoga/bdtools/internal/hevc"
+	"github.com/brunoga/bdtools/internal/mpeg2"
 )
 
-// VAAPI decoding of HEVC: the HEVC parser here (internal/hevc) reads the
-// stream and keeps the reference pictures and their order; the GPU decodes
-// each picture's slices into a surface (VAAPI has no parser of its own).
+// VAAPI decoding of HEVC, MPEG-2 and H.264: the parsers here (internal/hevc,
+// internal/mpeg2, mvc) read the stream and keep the reference pictures and
+// their order; the GPU decodes each picture's slices into a surface (VAAPI
+// has no parser of its own).
 
 // The parameter buffers, as the libva headers lay them out (amd64 and
 // arm64 align these fields as C does; TestVAAPIDecodeLayout checks them).
@@ -97,7 +99,10 @@ type vaDecoder struct {
 	fd      *os.File
 	dpy     uintptr
 	picture func(*DecodedPicture) error
+	codec   VideoCodec
 	hevc    *hevc.Decoder
+	mpeg2   *mpeg2.Decoder
+	di      *Deinterlacing // MPEG-2's pictures, deinterlaced
 
 	conf, ctx     uint32
 	surfaces      []uint32
@@ -105,14 +110,18 @@ type vaDecoder struct {
 	width, height int
 	depth         int
 
-	y, uv []byte // the picture given out
-	err   error
+	y, uv  []byte // the picture given out
+	cb, cr []byte // MPEG-2's chroma planes
+	err    error
 }
 
-// openVAAPIDecoder opens the first render node whose driver decodes HEVC.
+// openVAAPIDecoder opens the first render node whose driver decodes the
+// codec.
 func openVAAPIDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (Decoder, error) {
-	if cfg.Codec != DecodeHEVC {
-		return nil, fmt.Errorf("%w: VAAPI decoding is of HEVC only", ErrDecodeUnavailable)
+	switch cfg.Codec {
+	case DecodeHEVC, DecodeMPEG2:
+	default:
+		return nil, fmt.Errorf("%w: VAAPI decoding is of HEVC and MPEG-2", ErrDecodeUnavailable)
 	}
 	f, err := loadVA()
 	if err != nil {
@@ -121,11 +130,18 @@ func openVAAPIDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (De
 	devices, _ := filepath.Glob("/dev/dri/renderD*")
 	firstErr := fmt.Errorf("%w: no render node", ErrDecodeUnavailable)
 	for i, dev := range devices {
-		d := &vaDecoder{f: f, picture: picture}
+		d := &vaDecoder{f: f, picture: picture, codec: cfg.Codec}
 		err := d.open(dev)
 		if err == nil {
-			d.hevc = hevc.New()
-			d.hevc.SetAccel(d)
+			switch cfg.Codec {
+			case DecodeHEVC:
+				d.hevc = hevc.New()
+				d.hevc.SetAccel(d)
+			case DecodeMPEG2:
+				d.mpeg2 = mpeg2.New()
+				d.mpeg2.SetAccel(vaMPEG2{d})
+				d.di = NewDeinterlacing(picture)
+			}
 			return d, nil
 		}
 		d.release()
@@ -159,9 +175,16 @@ func (d *vaDecoder) open(dev string) error {
 		d.dpy = 0
 		return fmt.Errorf("%w: %s: %v", ErrDecodeUnavailable, dev, d.check("initialising", st))
 	}
-	// Main 10 decoding covers Ultra HD Blu-ray; Main comes with it.
-	if !d.vld(vaProfileHEVCMain10) || !d.vld(vaProfileHEVCMain) {
-		return fmt.Errorf("%w: %s: the driver does not decode HEVC Main 10", ErrDecodeUnavailable, dev)
+	switch d.codec {
+	case DecodeHEVC:
+		// Main 10 decoding covers Ultra HD Blu-ray; Main comes with it.
+		if !d.vld(vaProfileHEVCMain10) || !d.vld(vaProfileHEVCMain) {
+			return fmt.Errorf("%w: %s: the driver does not decode HEVC Main 10", ErrDecodeUnavailable, dev)
+		}
+	case DecodeMPEG2:
+		if !d.vld(vaProfileMPEG2Main) {
+			return fmt.Errorf("%w: %s: the driver does not decode MPEG-2", ErrDecodeUnavailable, dev)
+		}
 	}
 	return nil
 }
@@ -186,20 +209,32 @@ func (d *vaDecoder) Decode(au []byte, pts int64) error {
 	if d.err != nil {
 		return d.err
 	}
-	if err := d.hevc.Decode(au, pts, nil); err != nil {
-		d.err = err
+	var err error
+	switch d.codec {
+	case DecodeHEVC:
+		err = d.hevc.Decode(au, pts, nil)
+	case DecodeMPEG2:
+		err = d.mpeg2.Decode(au, pts, d.takeMPEG2)
 	}
-	return d.err
+	d.err = err
+	return err
 }
 
 func (d *vaDecoder) Flush() error {
 	if d.err != nil {
 		return d.err
 	}
-	if err := d.hevc.Flush(nil); err != nil {
-		d.err = err
+	var err error
+	switch d.codec {
+	case DecodeHEVC:
+		err = d.hevc.Flush(nil)
+	case DecodeMPEG2:
+		if err = d.mpeg2.Flush(d.takeMPEG2); err == nil {
+			err = d.di.Flush()
+		}
 	}
-	return d.err
+	d.err = err
+	return err
 }
 
 func (d *vaDecoder) Close() error {
@@ -265,7 +300,10 @@ func (d *vaDecoder) Release(surface int) {
 func (d *vaDecoder) createContext(width, height, depth int) error {
 	d.destroyContext()
 	profile, rt := uint32(vaProfileHEVCMain), uint32(vaRTFormatYUV420)
-	if depth > 8 {
+	switch {
+	case d.codec == DecodeMPEG2:
+		profile = vaProfileMPEG2Main
+	case depth > 8:
 		profile, rt = vaProfileHEVCMain10, vaRTFormatYUV420_10
 	}
 	attr := newStruct(vaSizeConfigAttrib)
@@ -305,45 +343,50 @@ func structBytes[T any](v *T) cstruct {
 
 func bit(b bool, pos int) uint32 { return b2u(b) << pos }
 
+// vaBuffer is a parameter or data buffer of a picture.
+type vaBuffer struct {
+	typ  uintptr
+	data cstruct
+}
+
+// slicesData copies slice data into C-reachable memory.
+func slicesData(b []byte) cstruct {
+	data := newStruct(len(b))
+	copy(data, b)
+	return data
+}
+
 // DecodePicture sends a picture's parameters and slices to the GPU.
 func (d *vaDecoder) DecodePicture(p *hevc.AccelPicture, slices []hevc.AccelSlice) error {
-	pp := d.picParams(p)
+	bufs := []vaBuffer{{vaPictureParameterBufferType, structBytes(d.picParams(p))}}
+	if p.Scaling != nil {
+		q := &vaIQMatrixHEVC{L4: p.Scaling.L4, L8: p.Scaling.L8, L16: p.Scaling.L16, L32: p.Scaling.L32,
+			DC16: p.Scaling.DC16, DC32: p.Scaling.DC32}
+		bufs = append(bufs, vaBuffer{vaIQMatrixBufferType, structBytes(q)})
+	}
+	for i := range slices {
+		bufs = append(bufs, vaBuffer{vaSliceParameterBufferType, structBytes(sliceParams(&slices[i], i == len(slices)-1))},
+			vaBuffer{vaSliceDataBufferType, slicesData(slices[i].Data)})
+	}
+	return d.render(p.Surface, bufs)
+}
+
+// render decodes a picture into surface from its buffers.
+func (d *vaDecoder) render(surf int, in []vaBuffer) error {
 	var bufs []uint32
 	defer func() {
 		for _, b := range bufs {
 			call(d.f.destroyBuffer, d.dpy, uintptr(b))
 		}
 	}()
-	add := func(typ uintptr, s cstruct) error {
+	for _, b := range in {
 		id := newStruct(4)
-		err := d.check("creating a buffer", call(d.f.createBuffer, d.dpy, uintptr(d.ctx), typ, uintptr(len(s)), 1, s.ptr(), id.ptr()))
-		if err == nil {
-			bufs = append(bufs, id.getU32(0))
-		}
-		return err
-	}
-	if err := add(vaPictureParameterBufferType, structBytes(pp)); err != nil {
-		return err
-	}
-	if p.Scaling != nil {
-		q := &vaIQMatrixHEVC{L4: p.Scaling.L4, L8: p.Scaling.L8, L16: p.Scaling.L16, L32: p.Scaling.L32,
-			DC16: p.Scaling.DC16, DC32: p.Scaling.DC32}
-		if err := add(vaIQMatrixBufferType, structBytes(q)); err != nil {
+		if err := d.check("creating a buffer", call(d.f.createBuffer, d.dpy, uintptr(d.ctx), b.typ, uintptr(len(b.data)), 1, b.data.ptr(), id.ptr())); err != nil {
 			return err
 		}
+		bufs = append(bufs, id.getU32(0))
 	}
-	for i := range slices {
-		sp := sliceParams(&slices[i], i == len(slices)-1)
-		if err := add(vaSliceParameterBufferType, structBytes(sp)); err != nil {
-			return err
-		}
-		data := newStruct(len(slices[i].Data))
-		copy(data, slices[i].Data)
-		if err := add(vaSliceDataBufferType, data); err != nil {
-			return err
-		}
-	}
-	surface := uintptr(d.surfaces[p.Surface])
+	surface := uintptr(d.surfaces[surf])
 	if err := d.check("starting a picture", call(d.f.beginPicture, d.dpy, uintptr(d.ctx), surface)); err != nil {
 		return err
 	}
@@ -482,9 +525,16 @@ func sliceParams(s *hevc.AccelSlice, last bool) *vaSliceParamHEVC {
 	return sp
 }
 
-// Output waits for the picture in surface and gives it out, its window
-// copied out of the surface as NV12 or P010.
-func (d *vaDecoder) Output(surface int, p *hevc.Picture) error {
+// surfaceImage is a decoded surface mapped: its planes' addresses and
+// pitches.
+type surfaceImage struct {
+	y, uv          uintptr
+	pitch, uvPitch int
+}
+
+// mapSurface waits for the picture in surface and maps it (NV12 or P010,
+// as want says) for fn to read.
+func (d *vaDecoder) mapSurface(surface int, want uint32, fn func(*surfaceImage)) error {
 	sid := uintptr(d.surfaces[surface])
 	if err := d.check("waiting for a picture", call(d.f.syncSurface, d.dpy, sid)); err != nil {
 		return err
@@ -494,10 +544,6 @@ func (d *vaDecoder) Output(surface int, p *hevc.Picture) error {
 		return err
 	}
 	defer call(d.f.destroyImage, d.dpy, uintptr(img.getU32(vaImageID)))
-	bps, depth, want := 1, 8, uint32(vaFourccNV12)
-	if p.BitDepth > 8 {
-		bps, depth, want = 2, 10, vaFourccP010
-	}
 	if img.getU32(vaImageFourcc) != want {
 		return errors.New("vaapi: the decoded surface is in another format")
 	}
@@ -507,8 +553,18 @@ func (d *vaDecoder) Output(surface int, p *hevc.Picture) error {
 		return err
 	}
 	base := m.getPtr(0)
-	spitch, uvPitch := int(img.getU32(vaImagePitches)), int(img.getU32(vaImagePitches+4))
-	yOff, uvOff := uintptr(img.getU32(vaImageOffsets)), uintptr(img.getU32(vaImageOffsets+4))
+	fn(&surfaceImage{y: base + uintptr(img.getU32(vaImageOffsets)), uv: base + uintptr(img.getU32(vaImageOffsets+4)),
+		pitch: int(img.getU32(vaImagePitches)), uvPitch: int(img.getU32(vaImagePitches + 4))})
+	return d.check("unmapping an image", call(d.f.unmapBuffer, d.dpy, buf))
+}
+
+// Output waits for the picture in surface and gives it out, its window
+// copied out of the surface as NV12 or P010.
+func (d *vaDecoder) Output(surface int, p *hevc.Picture) error {
+	bps, depth, want := 1, 8, uint32(vaFourccNV12)
+	if p.BitDepth > 8 {
+		bps, depth, want = 2, 10, vaFourccP010
+	}
 	w, h := p.Width, p.Height
 	ch := (h + 1) / 2
 	row := (w + w&1) * bps
@@ -516,15 +572,15 @@ func (d *vaDecoder) Output(surface int, p *hevc.Picture) error {
 		d.y, d.uv = make([]byte, row*h), make([]byte, row*ch)
 	}
 	x0 := p.Left * bps
-	for r := range h {
-		src := cbytes(base+yOff+uintptr((p.Top+r)*spitch+x0), row)
-		copy(d.y[r*row:], src)
-	}
-	for r := range ch {
-		src := cbytes(base+uvOff+uintptr((p.Top/2+r)*uvPitch+(p.Left/2)*2*bps), row)
-		copy(d.uv[r*row:], src)
-	}
-	if err := d.check("unmapping an image", call(d.f.unmapBuffer, d.dpy, buf)); err != nil {
+	err := d.mapSurface(surface, want, func(m *surfaceImage) {
+		for r := range h {
+			copy(d.y[r*row:], cbytes(m.y+uintptr((p.Top+r)*m.pitch+x0), row))
+		}
+		for r := range ch {
+			copy(d.uv[r*row:], cbytes(m.uv+uintptr((p.Top/2+r)*m.uvPitch+(p.Left/2)*2*bps), row))
+		}
+	})
+	if err != nil {
 		return err
 	}
 	return d.picture(&DecodedPicture{Width: w, Height: h, Depth: depth, Y: d.y, UV: d.uv, Pitch: row, PTS: p.PTS,
