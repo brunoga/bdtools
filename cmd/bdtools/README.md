@@ -730,6 +730,15 @@ side-by-side file has no such player.
   in 3D itself (Kodi playing frame packed) draws a 3D track squeezed into
   one eye; pick the 3D one on a player that shows the frame as it is.
 
+In a 3D conversion, the flat tracks' wide subtitles are written as two
+pieces side by side, drawn exactly as the one they were. Kodi, playing a
+3D film, takes any subtitle wider than half its plane (960 pixels) for one
+drawn side by side for both eyes, and shows its left half on half the
+plane: larger, pushed to the right and cut off. A disc's two-line
+subtitles are often that wide; each piece is not. `tools/pgskodi` does the
+same to a `.sup` file, for films converted before (extract the flat
+tracks, rewrite them, mux them back with mkvmerge).
+
 A subtitle takes the depth the disc gives at its first frame; a disc that
 moves it while it is up is followed from its next display set. A subtitle
 track the disc assigns no offset sequence sits at the screen plane. A

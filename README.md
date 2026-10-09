@@ -304,6 +304,7 @@ the headers are; `testdata/vaoff.c` generates `vaapi_layout.go`).
 | `mvc/aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
 | `mvc/stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
 | `cmd/mvcdec`, `cmd/bdtools` | the commands |
+| `tools/pgskodi`, `tools/refdump` | splitting wide PGS subtitles for Kodi in films converted before bdtools did; the edge264 reference dumper |
 | `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
 | `internal/hevc`, `internal/mpeg2`, `internal/vc1`, `internal/deint` | HEVC, MPEG-2 and VC-1 decoders in Go (whose parsers also drive VAAPI), and a deinterlacer, for 2D sources |
 | `internal/dovi`, `internal/hdr` | Dolby Vision: RPU parsing and rewriting (profile 7 to 8.1), enhancement-layer composition; HDR10 and HDR10+ metadata |

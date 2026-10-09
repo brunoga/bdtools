@@ -5,6 +5,20 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Kodi playing a 3D conversion drew the flat subtitle tracks' wide lines
+  (over 960 pixels, as two-line subtitles often are) larger, shifted right
+  and cut off: it takes any subtitle wider than half its plane for a
+  side-by-side one. They are written as two pieces side by side now, drawn
+  as before by every player. `tools/pgskodi` fixes a `.sup` extracted from
+  a film converted earlier.
+
+### Changed
+
+- The MKV's writing application says which bdtools made it (`bdtools
+  v0.8.1`), not only that bdtools did.
+
 ## [0.8.0] - 2026-10-09
 
 ### Added

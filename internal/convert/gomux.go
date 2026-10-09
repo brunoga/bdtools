@@ -116,7 +116,13 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 					p.SetDefault(true)
 					firstSubs = false
 				}
-				sources = append(sources, p)
+				if r.flat {
+					sources = append(sources, p)
+				} else {
+					// Kodi playing a 3D film cuts flat subtitles wider than
+					// half its plane: they go in pieces it leaves whole.
+					sources = append(sources, KodiPGS(p))
+				}
 			}
 			if r.Opts.Subs3D.threeD() {
 				p, err := pgs()
@@ -187,7 +193,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	err = mkv.Mux(out, sources, mkv.Options{
 		Spans:      &spans,
 		Chapters:   chs,
-		WritingApp: "bdtools",
+		WritingApp: strings.TrimSpace("bdtools " + r.Version),
 		Progress: func(t time.Duration) {
 			if ctx.Err() == nil && t%(10*time.Minute) < time.Minute {
 				r.Report.Report("muxed %s", t.Round(time.Minute))
