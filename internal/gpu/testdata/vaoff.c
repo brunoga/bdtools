@@ -211,6 +211,46 @@ int main(void) {
 	LBIT(collocated_from_l0_flag, "vaHEVCDecSliceColFromL0Bit"); LBIT(slice_loop_filter_across_slices_enabled_flag, "vaHEVCDecSliceLFAcrossBit");
 	typedef VAIQMatrixBufferHEVC DQ;
 	SZ(DQ, "vaSizeHEVCIQ"); OFF(DQ, ScalingList32x32, "vaHEVCIQ32"); OFF(DQ, ScalingListDC32x32, "vaHEVCIQDC32");
+	/* MPEG-2 decoding */
+	C(VAProfileMPEG2Main, "vaProfileMPEG2Main");
+	typedef VAPictureParameterBufferMPEG2 MP;
+	SZ(MP, "vaSizeMPEG2Pic"); OFF(MP, forward_reference_picture, "vaMPEG2PicForward"); OFF(MP, picture_coding_type, "vaMPEG2PicType");
+	OFF(MP, picture_coding_extension, "vaMPEG2PicExt");
+	BIT(MP, picture_coding_extension, intra_dc_precision, "vaMPEG2DCPrecisionBit"); BIT(MP, picture_coding_extension, picture_structure, "vaMPEG2StructureBit");
+	BIT(MP, picture_coding_extension, top_field_first, "vaMPEG2TFFBit"); BIT(MP, picture_coding_extension, frame_pred_frame_dct, "vaMPEG2FramePredBit");
+	BIT(MP, picture_coding_extension, concealment_motion_vectors, "vaMPEG2ConcealmentBit"); BIT(MP, picture_coding_extension, q_scale_type, "vaMPEG2QScaleTypeBit");
+	BIT(MP, picture_coding_extension, intra_vlc_format, "vaMPEG2IntraVLCBit"); BIT(MP, picture_coding_extension, alternate_scan, "vaMPEG2AltScanBit");
+	BIT(MP, picture_coding_extension, repeat_first_field, "vaMPEG2RepeatFirstBit"); BIT(MP, picture_coding_extension, progressive_frame, "vaMPEG2ProgressiveBit");
+	BIT(MP, picture_coding_extension, is_first_field, "vaMPEG2FirstFieldBit");
+	typedef VAIQMatrixBufferMPEG2 MQ;
+	SZ(MQ, "vaSizeMPEG2IQ"); OFF(MQ, intra_quantiser_matrix, "vaMPEG2IQIntra"); OFF(MQ, chroma_non_intra_quantiser_matrix, "vaMPEG2IQChromaNonIntra");
+	typedef VASliceParameterBufferMPEG2 MS;
+	SZ(MS, "vaSizeMPEG2Slice"); OFF(MS, macroblock_offset, "vaMPEG2SliceMBOffset"); OFF(MS, intra_slice_flag, "vaMPEG2SliceIntra");
+	/* H.264 decoding */
+	C(VAProfileH264Main, "vaProfileH264Main"); C(VAProfileH264ConstrainedBaseline, "vaProfileH264ConstrainedBaseline");
+	C(VA_PICTURE_H264_TOP_FIELD, "vaPictureH264Top"); C(VA_PICTURE_H264_BOTTOM_FIELD, "vaPictureH264Bottom");
+	C(VA_PICTURE_H264_LONG_TERM_REFERENCE, "vaPictureH264LongTerm");
+	typedef VAPictureParameterBufferH264 DHP;
+	SZ(DHP, "vaSizeH264DecPic"); OFF(DHP, ReferenceFrames, "vaH264DecPicRefs"); OFF(DHP, picture_width_in_mbs_minus1, "vaH264DecPicWidth");
+	OFF(DHP, num_ref_frames, "vaH264DecPicNumRefFrames"); OFF(DHP, seq_fields, "vaH264DecPicSeqFields"); OFF(DHP, pic_init_qp_minus26, "vaH264DecPicInitQP");
+	OFF(DHP, pic_fields, "vaH264DecPicPicFields"); OFF(DHP, frame_num, "vaH264DecPicFrameNum");
+	BIT(DHP, seq_fields, chroma_format_idc, "vaH264ChromaFormatBit"); BIT(DHP, seq_fields, gaps_in_frame_num_value_allowed_flag, "vaH264GapsBit");
+	BIT(DHP, seq_fields, frame_mbs_only_flag, "vaH264FrameMBsOnlyBit"); BIT(DHP, seq_fields, mb_adaptive_frame_field_flag, "vaH264MBAFFBit");
+	BIT(DHP, seq_fields, direct_8x8_inference_flag, "vaH264Direct8x8Bit"); BIT(DHP, seq_fields, MinLumaBiPredSize8x8, "vaH264MinBiPred8x8Bit");
+	BIT(DHP, seq_fields, log2_max_frame_num_minus4, "vaH264Log2MaxFrameNumBit"); BIT(DHP, seq_fields, pic_order_cnt_type, "vaH264POCTypeBit");
+	BIT(DHP, seq_fields, log2_max_pic_order_cnt_lsb_minus4, "vaH264Log2MaxPOCLsbBit"); BIT(DHP, seq_fields, delta_pic_order_always_zero_flag, "vaH264DeltaPOCZeroBit");
+	BIT(DHP, pic_fields, entropy_coding_mode_flag, "vaH264CABACBit"); BIT(DHP, pic_fields, weighted_pred_flag, "vaH264WeightedPredBit");
+	BIT(DHP, pic_fields, weighted_bipred_idc, "vaH264WeightedBipredBit"); BIT(DHP, pic_fields, transform_8x8_mode_flag, "vaH264Transform8x8Bit");
+	BIT(DHP, pic_fields, field_pic_flag, "vaH264FieldPicBit"); BIT(DHP, pic_fields, constrained_intra_pred_flag, "vaH264ConstrainedIntraBit");
+	BIT(DHP, pic_fields, pic_order_present_flag, "vaH264POCPresentBit"); BIT(DHP, pic_fields, deblocking_filter_control_present_flag, "vaH264DeblockControlBit");
+	BIT(DHP, pic_fields, redundant_pic_cnt_present_flag, "vaH264RedundantPicCntBit"); BIT(DHP, pic_fields, reference_pic_flag, "vaH264ReferenceBit");
+	typedef VAIQMatrixBufferH264 DHQ;
+	SZ(DHQ, "vaSizeH264IQ"); OFF(DHQ, ScalingList8x8, "vaH264IQ8x8");
+	typedef VASliceParameterBufferH264 DHS;
+	SZ(DHS, "vaSizeH264DecSlice"); OFF(DHS, slice_data_bit_offset, "vaH264DecSliceBitOffset"); OFF(DHS, slice_type, "vaH264DecSliceType");
+	OFF(DHS, RefPicList0, "vaH264DecSliceRefs0"); OFF(DHS, RefPicList1, "vaH264DecSliceRefs1"); OFF(DHS, luma_log2_weight_denom, "vaH264DecSliceLumaDenom");
+	OFF(DHS, luma_weight_l0, "vaH264DecSliceLumaWeightL0"); OFF(DHS, chroma_weight_l0_flag, "vaH264DecSliceChromaFlagL0"); OFF(DHS, chroma_weight_l0, "vaH264DecSliceChromaWeightL0");
+	OFF(DHS, luma_weight_l1_flag, "vaH264DecSliceLumaFlagL1"); OFF(DHS, chroma_offset_l1, "vaH264DecSliceChromaOffsetL1");
 	printf(")\n");
 	return 0;
 }

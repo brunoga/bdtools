@@ -12,12 +12,15 @@ import (
 	"unsafe"
 )
 
-// The Go mirrors of the HEVC decoding buffers lie as the C headers do
+// The Go mirrors of the decoding buffers lie as the C headers do
 // (the numbers come from them: TestVAAPILayout).
 func TestVAAPIDecodeLayout(t *testing.T) {
 	var p vaPicParamHEVC
 	var s vaSliceParamHEVC
 	var q vaIQMatrixHEVC
+	var mp vaPicParamMPEG2
+	var mq vaIQMatrixMPEG2
+	var ms vaSliceParamMPEG2
 	for _, c := range []struct {
 		name      string
 		got, want uintptr
@@ -48,6 +51,16 @@ func TestVAAPIDecodeLayout(t *testing.T) {
 		{"IQ size", unsafe.Sizeof(q), vaSizeHEVCIQ},
 		{"ScalingList32x32", unsafe.Offsetof(q.L32), vaHEVCIQ32},
 		{"ScalingListDC32x32", unsafe.Offsetof(q.DC32), vaHEVCIQDC32},
+		{"MPEG-2 picture size", unsafe.Sizeof(mp), vaSizeMPEG2Pic},
+		{"forward_reference_picture", unsafe.Offsetof(mp.Forward), vaMPEG2PicForward},
+		{"picture_coding_type", unsafe.Offsetof(mp.CodingType), vaMPEG2PicType},
+		{"picture_coding_extension", unsafe.Offsetof(mp.Ext), vaMPEG2PicExt},
+		{"MPEG-2 IQ size", unsafe.Sizeof(mq), vaSizeMPEG2IQ},
+		{"intra_quantiser_matrix", unsafe.Offsetof(mq.Intra), vaMPEG2IQIntra},
+		{"chroma_non_intra_quantiser_matrix", unsafe.Offsetof(mq.ChromaNonIntra), vaMPEG2IQChromaNonIntra},
+		{"MPEG-2 slice size", unsafe.Sizeof(ms), vaSizeMPEG2Slice},
+		{"macroblock_offset", unsafe.Offsetof(ms.MBOffset), vaMPEG2SliceMBOffset},
+		{"intra_slice_flag", unsafe.Offsetof(ms.IntraSlice), vaMPEG2SliceIntra},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s at %d, C's at %d", c.name, c.got, c.want)

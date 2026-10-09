@@ -325,6 +325,15 @@ func TestRunnerConverts2DSources(t *testing.T) {
 		if got := convert(t, mpeg2, CodecH264, DecoderCPU); !bytes.HasPrefix(got, []byte("8-bit ")) {
 			t.Errorf("output %s", got[:7])
 		}
+		t.Run("in Matroska", func(t *testing.T) {
+			remux := filepath.Join(work, "mpeg2.mkv")
+			if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", mpeg2, "-c", "copy", remux); err != nil {
+				t.Skipf("could not remux: %v", err)
+			}
+			if got := convert(t, remux, CodecH264, DecoderCPU); !bytes.HasPrefix(got, []byte("8-bit ")) {
+				t.Errorf("output %s", got[:7])
+			}
+		})
 	})
 }
 

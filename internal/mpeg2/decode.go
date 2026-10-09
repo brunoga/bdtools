@@ -26,6 +26,7 @@ type frame struct {
 	progressive bool
 	tff         bool
 	anchor      bool // an I or P frame
+	surface     int  // the accelerator's
 }
 
 // Decoder decodes an MPEG-2 video elementary stream, access unit by
@@ -65,6 +66,10 @@ type Decoder struct {
 	predY  [256]uint8
 	predC  [2][64]uint8
 	out    func(*Picture) error
+
+	accel     Accel
+	accSlices []AccelSlice
+	accData   []byte
 }
 
 // picture is a picture header and its coding extension.
@@ -80,6 +85,7 @@ type picture struct {
 	intraVLC         bool
 	alternateScan    bool
 	progressiveFrame bool
+	repeatFirst      bool
 	pts              int64
 }
 
@@ -145,7 +151,11 @@ func (d *Decoder) Decode(au []byte, pts int64, out func(*Picture) error) error {
 			if d.cur == nil {
 				continue
 			}
-			if err := d.slice(int(code), body); err != nil {
+			if d.accel != nil {
+				if err := d.accelSlice(int(code), body); err != nil {
+					d.errors++
+				}
+			} else if err := d.slice(int(code), body); err != nil {
 				d.errors++
 			}
 		case code == 0xb7: // sequence end
@@ -237,6 +247,10 @@ func (d *Decoder) layout() {
 	d.strideY, d.strideC = d.mbw*16, d.mbw*8
 	d.lumaH = d.mbh * 16
 	d.pool = nil
+	if d.accel != nil {
+		// The accelerator's surfaces of the old size go with it.
+		d.fwd, d.bwd, d.held, d.cur = nil, nil, nil, nil
+	}
 }
 
 func (d *Decoder) extension(b []byte) {
@@ -285,7 +299,7 @@ func (d *Decoder) extension(b []byte) {
 		p.qScaleType = r.flag()
 		p.intraVLC = r.flag()
 		p.alternateScan = r.flag()
-		r.skip(1) // repeat_first_field
+		p.repeatFirst = r.flag()
 		r.skip(1) // chroma_420_type
 		p.progressiveFrame = r.flag()
 	}
@@ -326,7 +340,10 @@ func (d *Decoder) beginPicture() error {
 		d.inPicture = false
 		return nil
 	}
-	f := d.frame()
+	f, err := d.frame()
+	if err != nil {
+		return err
+	}
 	f.pts, f.progressive, f.tff = p.pts, p.progressiveFrame, p.tff
 	f.anchor = p.codingType != 3
 	if p.structure != framePic {
@@ -340,10 +357,11 @@ func (d *Decoder) beginPicture() error {
 				return err
 			}
 		}
-		if d.fwd != nil {
-			d.release(d.fwd)
-		}
+		old := d.fwd
 		d.fwd, d.bwd = d.bwd, f
+		if old != nil {
+			d.release(old)
+		}
 	}
 	d.cur, d.second = f, false
 	return nil
@@ -357,6 +375,12 @@ func (d *Decoder) endPicture() error {
 	if d.cur == nil {
 		d.inPicture = false
 		return nil
+	}
+	if d.accel != nil {
+		if err := d.accelPicture(); err != nil {
+			d.cur = nil
+			return err
+		}
 	}
 	f := d.cur
 	d.cur = nil
@@ -373,17 +397,31 @@ func (d *Decoder) endPicture() error {
 	return nil
 }
 
-func (d *Decoder) frame() *frame {
+func (d *Decoder) frame() (*frame, error) {
+	if d.accel != nil {
+		s, err := d.accel.NewSurface(d.strideY, d.lumaH)
+		if err != nil {
+			return nil, err
+		}
+		return &frame{surface: s}, nil
+	}
 	if n := len(d.pool); n > 0 {
 		f := d.pool[n-1]
 		d.pool = d.pool[:n-1]
-		return f
+		return f, nil
 	}
-	return &frame{y: make([]byte, d.strideY*d.lumaH), cb: make([]byte, d.strideC*d.lumaH/2), cr: make([]byte, d.strideC*d.lumaH/2)}
+	return &frame{y: make([]byte, d.strideY*d.lumaH), cb: make([]byte, d.strideC*d.lumaH/2), cr: make([]byte, d.strideC*d.lumaH/2)}, nil
 }
 
 func (d *Decoder) release(f *frame) {
-	if len(f.y) == d.strideY*d.lumaH && f != d.fwd && f != d.bwd {
+	if f == d.fwd || f == d.bwd {
+		return
+	}
+	if d.accel != nil {
+		d.accel.Release(f.surface)
+		return
+	}
+	if len(f.y) == d.strideY*d.lumaH {
 		d.pool = append(d.pool, f)
 	}
 }
@@ -392,7 +430,13 @@ func (d *Decoder) emit(f *frame) error {
 	if d.out == nil {
 		return nil
 	}
-	return d.out(&Picture{Width: d.width, Height: d.height, Y: f.y, Cb: f.cb, Cr: f.cr, StrideY: d.strideY, StrideC: d.strideC,
+	p := &Picture{Width: d.width, Height: d.height, Y: f.y, Cb: f.cb, Cr: f.cr, StrideY: d.strideY, StrideC: d.strideC,
 		PTS: f.pts, Progressive: f.progressive, TopFieldFirst: f.tff, FrameRateNum: d.rateNum, FrameRateDen: d.rateDen,
-		Primaries: d.prim, Transfer: d.trc, Matrix: d.matrix})
+		Primaries: d.prim, Transfer: d.trc, Matrix: d.matrix}
+	if d.accel != nil {
+		if err := d.accel.Output(f.surface, p); err != nil {
+			return err
+		}
+	}
+	return d.out(p)
 }

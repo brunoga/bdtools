@@ -119,7 +119,7 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			if len(videoTimes[p.Track]) < 64 {
 				videoTimes[p.Track] = append(videoTimes[p.Track], p.Time)
 			}
-			if isVC1(t) {
+			if startCoded(t) {
 				samples[p.Track] = append(samples[p.Track], p.Data...)
 			} else {
 				samples[p.Track] = append(samples[p.Track], annexB(p.Data, videoNALSize(t))...)
@@ -199,6 +199,9 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 			}
 			tr.Type, tr.StreamID = "VC-1", "V_MS/VFW/FOURCC"
 			tr.Info = fmt.Sprintf("SMPTE VC-1 Resolution: %dx%d", t.Width, t.Height)
+		case "V_MPEG2":
+			tr.Type, tr.StreamID = "MPEG-2", "V_MPEG2"
+			tr.Info = fmt.Sprintf("MPEG-2 video Resolution: %dx%d", t.Width, t.Height)
 		case "A_PCM/INT/LIT", "A_MS/ACM":
 			channels, rate, bits, ok := pcmFormat(&t)
 			if !ok {
@@ -227,6 +230,11 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 func isVC1(t *mkv.ReadTrack) bool {
 	return t.CodecID == "V_MS/VFW/FOURCC" && len(t.CodecPrivate) >= 20 && string(t.CodecPrivate[16:20]) == "WVC1"
 }
+
+// startCoded reports whether a video track's frames are the elementary
+// stream's own, framed by start codes (VC-1, MPEG-2), not NAL units with
+// sizes.
+func startCoded(t *mkv.ReadTrack) bool { return isVC1(t) || t.CodecID == "V_MPEG2" }
 
 // vc1Headers is a VC-1 track's sequence and entry point headers, after its
 // BITMAPINFOHEADER (from their first start code: a size byte can come
@@ -433,7 +441,8 @@ type mkvDemux struct {
 	r       *mkv.Reader
 	video   uint64
 	nalSize int
-	vc1     bool   // the video is VC-1: its blocks go as they are
+	raw     bool   // the video is framed by start codes (VC-1, MPEG-2): its blocks go as they are
+	seqCode byte   // its sequence header's start code
 	params  []byte // the avcC's parameter sets, ahead of the first picture
 	writers map[uint64]*esWriter
 	// t0 is the first block's time, the output's zero; anything earlier
@@ -466,8 +475,15 @@ func (g *mkvDemux) start() error {
 	if t := r.Track(g.video); t != nil {
 		g.nalSize = videoNALSize(t)
 		g.params = videoParams(t)
-		if isVC1(t) {
-			g.vc1, g.params = true, vc1Headers(t)
+		switch {
+		case isVC1(t):
+			g.raw, g.params, g.seqCode = true, vc1Headers(t), 0x0f
+		case startCoded(t):
+			// MPEG-2: the track header holds the sequence header.
+			g.raw, g.params, g.seqCode = true, nil, 0xb3
+			if i := bytes.Index(t.CodecPrivate, []byte{0, 0, 1, 0xb3}); i >= 0 {
+				g.params = t.CodecPrivate[i:]
+			}
 		}
 	}
 	if err := os.MkdirAll(g.tmp, 0o750); err != nil { //nolint:gosec // the operator's work directory
@@ -509,12 +525,12 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 			g.t0, g.t0Known = p.Time, true
 		}
 		switch {
-		case p.Track == g.video && g.vc1:
+		case p.Track == g.video && g.raw:
 			au := append([]byte(nil), p.Data...)
 			if g.params != nil {
 				// The track header's sequence header, ahead of a first
 				// picture without its own.
-				if !bytes.Contains(au, []byte{0, 0, 1, 0x0f}) {
+				if !bytes.Contains(au, []byte{0, 0, 1, g.seqCode}) {
 					au = append(g.params, au...)
 				}
 				g.params = nil

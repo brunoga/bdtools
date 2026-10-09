@@ -271,7 +271,9 @@ GPUs decode HEVC through VAAPI: VAAPI has no parser of its own, so the HEVC
 decoder here parses the stream, keeps the reference pictures and their
 order, and hands the GPU each picture's slices (byte-identical to ffmpeg on
 all 152 conformance streams on an Intel Arrow Lake GPU; 95 fps for a disc's
-4K stream there, with about one CPU core). Without a GPU decoder, every
+4K stream there, with about one CPU core). MPEG-2 goes to VAAPI the same
+way, the MPEG-2 decoder here parsing, its interlaced frames deinterlaced
+here. Without a GPU decoder, every
 codec goes to the decoders here (Go), and HEVC of a profile they do not
 decode (the format range extensions, never on a disc) to ffmpeg (see
 [What works where](#what-works-where)). `--decoder` overrides the choice.
@@ -831,11 +833,11 @@ NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
 (macOS: H.264, HEVC), VAAPI (Linux, Intel and AMD: HEVC) — else by the
 decoders here, in Go:
 
-| | NVIDIA (Linux, Windows), Mac (H.264, HEVC), VAAPI (HEVC) | elsewhere |
+| | NVIDIA (Linux, Windows), Mac (H.264, HEVC), VAAPI (HEVC, MPEG-2) | elsewhere |
 |---|---|---|
 | 3D Blu-ray → SBS | ✓ | ✓ |
 | Remux (`.m2ts`, `.mkv`, Dolby Vision kept) | ✓ | ✓ |
-| 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC) | ✓ (decoded here) |
+| 2D H.264, VC-1 or MPEG-2 Blu-ray | ✓ (NVDEC; VAAPI for MPEG-2) | ✓ (decoded here) |
 | 2D HEVC (Ultra HD) | ✓ (NVDEC, VideoToolbox, VAAPI) | ✓ (decoded here) |
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) |
