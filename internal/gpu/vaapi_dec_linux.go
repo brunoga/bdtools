@@ -12,6 +12,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/hevc"
 	"github.com/brunoga/bdtools/internal/mpeg2"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // VAAPI decoding of HEVC, MPEG-2 and H.264: the parsers here (internal/hevc,
@@ -91,8 +92,14 @@ type vaIQMatrixHEVC struct {
 }
 
 // vaDecSurfaces is how many surfaces a decoder makes: the 16 pictures
-// HEVC may keep, the one being decoded, and room for the output.
-const vaDecSurfaces = 20
+// HEVC may keep, the one being decoded, and room for the output; H.264's
+// 16 references and as many held for reordering.
+func (d *vaDecoder) vaDecSurfaces() int {
+	if d.codec == DecodeH264 {
+		return 36
+	}
+	return 20
+}
 
 type vaDecoder struct {
 	f       *vaFuncs
@@ -102,6 +109,7 @@ type vaDecoder struct {
 	codec   VideoCodec
 	hevc    *hevc.Decoder
 	mpeg2   *mpeg2.Decoder
+	h264    *mvc.Decoder
 	di      *Deinterlacing // MPEG-2's pictures, deinterlaced
 
 	conf, ctx     uint32
@@ -119,9 +127,9 @@ type vaDecoder struct {
 // codec.
 func openVAAPIDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (Decoder, error) {
 	switch cfg.Codec {
-	case DecodeHEVC, DecodeMPEG2:
+	case DecodeHEVC, DecodeMPEG2, DecodeH264:
 	default:
-		return nil, fmt.Errorf("%w: VAAPI decoding is of HEVC and MPEG-2", ErrDecodeUnavailable)
+		return nil, fmt.Errorf("%w: VAAPI decoding is of HEVC, H.264 and MPEG-2", ErrDecodeUnavailable)
 	}
 	f, err := loadVA()
 	if err != nil {
@@ -141,6 +149,9 @@ func openVAAPIDecoder(cfg DecodeConfig, picture func(*DecodedPicture) error) (De
 				d.mpeg2 = mpeg2.New()
 				d.mpeg2.SetAccel(vaMPEG2{d})
 				d.di = NewDeinterlacing(picture)
+			case DecodeH264:
+				d.h264 = mvc.NewDecoder(mvc.Options{BaseOnly: true, Threads: 1})
+				d.h264.SetAccel(vaH264{d})
 			}
 			return d, nil
 		}
@@ -185,6 +196,10 @@ func (d *vaDecoder) open(dev string) error {
 		if !d.vld(vaProfileMPEG2Main) {
 			return fmt.Errorf("%w: %s: the driver does not decode MPEG-2", ErrDecodeUnavailable, dev)
 		}
+	case DecodeH264:
+		if !d.vld(vaProfileH264High) {
+			return fmt.Errorf("%w: %s: the driver does not decode H.264 High", ErrDecodeUnavailable, dev)
+		}
 	}
 	return nil
 }
@@ -215,6 +230,10 @@ func (d *vaDecoder) Decode(au []byte, pts int64) error {
 		err = d.hevc.Decode(au, pts, nil)
 	case DecodeMPEG2:
 		err = d.mpeg2.Decode(au, pts, d.takeMPEG2)
+	case DecodeH264:
+		if err = d.h264.DecodeAU(au, pts); err == nil {
+			err = d.outputH264()
+		}
 	}
 	d.err = err
 	return err
@@ -231,6 +250,10 @@ func (d *vaDecoder) Flush() error {
 	case DecodeMPEG2:
 		if err = d.mpeg2.Flush(d.takeMPEG2); err == nil {
 			err = d.di.Flush()
+		}
+	case DecodeH264:
+		if err = d.h264.Flush(); err == nil {
+			err = d.outputH264()
 		}
 	}
 	d.err = err
@@ -303,6 +326,8 @@ func (d *vaDecoder) createContext(width, height, depth int) error {
 	switch {
 	case d.codec == DecodeMPEG2:
 		profile = vaProfileMPEG2Main
+	case d.codec == DecodeH264:
+		profile = vaProfileH264High
 	case depth > 8:
 		profile, rt = vaProfileHEVCMain10, vaRTFormatYUV420_10
 	}
@@ -314,18 +339,19 @@ func (d *vaDecoder) createContext(width, height, depth int) error {
 		return err
 	}
 	d.conf = id.getU32(0)
-	s := newStruct(4 * vaDecSurfaces)
-	if err := d.check("creating surfaces", call(d.f.createSurfaces, d.dpy, uintptr(rt), uintptr(width), uintptr(height), s.ptr(), vaDecSurfaces, 0, 0)); err != nil {
+	n := d.vaDecSurfaces()
+	s := newStruct(4 * n)
+	if err := d.check("creating surfaces", call(d.f.createSurfaces, d.dpy, uintptr(rt), uintptr(width), uintptr(height), s.ptr(), uintptr(n), 0, 0)); err != nil {
 		return err
 	}
-	d.surfaces = make([]uint32, vaDecSurfaces)
-	d.free = make([]bool, vaDecSurfaces)
+	d.surfaces = make([]uint32, n)
+	d.free = make([]bool, n)
 	for i := range d.surfaces {
 		d.surfaces[i] = s.getU32(4 * i)
 		d.free[i] = true
 	}
 	if err := d.check("creating the context", call(d.f.createContext, d.dpy, uintptr(d.conf), uintptr(width), uintptr(height), vaProgressive,
-		s.ptr(), vaDecSurfaces, id.ptr())); err != nil {
+		s.ptr(), uintptr(n), id.ptr())); err != nil {
 		return err
 	}
 	d.ctx = id.getU32(0)

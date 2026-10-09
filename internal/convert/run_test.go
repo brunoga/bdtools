@@ -315,6 +315,12 @@ func TestRunnerConverts2DSources(t *testing.T) {
 			}
 		})
 	})
+	t.Run("H.264 interlaced, through ffmpeg", func(t *testing.T) {
+		h264i := make2D("avci.m2ts", "-c:v", "libx264", "-bf", "2", "-flags", "+ildct+ilme", "-x264-params", "tff=1")
+		if got := convert(t, h264i, CodecH264, DecoderCPU); !bytes.HasPrefix(got, []byte("8-bit ")) {
+			t.Errorf("output %s", got[:7])
+		}
+	})
 	t.Run("HEVC 10-bit stays 10-bit", func(t *testing.T) {
 		if got := convert(t, hevc10, CodecH265, DecoderAuto); !bytes.HasPrefix(got, []byte("10-bit ")) {
 			t.Errorf("output %s", got[:7])

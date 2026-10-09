@@ -37,6 +37,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pictures within the inverse transform's tolerance of the decoder in Go
   (71 to 80 dB on the conformance streams).
 - Matroska remuxes of MPEG-2 discs (the `V_MPEG2` track).
+- VAAPI decoding of 2D H.264 (progressive), the H.264 decoder here parsing:
+  byte-identical to it on 65 of the 66 conformance streams it decodes, on
+  an Intel GPU.
+- Interlaced 2D H.264 (1080i discs: field pictures, MBAFF) decodes through
+  ffmpeg where neither NVDEC nor VideoToolbox does; the decoder here takes
+  progressive H.264 only, and before this such a source decoded to no
+  frames.
 - Matroska remuxes of VC-1 Blu-rays: the `V_MS/VFW/FOURCC` (WVC1) track, and
   PCM audio in `A_MS/ACM`.
 - VideoToolbox decoding on macOS (H.264 and HEVC, 10-bit included),

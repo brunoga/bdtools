@@ -22,7 +22,7 @@ func (v *viewState) reset() {
 }
 
 // computePOC derives the picture order count (8.2.1) for a frame.
-func (v *viewState) computePOC(h *sliceHeader) (poc int32, frameNumOffset int32) {
+func (v *viewState) computePOC(h *sliceHeader) (poc, top, bot int32, frameNumOffset int32) {
 	s := h.sps
 	idr := h.nal.idr
 	maxFrameNum := int32(1) << s.log2MaxFrameNum
@@ -50,7 +50,7 @@ func (v *viewState) computePOC(h *sliceHeader) (poc int32, frameNumOffset int32)
 			v.prevPocMsb = msb
 			v.prevPocLsb = lsb
 		}
-		return poc, 0
+		return poc, top, bot, 0
 	case 1:
 		var off int32
 		if !idr {
@@ -88,7 +88,7 @@ func (v *viewState) computePOC(h *sliceHeader) (poc int32, frameNumOffset int32)
 		}
 		top := expected + h.deltaPoc[0]
 		bot := top + s.offsetForTopToBottom + h.deltaPoc[1]
-		return min(top, bot), off
+		return min(top, bot), top, bot, off
 	default:
 		var off int32
 		if !idr {
@@ -109,7 +109,7 @@ func (v *viewState) computePOC(h *sliceHeader) (poc int32, frameNumOffset int32)
 		default:
 			t = 2 * (off + int32(h.frameNum))
 		}
-		return t, off
+		return t, t, t, off
 	}
 }
 
