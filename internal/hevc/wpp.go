@@ -191,6 +191,7 @@ func (sd *sliceDec) decodeRow(data []byte, start, k, ctbY int, last bool, rp *ro
 			return err
 		}
 		ps.ctbDecoded[sd.ctbAddrRS] = true
+		sd.f.ctbDone(ctbY)
 		if x == 1 || s.ctbW == 1 {
 			ps.wppRowCtx[ctbY] = sd.c.ctx
 		}

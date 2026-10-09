@@ -5,48 +5,39 @@ import (
 	"sync/atomic"
 )
 
-// The in-loop filters (8.7): deblocking of the whole picture, every
-// vertical edge then every horizontal one, then SAO from a copy of the
-// deblocked picture.
+// The in-loop filters (8.7), CTB row by CTB row as rows are decoded (see
+// frame.go for the order): deblocking, every vertical edge of a row then
+// its horizontal ones, then SAO from a copy of the deblocked rows.
 
 // noLoopFilter turns the loop filters off (tests).
 var noLoopFilter bool
 
-func (d *Decoder) loopFilter() {
-	ps := &d.pic
-	if len(ps.slices) == 0 || noLoopFilter {
-		return
-	}
-	d.deblock()
-	d.sao()
-}
-
 // sliceAt is the slice header of the CTB containing luma (x, y).
-func (d *Decoder) sliceAt(x, y int) *sliceHeader {
-	s := d.sps
-	return d.pic.slices[d.pic.ctbSlice[(y>>s.log2Ctb)*s.ctbW+x>>s.log2Ctb]]
+func (f *frame) sliceAt(x, y int) *sliceHeader {
+	s := f.sps
+	return f.ps.slices[f.ps.ctbSlice[(y>>s.log2Ctb)*s.ctbW+x>>s.log2Ctb]]
 }
 
-// refPOCAt is the POC of the picture block f (at luma (x, y)) refers to in
+// refPOCAt is the POC of the picture block m (at luma (x, y)) refers to in
 // list l.
-func (d *Decoder) refPOCAt(x, y, l int, f *mvField) int32 {
-	s := d.sps
-	slice := d.cur.ctbSlice[(y>>s.log2Ctb)*s.ctbW+x>>s.log2Ctb]
-	return d.cur.refPOC[slice][l][f.refIdx[l]]
+func (f *frame) refPOCAt(x, y, l int, m *mvField) int32 {
+	s := f.sps
+	slice := f.pic.ctbSlice[(y>>s.log2Ctb)*s.ctbW+x>>s.log2Ctb]
+	return f.pic.refPOC[slice][l][m.refIdx[l]]
 }
 
 // mvStrength is the boundary strength two inter blocks' motion gives
 // (8.7.2.4).
-func (d *Decoder) mvStrength(xq, yq, xp, yp int) int {
-	pic := d.cur
+func (f *frame) mvStrength(xq, yq, xp, yp int) int {
+	pic := f.pic
 	q := &pic.mvf[(yq>>2)*pic.mvfW+xq>>2]
 	p := &pic.mvf[(yp>>2)*pic.mvfW+xp>>2]
 	far := func(a, b mv) bool {
 		return iabs(int(a.x)-int(b.x)) >= 4 || iabs(int(a.y)-int(b.y)) >= 4
 	}
 	if q.pred == 3 && p.pred == 3 {
-		q0, q1 := d.refPOCAt(xq, yq, 0, q), d.refPOCAt(xq, yq, 1, q)
-		p0, p1 := d.refPOCAt(xp, yp, 0, p), d.refPOCAt(xp, yp, 1, p)
+		q0, q1 := f.refPOCAt(xq, yq, 0, q), f.refPOCAt(xq, yq, 1, q)
+		p0, p1 := f.refPOCAt(xp, yp, 0, p), f.refPOCAt(xp, yp, 1, p)
 		switch {
 		case q0 == p0 && q0 == q1 && p0 == p1:
 			if (far(p.mv[0], q.mv[0]) || far(p.mv[1], q.mv[1])) && (far(p.mv[1], q.mv[0]) || far(p.mv[0], q.mv[1])) {
@@ -74,7 +65,7 @@ func (d *Decoder) mvStrength(xq, yq, xp, yp int) int {
 		if p.pred&1 == 0 {
 			lp = 1
 		}
-		if d.refPOCAt(xq, yq, lq, q) != d.refPOCAt(xp, yp, lp, p) {
+		if f.refPOCAt(xq, yq, lq, q) != f.refPOCAt(xp, yp, lp, p) {
 			return 1
 		}
 		if far(q.mv[lq], p.mv[lp]) {
@@ -87,16 +78,16 @@ func (d *Decoder) mvStrength(xq, yq, xp, yp int) int {
 
 // edgeStrength is the boundary strength of the 4-sample edge segment
 // between (xp, yp) and (xq, yq), or 0 when it is not filtered.
-func (d *Decoder) edgeStrength(xq, yq, xp, yp int, flags uint8, vertical bool) int {
-	s, ps, p := d.sps, &d.pic, d.pps
-	hq := d.sliceAt(xq, yq)
+func (f *frame) edgeStrength(xq, yq, xp, yp int, flags uint8, vertical bool) int {
+	s, ps, p := f.sps, &f.ps, f.pps
+	hq := f.sliceAt(xq, yq)
 	if hq.deblockingDisabled {
 		return 0
 	}
 	ctbQ := (yq>>s.log2Ctb)*s.ctbW + xq>>s.log2Ctb
 	ctbP := (yp>>s.log2Ctb)*s.ctbW + xp>>s.log2Ctb
 	if ctbQ != ctbP {
-		hp := d.sliceAt(xp, yp)
+		hp := f.sliceAt(xp, yp)
 		if hp.sliceAddr != hq.sliceAddr && !hq.loopFilterAcross {
 			return 0
 		}
@@ -111,29 +102,36 @@ func (d *Decoder) edgeStrength(xq, yq, xp, yp int, flags uint8, vertical bool) i
 	if flags&1 != 0 && (ps.cbfLuma[iq] || ps.cbfLuma[ip]) {
 		return 1
 	}
-	return d.mvStrength(xq, yq, xp, yp)
+	return f.mvStrength(xq, yq, xp, yp)
 }
 
-func (d *Decoder) deblock() {
-	s := d.sps
-	// Boundary strengths of every 4-sample edge segment on the 8x8 grid.
-	w4, h4 := (s.width+3)>>2, (s.height+3)>>2
-	if len(d.bsV) != w4*h4 {
-		d.bsV = make([]uint8, w4*h4)
-		d.bsH = make([]uint8, w4*h4)
-	}
-	// Bands of whole CTB rows: the edges of one never touch the samples of
-	// another's, as edges are 8 apart and change at most 3 on each side.
-	band := s.ctbSize
-	d.parallel(s.height, band, func(y0, y1 int) { d.edgeStrengths(y0, y1, w4) })
-	d.parallel(s.height, band, func(y0, y1 int) { d.deblockEdges(y0, y1, w4, true) })
-	d.parallel(s.height, band, func(y0, y1 int) { d.deblockEdges(y0, y1, w4, false) })
+// rowLines is CTB row r's luma lines, [y0, y1).
+func (f *frame) rowLines(r int) (y0, y1 int) {
+	s := f.sps
+	return r << s.log2Ctb, min(s.height, (r+1)<<s.log2Ctb)
 }
 
-// parallel runs fn over [0, n) in bands of size, on d.threads goroutines.
-func (d *Decoder) parallel(n, size int, fn func(lo, hi int)) {
+// deblockV derives the boundary strengths of CTB row r's edges and
+// filters its vertical edges.
+func (f *frame) deblockV(r int) {
+	y0, y1 := f.rowLines(r)
+	w4 := (f.sps.width + 3) >> 2
+	f.edgeStrengths(y0, y1, w4)
+	f.deblockEdges(y0, y1, w4, true)
+}
+
+// deblockH filters CTB row r's horizontal edges, its top edge with them.
+// The edges are 8 apart and change at most 3 samples on each side, so a
+// row's never touch the samples another's read.
+func (f *frame) deblockH(r int) {
+	y0, y1 := f.rowLines(r)
+	f.deblockEdges(y0, y1, (f.sps.width+3)>>2, false)
+}
+
+// parallel runs fn over [0, n) in bands of size, on f.threads goroutines.
+func (f *frame) parallel(n, size int, fn func(lo, hi int)) {
 	bands := (n + size - 1) / size
-	workers := min(d.threads, bands)
+	workers := min(f.threads, bands)
 	if workers < 2 {
 		fn(0, n)
 		return
@@ -158,21 +156,21 @@ func (d *Decoder) parallel(n, size int, fn func(lo, hi int)) {
 
 // edgeStrengths derives the boundary strengths of the edges in luma rows
 // [y0, y1).
-func (d *Decoder) edgeStrengths(y0, y1, w4 int) {
-	s, ps := d.sps, &d.pic
-	bsV, bsH := d.bsV, d.bsH
+func (f *frame) edgeStrengths(y0, y1, w4 int) {
+	s, ps := f.sps, &f.ps
+	bsV, bsH := f.bsV, f.bsH
 	for y := y0; y < y1; y += 4 {
 		for x := 0; x < s.width; x += 4 {
 			i := (y>>2)*w4 + x>>2
 			bsV[i], bsH[i] = 0, 0
 			if x > 0 && x&7 == 0 {
-				if f := ps.tuEdgeV[(y>>2)*ps.w4+x>>2]; f != 0 {
-					bsV[i] = uint8(d.edgeStrength(x, y, x-1, y, f, true))
+				if e := ps.tuEdgeV[(y>>2)*ps.w4+x>>2]; e != 0 {
+					bsV[i] = uint8(f.edgeStrength(x, y, x-1, y, e, true))
 				}
 			}
 			if y > 0 && y&7 == 0 {
-				if f := ps.tuEdgeH[(y>>2)*ps.w4+x>>2]; f != 0 {
-					bsH[i] = uint8(d.edgeStrength(x, y, x, y-1, f, false))
+				if e := ps.tuEdgeH[(y>>2)*ps.w4+x>>2]; e != 0 {
+					bsH[i] = uint8(f.edgeStrength(x, y, x, y-1, e, false))
 				}
 			}
 		}
@@ -181,10 +179,10 @@ func (d *Decoder) edgeStrengths(y0, y1, w4 int) {
 
 // deblockEdges filters the vertical or horizontal edges in luma rows
 // [y0, y1), luma and chroma.
-func (d *Decoder) deblockEdges(y0, y1, w4 int, vertical bool) {
-	s, ps := d.sps, &d.pic
-	pic := d.cur
-	bsV, bsH := d.bsV, d.bsH
+func (f *frame) deblockEdges(y0, y1, w4 int, vertical bool) {
+	s, ps := f.sps, &f.ps
+	pic := f.pic
+	bsV, bsH := f.bsV, f.bsH
 	qpAt := func(x, y int) int { return int(ps.qpY[(y>>2)*ps.w4+x>>2]) }
 	noF := func(x, y int) bool { return ps.noFilter[(y>>2)*ps.w4+x>>2] }
 	for y := y0; y < y1; y += 4 {
@@ -207,7 +205,7 @@ func (d *Decoder) deblockEdges(y0, y1, w4 int, vertical bool) {
 			if bs == 0 {
 				continue
 			}
-			h := d.sliceAt(x, y)
+			h := f.sliceAt(x, y)
 			qp := (qpAt(x, y) + qpAt(xp, yp) + 1) >> 1
 			beta := betaTable[clip3(0, 51, qp+h.betaOffset)] << (s.bitDepth - 8)
 			tc := tcTable[clip3(0, 53, qp+2*(int(bs)-1)+h.tcOffset)] << (s.bitDepth - 8)
@@ -217,10 +215,10 @@ func (d *Decoder) deblockEdges(y0, y1, w4 int, vertical bool) {
 	// Chroma edges on the 8x8 chroma grid (16 luma), with strength 2.
 	for ci := 1; ci <= 2; ci++ {
 		pl := pic.cb
-		off := d.pps.cbQPOffset
+		off := f.pps.cbQPOffset
 		if ci == 2 {
 			pl = pic.cr
-			off = d.pps.crQPOffset
+			off = f.pps.crQPOffset
 		}
 		for y := (y0 + 7) &^ 7; y < y1; y += 8 {
 			for x := 0; x < s.width; x += 8 {
@@ -242,7 +240,7 @@ func (d *Decoder) deblockEdges(y0, y1, w4 int, vertical bool) {
 				if bs != 2 {
 					continue
 				}
-				h := d.sliceAt(x, y)
+				h := f.sliceAt(x, y)
 				qpi := ((qpAt(x, y) + qpAt(xp, yp) + 1) >> 1) + off
 				qpc := chromaQP(qpi)
 				if qpi < 0 {
@@ -350,143 +348,156 @@ func chromaEdge(pl []uint16, stride, x, y int, vertical bool, tc int, noP, noQ b
 	}
 }
 
-// sao applies sample adaptive offset (8.7.3) from a copy of the deblocked
-// picture.
-func (d *Decoder) sao() {
-	s, ps := d.sps, &d.pic
-	if !s.sao {
-		return
-	}
-	pic := d.cur
-	any := false
-	for _, h := range ps.slices {
-		if h.saoLuma || h.saoChroma {
-			any = true
+// saoCopy keeps CTB row r's first and last lines, deblocked, for the SAO
+// of the rows around it to read (their own SAO changes them).
+func (f *frame) saoCopy(r int) {
+	s, pic := f.sps, f.pic
+	for ci, pl := range [3][]uint16{pic.y, pic.cb, pic.cr} {
+		stride, size := pic.strideY, s.ctbSize
+		if ci > 0 {
+			stride, size = pic.strideC, s.ctbSize/2
 		}
+		lines := f.saoLines[ci][2*r*stride : (2*r+2)*stride]
+		copy(lines[:stride], pl[r*size*stride:])
+		copy(lines[stride:], pl[((r+1)*size-1)*stride:])
 	}
-	if !any {
-		return
-	}
-	dst := [3][]uint16{pic.y, pic.cb, pic.cr}
-	for ci := range 3 {
-		if cap(d.saoSrc[ci]) < len(dst[ci]) {
-			d.saoSrc[ci] = make([]uint16, len(dst[ci]))
-		}
-		d.saoSrc[ci] = d.saoSrc[ci][:len(dst[ci])]
-	}
-	src := d.saoSrc
-	// Copy the deblocked picture for SAO to read from, then filter.
-	d.parallel(s.ctbH, 1, func(r0, r1 int) {
-		for ci := range 3 {
-			stride, size := pic.strideY, s.ctbSize
-			if ci > 0 {
-				stride, size = pic.strideC, s.ctbSize/2
-			}
-			lo, hi := min(r0*size*stride, len(dst[ci])), min(r1*size*stride, len(dst[ci]))
-			copy(src[ci][lo:hi], dst[ci][lo:hi])
-		}
-	})
-	d.parallel(s.ctbH, 1, func(r0, r1 int) { d.saoRows(r0, r1, src, dst) })
 }
 
-// saoRows applies SAO to CTB rows [r0, r1), from src to dst.
-func (d *Decoder) saoRows(r0, r1 int, src, dst [3][]uint16) {
-	s, ps := d.sps, &d.pic
-	pic := d.cur
-	for ry := r0; ry < r1; ry++ {
-		for rx := range s.ctbW {
-			addr := ry*s.ctbW + rx
-			h := ps.slices[ps.ctbSlice[addr]]
-			noFilter := d.ctbNoFilter(rx, ry)
-			for ci := range 3 {
-				if ci == 0 && !h.saoLuma || ci > 0 && !h.saoChroma {
-					continue
+// saoScratch holds a CTB row, deblocked, with a line above and below.
+var saoScratch sync.Pool
+
+// sao applies sample adaptive offset (8.7.3) to CTB row r, from a copy of
+// it with the lines around it.
+func (f *frame) sao(r int) {
+	s, pic := f.sps, f.pic
+	dst := [3][]uint16{pic.y, pic.cb, pic.cr}
+	var src [3][]uint16
+	var base [3]int
+	bufs, _ := saoScratch.Get().(*[3][]uint16)
+	if bufs == nil {
+		bufs = new([3][]uint16)
+	}
+	for ci, pl := range dst {
+		stride, size := pic.strideY, s.ctbSize
+		if ci > 0 {
+			stride, size = pic.strideC, s.ctbSize/2
+		}
+		n := (size + 2) * stride
+		if cap(bufs[ci]) < n {
+			bufs[ci] = make([]uint16, n)
+		}
+		buf := bufs[ci][:n]
+		if r > 0 {
+			copy(buf[:stride], f.saoLines[ci][(2*r-1)*stride:])
+		}
+		copy(buf[stride:(size+1)*stride], pl[r*size*stride:])
+		if r+1 < s.ctbH {
+			copy(buf[(size+1)*stride:], f.saoLines[ci][(2*r+2)*stride:(2*r+3)*stride])
+		}
+		src[ci], base[ci] = buf, (r*size-1)*stride
+	}
+	f.saoRow(r, src, base, dst)
+	saoScratch.Put(bufs)
+}
+
+// saoRow applies SAO to CTB row ry, from src (sample i of a plane at
+// i - base) to dst.
+func (f *frame) saoRow(ry int, src [3][]uint16, base [3]int, dst [3][]uint16) {
+	s, ps := f.sps, &f.ps
+	pic := f.pic
+	for rx := range s.ctbW {
+		addr := ry*s.ctbW + rx
+		h := ps.slices[ps.ctbSlice[addr]]
+		noFilter := f.ctbNoFilter(rx, ry)
+		for ci := range 3 {
+			if ci == 0 && !h.saoLuma || ci > 0 && !h.saoChroma {
+				continue
+			}
+			sp := &ps.sao[addr][ci]
+			if sp.typ == 0 {
+				continue
+			}
+			shift := 0
+			stride := pic.strideY
+			depth := s.bitDepth
+			if ci > 0 {
+				shift = 1
+				stride = pic.strideC
+				depth = s.bitDepthC
+			}
+			size := s.ctbSize >> shift
+			x0, y0 := rx*size, ry*size
+			w := min(size, (s.width>>shift)-x0)
+			hgt := min(size, (s.height>>shift)-y0)
+			maxV := 1<<depth - 1
+			in, out := src[ci][max(0, -base[ci]):], dst[ci]
+			ib := max(0, base[ci]) // in[o-ib] is sample o
+			if sp.typ == 1 {
+				var bandTable [32]int
+				for k := range 4 {
+					bandTable[(k+int(sp.band))&31] = k + 1
 				}
-				sp := &ps.sao[addr][ci]
-				if sp.typ == 0 {
-					continue
-				}
-				shift := 0
-				stride := pic.strideY
-				depth := s.bitDepth
-				if ci > 0 {
-					shift = 1
-					stride = pic.strideC
-					depth = s.bitDepthC
-				}
-				size := s.ctbSize >> shift
-				x0, y0 := rx*size, ry*size
-				w := min(size, (s.width>>shift)-x0)
-				hgt := min(size, (s.height>>shift)-y0)
-				maxV := 1<<depth - 1
-				in, out := src[ci], dst[ci]
-				if sp.typ == 1 {
-					var bandTable [32]int
-					for k := range 4 {
-						bandTable[(k+int(sp.band))&31] = k + 1
-					}
-					bandShift := depth - 5
-					for y := range hgt {
-						o := (y0+y)*stride + x0
-						row, orow := in[o:o+w], out[o:o+w]
-						for x, v := range row {
-							k := bandTable[int(v)>>bandShift]
-							if k == 0 || noFilter && d.sampleNoFilter(x0+x, y0+y, shift) {
-								continue
-							}
-							orow[x] = uint16(clip3(0, maxV, int(v)+int(sp.offset[k-1])))
+				bandShift := depth - 5
+				for y := range hgt {
+					o := (y0+y)*stride + x0
+					row, orow := in[o-ib:o-ib+w], out[o:o+w]
+					for x, v := range row {
+						k := bandTable[int(v)>>bandShift]
+						if k == 0 || noFilter && f.sampleNoFilter(x0+x, y0+y, shift) {
+							continue
 						}
+						orow[x] = uint16(clip3(0, maxV, int(v)+int(sp.offset[k-1])))
 					}
-					continue
 				}
-				// Edge offset: the offset of each edge category.
-				hPos := [4][2]int{{-1, 1}, {0, 0}, {-1, 1}, {1, -1}}[sp.class]
-				vPos := [4][2]int{{0, 0}, {-1, 1}, {-1, 1}, {-1, 1}}[sp.class]
-				offs := [5]int{int(sp.offset[0]), int(sp.offset[1]), 0, int(sp.offset[2]), int(sp.offset[3])}
-				d0 := vPos[0]*stride + hPos[0]
-				d1 := vPos[1]*stride + hPos[1]
-				edge := func(x, y int) {
-					xs, ys := x0+x, y0+y
-					xl, yl := xs<<shift, ys<<shift
-					if noFilter && d.sampleNoFilter(xs, ys, shift) {
+				continue
+			}
+			// Edge offset: the offset of each edge category.
+			hPos := [4][2]int{{-1, 1}, {0, 0}, {-1, 1}, {1, -1}}[sp.class]
+			vPos := [4][2]int{{0, 0}, {-1, 1}, {-1, 1}, {-1, 1}}[sp.class]
+			offs := [5]int{int(sp.offset[0]), int(sp.offset[1]), 0, int(sp.offset[2]), int(sp.offset[3])}
+			d0 := vPos[0]*stride + hPos[0]
+			d1 := vPos[1]*stride + hPos[1]
+			edge := func(x, y int) {
+				xs, ys := x0+x, y0+y
+				xl, yl := xs<<shift, ys<<shift
+				if noFilter && f.sampleNoFilter(xs, ys, shift) {
+					return
+				}
+				for i := range 2 {
+					xn, yn := xs+hPos[i], ys+vPos[i]
+					if xn < 0 || yn < 0 || xn >= s.width>>shift || yn >= s.height>>shift {
 						return
 					}
-					for i := range 2 {
-						xn, yn := xs+hPos[i], ys+vPos[i]
-						if xn < 0 || yn < 0 || xn >= s.width>>shift || yn >= s.height>>shift {
-							return
-						}
-						if !d.saoNeighbourOK(xl, yl, xn<<shift, yn<<shift) {
-							return
-						}
-					}
-					o := ys*stride + xs
-					v := int(in[o])
-					e := 2 + sign(v-int(in[o+d0])) + sign(v-int(in[o+d1]))
-					if e != 2 {
-						out[o] = uint16(clip3(0, maxV, v+offs[e]))
+					if !f.saoNeighbourOK(xl, yl, xn<<shift, yn<<shift) {
+						return
 					}
 				}
-				// The samples inside the CTB have their neighbours in it.
-				for y := range hgt {
-					if y == 0 || y == hgt-1 || noFilter {
-						for x := range w {
-							edge(x, y)
-						}
-						continue
+				o := ys*stride + xs
+				v := int(in[o-ib])
+				e := 2 + sign(v-int(in[o-ib+d0])) + sign(v-int(in[o-ib+d1]))
+				if e != 2 {
+					out[o] = uint16(clip3(0, maxV, v+offs[e]))
+				}
+			}
+			// The samples inside the CTB have their neighbours in it.
+			for y := range hgt {
+				if y == 0 || y == hgt-1 || noFilter {
+					for x := range w {
+						edge(x, y)
 					}
-					edge(0, y)
-					o := (y0+y)*stride + x0
-					for x := 1; x < w-1; x++ {
-						v := int(in[o+x])
-						e := 2 + sign(v-int(in[o+x+d0])) + sign(v-int(in[o+x+d1]))
-						if e != 2 {
-							out[o+x] = uint16(clip3(0, maxV, v+offs[e]))
-						}
+					continue
+				}
+				edge(0, y)
+				o := (y0+y)*stride + x0
+				for x := 1; x < w-1; x++ {
+					v := int(in[o-ib+x])
+					e := 2 + sign(v-int(in[o-ib+x+d0])) + sign(v-int(in[o-ib+x+d1]))
+					if e != 2 {
+						out[o+x] = uint16(clip3(0, maxV, v+offs[e]))
 					}
-					if w > 1 {
-						edge(w-1, y)
-					}
+				}
+				if w > 1 {
+					edge(w-1, y)
 				}
 			}
 		}
@@ -505,8 +516,8 @@ func sign(v int) int {
 
 // ctbNoFilter reports whether a block of the CTB is left unfiltered (PCM
 // with its loop filter off, transquant bypass).
-func (d *Decoder) ctbNoFilter(rx, ry int) bool {
-	s, ps := d.sps, &d.pic
+func (f *frame) ctbNoFilter(rx, ry int) bool {
+	s, ps := f.sps, &f.ps
 	n := s.ctbSize >> 2
 	bx, by := rx*n, ry*n
 	for y := by; y < min(by+n, ps.h4); y++ {
@@ -521,13 +532,13 @@ func (d *Decoder) ctbNoFilter(rx, ry int) bool {
 
 // sampleNoFilter reports whether the sample at (x, y) of a component
 // (shift 1 for chroma) is in an unfiltered block.
-func (d *Decoder) sampleNoFilter(x, y, shift int) bool {
+func (f *frame) sampleNoFilter(x, y, shift int) bool {
 	xl, yl := x<<shift, y<<shift
-	return d.pic.noFilter[(yl>>2)*d.pic.w4+xl>>2]
+	return f.ps.noFilter[(yl>>2)*f.ps.w4+xl>>2]
 }
 
-func (d *Decoder) saoNeighbourOK(x, y, xn, yn int) bool {
-	s, p, ps := d.sps, d.pps, &d.pic
+func (f *frame) saoNeighbourOK(x, y, xn, yn int) bool {
+	s, p, ps := f.sps, f.pps, &f.ps
 	ctb := (y>>s.log2Ctb)*s.ctbW + x>>s.log2Ctb
 	ctbN := (yn>>s.log2Ctb)*s.ctbW + xn>>s.log2Ctb
 	if ctb == ctbN {

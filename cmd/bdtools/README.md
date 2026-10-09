@@ -869,12 +869,14 @@ Blu-ray uses (and tiles, wavefronts, dependent slices, weighted
 prediction, scaling lists, PCM and lossless blocks besides). Its pictures
 are byte-identical to ffmpeg's on all 152 of the JCT-VC conformance
 streams for those profiles and on 4K HDR10 and Dolby Vision clips. It
-decodes a picture's slices in parallel (discs cut each picture into
-several), and the rows of a wavefront picture, then filters in parallel
-bands, with AVX2 kernels for motion compensation on amd64: about 115 fps
-for an Ultra HD disc's 4K stream on 24 threads, against ffmpeg's 300 (a 4K
-Dolby Vision FEL conversion, both layers decoded here and composed,
-encodes at 51 fps on NVENC, its video identical to NVDEC's). A
+decodes several pictures at once, each CTB row loop filtered as soon as
+it and its neighbours are decoded so that the pictures predicting from it
+can go on, and within a picture its slices (discs cut each picture into
+several) and wavefront rows in parallel, with AVX2 kernels for motion
+compensation on amd64: about 250 fps for an Ultra HD disc's 4K stream on
+24 threads, as fast as ffmpeg (a 4K Dolby Vision FEL conversion, both
+layers decoded here and composed, encodes at 141 fps on NVENC, its video
+identical to NVDEC's). A
 stream of the format range extensions (4:2:2, 4:4:4, never on a disc)
 goes to ffmpeg instead, converted to 4:2:0.
 

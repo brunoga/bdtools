@@ -357,6 +357,7 @@ func (sd *sliceDec) colMV(col *picture, x, y, l, refIdx int) (mv, bool) {
 	if col.corrupt || len(col.refPOC) == 0 {
 		return mv{}, false
 	}
+	col.waitLines(y, y)
 	f := &col.mvf[(y>>2)*col.mvfW+x>>2]
 	if f.pred == 0 {
 		return mv{}, false
@@ -610,6 +611,12 @@ func (sd *sliceDec) interpolate(ref *picture, ci, x0, y0, w, h int, v mv, dst []
 		taps = 4
 	}
 	half := taps/2 - 1
+	// The rows read, final (frame threading).
+	if ci == 0 {
+		ref.waitLines(yInt-half, yInt-half+h+taps-1)
+	} else {
+		ref.waitLines((yInt-half)*2, (yInt-half+h+taps-1)*2+1)
+	}
 	// The source area with the filters' margins: in place when inside
 	// the picture, else copied with its edges repeated.
 	sw, sh := w+taps-1, h+taps-1
