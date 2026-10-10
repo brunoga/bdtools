@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-10
+
 ### Changed
 
 - `--dv-fel keep` and `reencode` quantise the enhancement layer at `--crf`
@@ -415,7 +417,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/brunoga/bdtools/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/brunoga/bdtools/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/brunoga/bdtools/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/brunoga/bdtools/compare/v0.6.0...v0.7.0
