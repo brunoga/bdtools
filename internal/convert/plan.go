@@ -80,7 +80,7 @@ type Options struct {
 	// is).
 	DVFEL FEL
 	// DVELCRF is the enhancement layer's quality when it is kept as a layer
-	// (0: CRF less 6).
+	// (0: CRF plus 12).
 	DVELCRF int
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),

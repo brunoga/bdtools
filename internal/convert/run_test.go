@@ -718,7 +718,9 @@ type felSource struct {
 	w, h       int
 }
 
-func makeFELSource(t *testing.T, blCRF int) felSource {
+// makeFELSource makes a profile 7 FEL source of 24 pictures, the
+// enhancement layer's from elFrom on (a cut clip's first may have none).
+func makeFELSource(t *testing.T, blCRF, elFrom int) felSource {
 	t.Helper()
 	for _, tool := range []string{"ffmpeg", "x265"} {
 		if _, err := LookPath(tool); err != nil {
@@ -727,13 +729,13 @@ func makeFELSource(t *testing.T, blCRF int) felSource {
 	}
 	dir := t.TempDir()
 	const w, h = 640, 360 // NVDEC's smallest HEVC is 144x144: the enhancement layer is 320x180
-	x265 := "log-level=error:bframes=3:b-adapt=0:scenecut=0:keyint=24:min-keyint=24:open-gop=0"
-	encode := func(name, src string, w, h, crf int, vf string) string {
+	x265 := "log-level=error:bframes=3:b-adapt=0:scenecut=0:open-gop=0"
+	encode := func(name, src string, w, h, crf, keyint int, vf string) string {
 		p := filepath.Join(dir, name)
 		if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
 			fmt.Sprintf("%s=s=%dx%d:r=24:d=1", src, w, h), "-vf", vf,
 			"-c:v", "libx265", "-pix_fmt", "yuv420p10le", "-crf", fmt.Sprint(crf),
-			"-x265-params", x265+":colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", p); err != nil {
+			"-x265-params", fmt.Sprintf("%s:keyint=%d:min-keyint=%d", x265, keyint, keyint)+":colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc", "-f", "hevc", p); err != nil {
 			t.Skipf("making %s: %v", name, err)
 		}
 		return p
@@ -741,8 +743,14 @@ func makeFELSource(t *testing.T, blCRF int) felSource {
 	// An enhancement layer is a residual: a few codes either side of the
 	// RPU's offset (512), as a disc's is.
 	lowContrast := "format=yuv420p,lutyuv=y=128+(val-128)/10:u=128+(val-128)/10:v=128+(val-128)/10"
-	fs := felSource{blES: encode("bl.hevc", "gradients", w, h, blCRF, "null"),
-		elES: encode("el.hevc", "testsrc2", w/2, h/2, 10, lowContrast), w: w, h: h}
+	// The layers' GOPs (alike, as a disc's are) end at elFrom, so that the
+	// enhancement layer decodes from there.
+	gop := 24
+	if elFrom > 0 {
+		gop = elFrom
+	}
+	fs := felSource{blES: encode("bl.hevc", "gradients", w, h, blCRF, gop, "null"),
+		elES: encode("el.hevc", "testsrc2", w/2, h/2, 10, gop, lowContrast), w: w, h: h}
 	fixture, err := os.ReadFile(filepath.Join("..", "dovi", "testdata", "fel-cmv29.bin"))
 	if err != nil {
 		t.Fatal(err)
@@ -767,6 +775,9 @@ func makeFELSource(t *testing.T, blCRF int) felSource {
 			break
 		}
 		d := int64(f.PTS / (time.Second / 24))
+		if d < int64(elFrom) {
+			continue
+		}
 		for b := f.Data; len(b) >= 4; {
 			n := int(binary.BigEndian.Uint32(b))
 			elFrames[d] = append(elFrames[d], append([]byte{dovi.NALEL << 1, 1}, b[4:4+n]...))
@@ -847,7 +858,7 @@ func (fs felSource) composition(t *testing.T, bl, el []byte) []*dovi.Picture {
 // layer mapped and corrected by the enhancement layer, picture by picture,
 // as dovi.Composer makes it. Skips without ffmpeg, x265 and a GPU decoder.
 func TestRunnerComposesFEL(t *testing.T) {
-	fs := makeFELSource(t, 10)
+	fs := makeFELSource(t, 10, 0)
 	for _, dec := range []Decoder{DecoderAuto, DecoderCPU} { // the GPU's, else ffmpeg's; ffmpeg's
 		t.Run("decoder="+cmp.Or(string(dec), "auto"), func(t *testing.T) { composesFEL(t, fs, dec) })
 	}
@@ -893,13 +904,67 @@ func composesFEL(t *testing.T, fs felSource, dec Decoder) {
 // encoded base layer (keep) than with the source's re-encoded (reencode).
 // Skips without ffmpeg, x265, NVDEC and NVENC.
 func TestRunnerKeepsFELLayers(t *testing.T) {
-	fs := makeFELSource(t, 10)
+	fs := makeFELSource(t, 10, 0)
 	for _, enc := range []Encoder{EncoderNVENC, EncoderSoftware} {
 		t.Run(string(enc), func(t *testing.T) {
 			if enc == EncoderNVENC && !ProbeNative(EncoderNVENC, CodecH265, 10, "") {
 				t.Skip("no NVENC")
 			}
 			keepsFELLayers(t, fs, enc)
+		})
+	}
+}
+
+// A clip cut from a film can start with pictures whose enhancement layer
+// is gone (it referred to what was cut away): the layers are kept apart all
+// the same, a neutral enhancement layer for those, not profile 8.1 with the
+// layer dropped.
+func TestRunnerKeepsFELLayersFromACut(t *testing.T) {
+	fs := makeFELSource(t, 10, 12)
+	for _, mode := range []FEL{FELKeep, FELReencode} {
+		t.Run(string(mode), func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "out.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.Encoder, o.Codec, o.DVFEL, o.Preset = fs.path, out, EncoderSoftware, CodecH265, mode, "ultrafast"
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(t.Context()); err != nil {
+				if strings.Contains(err.Error(), "GPU") {
+					t.Skipf("no GPU decoder: %v", err)
+				}
+				t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
+			}
+			if !slices.Contains(lines, "carrying Dolby Vision profile 7: the full enhancement layer and the RPU on 24 frames") {
+				t.Fatalf("not profile 7 throughout:\n%s", strings.Join(lines, "\n"))
+			}
+			in, err := os.Open(out) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer in.Close() //nolint:errcheck // read only
+			r, err := mkv.NewReader(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frames := 0
+			for {
+				p, err := r.Next()
+				if err != nil {
+					break
+				}
+				el := false
+				for b := p.Data; len(b) >= 4; {
+					n := int(binary.BigEndian.Uint32(b))
+					el = el || b[4]>>1&0x3f == dovi.NALEL
+					b = b[4+n:]
+				}
+				if !el {
+					t.Errorf("frame at %v has no enhancement layer", p.Time)
+				}
+				frames++
+			}
+			if frames != 24 {
+				t.Errorf("%d frames", frames)
+			}
 		})
 	}
 }

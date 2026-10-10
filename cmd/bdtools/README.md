@@ -350,7 +350,7 @@ scheduler such as pipeliner retry it.
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc` or `software`); or `drop` it (the HDR10 base layer as it is) |
-| `--dv-el-crf` | `--crf` − 6 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
@@ -568,10 +568,12 @@ first, so that the two streams' pictures are coded in the same order with
 the same types, as Dolby Vision requires; the mux checks it. With x265 both
 run in process (raw pictures in, the bitstream back through a pipe), set
 up to code every stream alike: no scene cut keyframes, no adaptive
-B-frames, a fixed keyframe interval, closed GOPs. Its quality is
-`--dv-el-crf` (by default `--crf` less 6: its residual is a few codes
-either side of its offset, which the base layer's quantiser would mostly
-flatten). `--remux` keeps the disc's layers as they are.
+B-frames, a fixed keyframe interval, closed GOPs, and each picture's type
+given (x265 shortens a run of B-frames where flat pictures meet detail even
+so). Its quality is `--dv-el-crf`, by default `--crf` plus 12: a finer
+enhancement layer brings the composition nearer the source, but a byte
+spent there buys less than in the base layer (below). `--remux` keeps the
+disc's layers as they are.
 
 On a 30-second 4K FEL clip (`--crf 18`), measured by composing each
 output's layers and comparing with the source's composition (luma PSNR,
@@ -588,6 +590,32 @@ Two layers are not cheaper than one for the same picture: what profile 7
 keeps is the enhancement layer for a player to compose itself, at its 12
 bits. Rebuilt, the enhancement layer is consistently about a dB nearer the
 source than re-encoded.
+
+On a feature (two one-minute stretches of a 4K FEL film, NVENC, luma
+PSNR against the source's composition over every frame, as `tools/felrd`
+measures it; the source's video is about 650 MB a minute):
+
+| `--dv-fel`, `--crf`, `--dv-el-crf` | composition | video a minute |
+|---|---|---|
+| `compose`, 12 | 51.4–51.8 dB | 449–580 MB |
+| `compose`, 14 | 50.0–50.4 dB | 322–436 MB |
+| `compose`, 16 | 48.5–49.2 dB | 229–316 MB |
+| `compose`, 18 | 46.6–47.8 dB | 139–181 MB |
+| `keep`, 16, 10 (the old default) | 51.8–52.7 dB | 873–1071 MB |
+| `keep`, 16, 16 | 50.7–51.4 dB | 493–630 MB |
+| `keep`, 16, 22 | 48.5–49.1 dB | 241–331 MB |
+| `keep`, 16, 28 (the default) | 48.5–49.1 dB | 220–308 MB |
+| `reencode`, 16, 28 | 48.5–49.1 dB | 219–307 MB |
+| `drop`, 16 (the base layer, as it plays) | 45.9–46.5 dB | 219–307 MB |
+
+At any size, `compose` is as near the source as `keep` or nearer: a
+finer enhancement layer is a dearer way to the same picture than a lower
+`--crf`. With the enhancement layer at its default, `keep` and `reencode`
+come out the size of `compose` and as near the source, in profile 7: for
+players that compose FEL themselves, and an HDR10 base layer that is the
+disc's own grade for those that play only HDR10. To keep a film near the
+disc at a fraction of its size, `compose` (the default) is the one to use;
+`--crf` sets the trade.
 
 The arithmetic follows libplacebo's reshaping and FEL composition and
 vs-nlq's dequantisation (the residual agrees with vs-nlq's to 1/65536 over

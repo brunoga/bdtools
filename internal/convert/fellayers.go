@@ -34,12 +34,17 @@ import (
 //     the base layer's encoding error, within the enhancement layer's
 //     resolution and quantisation.
 
-// elCRFOffset is how much finer than the base layer the enhancement layer
-// is quantised by default. Its residual is a few codes either side of its
-// offset, which the base layer's quantiser would mostly flatten: on a 4K
-// FEL clip, each 6 steps finer brought the composition 1.5-2 dB nearer the
-// source's, for an enhancement layer about 3 times the size.
-const elCRFOffset = 6
+// elCRFCoarser is how much coarser than the base layer the enhancement
+// layer is quantised by default. A finer one brings the composition nearer
+// the source's, but a byte spent there buys less than in the base layer:
+// on two minutes of a 4K FEL feature (NVENC, --crf 16), the enhancement
+// layer at the base layer's CRF less 6 was 2.5-3 times the base layer for
+// 3.3-3.6 dB, of which composing into one layer (profile 8.1) at CRF 12
+// gets all but 0.4-0.9 dB at half the size; at its CRF plus 6 it was 8-10%
+// of it for nothing measurable. At CRF plus 12 it is at most 0.5% of it,
+// and the layers compose as near the source as profile 8.1 at the same CRF
+// and size.
+const elCRFCoarser = 12
 
 // felLayers is a gpuSink's enhancement layer side, for one segment.
 type felLayers struct {
