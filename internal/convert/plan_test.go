@@ -428,3 +428,34 @@ func TestELCRF(t *testing.T) {
 		}
 	}
 }
+
+// NVENC's H.264 and HEVC encode at a constant quality, --crf plus 6, in
+// process and through ffmpeg alike; AV1 keeps its constant QP.
+func TestNVENCConstantQuality(t *testing.T) {
+	for _, c := range []struct {
+		codec Codec
+		crf   int
+		cq    int
+		args  string
+	}{
+		{CodecH265, 18, 24, "-rc vbr -cq 24 -b:v 0 -maxrate 100000000"},
+		{CodecH264, 20, 26, "-rc vbr -cq 26 -b:v 0 -maxrate 100000000"},
+		{CodecH265, 48, 51, "-rc vbr -cq 51 -b:v 0 -maxrate 100000000"},
+		{CodecAV1, 18, 0, "-rc constqp"},
+	} {
+		o := DefaultOptions()
+		o.Codec, o.CRF, o.Encoder = c.codec, c.crf, EncoderNVENC
+		if got := o.nvencCQ(); got != c.cq {
+			t.Errorf("%s --crf %d: CQ %d, want %d", c.codec, c.crf, got, c.cq)
+		}
+		if argv := strings.Join(encodeStep(o, "/tmp/out").Argv, " "); !strings.Contains(argv, c.args) {
+			t.Errorf("%s --crf %d through ffmpeg: %s, want %q", c.codec, c.crf, argv, c.args)
+		}
+	}
+	// HD's ceiling is lower, for the level HD HEVC declares.
+	o := DefaultOptions()
+	o.Codec, o.Encoder, o.frameW, o.frameH = CodecH265, EncoderNVENC, 1920, 1080
+	if argv := strings.Join(encodeStep(o, "/tmp/out").Argv, " "); !strings.Contains(argv, "-maxrate 50000000") {
+		t.Errorf("HD through ffmpeg: %s, want -maxrate 50000000", argv)
+	}
+}

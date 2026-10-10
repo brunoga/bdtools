@@ -55,7 +55,7 @@ func TestDryRunNeedsNoTools(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	for _, want := range []string{"read /media/Life of Pi (2012)/disc.iso", "mvcdec", "x264", "write /out/Life of Pi (2012).mkv", "built in"} {
+	for _, want := range []string{"read /media/Life of Pi (2012)/disc.iso", "mvcdec", "x265", "write /out/Life of Pi (2012).mkv", "built in"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry run should mention %q, got:\n%s", want, out)
 		}
@@ -72,7 +72,7 @@ func TestDryRunNeedsNoTools(t *testing.T) {
 }
 
 // Full-SBS is what the decoder emits, so it needs no filter and the standalone
-// encoder runs it. Half-SBS squeezes the stacked pair, which x264 cannot do, so
+// encoder runs it. Half-SBS squeezes the stacked pair, which x265 cannot do, so
 // the same library is reached through ffmpeg instead of the request being
 // refused.
 func TestDryRunShowsTheChosenLayout(t *testing.T) {
@@ -84,7 +84,7 @@ func TestDryRunShowsTheChosenLayout(t *testing.T) {
 	if strings.Contains(full, "scale=") {
 		t.Errorf("full-SBS must not rescale:\n%s", full)
 	}
-	if !strings.Contains(full, "x264 --demuxer y4m") {
+	if !strings.Contains(full, "x265 --y4m") {
 		t.Errorf("unfiltered software encoding should use the standalone binary:\n%s", full)
 	}
 
@@ -93,8 +93,8 @@ func TestDryRunShowsTheChosenLayout(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("half-SBS with software encoding should work now, exit = %d", code)
 	}
-	if !strings.Contains(soft, "libx264") || !strings.Contains(soft, "scale=iw/2:ih") {
-		t.Errorf("half-SBS software encoding should squeeze through libx264:\n%s", soft)
+	if !strings.Contains(soft, "libx265") || !strings.Contains(soft, "scale=iw/2:ih") {
+		t.Errorf("half-SBS software encoding should squeeze through libx265:\n%s", soft)
 	}
 
 	half, _, code := capture(t, "--dry-run", "--encoder", "nvenc", "--gpu-api", "ffmpeg", "--layout", "half",
@@ -115,8 +115,8 @@ func TestSwapWorksWithEitherEncoder(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--swap-lr with software encoding should work, exit = %d", code)
 	}
-	if !strings.Contains(soft, "-swap") || !strings.Contains(soft, "x264 --demuxer y4m") {
-		t.Errorf("--swap-lr should be decoded swapped and encoded by x264 itself:\n%s", soft)
+	if !strings.Contains(soft, "-swap") || !strings.Contains(soft, "x265 --y4m") {
+		t.Errorf("--swap-lr should be decoded swapped and encoded by x265 itself:\n%s", soft)
 	}
 	out, _, code := capture(t, "--dry-run", "--encoder", "nvenc", "--swap-lr",
 		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")

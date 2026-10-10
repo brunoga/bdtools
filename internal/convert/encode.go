@@ -261,7 +261,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	o := s.r.Opts
 	w, h := s.r.frameSize(first)
 	cfg := gpu.Config{Codec: o.Codec.hw(), Width: w, Height: h, FPSNum: num, FPSDen: den,
-		QP: o.CRF, Device: o.VAAPIDevice, BitDepth: o.BitDepth, Color: o.Color}
+		QP: o.CRF, CQ: o.nvencCQ(), Device: o.VAAPIDevice, BitDepth: o.BitDepth, Color: o.Color}
 	var out io.Writer = f
 	s.layers = nil
 	if s.r.felLayered {
@@ -350,8 +350,10 @@ type programSink struct {
 	failed bool // writing to it failed: it has stopped
 }
 
-func (s *programSink) start(path string, _ picture, num, den int) error {
-	step := encodeStep(s.r.Opts, path)
+func (s *programSink) start(path string, first picture, num, den int) error {
+	o := s.r.Opts
+	o.frameW, o.frameH = s.r.frameSize(first)
+	step := encodeStep(o, path)
 	s.cmd = exec.CommandContext(s.ctx, s.bin, step.Argv[1:]...) //nolint:gosec // bin came from LookPath
 	stdin, err := s.cmd.StdinPipe()
 	if err != nil {

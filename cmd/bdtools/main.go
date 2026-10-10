@@ -60,9 +60,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
-		codec    = fs.String("codec", string(convert.CodecH264), "output video codec: h264 (plays anywhere), h265 (smaller) or av1 (smaller again, newest decoders)")
-		crf      = fs.Int("crf", 18, "quality target, 0-51; lower is better (not comparable between codecs)")
-		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: the source's (10 for a 10-bit source such as an Ultra HD Blu-ray, when the codec can)")
+		codec    = fs.String("codec", string(convert.CodecH265), "output video codec: h265 (HDR10, HDR10+ and Dolby Vision kept; what home theatre players play), h264 (plays anywhere, 8-bit, larger) or av1 (smaller again, newest decoders)")
+		crf      = fs.Int("crf", 0, "quality target, 0-51; lower is better (not comparable between codecs); default: by the source, 20 for 3D, 18 for Ultra HD, 16 for HD")
+		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: 10 when the codec and encoder can")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
@@ -82,7 +82,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
 		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc or software); or drop it (the HDR10 base layer as it is)")
 		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf plus 12)")
-		subs3D   = fs.String("subs-3d", "off", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
+		subs3D   = fs.String("subs-3d", "both", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
 		quiet    = fs.Bool("quiet", false, "only report errors")
@@ -100,8 +100,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 			"SVT-AV1 do. Run --check to see what is installed.\n\n"+
 			"examples:\n"+
 			"  bdtools --list --input disc.iso\n"+
-			"  bdtools --input disc.iso --output \"Film (2012) 3D FSBS.mkv\" --codec h265 --audio-best\n"+
-			"  bdtools --input uhd.iso --output \"Film (2021).mkv\" --codec h265\n"+
+			"  bdtools --input disc.iso --output \"Film (2012) 3D FSBS.mkv\" --audio-best\n"+
+			"  bdtools --input uhd.iso --output \"Film (2021).mkv\"\n"+
 			"  bdtools --remux --input uhd.iso --output \"Film (2021).mkv\" --audio-lang eng\n"+
 			"More: https://github.com/brunoga/bdtools/tree/main/cmd/bdtools#common-tasks\n\nflags:\n")
 		fs.PrintDefaults()
@@ -113,6 +113,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 		fmt.Fprintf(stdout, "bdtools %s\n", pversion.Resolve(version))
 		return 0
 	}
+
+	// The options given, as opposed to left at their defaults: what the
+	// source does not decide, and what the run reports as chosen.
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 
 	goos := runtime.GOOS
 	// Interrupted, a conversion stops cleanly: the video segments it
@@ -132,7 +137,13 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	if enc == convert.EncoderAuto {
-		enc = convert.DefaultEncoder(ctx, goos, cod, *depth, *vaapi)
+		// An encoder for the depth the run will settle on: 10 bits by
+		// default, unless H.264.
+		d := *depth
+		if d == 0 && cod != convert.CodecH264 {
+			d = 10
+		}
+		enc = convert.DefaultEncoder(ctx, goos, cod, d, *vaapi)
 	}
 
 	ga := convert.GPUAPI(*gpuAPI)
@@ -146,8 +157,17 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.Input, o.Output, o.TempDir, o.Playlist = *input, *output, *tempDir, *playlst
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
 	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
+	if !given["crf"] {
+		o.CRF = convert.CRFAuto
+	}
 	o.BitDepth = *depth
+	if o.BitDepth == 0 && cod != convert.CodecH264 && enc != convert.EncoderMediaFoundation {
+		o.BitDepth = 10
+	}
 	o.Subs3D = convert.Subs3D(*subs3D)
+	if *remux && !given["subs-3d"] {
+		o.Subs3D = convert.Subs3DOff // a remux keeps the disc's own
+	}
 	o.TwoD = *twoD
 	o.Decoder = convert.Decoder(*decoder)
 	if o.Decoder == "auto" {
@@ -228,14 +248,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 	runner.Version = pversion.Resolve(version)
 	runner.KeepTemp = *keepTemp
 	runner.Restart = *restart
+	runner.Explicit = given
 	// Whether --swap-lr was given, as opposed to merely defaulting to false:
 	// a disc that marks its base view as the right eye sets this itself, but
 	// must not override someone who said otherwise.
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "swap-lr" {
-			runner.SwapLRSet = true
-		}
-	})
+	runner.SwapLRSet = given["swap-lr"]
 	if err := runner.Run(ctx); err != nil {
 		fmt.Fprintf(stderr, "bdtools: %v\n", err)
 		return 1

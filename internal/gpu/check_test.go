@@ -182,9 +182,16 @@ func encodeTest(t *testing.T, k Kind, codec Codec, w, h, n int) []byte {
 // encodeDepth is encodeTest at a bit depth.
 func encodeDepth(t *testing.T, k Kind, codec Codec, depth, w, h, n int) []byte {
 	t.Helper()
+	return encodeConfig(t, k, Config{Codec: codec, Width: w, Height: h, FPSNum: 24000, FPSDen: 1001, QP: 24, GOP: 12,
+		Device: "/dev/dri/renderD128", BitDepth: depth}, n)
+}
+
+// encodeConfig is encodeTest with the whole configuration given.
+func encodeConfig(t *testing.T, k Kind, cfg Config, n int) []byte {
+	t.Helper()
+	w, h, depth := cfg.Width, cfg.Height, cfg.BitDepth
 	var out bytes.Buffer
-	e, err := Open(k, Config{Codec: codec, Width: w, Height: h, FPSNum: 24000, FPSDen: 1001, QP: 24, GOP: 12,
-		Device: "/dev/dri/renderD128", BitDepth: depth}, &out)
+	e, err := Open(k, cfg, &out)
 	if errors.Is(err, ErrUnavailable) {
 		t.Skipf("%s: %v", k, err)
 	}

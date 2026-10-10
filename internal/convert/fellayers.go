@@ -102,7 +102,8 @@ func openLayers(mode FEL, openEnc encoderOpener, open decoderOpener, cfg gpu.Con
 	l.elFile = f
 	ecfg := cfg
 	ecfg.Width, ecfg.Height = l.w, l.h
-	ecfg.QP = elQP
+	// The layer at a constant QP, as its default was measured.
+	ecfg.QP, ecfg.CQ = elQP, 0
 	if l.el, err = openEnc(ecfg, f); err != nil {
 		l.abort()
 		return nil, nil, fmt.Errorf("opening the enhancement layer's encoder: %w", err)

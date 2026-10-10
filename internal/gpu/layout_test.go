@@ -74,6 +74,9 @@ func TestNVENCLayout(t *testing.T) {
 	// HEVCBIT is the same for NV_ENC_CONFIG_HEVC's flag word.
 	src.WriteString("#define HEVCBIT(f) ({ NV_ENC_CONFIG_HEVC c; memset(&c, 0, sizeof c); c.f = 1; uint32_t w; " +
 		"memcpy(&w, (char *)&c + offsetof(NV_ENC_CONFIG_HEVC, maxCUSize) + sizeof c.maxCUSize, 4); __builtin_ctz(w); })\n")
+	// RCBIT is the same for NV_ENC_RC_PARAMS's flag word.
+	src.WriteString("#define RCBIT(f) ({ NV_ENC_RC_PARAMS r; memset(&r, 0, sizeof r); r.f = 1; uint32_t w; " +
+		"memcpy(&w, (char *)&r + offsetof(NV_ENC_RC_PARAMS, vbvInitialDelay) + 4, 4); __builtin_ctz(w); })\n")
 	src.WriteString("static void guid(const GUID *g) { const unsigned char *b = (const void *)g; for (int i = 0; i < 16; i++) printf(\"%02x\", b[i]); printf(\"\\n\"); }\n")
 	src.WriteString("int main(void) {\n\tprintf(\"%d.%d\\n\", NVENCAPI_MAJOR_VERSION, NVENCAPI_MINOR_VERSION);\n")
 	for _, f := range nvencFacts {
@@ -163,6 +166,11 @@ var nvencFacts = []struct {
 	{"nvCfgCodecConfig", nvCfgCodecConfig, "offsetof(NV_ENC_CONFIG, encodeCodecConfig)"},
 	{"nvRCRateControlMode", nvRCRateControlMode, "offsetof(NV_ENC_RC_PARAMS, rateControlMode)"},
 	{"nvRCConstQP", nvRCConstQP, "offsetof(NV_ENC_RC_PARAMS, constQP)"},
+	{"nvRCAverageBitRate", nvRCAverageBitRate, "offsetof(NV_ENC_RC_PARAMS, averageBitRate)"},
+	{"nvRCFlags", nvRCFlags, "offsetof(NV_ENC_RC_PARAMS, vbvInitialDelay) + 4"},
+	{"nvRCInitialRCQP", nvRCInitialRCQP, "offsetof(NV_ENC_RC_PARAMS, initialRCQP)"},
+	{"nvRCTargetQuality", nvRCTargetQuality, "offsetof(NV_ENC_RC_PARAMS, targetQuality)"},
+	{"nvRCInitialQPBit", nvRCInitialQPBit, "RCBIT(enableInitialRCQP)"},
 	{"nvH264IDRPeriod", nvH264IDRPeriod, "offsetof(NV_ENC_CONFIG_H264, idrPeriod)"},
 	{"nvHEVCIDRPeriod", nvHEVCIDRPeriod, "offsetof(NV_ENC_CONFIG_HEVC, idrPeriod)"},
 	{"nvAV1Level", nvAV1Level, "offsetof(NV_ENC_CONFIG_AV1, level)"},
@@ -236,6 +244,7 @@ var nvencFacts = []struct {
 	{"nvBufferFormatNV12", nvBufferFormatNV12, "NV_ENC_BUFFER_FORMAT_NV12"},
 	{"nvBufferFormatP010", nvBufferFormatP010, "NV_ENC_BUFFER_FORMAT_YUV420_10BIT"},
 	{"nvRCConstQPMode", nvRCConstQPMode, "NV_ENC_PARAMS_RC_CONSTQP"},
+	{"nvRCVBRMode", nvRCVBRMode, "NV_ENC_PARAMS_RC_VBR"},
 	{"nvPicStructFrame", nvPicStructFrame, "NV_ENC_PIC_STRUCT_FRAME"},
 	{"nvPicFlagEOS", nvPicFlagEOS, "NV_ENC_PIC_FLAG_EOS"},
 	{"nvTuningHighQuality", nvTuningHighQuality, "NV_ENC_TUNING_INFO_HIGH_QUALITY"},

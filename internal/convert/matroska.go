@@ -143,6 +143,9 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 	var tracks []Track
 	for _, t := range r.Tracks {
 		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced} //nolint:gosec // track numbers are small
+		if t.Type == mkv.TypeVideo {
+			tr.Height = t.Height
+		}
 		b := samples[t.Number]
 		switch t.CodecID {
 		case "V_MPEG4/ISO/AVC":
@@ -735,6 +738,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	}
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
+	}
+	if !r.Opts.Remux {
+		r.resolveDefaults(sel.Base, src.dovi[uint64(sel.Base.ID)] != nil) //nolint:gosec // a track number
 	}
 	if c := src.dovi[uint64(sel.Base.ID)]; c != nil && r.Opts.Remux { //nolint:gosec // a track number
 		r.dovi = c
