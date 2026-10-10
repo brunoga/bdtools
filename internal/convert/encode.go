@@ -265,11 +265,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	var out io.Writer = f
 	s.layers = nil
 	if s.r.felLayered {
-		elQP := o.DVELCRF
-		if elQP == 0 {
-			elQP = min(o.CRF+elCRFCoarser, 51)
-		}
-		l, bl, err := openLayers(o.DVFEL, s.opener(), s.r.openDecoder, cfg, elQP, path, f)
+		l, bl, err := openLayers(o.DVFEL, s.opener(), s.r.openDecoder, cfg, o.elCRF(), path, f)
 		if err != nil {
 			_ = f.Close()
 			_ = os.Remove(path)

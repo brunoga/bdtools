@@ -13,7 +13,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   picture `compose` comes within a dB of at half that size; now the two
   layers come out the size of `compose` and as near the disc. The
   documentation has the measurements, and recommends `compose` for keeping
-  a film near the disc at a fraction of its size.
+  a film near the disc at a fraction of its size. A conversion begun with
+  the old default starts over rather than resuming at the new one.
 
 ### Fixed
 
