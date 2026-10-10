@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A conversion starting over because an earlier run left segments made
+  with other settings (or an older bdtools) deleted the audio and subtitles
+  this run had begun demuxing, and failed at the mux after encoding the
+  whole film ("open ….thd: no such file or directory"). Only the old
+  segments are removed now.
+
 ## [0.8.3] - 2026-10-10
 
 ### Changed

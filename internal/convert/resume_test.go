@@ -147,6 +147,12 @@ func TestResumeEncodesWhatIsLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	o.CRF++
+	// What the demuxer has begun writing by the time the encode starts,
+	// which starting over leaves alone.
+	audio := filepath.Join(dir, "00800.track_4352_eng.thd")
+	if err := os.WriteFile(audio, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	third := &fakeSink{}
 	_, lines, err = encodeFixture(t, o, w, third)
 	if err != nil {
@@ -154,6 +160,9 @@ func TestResumeEncodesWhatIsLeft(t *testing.T) {
 	}
 	if len(third.pts) != 9 || !strings.Contains(strings.Join(lines, "\n"), "starting over") {
 		t.Errorf("with another CRF: %d pictures encoded, lines:\n%s", len(third.pts), strings.Join(lines, "\n"))
+	}
+	if _, err := os.Stat(audio); err != nil {
+		t.Errorf("starting over removed the demuxed audio: %v", err)
 	}
 }
 
