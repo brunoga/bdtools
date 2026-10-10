@@ -62,3 +62,23 @@ func TestMerge(t *testing.T) {
 		t.Error("an enhancement layer out of a base layer")
 	}
 }
+
+// FindRPU's RPU is a copy: kept per frame until the mux, a slice of the
+// access unit would keep all of it alive (a film's worth, at 4K).
+func TestFindRPUCopies(t *testing.T) {
+	au := []byte{0, 0, 0, 1, 0x02, 0x01, 0xaa, 0, 0, 1, NALRPU << 1, 0x01, 0x19, 0x08, 0x09}
+	rpu := FindRPU(au)
+	if len(rpu) == 0 || rpu[0]>>1&0x3f != NALRPU {
+		t.Fatalf("no RPU found: % x", rpu)
+	}
+	want := append([]byte(nil), rpu...)
+	for i := range au {
+		au[i] = 0xff
+	}
+	if !bytes.Equal(rpu, want) {
+		t.Error("the RPU shares the access unit's memory")
+	}
+	if !HasRPU([]byte{0, 0, 1, NALRPU << 1, 1, 2}) || HasRPU([]byte{0, 0, 1, 0x02, 1, 2}) {
+		t.Error("HasRPU")
+	}
+}
