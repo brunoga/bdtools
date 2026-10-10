@@ -66,19 +66,19 @@ network share:
 bdtools --list --input "Avatar (2009) 3D.iso"
 ```
 
-**A 3D Blu-ray to a full side-by-side MKV** (1080p per eye; H.264, on the
-GPU when there is one):
+**A 3D Blu-ray to a full side-by-side MKV** (1080p per eye; HEVC at 10 bits
+and the quality chosen for 3D, on the GPU when there is one — see
+[Defaults by source](#defaults-by-source)):
 
 ```sh
 bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv"
 ```
 
-**Smaller, in HEVC at 10 bits, with only the best English audio and English
-subtitles drawn in 3D** — what a TV or headset in side-by-side mode needs:
+**With only the best English audio and English subtitles drawn in 3D** —
+what a TV or headset in side-by-side mode needs:
 
 ```sh
 bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv" \
-        --codec h265 --bit-depth 10 --crf 20 \
         --audio-lang eng --audio-best --subs-lang eng --subs-3d on
 ```
 
@@ -87,13 +87,13 @@ naming the file after what it holds:
 
 ```sh
 bdtools --input disc.iso --output "Frozen (2013).mkv" --layout half --name-details
-# -> Frozen (2013) 3D HSBS 1080p H264 QP18 NVENC TrueHD 7.1.mkv
+# -> Frozen (2013) 3D HSBS 1080p HEVC 10bit QP20 NVENC TrueHD 7.1.mkv
 ```
 
 **A 3D disc as a 2D film** (its base view, one eye):
 
 ```sh
-bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009).mkv" --2d --codec h265
+bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009).mkv" --2d
 ```
 
 **A specific title** when the disc's choice is not the one you want (`--list`
@@ -107,7 +107,7 @@ bdtools --input disc.iso --playlist 00801 --output "Film (Extended).mkv"
 metadata are kept without asking:
 
 ```sh
-bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --codec h265
+bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"
 ```
 
 **Dolby Vision.** A conversion makes profile 8.1, the full enhancement layer
@@ -115,9 +115,9 @@ composed into the picture; or keep profile 7's layers for a player that
 composes them (NVENC or x265); or leave Dolby Vision out:
 
 ```sh
-bdtools --input uhd.iso --output film.mkv --codec h265                          # profile 8.1
-bdtools --input uhd.iso --output film.mkv --codec h265 --dv-fel keep --encoder nvenc
-bdtools --input uhd.iso --output film.mkv --codec h265 --dv-fel drop            # HDR10 only
+bdtools --input uhd.iso --output film.mkv                          # profile 8.1
+bdtools --input uhd.iso --output film.mkv --dv-fel keep --encoder nvenc
+bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only
 ```
 
 **AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
@@ -332,7 +332,7 @@ scheduler such as pipeliner retry it.
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
 | `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |
-| `--codec` | `h264` | `h264`, `h265` or `av1` — see [Codec](#codec) |
+| `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
 | `--audio-lang` | — | Keep only audio in these languages, e.g. `eng` or `eng,fra` |
@@ -340,13 +340,13 @@ scheduler such as pipeliner retry it.
 | `--audio-best` | — | Of the audio that matches, keep only the highest-quality track |
 | `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
-| `--subs-3d` | `off` | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
+| `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
 | `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
 | `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
-| `--crf` | `18` | Quality target, 0–51; lower is better. **Not comparable between codecs** |
-| `--bit-depth` | the source's | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
+| `--crf` | by the source: `20` 3D, `18` Ultra HD, `16` HD | Quality target, 0–51; lower is better. **Not comparable between codecs** — see [Defaults by source](#defaults-by-source) |
+| `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc` or `software`); or `drop` it (the HDR10 base layer as it is) |
@@ -375,17 +375,78 @@ ffmpeg is not the same as having libx265, which a build may omit, so that case
 gets a one-frame trial encode too — the alternative is finding out at the
 encode step, hours into a conversion.
 
+## Defaults by source
+
+With no `--crf`, the quality is chosen for the kind of source, and the run
+says what it chose, and for what:
+
+```
+bdtools: video: --codec h265, --bit-depth 10, --crf 18 (defaults for Ultra HD Dolby Vision)
+bdtools: video: --codec h265, --bit-depth 10, --crf 20, --layout full, --subs-3d both (defaults for 3D)
+```
+
+| Source | `--crf` | Why |
+|---|---|---|
+| 3D Blu-ray | 20 | seen through glasses, at 1080p per eye; 18 costs 45–60% more for about +0.6 VMAF |
+| Ultra HD: Dolby Vision, HDR10, HDR10+ or SDR | 18 | near the disc on every film measured, at 8–38% of its size |
+| HD (1080p and below) | 16 | small already; the HD model of VMAF is the stricter |
+
+Anything given (`--crf`, `--codec`, `--bit-depth`) is kept, and listed as
+given. Everything else defaults alike for every source: HEVC (`--codec
+h265`), 10 bits, Dolby Vision's full enhancement layer composed into a
+profile 8.1 picture (`--dv-fel compose`, the nearest the disc for the size),
+and for 3D full side by side with both flat and 3D subtitles.
+
+The numbers come from minute-long clips of each kind of film, encoded on
+NVENC at each `--crf` and measured against the source with `tools/qcmp`: VMAF
+(100 is the source; 95 and above is hard to tell from it at a normal
+distance; the 4K model for Ultra HD, the stricter HD one for HD and for 3D's
+3840x1080 frame), its mean and its 1st percentile, the worst pictures, where
+an encode's faults show. A Dolby Vision FEL source is measured against the
+picture its layers compose to. At the defaults:
+
+| Source | Clip | `--crf` | MB a minute | of the source | VMAF | worst 1% |
+|---|---|---|---|---|---|---|
+| 3D | Gravity | 20 | 52 | 18% | 96.5 | 93.6 |
+| 3D, animated | Toy Story 4 | 20 | 19 | 9% | 95.2 | 92.7 |
+| Ultra HD Dolby Vision FEL | Dune: Part Two | 18 | 33 | 8% | 98.5 | 96.9 |
+| Ultra HD Dolby Vision FEL, grain | Michael (two stretches) | 18 | 137–158 | 22–23% | 93.5–96.5 | 88.1–89.8 |
+| Ultra HD HDR10 | Godzilla Minus One | 18 | 72 | 14% | 97.4 | 95.0 |
+| Ultra HD SDR, grain | High and Low | 18 | 194 | 38% | 97.0 | 95.1 |
+| HD, H.264 | Solo | 16 | 25 | 11% | 96.9 | 93.2 |
+| HD, VC-1, grain | There Will Be Blood | 16 | 87 | 37% | 97.7 | 92.4 |
+
+Grain is what costs: a grainy film takes several times the bits of a clean
+one at the same `--crf`, and is the one to give a lower `--crf` to when its
+worst pictures matter (Michael, the hardest, needs `--crf` 12 and most of the
+disc's size to bring them to 94). On the same clips, x265 (`--encoder
+software`, `medium`) at the same size as NVENC at a constant QP had the same
+mean VMAF and a worst 1% about 0.7 higher, which NVENC's constant quality
+(below) makes up; its slowest preset, adaptive quantisation, lookahead and
+two passes moved neither (VMAF scores adaptive quantisation
+down, which says little about how it looks).
+
+NVENC encodes at a constant quality, not a constant QP (see
+[Hardware encoding](#hardware-encoding)). Measured against the constant QP
+of the same `--crf`, interpolated to the same size, it is ahead on every
+clip: +0.1 to +1.0 VMAF on the mean, +0.2 to +2.3 on the worst 1%. Its size
+follows the picture rather than the number: a clean film comes out about
+the size it did (−4% to +16%), a grainy one 13–58% smaller, at a lower
+score on the grainiest (There Will Be Blood at 16: 97.7 and 92.4, from
+99.5 and 95.3 at 2.4 times the size).
+
 ## Codec
 
-`--codec h264` (the default) plays on anything, including hardware too old to
-decode HEVC at all. `--codec h265` is materially smaller at the same quality: a
-full-SBS frame is double width — 3840x1080 from a 1080p disc — which is exactly
-the case HEVC's larger coding units were designed for.
+`--codec h265` (the default) is materially smaller than H.264 at the same
+quality, carries HDR10, HDR10+ and Dolby Vision, and is what home theatre
+players, TVs and streaming boxes decode: a full-SBS frame is double width —
+3840x1080 from a 1080p disc — which is exactly the case HEVC's larger coding
+units were designed for.
 
-The trade-off is decoder support. HEVC is widely but not universally
-direct-played, and a client that has to *transcode* a 3840x1080 stream is worse
-off than one direct-playing H.264. If the library is served to a mix of clients,
-H.264 is the safer default; if you know what plays it, HEVC saves real space.
+`--codec h264` plays on anything, including hardware too old to decode HEVC
+at all, and a client that has to *transcode* a 3840x1080 HEVC stream is worse
+off than one direct-playing H.264. If the library is served to such clients,
+H.264 is the safer choice (8 bits, and no HDR).
 
 `--crf` means something different to each codec: x265 at a given CRF is roughly a
 step *higher* quality — and larger — than x264 at the same number. Nothing here
@@ -468,9 +529,9 @@ codec goes to the decoders here (Go), and HEVC of a profile they do not
 decode (the format range extensions, never on a disc) to ffmpeg (see
 [What works where](#what-works-where)). `--decoder` overrides the choice.
 
-The output keeps the source's bit depth unless `--bit-depth` says otherwise:
-a 10-bit Ultra HD picture is encoded at 10 bits (with HEVC or AV1; H.264
-takes 8), a Blu-ray at 8. A stream that states no frame rate takes the
+The output is 10-bit unless `--bit-depth` says otherwise (with HEVC or AV1;
+H.264 takes 8): an Ultra HD picture keeps its 10 bits, and a Blu-ray's 8
+gain the encoder's finer precision (see [10-bit](#10-bit)). A stream that states no frame rate takes the
 container's: the playlist's on a disc, the frame duration or the spacing of
 the first frames in Matroska.
 
@@ -742,7 +803,7 @@ disc sets frame by frame (the offset metadata in the MVC stream, one of up
 to 32 sequences, which the playlist assigns to each subtitle track). A
 side-by-side file has no such player.
 
-- `--subs-3d off` (the default) keeps the subtitles as the disc has them,
+- `--subs-3d off` keeps the subtitles as the disc has them,
   drawn once. That is right for a player that places subtitles in 3D itself
   (Kodi in its 3D mode does), and wrong for one that shows the frame as it
   is: a TV or headset in side-by-side mode stretches each half to the whole
@@ -753,7 +814,8 @@ side-by-side file has no such player.
   for the usual depth in front of the screen), as a 3D player would. With
   `--layout half` it is squeezed to half width like the picture, keeping
   thin strokes. The track is named "3D".
-- `--subs-3d both` keeps the flat track and adds the 3D one after it. The
+- `--subs-3d both` (the default) keeps the flat track and adds the 3D one
+  after it, so the file suits either kind of player. The
   first flat track is marked default, since a player that places subtitles
   in 3D itself (Kodi playing frame packed) draws a 3D track squeezed into
   one eye; pick the 3D one on a player that shows the frame as it is.
@@ -937,9 +999,9 @@ Installing them is left to you; `--check` says what is missing, what each one
 does, and where to start:
 
 ```
-platform: linux   encoder: software   codec: h264
+platform: linux   encoder: software   codec: h265
 
-  ok       x264       /usr/bin/x264
+  ok       x265       /usr/bin/x265
 
 all 1 required tools present
 ```
@@ -1157,7 +1219,17 @@ filter runs. Each encoder makes an IDR every 250 frames (about 10 s, as x264
 and x265 do; 7% smaller than every 2 s at the same quality) with B-frames
 between references, at a constant quantiser: `--crf` is the P-picture QP,
 and I and B pictures get the offsets ffmpeg applies by default for that
-encoder, so a number means what it meant through ffmpeg's `-qp`.
+encoder, so a number means what it meant through ffmpeg's `-qp`. NVENC's
+H.264 and HEVC are the exception: they encode at a constant quality
+(ffmpeg's `-rc vbr -cq`, at `--crf` plus 6, which comes out about the size
+of a constant QP of `--crf`), letting the encoder move each picture's
+quantiser where it gains most: at the same size, the worst pictures come
+nearer the source (see [Defaults by source](#defaults-by-source)). The rate
+is held under 50 Mbit/s for HD and 100 Mbit/s above it, a Blu-ray's and an
+Ultra HD Blu-ray's ceilings: left to itself the driver holds a grainy 4K
+film near 20 Mbit/s whatever the quality asked, and a higher ceiling makes
+it declare a level (6.1 from 300 Mbit/s) players refuse; at these the
+stream declares level 4.1 and 5.0, as HD and Ultra HD HEVC are.
 VideoToolbox has no QP; `--crf` maps onto its quality scale, `0` the best
 and `51` the worst.
 

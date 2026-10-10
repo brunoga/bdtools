@@ -5,6 +5,30 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The defaults suit the source: with no `--crf`, a 3D disc encodes at 20,
+  Ultra HD (HDR10, HDR10+, Dolby Vision or SDR) at 18, HD at 16, each
+  measured with VMAF against its source to keep its worst pictures about as
+  near it. `--codec` defaults to `h265` (was `h264`), `--bit-depth` to 10
+  whenever the codec and encoder can (was the source's), and `--subs-3d` to
+  `both` (was `off`; `off` still with `--remux`). The run says which
+  settings it chose and for what kind of source.
+- NVENC encodes H.264 and HEVC at a constant quality (ffmpeg's
+  `-rc vbr -cq`, at `--crf` plus 6, under 50 Mbit/s for HD and 100 above)
+  rather than a constant QP. At the same size it is nearer the source on
+  every clip measured: +0.1 to +1.0 VMAF on the mean, +0.2 to +2.3 on the
+  worst 1% of pictures. A clean film comes out about the size it did at
+  the same `--crf`; a grainy one 13–58% smaller, at a lower score on the
+  grainiest. A conversion begun with the old one starts over rather than
+  resuming.
+
+### Added
+
+- `tools/qcmp`, which measures encodes against their source: PSNR and VMAF
+  (mean, 1st percentile, worst), for Matroska sources (a Dolby Vision FEL
+  source's layers composed) and 3D Blu-ray streams.
+
 ## [0.8.2] - 2026-10-10
 
 ### Changed

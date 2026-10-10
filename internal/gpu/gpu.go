@@ -34,6 +34,13 @@ type Config struct {
 	// what it did when these encoders were driven through ffmpeg's -qp.
 	// For AV1 it is on the same 0-51 scale and mapped by AV1QIndex.
 	QP int
+	// CQ, when set, has NVENC encode H.264 and HEVC at a constant quality
+	// (variable rate, its targetQuality) instead of constant QP: the
+	// encoder moves each picture's quantiser where it gains most, which at
+	// the size of a constant-QP encode keeps its worst pictures nearer the
+	// source. It is what ffmpeg's -rc vbr -cq CQ -b:v 0 sets. Other
+	// encoders, and AV1, keep to QP.
+	CQ int
 	// GOP is the keyframe interval in frames; 0 picks DefaultGOP.
 	GOP int
 	// Device is the VAAPI render node (VAAPI only).
@@ -145,3 +152,17 @@ const (
 	av1Slope  = 7.1
 	av1Offset = -76.0
 )
+
+// NVENCMaxBitRate is NVENC's ceiling at a constant quality, in bits a
+// second, for a w x h picture: a Blu-ray's most and then some for HD (50
+// Mbit/s, which NVENC declares level 4.1, as HD HEVC is), an Ultra HD
+// Blu-ray's for larger pictures (100 Mbit/s, level 5.0). Neither holds
+// back an encode at any --crf a film is converted at; higher, NVENC
+// declares levels players refuse (6.1 at 300 Mbit/s). A size of 0 (not
+// known yet) takes the larger.
+func NVENCMaxBitRate(w, h int) uint32 {
+	if w*h > 0 && w*h <= 1920*1088 {
+		return 50_000_000
+	}
+	return 100_000_000
+}

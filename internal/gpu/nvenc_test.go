@@ -43,3 +43,17 @@ func TestNVENC10Bit(t *testing.T) {
 	checkDecode10(t, encodeDepth(t, NVENC, HEVC, 10, w, h, n), "hevc", w, h, n)
 	checkDecode10(t, encodeDepth(t, NVENC, AV1, 10, w, h, n), "obu", w, h, n)
 }
+
+// At a constant quality the stream decodes as well, and a finer quality
+// takes more bits.
+func TestNVENCConstantQuality(t *testing.T) {
+	const w, h, n = 640, 368, 30
+	cfg := Config{Codec: HEVC, Width: w, Height: h, FPSNum: 24000, FPSDen: 1001, GOP: 12, BitDepth: 10}
+	cfg.CQ = 20
+	fine := encodeConfig(t, NVENC, cfg, n)
+	checkDecode10(t, fine, "hevc", w, h, n)
+	cfg.CQ = 40
+	if coarse := encodeConfig(t, NVENC, cfg, n); len(coarse) >= len(fine) {
+		t.Errorf("CQ 40 took %d bytes, CQ 20 %d", len(coarse), len(fine))
+	}
+}

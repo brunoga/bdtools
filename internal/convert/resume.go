@@ -232,13 +232,23 @@ func (r *Runner) resumeKey() (string, error) {
 		Segment   int
 		DVFEL     FEL `json:",omitempty"`
 		DVELCRF   int `json:",omitempty"`
+		NVENCCQ   int `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF()}) // as resolved: a default may change
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ()}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// keyCQ is NVENC's constant quality for the key, when NVENC may encode:
+// a run from before it encoded at a constant QP.
+func (o Options) keyCQ() int {
+	if o.Encoder != EncoderNVENC && o.Encoder != EncoderAuto {
+		return 0
+	}
+	return o.nvencCQ()
 }
 
 // openSegments reads the segments as one stream. An IVF segment (what

@@ -24,6 +24,9 @@ type Track struct {
 	// has them (a Matroska file does; a disc does not).
 	Name   string
 	Forced bool
+	// Height is a video track's picture height, when the source states it
+	// before decoding (a Matroska file does; a disc's playlist does not).
+	Height int
 }
 
 // Kind classifies a track by what the conversion must do with it.

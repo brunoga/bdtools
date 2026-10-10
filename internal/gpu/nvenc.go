@@ -153,7 +153,8 @@ func (e *nvenc) open() error {
 		codec = nvCodecAV1GUID
 	}
 	// The P4 preset tuned for quality, then constant QP as ffmpeg's -qp sets
-	// it, B-frames, and a keyframe interval.
+	// it (or constant quality as its -cq does), B-frames, and a keyframe
+	// interval.
 	pc := newStruct(nvSizePresetConfig)
 	pc.u32(0, nvPresetConfigVer)
 	pc.u32(nvPCPresetCfg, nvConfigVer)
@@ -171,15 +172,35 @@ func (e *nvenc) open() error {
 	cfg.u32(nvCfgFrameIntervalP, 4)            // three B-frames
 	rc := nvCfgRCParams
 	cfg.u32(rc, nvRCParamsVer)
-	cfg.u32(rc+nvRCRateControlMode, nvRCConstQPMode)
-	i, p, b := qps(e.cfg.QP)
-	if e.cfg.Codec == AV1 {
-		// AV1's quantiser is a 0-255 index: the same offsets, mapped.
-		i, p, b = AV1QIndex(i), AV1QIndex(p), AV1QIndex(b)
+	if e.cfg.CQ > 0 && e.cfg.Codec != AV1 {
+		// No average bitrate, no VBV: only the quality, up to a ceiling.
+		// Left at 0 the driver sets one of its own, which on a grainy 4K
+		// film holds the encode near 20 Mbit/s whatever the quality asked;
+		// stated, it also decides the level the stream declares.
+		// The rate control starts from ffmpeg's initial quantisers, P at
+		// 26 and I and B by its factors.
+		cfg.u32(rc+nvRCRateControlMode, nvRCVBRMode)
+		cfg.u32(rc+nvRCAverageBitRate, 0)
+		cfg.u32(rc+nvRCAverageBitRate+4, NVENCMaxBitRate(e.cfg.Width, e.cfg.Height))
+		cfg.u32(rc+nvRCAverageBitRate+8, 0) // vbvBufferSize
+		cfg.u32(rc+nvRCFlags, cfg.getU32(rc+nvRCFlags)|1<<nvRCInitialQPBit)
+		i, p, b := qps(26)
+		cfg.u32(rc+nvRCInitialRCQP, uint32(p))   //nolint:gosec // 0..51
+		cfg.u32(rc+nvRCInitialRCQP+4, uint32(b)) //nolint:gosec // 0..51
+		cfg.u32(rc+nvRCInitialRCQP+8, uint32(i)) //nolint:gosec // 0..51
+		cfg[rc+nvRCTargetQuality] = byte(min(e.cfg.CQ, 51))
+		cfg[rc+nvRCTargetQuality+1] = 0
+	} else {
+		cfg.u32(rc+nvRCRateControlMode, nvRCConstQPMode)
+		i, p, b := qps(e.cfg.QP)
+		if e.cfg.Codec == AV1 {
+			// AV1's quantiser is a 0-255 index: the same offsets, mapped.
+			i, p, b = AV1QIndex(i), AV1QIndex(p), AV1QIndex(b)
+		}
+		cfg.u32(rc+nvRCConstQP, uint32(p))   //nolint:gosec // 0..255
+		cfg.u32(rc+nvRCConstQP+4, uint32(b)) //nolint:gosec // 0..255
+		cfg.u32(rc+nvRCConstQP+8, uint32(i)) //nolint:gosec // 0..255
 	}
-	cfg.u32(rc+nvRCConstQP, uint32(p))   //nolint:gosec // 0..255
-	cfg.u32(rc+nvRCConstQP+4, uint32(b)) //nolint:gosec // 0..255
-	cfg.u32(rc+nvRCConstQP+8, uint32(i)) //nolint:gosec // 0..255
 	cc := nvCfgCodecConfig
 	switch e.cfg.Codec {
 	case H264:

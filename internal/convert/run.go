@@ -43,6 +43,9 @@ type Runner struct {
 	// SwapLRSet records that the operator gave --swap-lr explicitly, which
 	// stops the disc's own base-view marking from overriding them.
 	SwapLRSet bool
+	// Explicit holds the options the operator gave (by flag name), so the
+	// report of the settings tells them apart from the defaults chosen.
+	Explicit map[string]bool
 
 	// fpsNum and fpsDen are the frame rate the decode found, for the mux.
 	fpsNum, fpsDen int
@@ -208,6 +211,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	for _, a := range sel.Audio {
 		r.Report.Report("audio: %s", DescribeAudio(a))
 	}
+	if !r.Opts.Remux {
+		r.resolveDefaults(sel.Base, sel.Dependent.StreamID == streamDVEL)
+	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.frameRate()
 	g := newGoDemux(src, sel, tmp, r.Report)
@@ -364,7 +370,9 @@ type decoderOpener func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) 
 // check2D says what a 2D conversion leaves aside.
 func (r *Runner) check2D() {
 	if r.Opts.Subs3D.threeD() {
-		r.Report.Report("2D: --subs-3d does not apply; the subtitles are kept as they are")
+		if r.Explicit["subs-3d"] {
+			r.Report.Report("2D: --subs-3d does not apply; the subtitles are kept as they are")
+		}
 		r.Opts.Subs3D = Subs3DOff
 	}
 }

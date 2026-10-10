@@ -50,6 +50,10 @@ const (
 	nvCfgCodecConfig    = 168
 	nvRCRateControlMode = 4
 	nvRCConstQP         = 8
+	nvRCAverageBitRate  = 20
+	nvRCFlags           = 36 // the bitfield word after vbvInitialDelay
+	nvRCInitialRCQP     = 64
+	nvRCTargetQuality   = 88
 	nvH264IDRPeriod     = 8
 	nvHEVCIDRPeriod     = 20
 	nvAV1Level          = 0
@@ -125,6 +129,8 @@ const (
 	nvBufferFormatNV12  = 1
 	nvBufferFormatP010  = 0x10000
 	nvRCConstQPMode     = 0
+	nvRCVBRMode         = 1
+	nvRCInitialQPBit    = 2
 	nvPicStructFrame    = 1
 	nvPicFlagEOS        = 0x8
 	nvTuningHighQuality = 1

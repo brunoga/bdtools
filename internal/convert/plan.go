@@ -53,7 +53,7 @@ type Options struct {
 	// codec, layout and CRF settings do not apply.
 	Remux bool
 	// CRF is the quality target. Lower is better; 18 is visually transparent
-	// for most sources.
+	// for most sources. CRFAuto leaves it to the source: see sourceKind.
 	//
 	// It is not comparable across codecs: x265 at a given CRF is roughly a
 	// step higher quality — and larger — than x264 at the same number, so the
@@ -61,6 +61,9 @@ type Options struct {
 	// Nothing here adjusts it, because silently re-interpreting a number the
 	// operator typed is worse than documenting what it means.
 	CRF int
+	// frameW and frameH are the encoded frame's size, once the first
+	// picture gives it (0 before).
+	frameW, frameH int
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
@@ -146,6 +149,21 @@ func (f FEL) layered() bool { return f == FELKeep || f == FELReencode }
 
 // elCRF is the enhancement layer's quality when it is kept as a layer, and
 // 0 when it is not.
+// nvencCQOffset is how much higher NVENC's constant quality is set than
+// --crf, for its encode to come out about the size a constant QP of --crf
+// gives. Measured on HEVC, at the same size its worst pictures are 0.6 to
+// 1.3 VMAF nearer the source's (see cmd/bdtools/README.md).
+const nvencCQOffset = 6
+
+// nvencCQ is the constant quality NVENC encodes H.264 and HEVC at; 0 for
+// AV1, which keeps to a constant QP.
+func (o Options) nvencCQ() int {
+	if o.Codec == CodecAV1 {
+		return 0
+	}
+	return min(o.CRF+nvencCQOffset, 51)
+}
+
 func (o Options) elCRF() int {
 	switch {
 	case !o.DVFEL.layered():
@@ -201,6 +219,9 @@ type Step struct {
 
 // Plan is the full sequence for one conversion.
 type Plan struct {
+	// Notes are said before the steps: what the run settles that the plan
+	// cannot know yet.
+	Notes []string
 	Steps []Step
 	// Intermediates are the files the steps create, for cleanup.
 	Intermediates []string
@@ -282,7 +303,7 @@ func (o Options) Validate(goos string) error {
 	if o.Codec == CodecAV1 && o.Encoder == EncoderMediaFoundation {
 		return fmt.Errorf("the Media Foundation encoder does H.264 and HEVC, not AV1: use --encoder nvenc or software (SVT-AV1)")
 	}
-	if o.CRF < 0 || o.CRF > 51 {
+	if o.CRF != CRFAuto && (o.CRF < 0 || o.CRF > 51) {
 		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
 	}
 	switch o.Decoder {
@@ -419,7 +440,16 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 		tmp = filepath.Dir(opts.Output)
 	}
 	videoOut := filepath.Join(tmp, "stacked"+opts.Codec.streamExt())
-	return builtinPlan(opts, tmp, videoOut), nil
+	var notes []string
+	if opts.CRF == CRFAuto {
+		// The source is not read for a plan: the steps show Ultra HD's.
+		opts.CRF = crfUHD
+		notes = append(notes, fmt.Sprintf("--crf is chosen from the source once it is read: %d for 3D, %d for Ultra HD, "+
+			"%d for HD; the steps show %d", crf3D, crfUHD, crfHD, crfUHD))
+	}
+	p := builtinPlan(opts, tmp, videoOut)
+	p.Notes = notes
+	return p, nil
 }
 
 // nativeEncodeStep is the encode with the GPU driven in process.
@@ -517,6 +547,12 @@ func encodeStep(opts Options, out string) Step {
 		// better; -q:v takes it, and the in-process encoder maps the same.
 		return ff(append([]string{"-c:v", name, "-q:v", fmt.Sprint(int(100*gpu.VTQuality(opts.CRF) + 0.5))}, gpu10...), "")
 	case EncoderNVENC:
+		if cq := opts.nvencCQ(); cq > 0 {
+			// The ceiling as in process, for the frame's size.
+			maxRate := gpu.NVENCMaxBitRate(opts.frameW, opts.frameH)
+			return ff(append([]string{"-c:v", name, "-rc", "vbr", "-cq", fmt.Sprint(cq), "-b:v", "0",
+				"-maxrate", fmt.Sprint(maxRate)}, gpu10...), "")
+		}
 		return ff(append([]string{"-c:v", name, "-rc", "constqp", "-qp", fmt.Sprint(qp)}, gpu10...), "")
 	case EncoderMediaFoundation:
 		// ffmpeg's MF encoders take constant quality as 0 to 100, higher
@@ -595,6 +631,9 @@ func encodeStep(opts Options, out string) Step {
 // for reading, not for execution — the steps are run directly, never a shell.
 func (p *Plan) String() string {
 	var b strings.Builder
+	for _, n := range p.Notes {
+		fmt.Fprintf(&b, "# note: %s\n", n)
+	}
 	for i, s := range p.Steps {
 		fmt.Fprintf(&b, "# step %d: %s", i+1, s.Name)
 		if s.Builtin {
