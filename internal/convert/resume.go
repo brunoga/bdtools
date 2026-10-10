@@ -131,8 +131,15 @@ func (w *work) tidy() {
 func (w *work) begin(key string, report Reporter) (int, error) {
 	if w.m.Key != key && len(w.m.Segments) > 0 {
 		report.Report("an earlier run left %d encoded frames, with other settings or another source: starting over", w.m.done())
+		// Only the segments go: by now the demuxer is writing this run's
+		// audio and subtitles here too.
+		for _, s := range w.m.Segments {
+			_ = os.Remove(filepath.Join(w.dir, s.File))
+			if s.EL != "" {
+				_ = os.Remove(filepath.Join(w.dir, s.EL))
+			}
+		}
 		w.m.Segments = nil
-		w.tidy()
 	}
 	w.m.Version, w.m.Key = manifestVersion, key
 	return w.m.done(), w.save()
