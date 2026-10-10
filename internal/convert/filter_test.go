@@ -98,6 +98,27 @@ func TestFilterByCodec(t *testing.T) {
 	}
 }
 
+// A Matroska source's TrueHD track is "TRUE-HD", its stream ID AC-3's: the
+// codec filter matches it by spelling aside, as it does DTS-HD by "dtshd".
+func TestFilterByCodecSpelling(t *testing.T) {
+	for _, c := range []struct {
+		track Track
+		codec string
+	}{
+		{Track{StreamID: "A_AC3", Type: "TRUE-HD"}, "truehd"},
+		{Track{StreamID: "A_AC3", Type: "TRUE-HD"}, "true-hd"},
+		{Track{StreamID: "A_DTS", Type: "DTS-HD Master Audio"}, "dtshd"},
+		{Track{StreamID: "A_DTS", Type: "DTS-HD Master Audio"}, "dts-hd ma"},
+	} {
+		if !(TrackFilter{Codecs: []string{c.codec}}).Matches(c.track) {
+			t.Errorf("%q does not match %s %s", c.codec, c.track.StreamID, c.track.Type)
+		}
+	}
+	if (TrackFilter{Codecs: []string{"truehd"}}).Matches(Track{StreamID: "A_DTS", Type: "DTS-HD Master Audio"}) {
+		t.Error("truehd matches DTS-HD")
+	}
+}
+
 // Both dimensions must pass, so the pair names one track rather than the union
 // of two sets. This is the case the feature exists for: the English lossless
 // mix and nothing else.

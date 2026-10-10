@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // TrackFilter narrows which audio or subtitle tracks are carried into the
@@ -99,10 +100,14 @@ func (f TrackFilter) Matches(t Track) bool {
 		}
 	}
 	if len(f.Codecs) > 0 {
+		// Spelling aside: "truehd" finds a "TRUE-HD" track, as a Matroska
+		// source names one (its codec ID being AC-3's).
 		hay := strings.ToLower(t.StreamID + " " + t.Type)
+		bare := alnum(hay)
 		var hit bool
 		for _, c := range f.Codecs {
-			if c != "" && strings.Contains(hay, strings.ToLower(c)) {
+			c = strings.ToLower(c)
+			if c != "" && (strings.Contains(hay, c) || alnum(c) != "" && strings.Contains(bare, alnum(c))) {
 				hit = true
 				break
 			}
@@ -112,6 +117,16 @@ func (f TrackFilter) Matches(t Track) bool {
 		}
 	}
 	return true
+}
+
+// alnum is s with only its letters and digits.
+func alnum(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return r
+		}
+		return -1
+	}, s)
 }
 
 func containsFold(hay []string, needle string) bool {
