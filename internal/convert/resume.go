@@ -233,7 +233,7 @@ func (r *Runner) resumeKey() (string, error) {
 		DVFEL     FEL `json:",omitempty"`
 		DVELCRF   int `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.DVELCRF})
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF()}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}

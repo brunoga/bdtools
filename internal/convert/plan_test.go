@@ -405,3 +405,26 @@ func encodeArgs(p *Plan) string {
 	}
 	return ""
 }
+
+// The enhancement layer's quality is --dv-el-crf, else --crf plus 12 (at
+// most 51), and nothing when the layer is not kept.
+func TestELCRF(t *testing.T) {
+	for _, c := range []struct {
+		fel     FEL
+		crf, el int
+		want    int
+	}{
+		{FELKeep, 16, 0, 28},
+		{FELReencode, 20, 0, 32},
+		{FELKeep, 45, 0, 51},
+		{FELKeep, 16, 10, 10},
+		{FELCompose, 16, 10, 0},
+		{FELDrop, 16, 0, 0},
+	} {
+		o := DefaultOptions()
+		o.DVFEL, o.CRF, o.DVELCRF = c.fel, c.crf, c.el
+		if got := o.elCRF(); got != c.want {
+			t.Errorf("--dv-fel %s --crf %d --dv-el-crf %d: %d, want %d", c.fel, c.crf, c.el, got, c.want)
+		}
+	}
+}

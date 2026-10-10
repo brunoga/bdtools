@@ -5,17 +5,40 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `--dv-fel keep` and `reencode` quantise the enhancement layer at `--crf`
+  plus 12 by default, not `--crf` less 6. Measured on a 4K FEL feature,
+  the finer layer made the file about 3.5 times as large as `compose`'s for a
+  picture `compose` comes within a dB of at half that size; now the two
+  layers come out the size of `compose` and as near the disc. The
+  documentation has the measurements, and recommends `compose` for keeping
+  a film near the disc at a fraction of its size. A conversion begun with
+  the old default starts over rather than resuming at the new one.
+
 ### Fixed
 
 - `--dv-fel keep` and `reencode` held every access unit of the film in
   memory (each kept RPU was a slice of its access unit, about 1 MB a frame
   at 4K), until the system ran out of memory partway through a feature.
   They now hold about 4.5 GB throughout, as `compose` does.
+- `--dv-fel keep` and `reencode` on a source whose first pictures have no
+  enhancement layer (a clip cut from a film) wrote profile 8.1 without the
+  layer, while saying they kept it. They keep it, a neutral enhancement
+  layer for those pictures.
+- With x265 (`--encoder software`), the enhancement layer could be coded
+  with a run of B-frames shorter than the base layer's where its pictures
+  went from flat to detailed, and the mux refused the layers. x265 is now
+  given every picture's type.
+- `--audio-codec truehd` (and other spellings, such as `TRUE-HD`) did not
+  find a Matroska source's TrueHD track.
 
 ### Added
 
 - `BDTOOLS_PPROF=localhost:6060` serves Go's profiles while bdtools runs,
   for finding where its memory or time goes.
+- `tools/felrd` measures Dolby Vision FEL encodes (any `--dv-fel`) against
+  the picture the source's layers compose to: size per layer and PSNR.
 
 ## [0.8.1] - 2026-10-09
 

@@ -32,6 +32,10 @@ type picture struct {
 	// layers are kept apart (--dv-fel keep or reencode); valid, like the
 	// picture, during the call that delivers it.
 	el *dovi.Picture
+	// layered says the layers are kept apart, for a picture whose source
+	// has no enhancement layer picture too (a clip's first, cut from what
+	// they referred to): its el is nil, and a neutral one goes in its place.
+	layered bool
 }
 
 // size is the picture's (one view's) size and sample depth.

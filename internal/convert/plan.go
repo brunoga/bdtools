@@ -80,7 +80,7 @@ type Options struct {
 	// is).
 	DVFEL FEL
 	// DVELCRF is the enhancement layer's quality when it is kept as a layer
-	// (0: CRF less 6).
+	// (0: CRF plus 12).
 	DVELCRF int
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
@@ -143,6 +143,18 @@ const (
 // layered reports whether the output keeps the enhancement layer apart:
 // profile 7.
 func (f FEL) layered() bool { return f == FELKeep || f == FELReencode }
+
+// elCRF is the enhancement layer's quality when it is kept as a layer, and
+// 0 when it is not.
+func (o Options) elCRF() int {
+	switch {
+	case !o.DVFEL.layered():
+		return 0
+	case o.DVELCRF > 0:
+		return o.DVELCRF
+	}
+	return min(o.CRF+elCRFCoarser, 51)
+}
 
 // Subs3D says what becomes of the subtitles: see Options.Subs3D.
 type Subs3D string

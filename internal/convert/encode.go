@@ -116,7 +116,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			return err
 		}
 		if n == 0 {
-			if sf.el != nil {
+			if sf.layered {
 				// Dolby Vision's layers kept apart: profile 7 out.
 				if _, ok := sink.(*gpuSink); !ok {
 					return &encodeError{errors.New("--dv-fel " + string(r.Opts.DVFEL) +
@@ -265,11 +265,7 @@ func (s *gpuSink) start(path string, first picture, num, den int) error {
 	var out io.Writer = f
 	s.layers = nil
 	if s.r.felLayered {
-		elQP := o.DVELCRF
-		if elQP == 0 {
-			elQP = max(o.CRF-elCRFOffset, 0)
-		}
-		l, bl, err := openLayers(o.DVFEL, s.opener(), s.r.openDecoder, cfg, elQP, path, f)
+		l, bl, err := openLayers(o.DVFEL, s.opener(), s.r.openDecoder, cfg, o.elCRF(), path, f)
 		if err != nil {
 			_ = f.Close()
 			_ = os.Remove(path)

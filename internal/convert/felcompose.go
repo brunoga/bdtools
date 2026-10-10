@@ -140,6 +140,7 @@ func (f *felComposer) put(pic picture, each func(picture) error) error {
 		buf = newPicture(p.Width, p.Height)
 	}
 	var el *dovi.Picture
+	pic.layered = f.pass && p.Depth == 10
 	pic.gpu, el = f.compose(buf, p, pic.rpu)
 	pic.el = el
 	f.queue <- composedPicture{pic, buf, el}

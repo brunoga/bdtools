@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -22,8 +23,11 @@ import (
 //
 // fixedGOP sets x265 up to code every stream the same way: no scene cut
 // keyframes, no adaptive B-frames, keyframes every GOP pictures, closed
-// GOPs. Two streams of the same length then get the same picture types in
-// the same order, which Dolby Vision's two layers must have.
+// GOPs, and each picture's type given (a qpfile): x265 shortens a run of
+// B-frames where flat pictures give way to detail even so, as an
+// enhancement layer's neutral pictures do. Two streams of the same length
+// then get the same picture types in the same order, which Dolby Vision's
+// two layers must have.
 type x265Encoder struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -33,6 +37,7 @@ type x265Encoder struct {
 	copied chan error
 	stderr strings.Builder
 	err    error
+	qpfile string // removed on Close
 }
 
 func openX265(bin string, cfg gpu.Config, preset string, fixedGOP bool, w io.Writer) (gpu.Encoder, error) {
@@ -57,23 +62,31 @@ func openX265(bin string, cfg gpu.Config, preset string, fixedGOP bool, w io.Wri
 		args = append(args, "--colorprim", fmt.Sprint(c.Primaries), "--transfer", fmt.Sprint(c.Transfer),
 			"--colormatrix", fmt.Sprint(c.Matrix), "--range", rng)
 	}
-	if fixedGOP {
-		args = append(args, "--no-scenecut", "--b-adapt", "0", "--bframes", "3", "--no-open-gop",
-			"--keyint", fmt.Sprint(cfg.GOP), "--min-keyint", fmt.Sprint(cfg.GOP))
-	}
 	e := &x265Encoder{cfg: cfg, copied: make(chan error, 1)}
+	if fixedGOP {
+		qp, err := writeQPFile(cfg.GOP, segmentFrames)
+		if err != nil {
+			return nil, err
+		}
+		e.qpfile = qp
+		args = append(args, "--no-scenecut", "--b-adapt", "0", "--bframes", "3", "--no-open-gop",
+			"--keyint", fmt.Sprint(cfg.GOP), "--min-keyint", fmt.Sprint(cfg.GOP), "--qpfile", qp)
+	}
 	// Close ends it: the encoder's life is its caller's, not a context's.
 	e.cmd = exec.CommandContext(context.Background(), bin, append(args, "--output", "-")...) //nolint:gosec // the x265 we resolved
 	e.cmd.Stderr = &e.stderr
 	var err error
 	if e.stdin, err = e.cmd.StdinPipe(); err != nil {
+		e.removeQPFile()
 		return nil, err
 	}
 	out, err := e.cmd.StdoutPipe()
 	if err != nil {
+		e.removeQPFile()
 		return nil, err
 	}
 	if err := e.cmd.Start(); err != nil {
+		e.removeQPFile()
 		return nil, fmt.Errorf("starting x265: %w", err)
 	}
 	go func() {
@@ -146,7 +159,43 @@ func (e *x265Encoder) Close() error {
 	if e.err == nil && cerr != nil {
 		e.err = fmt.Errorf("x265's output: %w", cerr)
 	}
+	e.removeQPFile()
 	return e.err
+}
+
+func (e *x265Encoder) removeQPFile() {
+	if e.qpfile != "" {
+		_ = os.Remove(e.qpfile)
+		e.qpfile = ""
+	}
+}
+
+// writeQPFile writes x265's picture types for n pictures, as x265 itself
+// chooses them without adapting: an IDR picture every gop, between them
+// P-pictures every fourth, and the three B-pictures before each the middle
+// one a reference (b B b P).
+func writeQPFile(gop, n int) (string, error) {
+	f, err := os.CreateTemp("", "bdtools-*.qp")
+	if err != nil {
+		return "", err
+	}
+	w := bufio.NewWriter(f)
+	for i := range n {
+		t := "PbBb"[(i%gop)%4]
+		if i%gop == 0 {
+			t = 'I'
+		}
+		fmt.Fprintf(w, "%d %c -1\n", i, t)
+	}
+	err = w.Flush()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func (e *x265Encoder) failure(err error) error {
