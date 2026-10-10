@@ -14,6 +14,7 @@
 package dovi
 
 import (
+	"bytes"
 	"errors"
 )
 
@@ -158,7 +159,14 @@ func SplitEL(au []byte) []byte {
 }
 
 // HasRPU reports whether an access unit (Annex B) carries an RPU.
-func HasRPU(au []byte) bool { return FindRPU(au) != nil }
+func HasRPU(au []byte) bool {
+	for _, n := range nalUnits(au) {
+		if len(n) > 0 && n[0]>>1&0x3f == NALRPU {
+			return true
+		}
+	}
+	return false
+}
 
 // FindRPU returns an access unit's (Annex B) RPU NAL unit, without start
 // code, or nil.
@@ -169,7 +177,10 @@ func FindRPU(au []byte) []byte {
 			rpu = n
 		}
 	}
-	return rpu
+	// A copy: the RPU is kept for its frame until the mux, and a slice of
+	// the access unit would keep the whole of it (a megabyte at 4K, for
+	// every frame of a film).
+	return bytes.Clone(rpu)
 }
 
 // Profile81 is the configuration of a profile 8.1 stream: an HDR10 base

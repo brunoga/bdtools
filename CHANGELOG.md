@@ -5,6 +5,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `--dv-fel keep` and `reencode` held every access unit of the film in
+  memory (each kept RPU was a slice of its access unit, about 1 MB a frame
+  at 4K), until the system ran out of memory partway through a feature.
+  They now hold about 4.5 GB throughout, as `compose` does.
+
+### Added
+
+- `BDTOOLS_PPROF=localhost:6060` serves Go's profiles while bdtools runs,
+  for finding where its memory or time goes.
+
 ## [0.8.1] - 2026-10-09
 
 ### Fixed
