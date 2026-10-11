@@ -593,9 +593,15 @@ func TestDetailTags(t *testing.T) {
 	o.Codec, o.CRF, o.Encoder = CodecH265, 20, EncoderNVENC
 	thd := Track{Type: "TRUE-HD", StreamID: "A_AC3", Info: "AC3 core + TRUE-HD + ATMOS. Sample Rate: 48KHz Channels: 7.1"}
 	got := DetailTags(o, []Track{thd}, 1080)
-	if got != "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1" {
+	if got != "3D FSBS 1080p HEVC CQ26 NVENC TrueHD-Atmos 7.1" {
 		t.Errorf("tags %q", got)
 	}
+	// AV1 on NVENC keeps a constant QP, and says so.
+	o.Codec = CodecAV1
+	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 QP20 NVENC" {
+		t.Errorf("AV1 tags %q", got)
+	}
+	o.Codec = CodecH265
 	o.Codec, o.CRF, o.Encoder, o.Layout = CodecH264, 18, EncoderSoftware, LayoutHalfSBS
 	ma := Track{Type: "DTS-HD Master Audio", StreamID: "A_DTS", Info: "Sample Rate: 48KHz Channels: 5.1"}
 	if got := DetailTags(o, []Track{ma}, 1080); got != "3D HSBS 1080p H264 CRF18 x264 DTS-HD-MA 5.1" {

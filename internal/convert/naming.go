@@ -11,7 +11,7 @@ import (
 // DetailTags describes a finished conversion for its file name, in the
 // order release names use: layout, resolution per eye, video codec and its
 // quality setting, encoder, then the main audio track and its channels,
-// e.g. "3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1", or without the
+// e.g. "3D FSBS 1080p HEVC CQ26 NVENC TrueHD-Atmos 7.1", or without the
 // layout for a 2D conversion. height is the source picture height (one
 // eye).
 func DetailTags(o Options, audio []Track, height int) string {
@@ -41,6 +41,13 @@ func DetailTags(o Options, audio []Track, height int) string {
 		tags = append(tags, fmt.Sprintf("Q%d", qualityPercent(o.CRF)))
 	case EncoderSoftware:
 		tags = append(tags, fmt.Sprintf("CRF%d", o.CRF))
+	case EncoderNVENC:
+		// A constant quality, its own number (-cq), for H.264 and HEVC.
+		if cq := o.nvencCQ(); cq > 0 {
+			tags = append(tags, fmt.Sprintf("CQ%d", cq))
+			break
+		}
+		tags = append(tags, fmt.Sprintf("QP%d", o.CRF))
 	default:
 		tags = append(tags, fmt.Sprintf("QP%d", o.CRF))
 	}

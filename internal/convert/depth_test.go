@@ -99,7 +99,7 @@ func TestBitDepthEncoderArguments(t *testing.T) {
 func TestBitDepthInDetailTags(t *testing.T) {
 	o := DefaultOptions()
 	o.Codec, o.CRF, o.Encoder, o.BitDepth = CodecH265, 20, EncoderNVENC, 10
-	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p HEVC 10bit QP20 NVENC" {
+	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p HEVC 10bit CQ26 NVENC" {
 		t.Errorf("tags %q", got)
 	}
 }
