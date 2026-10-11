@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-10
+
 ### Fixed
 
 - `--name-details` names an NVENC H.264 or HEVC encode by the constant
@@ -466,7 +468,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.8.5...HEAD
+[0.8.5]: https://github.com/brunoga/bdtools/compare/v0.8.4...v0.8.5
 [0.8.4]: https://github.com/brunoga/bdtools/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/brunoga/bdtools/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/brunoga/bdtools/compare/v0.8.1...v0.8.2
