@@ -1,11 +1,16 @@
 // Command qcmp measures encodes against their source, picture by picture:
 //
-//	qcmp [-vmaf] SRC OUT...
+//	qcmp [-vmaf] [-cambi] SRC OUT...
 //
 // prints, for each output, its video's size and its PSNR against SRC (and
 // with -vmaf, VMAF: the mean, the 1st percentile of pictures and the
 // worst, from Netflix's vmaf tool, which must be on the PATH or in
-// $QCMP_VMAF; the 4K model for pictures above 1080 lines). SRC is a
+// $QCMP_VMAF; the 4K model for pictures above 1080 lines). With -cambi,
+// the same tool also scores banding with Netflix's CAMBI, in the output
+// and in SRC, through PQ for an HDR source: the mean, the 1st percentile
+// of pictures from the worst (the 99th), the worst, and the source's mean
+// (banding the encode did not add); below 5 is hard to see. The worst
+// stretches' times go to stderr, for a look by eye. SRC is a
 // Matroska file (a Dolby Vision profile 7 FEL source's layers composed,
 // as an output's are), or an MVC Blu-ray stream (.m2ts), decoded by mvcdec
 // side by side. Every stream is lined up by its end: a clip cut from a
@@ -15,6 +20,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -26,6 +32,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -41,19 +48,29 @@ type stream struct {
 	w, h             int
 	next             func() (*dovi.Picture, error)
 	frames           int
+	frameDur         time.Duration
+	transfer         int
 	seY              float64
 	n                int
 	// VMAF: the pictures go to vmaf through two pipes.
 	ref, dist *bufio.Writer
 	vmaf      *exec.Cmd
 	vmafOut   string
+	// from is the first compared picture's number in this stream.
+	from int
+}
+
+// scores are vmaf's per-picture scores, by compared picture.
+type scores struct {
+	vmaf, cambi, cambiSrc []float64
 }
 
 func main() {
 	useVMAF := flag.Bool("vmaf", false, "measure VMAF too")
+	useCAMBI := flag.Bool("cambi", false, "measure banding with CAMBI too (with VMAF)")
 	flag.Parse()
 	if flag.NArg() < 2 {
-		fmt.Fprintln(os.Stderr, "usage: qcmp [-vmaf] SRC OUT...")
+		fmt.Fprintln(os.Stderr, "usage: qcmp [-vmaf] [-cambi] SRC OUT...")
 		os.Exit(2)
 	}
 	tmp, err := os.MkdirTemp(os.Getenv("QCMP_TMP"), "qcmp")
@@ -74,11 +91,26 @@ func main() {
 		}
 	}
 	for _, o := range ss {
-		check(skip(o.next, o.frames-n))
+		o.from = o.frames - n
+		check(skip(o.next, o.from))
+	}
+	*useVMAF = *useVMAF || *useCAMBI
+	var cambi string
+	if *useCAMBI {
+		// Both pictures scored, the thresholds through the source's EOTF.
+		eotf := "bt1886"
+		if ref.transfer == 0 {
+			ref.transfer = probeTransfer(flag.Arg(0))
+		}
+		if ref.transfer == 16 {
+			eotf = "pq"
+		}
+		cambi = "cambi=full_ref=true:eotf=" + eotf
+		fmt.Fprintf(os.Stderr, "CAMBI through %s\n", eotf)
 	}
 	if *useVMAF {
 		for i, o := range outs {
-			check(o.startVMAF(filepath.Join(tmp, fmt.Sprintf("vmaf%d", i)), ref.w, ref.h, max(2, 24/len(outs))))
+			check(o.startVMAF(filepath.Join(tmp, fmt.Sprintf("vmaf%d", i)), ref.w, ref.h, max(2, 24/len(outs)), cambi))
 		}
 	}
 	fmt.Fprintf(os.Stderr, "comparing %d pictures\n", n)
@@ -115,16 +147,87 @@ func main() {
 		}
 	}
 	ys := ref.w * ref.h
-	fmt.Printf("%-36s %8s %8s %7s %6s %6s %6s %6s\n", "output", "BL MB", "EL MB", "Y dB", "VMAF", "1%", "min", "frames")
+	fmt.Printf("%-36s %8s %8s %7s %6s %6s %6s", "output", "BL MB", "EL MB", "Y dB", "VMAF", "1%", "min")
+	if *useCAMBI {
+		fmt.Printf(" %6s %6s %6s %6s", "CAMBI", "1%", "max", "src")
+	}
+	fmt.Printf(" %6s\n", "frames")
 	for _, o := range outs {
-		mean, p1, worst := math.NaN(), math.NaN(), math.NaN()
+		var sc scores
 		if o.vmaf != nil {
-			mean, p1, worst, err = o.finishVMAF()
+			sc, err = o.finishVMAF()
 			check(err)
 		}
-		fmt.Printf("%-36s %8.1f %8.1f %7.2f %6.2f %6.2f %6.2f %6d\n", o.name, float64(o.blBytes)/1e6, float64(o.elBytes)/1e6,
-			psnr(o.seY/float64(o.n), ys), mean, p1, worst, o.n)
+		mean, p1, worst := summary(sc.vmaf, false)
+		fmt.Printf("%-36s %8.1f %8.1f %7.2f %6.2f %6.2f %6.2f", o.name, float64(o.blBytes)/1e6, float64(o.elBytes)/1e6,
+			psnr(o.seY/float64(o.n), ys), mean, p1, worst)
+		if *useCAMBI {
+			mean, p1, worst := summary(sc.cambi, true)
+			src, _, _ := summary(sc.cambiSrc, true)
+			fmt.Printf(" %6.2f %6.2f %6.2f %6.2f", mean, p1, worst, src)
+			o.worstBanding(sc)
+		}
+		fmt.Printf(" %6d\n", o.n)
 	}
+}
+
+// summary is the mean of v, its 1st percentile from the worst end and its
+// worst: the lowest, or with high the highest.
+func summary(v []float64, high bool) (mean, p1, worst float64) {
+	if len(v) == 0 {
+		return math.NaN(), math.NaN(), math.NaN()
+	}
+	v = slices.Clone(v)
+	sort.Float64s(v)
+	if high {
+		slices.Reverse(v)
+	}
+	var sum float64
+	for _, x := range v {
+		sum += x
+	}
+	return sum / float64(len(v)), v[len(v)/100], v[0]
+}
+
+// worstBanding tells, on stderr, where this output bands most: the five
+// worst pictures at least ten seconds apart, with the source's score
+// there.
+func (s *stream) worstBanding(sc scores) {
+	idx := make([]int, len(sc.cambi))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.Slice(idx, func(a, b int) bool { return sc.cambi[idx[a]] > sc.cambi[idx[b]] })
+	apart := int(10 * time.Second / s.frameDur)
+	var shown []int
+	for _, k := range idx {
+		if len(shown) == 5 {
+			break
+		}
+		if slices.ContainsFunc(shown, func(j int) bool { return abs(j-k) < apart }) {
+			continue
+		}
+		shown = append(shown, k)
+		at := time.Duration(s.from+k) * s.frameDur
+		src := math.NaN()
+		if k < len(sc.cambiSrc) {
+			src = sc.cambiSrc[k]
+		}
+		fmt.Fprintf(os.Stderr, "%s: banding %.2f at %s (source %.2f)\n", s.name, sc.cambi[k], clock(at), src)
+	}
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// clock is d as h:mm:ss.
+func clock(d time.Duration) string {
+	t := int(d / time.Second)
+	return fmt.Sprintf("%d:%02d:%02d", t/3600, t/60%60, t%60)
 }
 
 func check(err error) {
@@ -167,7 +270,8 @@ func y4mFrame(p *dovi.Picture) []byte {
 }
 
 // startVMAF starts vmaf reading the reference and this output from pipes.
-func (s *stream) startVMAF(dir string, w, h, threads int) error {
+// cambi, when set, is the CAMBI feature to compute too.
+func (s *stream) startVMAF(dir string, w, h, threads int, cambi string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // under our temporary directory
 		return err
 	}
@@ -181,10 +285,14 @@ func (s *stream) startVMAF(dir string, w, h, threads int) error {
 	if h > 1080 {
 		model = "version=vmaf_4k_v0.6.1"
 	}
-	bin := cmpOr(os.Getenv("QCMP_VMAF"), "vmaf")
+	bin := cmp.Or(os.Getenv("QCMP_VMAF"), "vmaf")
 	s.vmafOut = filepath.Join(dir, "out.json")
-	s.vmaf = exec.CommandContext(context.Background(), bin, "-r", refPath, "-d", distPath, //nolint:gosec // the vmaf named
-		"--model", model, "--threads", fmt.Sprint(threads), "--json", "-o", s.vmafOut, "-q")
+	args := []string{"-r", refPath, "-d", distPath,
+		"--model", model, "--threads", fmt.Sprint(threads), "--json", "-o", s.vmafOut, "-q"}
+	if cambi != "" {
+		args = append(args, "--feature", cambi)
+	}
+	s.vmaf = exec.CommandContext(context.Background(), bin, args...) //nolint:gosec // the vmaf named
 	s.vmaf.Stderr = os.Stderr
 	if err := s.vmaf.Start(); err != nil {
 		return fmt.Errorf("starting vmaf: %w", err)
@@ -211,29 +319,44 @@ func (s *stream) startVMAF(dir string, w, h, threads int) error {
 	return err
 }
 
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
+// probeTransfer is the transfer characteristics of path's video as its
+// bitstream states them (H.273: 16 is PQ, 18 HLG), when its container
+// does not: zero when ffprobe cannot tell.
+func probeTransfer(path string) int {
+	out, err := exec.CommandContext(context.Background(), "ffprobe", "-v", "error", "-select_streams", "v:0", //nolint:gosec // the file named
+		"-show_entries", "stream=color_transfer", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		return 0
 	}
-	return b
+	switch strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0]) {
+	case "smpte2084":
+		return 16
+	case "arib-std-b67":
+		return 18
+	}
+	return 0
 }
 
+// filmFrame is a picture's time at 24000/1001 a second.
+const filmFrame = time.Second * 1001 / 24000
+
 // finishVMAF ends vmaf's input and gives its scores.
-func (s *stream) finishVMAF() (mean, p1, worst float64, err error) {
+func (s *stream) finishVMAF() (scores, error) {
+	var sc scores
 	for _, w := range []*bufio.Writer{s.ref, s.dist} {
 		if err := w.Flush(); err != nil {
-			return 0, 0, 0, err
+			return sc, err
 		}
 	}
 	// The pipes close with the process: close them through their files.
 	closeFIFO(s.ref)
 	closeFIFO(s.dist)
 	if err := s.vmaf.Wait(); err != nil {
-		return 0, 0, 0, fmt.Errorf("vmaf: %w", err)
+		return sc, fmt.Errorf("vmaf: %w", err)
 	}
 	b, err := os.ReadFile(s.vmafOut) //nolint:gosec // under our temporary directory
 	if err != nil {
-		return 0, 0, 0, err
+		return sc, err
 	}
 	var out struct {
 		Frames []struct {
@@ -241,21 +364,24 @@ func (s *stream) finishVMAF() (mean, p1, worst float64, err error) {
 		} `json:"frames"`
 	}
 	if err := json.Unmarshal(b, &out); err != nil {
-		return 0, 0, 0, err
+		return sc, err
 	}
-	var v []float64
 	for _, f := range out.Frames {
-		v = append(v, f.Metrics["vmaf"])
+		sc.vmaf = append(sc.vmaf, f.Metrics["vmaf"])
+		for k, v := range f.Metrics {
+			// The output's score is named for its options ("cambi_eotf_pq").
+			switch {
+			case k == "cambi_source":
+				sc.cambiSrc = append(sc.cambiSrc, v)
+			case k == "cambi", strings.HasPrefix(k, "cambi_eotf"):
+				sc.cambi = append(sc.cambi, v)
+			}
+		}
 	}
-	if len(v) == 0 {
-		return 0, 0, 0, errors.New("vmaf gave no frames")
+	if len(sc.vmaf) == 0 {
+		return sc, errors.New("vmaf gave no frames")
 	}
-	sort.Float64s(v)
-	var sum float64
-	for _, x := range v {
-		sum += x
-	}
-	return sum / float64(len(v)), v[len(v)/100], v[0], nil
+	return sc, nil
 }
 
 // fifoWriters remembers each pipe's file, for closing.
@@ -292,7 +418,7 @@ func open(path, tmp string) (*stream, error) {
 	if tr == nil {
 		return nil, fmt.Errorf("%s: no video", path)
 	}
-	s := &stream{name: filepath.Base(path), w: tr.Width, h: tr.Height}
+	s := &stream{name: filepath.Base(path), w: tr.Width, h: tr.Height, frameDur: cmp.Or(tr.DefaultDuration, filmFrame), transfer: tr.Transfer}
 	hevc := tr.CodecID == "V_MPEGH/ISO/HEVC"
 	if err := os.MkdirAll(tmp, 0o700); err != nil { //nolint:gosec // under our temporary directory
 		return nil, err
@@ -438,7 +564,7 @@ func openMVC(path string) (*stream, error) {
 	if w == 0 || h == 0 {
 		return nil, fmt.Errorf("%s: no picture size from mvcdec", path)
 	}
-	s := &stream{name: filepath.Base(path), w: w, h: h}
+	s := &stream{name: filepath.Base(path), w: w, h: h, frameDur: filmFrame}
 	next, n, err := decode(cmd, w, h)
 	if err != nil {
 		return nil, err

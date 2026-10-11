@@ -5,6 +5,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `tools/qcmp -cambi` scores banding too, with Netflix's CAMBI (through PQ
+  for an HDR source), in the encode and in the source, and tells where the
+  encode bands most, for a look by eye.
+
 ## [0.8.5] - 2026-10-10
 
 ### Fixed

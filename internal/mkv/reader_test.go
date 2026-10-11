@@ -34,6 +34,7 @@ func TestReaderRoundTrip(t *testing.T) {
 		}
 		th.SetName("Commentary")
 		v.SetBlockAdditions(dvMapping)
+		v.SetColour(&Colour{Matrix: 9, Transfer: 16, Primaries: 9})
 		return []Source{v, a, th}
 	}
 	path := filepath.Join(t.TempDir(), "x.mkv")
@@ -72,7 +73,7 @@ func TestReaderRoundTrip(t *testing.T) {
 			t.Errorf("track %d: %+v", i, tr)
 		}
 	}
-	if v := r.Tracks[0]; v.Width != 1280 || v.Height != 480 || v.StereoMode != 1 || len(v.CodecPrivate) < 20 {
+	if v := r.Tracks[0]; v.Width != 1280 || v.Height != 480 || v.StereoMode != 1 || v.Transfer != 16 || len(v.CodecPrivate) < 20 {
 		t.Errorf("video: %+v", v)
 	}
 	if len(r.Chapters) != 2 || r.Chapters[1] != 500*time.Millisecond {

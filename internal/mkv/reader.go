@@ -63,6 +63,9 @@ type ReadTrack struct {
 	// BitsPerChannel is the Colour element's bit depth, zero when the file
 	// does not say.
 	BitsPerChannel int
+	// Transfer is the Colour element's transfer characteristics (H.273: 16
+	// is PQ, 18 HLG), zero when the file does not say.
+	Transfer int
 	// BlockAdditions are the track's BlockAdditionMappings (Dolby Vision's
 	// configuration).
 	BlockAdditions []BlockAddition
@@ -282,8 +285,11 @@ func parseTrack(b []byte) (ReadTrack, error) {
 					t.DisplayHeight = int(readUint(v)) //nolint:gosec // a frame size
 				case idColour:
 					return eachChild(v, func(id uint32, v []byte) error {
-						if id == idBitsPerChannel {
+						switch id {
+						case idBitsPerChannel:
 							t.BitsPerChannel = int(readUint(v)) //nolint:gosec // a bit depth
+						case idTransfer:
+							t.Transfer = int(readUint(v)) //nolint:gosec // a code point
 						}
 						return nil
 					})
