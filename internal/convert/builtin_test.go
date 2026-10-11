@@ -592,31 +592,31 @@ func TestDetailTags(t *testing.T) {
 	o := DefaultOptions()
 	o.Codec, o.CRF, o.Encoder = CodecH265, 20, EncoderNVENC
 	thd := Track{Type: "TRUE-HD", StreamID: "A_AC3", Info: "AC3 core + TRUE-HD + ATMOS. Sample Rate: 48KHz Channels: 7.1"}
-	got := DetailTags(o, []Track{thd}, 1080)
+	got := DetailTags(o, []Track{thd}, 1080, nil)
 	if got != "3D FSBS 1080p HEVC CQ26 NVENC TrueHD-Atmos 7.1" {
 		t.Errorf("tags %q", got)
 	}
 	// AV1 on NVENC keeps a constant QP, and says so.
 	o.Codec = CodecAV1
-	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 QP20 NVENC" {
+	if got := DetailTags(o, nil, 1080, nil); got != "3D FSBS 1080p AV1 QP20 NVENC" {
 		t.Errorf("AV1 tags %q", got)
 	}
 	o.Codec = CodecH265
 	o.Codec, o.CRF, o.Encoder, o.Layout = CodecH264, 18, EncoderSoftware, LayoutHalfSBS
 	ma := Track{Type: "DTS-HD Master Audio", StreamID: "A_DTS", Info: "Sample Rate: 48KHz Channels: 5.1"}
-	if got := DetailTags(o, []Track{ma}, 1080); got != "3D HSBS 1080p H264 CRF18 x264 DTS-HD-MA 5.1" {
+	if got := DetailTags(o, []Track{ma}, 1080, nil); got != "3D HSBS 1080p H264 CRF18 x264 DTS-HD-MA 5.1" {
 		t.Errorf("tags %q", got)
 	}
 	o.Codec, o.CRF, o.Encoder, o.Layout = CodecAV1, 20, EncoderSoftware, LayoutFullSBS
-	if got := DetailTags(o, nil, 1080); got != "3D FSBS 1080p AV1 CRF20 SVT-AV1" {
+	if got := DetailTags(o, nil, 1080, nil); got != "3D FSBS 1080p AV1 CRF20 SVT-AV1" {
 		t.Errorf("AV1 tags %q", got)
 	}
 	o.TwoD = true
-	if got := DetailTags(o, nil, 2160); got != "2160p AV1 CRF20 SVT-AV1" {
+	if got := DetailTags(o, nil, 2160, nil); got != "2160p AV1 CRF20 SVT-AV1" {
 		t.Errorf("2D tags %q", got)
 	}
 	o.Remux, o.Codec = true, CodecH265
-	if got := DetailTags(o, []Track{thd}, 0); got != "HEVC Remux TrueHD-Atmos 7.1" {
+	if got := DetailTags(o, []Track{thd}, 0, nil); got != "HEVC Remux TrueHD-Atmos 7.1" {
 		t.Errorf("remux tags %q", got)
 	}
 	for in, want := range map[string]string{
@@ -641,5 +641,23 @@ func TestPlaylistOption(t *testing.T) {
 		if _, err := resolveGo(bluray(form), "09999", false, nil); err == nil {
 			t.Errorf("%s: a missing playlist must fail", form)
 		}
+	}
+}
+
+// The high dynamic range the output carries goes after the resolution, in
+// release names' order, and none for SDR.
+func TestPictureTags(t *testing.T) {
+	r := NewRunner("linux", DefaultOptions(), nil)
+	if got := r.PictureTags(); got != nil {
+		t.Errorf("SDR: %q", got)
+	}
+	r.carried.hdr10, r.carried.dv, r.carried.hdr10Plus = true, true, true
+	if got := strings.Join(r.PictureTags(), " "); got != "DV HDR10+ HDR10" {
+		t.Errorf("tags %q", got)
+	}
+	o := DefaultOptions()
+	o.Codec, o.CRF, o.Encoder, o.BitDepth, o.TwoD = CodecH265, 18, EncoderNVENC, 10, true
+	if got := DetailTags(o, nil, 2160, []string{"DV", "HDR10"}); got != "2160p DV HDR10 HEVC 10bit CQ24 NVENC" {
+		t.Errorf("tags %q", got)
 	}
 }

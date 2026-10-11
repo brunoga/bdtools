@@ -291,6 +291,7 @@ func (r *Runner) carryHDR(v *mkv.VideoSource) {
 	if c := r.colour; c != nil {
 		v.SetColour(&mkv.Colour{Matrix: c.Matrix, Transfer: c.Transfer, Primaries: c.Primaries, FullRange: c.FullRange,
 			Static: r.hdrStatic})
+		r.carried.hlg = c.Transfer == 18
 	}
 	if r.Opts.Codec == CodecH264 && (!r.hdrStatic.Empty() || r.hdr10Plus != nil) {
 		r.Report.Report("warning: H.264 output: the source's HDR metadata is not carried (use --codec h265 or av1)")
@@ -315,6 +316,8 @@ func (r *Runner) carryHDR(v *mkv.VideoSource) {
 	if len(parts) > 0 {
 		r.Report.Report("carrying the source's %s", strings.Join(parts, " and "))
 	}
+	r.carried.hdr10 = static != nil || r.colour != nil && r.colour.Transfer == 16
+	r.carried.hdr10Plus = len(r.hdr10Plus) > 0
 	v.SetExtras(func(display int64, key bool) [][]byte {
 		var out [][]byte
 		if key && static != nil {

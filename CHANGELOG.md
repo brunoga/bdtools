@@ -12,6 +12,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   NVENC encodes at a constant quality, not a constant QP, and the name
   claimed an encode that did not happen (and matched the older file's).
 
+### Added
+
+- `--name-details` names the high dynamic range the file carries, after
+  the resolution: `DV`, `HDR10+`, `HDR10`, `HLG` (`2160p DV HDR10 HEVC
+  10bit CQ24 NVENC`).
+
 ## [0.8.4] - 2026-10-10
 
 ### Fixed

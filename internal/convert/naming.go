@@ -12,9 +12,11 @@ import (
 // order release names use: layout, resolution per eye, video codec and its
 // quality setting, encoder, then the main audio track and its channels,
 // e.g. "3D FSBS 1080p HEVC CQ26 NVENC TrueHD-Atmos 7.1", or without the
-// layout for a 2D conversion. height is the source picture height (one
-// eye).
-func DetailTags(o Options, audio []Track, height int) string {
+// layout for a 2D conversion, and with the high dynamic range the output
+// carries after the resolution ("2160p DV HDR10 HEVC 10bit CQ24 NVENC").
+// height is the source picture height (one eye); picture is the run's
+// PictureTags.
+func DetailTags(o Options, audio []Track, height int, picture []string) string {
 	var tags []string
 	switch {
 	case o.TwoD:
@@ -26,6 +28,7 @@ func DetailTags(o Options, audio []Track, height int) string {
 	if height > 0 {
 		tags = append(tags, fmt.Sprintf("%dp", height))
 	}
+	tags = append(tags, picture...)
 	tags = append(tags, map[Codec]string{CodecH264: "H264", CodecH265: "HEVC", CodecAV1: "AV1"}[o.Codec])
 	if o.tenBit() {
 		tags = append(tags, "10bit")
@@ -128,4 +131,21 @@ func WithDetails(path, tags string) string {
 		}
 	}
 	return strings.TrimSpace(base) + " " + tags + ext
+}
+
+// PictureTags names the high dynamic range a finished run's output
+// carries, as release names do: DV (Dolby Vision, profile 8.1 or 7),
+// HDR10+, HDR10 (a PQ picture), HLG. None for SDR, or for HDR the output
+// could not carry (H.264 keeps no HDR metadata).
+func (r *Runner) PictureTags() []string {
+	var tags []string
+	for _, t := range []struct {
+		on   bool
+		name string
+	}{{r.carried.dv, "DV"}, {r.carried.hdr10Plus, "HDR10+"}, {r.carried.hdr10, "HDR10"}, {r.carried.hlg, "HLG"}} {
+		if t.on {
+			tags = append(tags, t.name)
+		}
+	}
+	return tags
 }
