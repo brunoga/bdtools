@@ -57,6 +57,9 @@ type Runner struct {
 	// Height is the source picture's height (one eye), known once the
 	// first picture is decoded: for naming the output.
 	Height int
+	// carried is the high dynamic range the output was given, as the mux
+	// settled it: for naming the output (see PictureTags).
+	carried struct{ dv, hdr10Plus, hdr10, hlg bool }
 	// length is how long the output plays, when the source says (a
 	// playlist, a Matroska file's duration), for the progress lines.
 	length time.Duration

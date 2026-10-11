@@ -5,6 +5,19 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `--name-details` names an NVENC H.264 or HEVC encode by the constant
+  quality it was made at, `CQ26` for `--crf 20`, not `QP20`: since 0.8.3
+  NVENC encodes at a constant quality, not a constant QP, and the name
+  claimed an encode that did not happen (and matched the older file's).
+
+### Added
+
+- `--name-details` names the high dynamic range the file carries, after
+  the resolution: `DV`, `HDR10+`, `HDR10`, `HLG` (`2160p DV HDR10 HEVC
+  10bit CQ24 NVENC`).
+
 ## [0.8.4] - 2026-10-10
 
 ### Fixed

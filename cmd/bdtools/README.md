@@ -87,7 +87,7 @@ naming the file after what it holds:
 
 ```sh
 bdtools --input disc.iso --output "Frozen (2013).mkv" --layout half --name-details
-# -> Frozen (2013) 3D HSBS 1080p HEVC 10bit QP20 NVENC TrueHD 7.1.mkv
+# -> Frozen (2013) 3D HSBS 1080p HEVC 10bit CQ26 NVENC TrueHD 7.1.mkv
 ```
 
 **A 3D disc as a 2D film** (its base view, one eye):
@@ -846,14 +846,19 @@ sequences than the first, which would have put them inside the scene.)
 Toy Story (1995) 3D FSBS.mkv  ->  Toy Story (1995) 3D FSBS.TrueHD-Atmos.mkv
 ```
 
-`--name-details` says everything that tells one conversion from another:
-the layout, the resolution per eye, the codec (with `10bit` at 10 bits) and
-its quality setting (`QP` for a GPU, `CRF` for x264, x265 and SVT-AV1, `Q`
-for VideoToolbox's quality), the encoder, and the main audio track with its
-channels:
+`--name-details` says everything that tells one conversion from another,
+as the run settled it (the defaults the source chose included): the layout,
+the resolution per eye, the high dynamic range the file carries (`DV` for
+Dolby Vision, `HDR10+`, `HDR10`, `HLG`; nothing for SDR, or for H.264,
+which keeps no HDR metadata), the codec (with `10bit` at 10 bits) and
+its quality setting, as the encoder took it (`CQ` for NVENC's constant
+quality, `--crf` plus 6; `QP` for the other GPUs and NVENC's AV1; `CRF` for
+x264, x265 and SVT-AV1; `Q` for VideoToolbox's quality), the encoder, and
+the main audio track with its channels:
 
 ```
-Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC QP20 NVENC TrueHD-Atmos 7.1.mkv
+Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC 10bit CQ26 NVENC TrueHD-Atmos 7.1.mkv
+Dune (2024).mkv   ->  Dune (2024) 2160p DV HDR10 HEVC 10bit CQ24 NVENC TrueHD-Atmos 7.1.mkv
 ```
 
 A name that already ends in `3D FSBS` does not get it twice. "3D FSBS" is

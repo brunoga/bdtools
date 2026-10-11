@@ -90,6 +90,7 @@ func (r *Runner) carryDolbyVision(v *mkv.VideoSource, num, den int) error {
 	if cfg == nil {
 		return nil
 	}
+	r.carried.dv = true
 	c := *cfg
 	if c.Level == 0 {
 		t := v.Track()
