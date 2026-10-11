@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // Dolby Vision profile 7 out: the full enhancement layer kept as a layer.
@@ -61,6 +63,11 @@ type felLayers struct {
 	written *auSplitter
 	held    map[int]*heldLayers
 	in, out int // pictures put, and come back from the loop
+	// order gives the loop each access unit's place in display order, for
+	// decoders that give pictures back by timestamp; last is the latest
+	// come back.
+	order mkv.HEVCOrder
+	last  int64
 	// The rebuilding and the enhancement layer's encoding run on a
 	// goroutine of their own, in order, while the base layer goes on:
 	// jobs feeds it, back returns what it is done with, failed gets its
@@ -111,7 +118,7 @@ func openLayers(mode FEL, openEnc encoderOpener, open decoderOpener, cfg gpu.Con
 	if mode != FELKeep {
 		return l, bl, nil
 	}
-	l.held = map[int]*heldLayers{}
+	l.held, l.last = map[int]*heldLayers{}, math.MinInt64
 	if l.loop, err = open(gpu.DecodeConfig{Codec: gpu.DecodeHEVC}, l.decoded); err != nil {
 		l.abort()
 		return nil, nil, fmt.Errorf("opening the decoder of the encoded base layer: %w", err)
@@ -164,7 +171,11 @@ func (l *felLayers) put(p picture) error {
 // drain decodes what the base layer's encoder has written.
 func (l *felLayers) drain() error {
 	for _, au := range l.written.take() {
-		if err := l.loop.Decode(au, int64(l.out+len(l.held))); err != nil {
+		at, err := l.order.Key(au)
+		if err != nil {
+			return fmt.Errorf("ordering the encoded base layer: %w", err)
+		}
+		if err := l.loop.Decode(au, at); err != nil {
 			return fmt.Errorf("decoding the encoded base layer: %w", err)
 		}
 		if l.err != nil {
@@ -184,6 +195,13 @@ func (l *felLayers) decoded(p *gpu.DecodedPicture) error {
 		return err
 	default:
 	}
+	// Paired with the pictures put by their order: a picture out of
+	// display order would rebuild another's enhancement layer.
+	if p.PTS <= l.last {
+		l.err = fmt.Errorf("the encoded base layer gave back picture %d out of display order", l.out)
+		return l.err
+	}
+	l.last = p.PTS
 	h := l.held[l.out]
 	if h == nil {
 		l.err = fmt.Errorf("the encoded base layer gave back picture %d, which was not put", l.out)

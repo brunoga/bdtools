@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `--dv-fel keep` on a Mac (VideoToolbox decoding) could rebuild a
+  picture's enhancement layer against another picture's base layer, and
+  come out no nearer the source than `reencode`: the base layer it decodes
+  again went to the decoder with timestamps in decoding order, often all
+  the same, and VideoToolbox gives pictures back in timestamp order. They
+  now carry their place in display order, and a picture out of it stops
+  the encode rather than spoil it. This was also the macOS CI's flaky
+  `TestRunnerKeepsFELLayers`.
+
 ### Added
 
 - `tools/qcmp -cambi` scores banding too, with Netflix's CAMBI (through PQ
