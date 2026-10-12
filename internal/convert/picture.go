@@ -433,19 +433,34 @@ func (r *Runner) resolveDepth(source int) {
 var standardRates = [][2]int{{24000, 1001}, {24, 1}, {25, 1}, {30000, 1001}, {30, 1}, {48, 1}, {50, 1},
 	{60000, 1001}, {60, 1}, {100, 1}, {120000, 1001}, {120, 1}}
 
-// rateFromDuration is the standard frame rate a frame duration is (within
-// 0.2%), or 0 when it is none of them.
+// rateFromDuration is the standard frame rate nearest a frame duration
+// (within 0.2%), or 0 when it is none of them. Nearest, not first: 24 and
+// 24000/1001 lie 0.1% apart.
 func rateFromDuration(d time.Duration) (num, den int) {
 	if d <= 0 {
 		return 0, 0
 	}
 	fps := float64(time.Second) / float64(d)
+	best := 0.002
 	for _, r := range standardRates {
-		if want := float64(r[0]) / float64(r[1]); math.Abs(fps-want) < want*0.002 {
-			return r[0], r[1]
+		want := float64(r[0]) / float64(r[1])
+		if e := math.Abs(fps-want) / want; e < best {
+			best, num, den = e, r[0], r[1]
 		}
 	}
-	return 0, 0
+	return num, den
+}
+
+// pictureRate is the frame rate to encode at: the source's own timing (a
+// Matroska track's frame duration) over the rate its video stream states,
+// for the pictures are placed by that timing and the sound follows it. A
+// disc can state 24 in its stream and play at 24000/1001.
+func pictureRate(streamNum, streamDen, timedNum, timedDen int) (num, den int, overruled bool) {
+	if timedNum <= 0 || timedDen <= 0 {
+		return streamNum, streamDen, false
+	}
+	overruled = streamNum > 0 && streamDen > 0 && streamNum*timedDen != timedNum*streamDen
+	return timedNum, timedDen, overruled
 }
 
 // rateFromCode is the frame rate a Blu-ray clip info's frame_rate code

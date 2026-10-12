@@ -3,6 +3,7 @@ package convert
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // The tracks of the Blu-ray fixture, as the probe lists them.
@@ -142,5 +143,45 @@ func TestSelectTracks2DTakesTheDolbyVisionLayer(t *testing.T) {
 	}
 	if threeD([]Track{bl, el}) {
 		t.Error("a Dolby Vision source counted as 3D")
+	}
+}
+
+func TestRateFromDuration(t *testing.T) {
+	for _, c := range []struct {
+		d        time.Duration
+		num, den int
+	}{
+		{41708333, 24000, 1001},
+		{41666666, 24, 1},
+		{41666667, 24, 1},
+		{40 * time.Millisecond, 25, 1},
+		{33366666, 30000, 1001},
+		{16683333, 60000, 1001},
+		{37 * time.Millisecond, 0, 0},
+		{0, 0, 0},
+	} {
+		if n, d := rateFromDuration(c.d); n != c.num || d != c.den {
+			t.Errorf("rateFromDuration(%v) = %d/%d, want %d/%d", c.d, n, d, c.num, c.den)
+		}
+	}
+}
+
+func TestPictureRate(t *testing.T) {
+	for _, c := range []struct {
+		sn, sd, tn, td int
+		num, den       int
+		overruled      bool
+	}{
+		{24, 1, 24000, 1001, 24000, 1001, true}, // a disc's stream says 24, it plays at 23.976
+		{24000, 1001, 24000, 1001, 24000, 1001, false},
+		{48000, 2002, 24000, 1001, 24000, 1001, false}, // the same rate, unreduced
+		{24000, 1001, 0, 0, 24000, 1001, false},        // no timing of its own: the stream's
+		{0, 0, 25, 1, 25, 1, false},
+		{0, 0, 0, 0, 0, 0, false},
+	} {
+		n, d, o := pictureRate(c.sn, c.sd, c.tn, c.td)
+		if n != c.num || d != c.den || o != c.overruled {
+			t.Errorf("pictureRate(%d/%d, %d/%d) = %d/%d %v, want %d/%d %v", c.sn, c.sd, c.tn, c.td, n, d, o, c.num, c.den, c.overruled)
+		}
 	}
 }

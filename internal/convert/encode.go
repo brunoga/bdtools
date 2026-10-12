@@ -142,9 +142,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 					r.Report.Report("warning: an HDR source at 8 bits bands visibly; --bit-depth 10 (the default for it) keeps its precision")
 				}
 			}
-			num, den = src.frameRate()
-			if num <= 0 && r.rateNum > 0 {
-				num, den = r.rateNum, r.rateDen
+			sn, sd := src.frameRate()
+			var overruled bool
+			num, den, overruled = pictureRate(sn, sd, r.rateNum, r.rateDen)
+			if overruled {
+				r.Report.Report("warning: the video stream states %d/%d frames a second but its timestamps run at %d/%d; following the timestamps", sn, sd, num, den)
 			}
 			if num <= 0 {
 				num, den = 24000, 1001
