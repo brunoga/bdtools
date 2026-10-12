@@ -15,6 +15,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now carry their place in display order, and a picture out of it stops
   the encode rather than spoil it. This was also the macOS CI's flaky
   `TestRunnerKeepsFELLayers`.
+- Encoding a Matroska file whose video stream states one frame rate and
+  whose timestamps run at another followed the stream, and the picture
+  drifted from the sound: a UHD disc remux stating 24 in its HEVC stream
+  but playing at 24000/1001 came out 7 s short over two hours. The file's
+  own timing now wins, with a warning. A frame duration also now reads as
+  the nearest standard rate, so 24 is no longer taken for 24000/1001.
 
 ### Added
 
