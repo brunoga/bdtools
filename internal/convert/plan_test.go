@@ -147,6 +147,8 @@ func TestValidateRejectsIncoherentOptions(t *testing.T) {
 		{"a dvd", func(o *Options) { o.Input = "/in/VTS_01_1.VOB" }, "Blu-ray"},
 		{"unknown layout", func(o *Options) { o.Layout = "sbs3d" }, "unknown layout"},
 		{"crf out of range", func(o *Options) { o.CRF = 99 }, "out of range"},
+		{"mvc with a GPU left eye", func(o *Options) { o.Layout, o.Codec, o.Encoder, o.NativeGPU = LayoutMVC, CodecH264, EncoderNVENC, true }, "x264"},
+		{"builtin for side by side", func(o *Options) { o.Encoder = EncoderBuiltin }, "mvc"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

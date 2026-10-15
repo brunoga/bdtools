@@ -2,7 +2,9 @@ package convert
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // muxBuiltin writes the MKV in process: the encoded video, then each audio
@@ -51,8 +54,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	}
 	defer closeVideo()
 	stereo := 1 // side by side, left eye first
-	if r.flat {
-		stereo = 0
+	mvcOut := !r.flat && r.Opts.Layout == LayoutMVC
+	if r.flat || mvcOut {
+		stereo = 0 // MVC's second view is not in the frame
 	}
 	v, err := mkv.NewVideoSource(vr, codec, num, den, stereo)
 	if err != nil {
@@ -61,8 +65,16 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	// Each eye's shape, as players read it: 16:9 from square pixels for a
 	// full-width pair, 16:9 from squeezed ones for a half-width pair. A 2D
 	// picture is shown at its pixel size, Matroska's default.
+	if mvcOut {
+		// The mvcC record tells players the track holds a second view.
+		cfg, err := mvcConfig(video[0])
+		if err != nil {
+			return fmt.Errorf("muxing: %w", err)
+		}
+		v.SetBlockAdditions([]mkv.BlockAddition{{Type: mkv.FourCC("mvcC"), ExtraData: cfg}})
+	}
 	switch t := v.Track(); {
-	case r.flat:
+	case r.flat, mvcOut:
 	case r.Opts.Layout == LayoutHalfSBS:
 		v.SetDisplaySize(t.Width, t.Height)
 	default:
@@ -332,4 +344,20 @@ func (r *Runner) carryHDR(v *mkv.VideoSource) {
 		}
 		return out
 	})
+}
+
+// mvcConfig reads the MVC configuration record from the start of an MVC
+// stream file.
+func mvcConfig(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // our work directory
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, 1<<20)
+	n, err := io.ReadFull(f, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return mvc.ConfigRecord(head[:n])
 }

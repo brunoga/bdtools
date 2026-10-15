@@ -70,6 +70,12 @@ const (
 	// EncoderMediaFoundation is the encoder a Windows GPU driver installs as
 	// a Media Foundation transform: Intel Quick Sync, AMD AMF. Windows only.
 	EncoderMediaFoundation Encoder = "mediafoundation"
+	// EncoderBuiltin is the H.264 encoder in this program, which codes
+	// both eyes of an MVC file: no tool needed, every platform.
+	EncoderBuiltin Encoder = "builtin"
+	// EncoderCopy keeps a 3D source's left eye as it is and codes the
+	// right eye here (--layout mvc): the 2D picture stays the disc's.
+	EncoderCopy Encoder = "copy"
 )
 
 // ParseEncoder resolves the name an operator typed. "x264" is accepted for
@@ -214,19 +220,21 @@ func svtPreset(p string) int {
 func Encoders(goos string) []Encoder {
 	switch goos {
 	case "linux":
-		return []Encoder{EncoderNVENC, EncoderVAAPI, EncoderSoftware}
+		return []Encoder{EncoderNVENC, EncoderVAAPI, EncoderBuiltin, EncoderCopy, EncoderSoftware}
 	case "darwin":
-		return []Encoder{EncoderVideoToolbox, EncoderSoftware}
+		return []Encoder{EncoderVideoToolbox, EncoderBuiltin, EncoderCopy, EncoderSoftware}
 	case "windows":
-		return []Encoder{EncoderNVENC, EncoderMediaFoundation, EncoderSoftware}
+		return []Encoder{EncoderNVENC, EncoderMediaFoundation, EncoderBuiltin, EncoderCopy, EncoderSoftware}
 	default:
-		return []Encoder{EncoderSoftware}
+		return []Encoder{EncoderBuiltin, EncoderCopy, EncoderSoftware}
 	}
 }
 
 // UsesFFmpeg reports whether an encoder is driven through ffmpeg rather than
 // the codec's own standalone binary.
-func (e Encoder) UsesFFmpeg() bool { return e != EncoderSoftware && e != EncoderAuto }
+func (e Encoder) UsesFFmpeg() bool {
+	return e != EncoderSoftware && e != EncoderAuto && e != EncoderBuiltin
+}
 
 var (
 	toolX264 = Tool{
@@ -288,7 +296,7 @@ func Required(goos string, enc Encoder, codec Codec, viaFFmpeg bool) []Tool {
 // RequiredFor returns the tools a run with these options needs: none for a
 // remux or a GPU encoding in process, otherwise the encoder program.
 func RequiredFor(goos string, o Options) []Tool {
-	if o.Remux || o.NativeGPU {
+	if o.Remux || o.NativeGPU || o.Encoder == EncoderBuiltin || o.Encoder == EncoderCopy {
 		return nil
 	}
 	return Required(goos, o.Encoder, o.Codec, o.EncodesViaFFmpeg())
@@ -461,7 +469,7 @@ func (r Report) String() string {
 // a conversion.
 func DefaultEncoder(ctx context.Context, goos string, codec Codec, depth int, vaapiDevice string) Encoder {
 	for _, enc := range Encoders(goos) {
-		if enc == EncoderSoftware || depth == 10 && enc == EncoderMediaFoundation {
+		if enc == EncoderSoftware || enc == EncoderBuiltin || depth == 10 && enc == EncoderMediaFoundation {
 			continue
 		}
 		// The GPU's own library first: it needs no ffmpeg.

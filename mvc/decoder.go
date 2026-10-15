@@ -164,6 +164,20 @@ func NewDecoder(opts Options) *Decoder {
 	return d
 }
 
+// holdPicture keeps a picture's buffer from being reused while an
+// encoder predicts from it; releasePicture lets it go.
+func (d *Decoder) holdPicture(p *picture) {
+	d.poolMu.Lock()
+	p.inflight++
+	d.poolMu.Unlock()
+}
+
+func (d *Decoder) releasePicture(p *picture) {
+	d.poolMu.Lock()
+	p.inflight--
+	d.poolMu.Unlock()
+}
+
 // Decode feeds Annex B byte stream data (start code delimited NAL units).
 // Data may be split at arbitrary boundaries across calls.
 func (d *Decoder) Decode(data []byte) error {

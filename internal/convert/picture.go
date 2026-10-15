@@ -410,7 +410,7 @@ func (y *flatY4M) flush() error { return y.w.Flush() }
 // conversion, two side by side (or squeezed into one width) for 3D.
 func (r *Runner) frameSize(p picture) (w, h int) {
 	w, h, _ = p.size()
-	if r.flat || r.Opts.Layout == LayoutHalfSBS {
+	if r.flat || r.Opts.Layout == LayoutHalfSBS || r.Opts.Layout == LayoutMVC {
 		return w, h
 	}
 	return 2 * w, h

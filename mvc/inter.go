@@ -120,6 +120,47 @@ func lumaMC(m *mcBuf, dst []byte, ds int, ref *picture, qx, qy, w, h int) {
 	}
 }
 
+// lumaMCPlanes is lumaMC reading the reference's half-sample planes
+// (picture.halfPel) instead of filtering: the same prediction, sample
+// for sample.
+func lumaMCPlanes(dst []byte, ds int, ref *picture, qx, qy, w, h int) {
+	ix, iy := qx>>2, qy>>2
+	fx, fy := qx&3, qy&3
+	if ix < -w-3 {
+		ix = -w - 3
+	} else if ix > ref.width+2 {
+		ix = ref.width + 2
+	}
+	if iy < -h-3 {
+		iy = -h - 3
+	} else if iy > ref.height+2 {
+		iy = ref.height + 2
+	}
+	g, b, v, j := ref.planes[0], ref.hpel[0], ref.hpel[1], ref.hpel[2]
+	ss := ref.stride[0]
+	so := ref.origin[0] + iy*ss + ix
+	switch fx | fy<<2 {
+	case 0:
+		copyBlock(dst, ds, g[so:], ss, w, h)
+	case 2:
+		copyBlock(dst, ds, b[so:], ss, w, h)
+	case 1, 3:
+		avgInto(dst, ds, b[so:], ss, g[so+fx>>1:], ss, w, h)
+	case 8:
+		copyBlock(dst, ds, v[so:], ss, w, h)
+	case 4, 12:
+		avgInto(dst, ds, v[so:], ss, g[so+(fy>>1)*ss:], ss, w, h)
+	case 10:
+		copyBlock(dst, ds, j[so:], ss, w, h)
+	case 6, 14: // fx=2, fy=1/3: avg(j, b at row y or y+1)
+		avgInto(dst, ds, j[so:], ss, b[so+(fy>>1)*ss:], ss, w, h)
+	case 9, 11: // fy=2, fx=1/3: avg(j, h at col x or x+1)
+		avgInto(dst, ds, j[so:], ss, v[so+fx>>1:], ss, w, h)
+	default: // diagonal quarter positions
+		avgInto(dst, ds, b[so+(fy>>1)*ss:], ss, v[so+fx>>1:], ss, w, h)
+	}
+}
+
 // chromaMC writes the w x h chroma prediction at eighth-sample position
 // (cx,cy) of plane c of ref into dst (stride ds).
 func chromaMCGeneric(dst []byte, ds int, ref *picture, c int, cx, cy, w, h int) {
@@ -160,6 +201,10 @@ const (
 	wpImplicit
 )
 
+// mcHook, when set, sees every inter-predicted partition (for stream
+// statistics in tests).
+var mcHook func(view, list, ref, px, py, pw, ph int, v mv, picW, picH int)
+
 // mcPartition performs inter prediction of the partition at (x,y) with
 // size (w,h) in 4x4 units, using the motion stored in the picture grid.
 func (s *sliceDec) mcPartition(x, y, w, h int) {
@@ -171,6 +216,13 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 	pw, ph := w*4, h*4
 	px := s.mbX*16 + x*4
 	py := s.mbY*16 + y*4
+	if mcHook != nil {
+		for l := 0; l < 2; l++ {
+			if r[l] >= 0 {
+				mcHook(s.h.nal.viewID, l, int(r[l]), px, py, pw, ph, pic.mvs[l][idx], pic.width, pic.height)
+			}
+		}
+	}
 	yo := pic.origin[0] + py*pic.stride[0] + px
 	co := pic.origin[1] + (py/2)*pic.stride[1] + px/2
 	// the common case: list 0 only, unweighted

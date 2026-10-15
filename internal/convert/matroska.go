@@ -489,8 +489,10 @@ func (g *mkvDemux) start() error {
 			}
 		}
 	}
-	if err := os.MkdirAll(g.tmp, 0o750); err != nil { //nolint:gosec // the operator's work directory
-		return err
+	if len(g.sel.Audio)+len(g.sel.Subtitles) > 0 {
+		if err := os.MkdirAll(g.tmp, 0o750); err != nil { //nolint:gosec // the operator's work directory
+			return err
+		}
 	}
 	for _, t := range append(append([]Track(nil), g.sel.Audio...), g.sel.Subtitles...) {
 		w, err := createESWriter(g.tmp, g.src.name, t)

@@ -31,6 +31,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"syscall"
 
@@ -58,8 +59,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
 		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC)")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
-		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye) or half (960p per eye, ~half the size)")
-		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc or mediafoundation (Windows; also mf)")
+		aq       = fs.Float64("aq", 0, "the built-in encoder's adaptive quantisation strength (--layout mvc): each macroblock's quantiser moved by its energy, flat and dark ones lower; 0 (the default) leaves every macroblock at the picture's")
+		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye side by side), half (960p per eye, ~half the size) or mvc (Blu-ray 3D's format: an H.264 left eye any player shows in 2D, with the right eye as a second view that 3D players frame pack; --codec h264, x264 for the left eye)")
+		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc, mediafoundation (Windows; also mf), builtin (the H.264 encoder here, for --layout mvc) or copy (--layout mvc: the source's left eye as it is, only the right eye coded)")
 		codec    = fs.String("codec", string(convert.CodecH265), "output video codec: h265 (HDR10, HDR10+ and Dolby Vision kept; what home theatre players play), h264 (plays anywhere, 8-bit, larger) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 0, "quality target, 0-51; lower is better (not comparable between codecs); default: by the source, 20 for 3D, 18 for Ultra HD, 16 for HD")
 		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: 10 when the codec and encoder can")
@@ -120,6 +122,20 @@ func run(argv []string, stdout, stderr *os.File) int {
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 
 	goos := runtime.GOOS
+	// BDTOOLS_CPUPROFILE names a file for a CPU profile of the run, for
+	// finding where the time goes (go tool pprof).
+	if path := os.Getenv("BDTOOLS_CPUPROFILE"); path != "" {
+		f, err := os.Create(path) //nolint:gosec // the user's own path
+		if err != nil {
+			fmt.Fprintf(stderr, "bdtools: %v\n", err)
+			return 2
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Fprintf(stderr, "bdtools: %v\n", err)
+			return 2
+		}
+		defer func() { pprof.StopCPUProfile(); _ = f.Close() }()
+	}
 	// Interrupted, a conversion stops cleanly: the video segments it
 	// finished stay in the work directory for the same command to resume
 	// from, and the rest is removed.
@@ -127,6 +143,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	defer stop()
 
 	cod := convert.Codec(*codec)
+	if convert.Layout(*layout) == convert.LayoutMVC && !given["codec"] {
+		cod = convert.CodecH264 // MVC is H.264's
+	}
 	if !cod.Valid() {
 		fmt.Fprintf(stderr, "bdtools: unknown codec %q\n", cod)
 		return 2
@@ -135,6 +154,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if !convert.SupportsEncoder(goos, enc) {
 		fmt.Fprintf(stderr, "bdtools: encoder %q is not available on %s\n", enc, goos)
 		return 2
+	}
+	if enc == convert.EncoderAuto && convert.Layout(*layout) == convert.LayoutMVC {
+		// Players' MVC decoders play the left eye coded here (or by
+		// x264), never a GPU-encoded one.
+		enc = convert.EncoderBuiltin
 	}
 	if enc == convert.EncoderAuto {
 		// An encoder for the depth the run will settle on: 10 bits by
@@ -161,12 +185,14 @@ func run(argv []string, stdout, stderr *os.File) int {
 		o.CRF = convert.CRFAuto
 	}
 	o.BitDepth = *depth
-	if o.BitDepth == 0 && cod != convert.CodecH264 && enc != convert.EncoderMediaFoundation {
+	if o.BitDepth == 0 && !*remux && cod != convert.CodecH264 && enc != convert.EncoderMediaFoundation {
+		// 10 bits by default, except for a remux, which keeps the disc's
 		o.BitDepth = 10
 	}
 	o.Subs3D = convert.Subs3D(*subs3D)
-	if *remux && !given["subs-3d"] {
-		o.Subs3D = convert.Subs3DOff // a remux keeps the disc's own
+	if (*remux || o.Layout == convert.LayoutMVC) && !given["subs-3d"] {
+		// A remux keeps the disc's own; MVC's 3D player places them.
+		o.Subs3D = convert.Subs3DOff
 	}
 	o.TwoD = *twoD
 	o.Decoder = convert.Decoder(*decoder)
@@ -179,6 +205,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 	o.SwapLR = *swapLR
 	o.DecodeThreads = *decThr
+	o.AQ = *aq
 	o.KeepFallback = *keepFall
 	o.Remux = *remux
 	if !o.Remux {

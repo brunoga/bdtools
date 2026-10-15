@@ -330,8 +330,8 @@ scheduler such as pipeliner retry it.
 | `--output` | — | Destination `.mkv` (or `.m2ts`, `.ts` for a `--remux` keeping a 3D disc's MVC) |
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
-| `--layout` | `full` | `full` (1080p per eye) or `half` (960p per eye, roughly half the size) |
-| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`) |
+| `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size) or `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) |
+| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the H.264 encoder here, for `--layout mvc`, or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
 | `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
@@ -368,6 +368,23 @@ binary: the same encoder library, reached by a route that can filter, with
 `--crf` and `--preset` passed straight through. Unfiltered software encoding
 still uses the standalone binary, which is fewer moving parts and works on a
 machine that has x264 but no ffmpeg.
+
+### MVC output
+
+`--layout mvc` keeps the disc's own kind of 3D: two views, the right one
+coded from the left, in an MKV that carries the dependent view in a
+`mvcC` BlockAddition (what CoreELEC's Kodi plays frame packed on an
+Amlogic box). Both eyes are re-encoded, with H.264 at 8 bits (MVC has no
+other form): the left as an ordinary High profile stream, the right from
+the left and from its own neighbouring pictures, by the encoder in this
+program (`--encoder builtin`, the default for this layout), or the left by
+x264 (`--encoder software`) and the right here. A GPU encoder is refused:
+players' MVC decoders stall on an NVENC-coded left eye, however it is
+configured. `--crf` is the left eye's quantiser (the right eye's is 3
+higher); no rate control beyond that yet. The encoder writes one slice
+per picture, because those decoders stutter on more, and codes several
+pictures at once instead. The findings behind these choices are in
+[docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md).
 
 `--check` follows the same rule, so it looks for ffmpeg when the filter is
 asked for rather than reporting x265 missing on a machine that never needs it. Having

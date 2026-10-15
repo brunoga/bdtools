@@ -313,8 +313,12 @@ func (p *paramSets) avcC() ([]byte, error) {
 		b = append(b, byte(len(raw)>>8), byte(len(raw)))
 		b = append(b, raw...)
 	}
-	b = append(b, byte(len(p.ppsList)))
-	for _, id := range p.ppsList {
+	ppsIDs := p.h264PPSIDs()
+	if len(ppsIDs) == 0 {
+		return nil, errors.New("mkv: no PPS for the SPS")
+	}
+	b = append(b, byte(len(ppsIDs)))
+	for _, id := range ppsIDs {
 		raw := p.rawPPS[id]
 		b = append(b, byte(len(raw)>>8), byte(len(raw)))
 		b = append(b, raw...)
@@ -344,10 +348,22 @@ func (p *paramSets) raw(c Codec) [][]byte {
 	for _, id := range p.spsList {
 		out = append(out, p.rawSPS[id])
 	}
-	for _, id := range p.ppsList {
+	for _, id := range p.h264PPSIDs() {
 		out = append(out, p.rawPPS[id])
 	}
 	return out
+}
+
+// h264PPSIDs are the PPSs of the stream's SPSs: not an MVC stream's
+// dependent view PPS, which refers to a subset SPS.
+func (p *paramSets) h264PPSIDs() []uint32 {
+	var ids []uint32
+	for _, id := range p.ppsList {
+		if _, ok := p.sps[p.pps[id].sps]; ok {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func (p *paramSets) codecPrivate(c Codec) ([]byte, error) {

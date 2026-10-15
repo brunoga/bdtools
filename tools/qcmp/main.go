@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brunoga/bdtools/internal/convert"
 	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/mkv"
 )
@@ -68,9 +69,10 @@ type scores struct {
 func main() {
 	useVMAF := flag.Bool("vmaf", false, "measure VMAF too")
 	useCAMBI := flag.Bool("cambi", false, "measure banding with CAMBI too (with VMAF)")
+	every := flag.Int("every", 1, "score every Nth picture only (a film in a fraction of the time; the rest are decoded and skipped)")
 	flag.Parse()
-	if flag.NArg() < 2 {
-		fmt.Fprintln(os.Stderr, "usage: qcmp [-vmaf] [-cambi] SRC OUT...")
+	if flag.NArg() < 2 || *every < 1 {
+		fmt.Fprintln(os.Stderr, "usage: qcmp [-vmaf] [-cambi] [-every N] SRC OUT...")
 		os.Exit(2)
 	}
 	tmp, err := os.MkdirTemp(os.Getenv("QCMP_TMP"), "qcmp")
@@ -113,12 +115,17 @@ func main() {
 			check(o.startVMAF(filepath.Join(tmp, fmt.Sprintf("vmaf%d", i)), ref.w, ref.h, max(2, 24/len(outs)), cambi))
 		}
 	}
-	fmt.Fprintf(os.Stderr, "comparing %d pictures\n", n)
+	if *every > 1 {
+		fmt.Fprintf(os.Stderr, "comparing %d pictures, scoring every %dth\n", n, *every)
+	} else {
+		fmt.Fprintf(os.Stderr, "comparing %d pictures\n", n)
+	}
 	for k := range n {
 		r, err := ref.next()
 		check(err)
+		score := k%*every == 0
 		var refY4M []byte
-		if *useVMAF {
+		if *useVMAF && score {
 			refY4M = y4mFrame(r)
 		}
 		var wg sync.WaitGroup
@@ -126,6 +133,9 @@ func main() {
 			wg.Go(func() {
 				p, err := o.next()
 				check(err)
+				if !score {
+					return
+				}
 				o.seY += se(p.Y, r.Y)
 				o.n++
 				if o.vmaf != nil {
@@ -418,6 +428,12 @@ func open(path, tmp string) (*stream, error) {
 	if tr == nil {
 		return nil, fmt.Errorf("%s: no video", path)
 	}
+	for _, a := range tr.BlockAdditions {
+		if a.Type == mkv.FourCC("mvcC") {
+			// MVC in Matroska: both views, side by side
+			return openMVC(path)
+		}
+	}
 	s := &stream{name: filepath.Base(path), w: tr.Width, h: tr.Height, frameDur: cmp.Or(tr.DefaultDuration, filmFrame), transfer: tr.Transfer}
 	hevc := tr.CodecID == "V_MPEGH/ISO/HEVC"
 	if err := os.MkdirAll(tmp, 0o700); err != nil { //nolint:gosec // under our temporary directory
@@ -565,6 +581,20 @@ func openMVC(path string) (*stream, error) {
 		return nil, fmt.Errorf("%s: no picture size from mvcdec", path)
 	}
 	s := &stream{name: filepath.Base(path), w: w, h: h, frameDur: filmFrame}
+	// the video's size: both views' access units, without the audio and
+	// the rest of the file (a demux pass, no decoding)
+	if next, stop, err := convert.OpenMVCMatroska(context.Background(), path); err == nil {
+		for {
+			base, dep, _, err := next()
+			if err != nil {
+				break
+			}
+			s.blBytes += int64(len(base) + len(dep))
+		}
+		_ = stop()
+	} else if fi, err := os.Stat(path); err == nil {
+		s.blBytes = fi.Size()
+	}
 	next, n, err := decode(cmd, w, h)
 	if err != nil {
 		return nil, err

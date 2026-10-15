@@ -434,6 +434,10 @@ func (s *sliceDec) parseMBPred() error {
 }
 
 // parseSubMBPred parses sub_mb_pred and derives motion vectors.
+// subHook, when set, sees every 8x8-partitioned macroblock's sub-partition
+// shapes (for stream statistics in tests).
+var subHook func(shape [4]uint8, direct uint8)
+
 func (s *sliceDec) parseSubMBPred(cur *mbInfo, isB, ref0 bool) error {
 	mb := &s.mb
 	for i := 0; i < 4; i++ {
@@ -469,6 +473,9 @@ func (s *sliceDec) parseSubMBPred(cur *mbInfo, isB, ref0 bool) error {
 		}
 	}
 	cur.directSub = mb.directSub
+	if subHook != nil {
+		subHook(mb.subShape, mb.directSub)
+	}
 	for l := 0; l < 2; l++ {
 		for i := 0; i < 4; i++ {
 			mb.refIdx[l][i] = -1
@@ -613,6 +620,7 @@ func (s *sliceDec) decodeIntraMB(cur *mbInfo, t int) error {
 	if s.h.sps.chromaFormatIdc != 0 {
 		if s.cabacOn {
 			mb.chromaPred = s.cabacChromaPredMode()
+
 		} else {
 			mb.chromaPred = uint8(s.br.ue())
 		}

@@ -48,6 +48,32 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	switch {
 	case r.sink != nil: // a test's
 		sink = r.sink
+	case !r.flat && r.Opts.Layout == LayoutMVC:
+		s := &mvcSink{r: r, ctx: ctx}
+		switch r.Opts.Encoder {
+		case EncoderSoftware:
+			bin, err := r.resolve(toolX264)
+			if err != nil {
+				return nil, err
+			}
+			s.bin = bin
+		case EncoderBuiltin:
+			s.builtin = true
+		case EncoderCopy:
+			s.copy = true
+			s.baseQ = make(chan baseAU, 64)
+			s.quit = make(chan struct{})
+			r.baseAU = s.feedBase(keep)
+		default:
+			s.kind, _ = hwKind(r.Opts.Encoder)
+		}
+		sink = s
+		verb = "encoded"
+		if s.copy {
+			r.Report.Report("decoding and encoding (MVC: the left eye copied from the source, the right eye here)")
+		} else {
+			r.Report.Report("decoding and encoding (MVC: the left eye with %s, the right eye here)", r.Opts.Encoder)
+		}
 	case r.Opts.NativeGPU:
 		k, _ := hwKind(r.Opts.Encoder)
 		sink = &gpuSink{r: r, kind: k}
@@ -112,6 +138,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			skipped++
 			return nil
 		}
+		if sk, ok := sink.(interface{ skips(int64) bool }); ok && sk.skips(sf.pts) {
+			skipped++ // a copied left eye starts at its first IDR picture
+			return nil
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -170,7 +200,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		if n <= skip {
 			return nil
 		}
-		if open && inSegment == segmentFrames {
+		if open && inSegment == segmentFrames && r.Opts.Encoder != EncoderCopy { // a copied left eye runs on as one stream
 			if err := finishSegment(); err != nil {
 				return err
 			}
