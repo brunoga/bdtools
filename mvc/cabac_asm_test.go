@@ -201,13 +201,6 @@ func TestCabacMvdAsm(t *testing.T) {
 	}
 }
 
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 // TestMvPredFillAsm compares the assembly MV predictor against mvPred and
 // fillMotion on random grids.
 func TestMvPredFillAsm(t *testing.T) {

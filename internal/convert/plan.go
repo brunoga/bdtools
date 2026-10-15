@@ -21,6 +21,11 @@ const (
 	// 1920x1080 total, so 960x1080 per eye. Half the horizontal detail, and
 	// roughly half the bitrate.
 	LayoutHalfSBS Layout = "half"
+	// LayoutMVC keeps the two eyes as Blu-ray 3D does: MVC, an H.264 left
+	// eye any player shows in 2D and a right eye coded as a second view of
+	// it, which 3D players decode with it and show frame packed. 1920x1080
+	// per eye; --codec h264, 8-bit.
+	LayoutMVC Layout = "mvc"
 )
 
 // Options configure a conversion.
@@ -109,6 +114,12 @@ type Options struct {
 	// The decoder stacks the views the other way round, so no filter is
 	// involved and any encoder will do.
 	SwapLR bool
+	// AQ is the strength of the built-in encoder's adaptive quantisation
+	// (--layout mvc): each macroblock's quantiser moved by its energy, flat
+	// and dark ones lower, busy ones higher. Off (0) by default: measured
+	// on Gravity it costs about a VMAF point at equal size; 1 is x264's
+	// usual setting.
+	AQ float64
 	// DecodeThreads is how many pictures the decoder works on at once; 0 uses
 	// every CPU.
 	DecodeThreads int
@@ -287,8 +298,31 @@ func (o Options) Validate(goos string) error {
 	}
 	switch o.Layout {
 	case LayoutFullSBS, LayoutHalfSBS:
+	case LayoutMVC:
+		if o.TwoD {
+			break
+		}
+		if o.Codec != CodecH264 {
+			return fmt.Errorf("--layout mvc is H.264 (MVC is its 3D extension): use --codec h264")
+		}
+		if o.BitDepth == 10 {
+			return fmt.Errorf("--layout mvc is 8-bit: MVC players decode Stereo High, which has no 10-bit form")
+		}
+		if o.Encoder != EncoderSoftware && o.Encoder != EncoderBuiltin && o.Encoder != EncoderCopy {
+			// Players' MVC decoders (Blu-ray era firmware) stall or reset
+			// on a left eye from NVENC, however it is configured, while
+			// x264's plays: the trigger is in NVENC's slice data, not in
+			// the stream's structure, and NVENC gives no control over it.
+			return fmt.Errorf("--layout mvc encodes the left eye with the encoder here (--encoder builtin, the default) or x264 (--encoder software), or keeps the source's (--encoder copy): players' MVC decoders do not play a GPU-encoded left eye")
+		}
+		if o.Subs3D.threeD() {
+			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: with --layout mvc the player places them in 3D itself")
+		}
 	default:
-		return fmt.Errorf("unknown layout %q (want %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS)
+		return fmt.Errorf("unknown layout %q (want %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutMVC)
+	}
+	if (o.Encoder == EncoderBuiltin || o.Encoder == EncoderCopy) && (o.Layout != LayoutMVC || o.TwoD) {
+		return fmt.Errorf("--encoder %s codes MVC (--layout mvc) only", o.Encoder)
 	}
 	if !o.Codec.Valid() {
 		return fmt.Errorf("unknown codec %q (want %s)", o.Codec, codecList(Codecs()))
@@ -482,7 +516,18 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 	decode = append(decode, "(audio, subtitles and chapters to "+tmp+")")
 	p := &Plan{Intermediates: []string{videoOut}}
 	enc := encodeStep(opts, videoOut)
-	if opts.NativeGPU {
+	switch {
+	case opts.Layout == LayoutMVC && !opts.TwoD:
+		left := "x264 " + strings.Join(mvcX264Args(opts), " ")
+		switch opts.Encoder {
+		case EncoderBuiltin:
+			left = "builtin h264 qp " + strconv.Itoa(opts.CRF)
+		case EncoderCopy:
+			left = "the source's, copied"
+		}
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{"left eye:", left, "| right eye: MVC, qp",
+			strconv.Itoa(mvcDepQP(opts.CRF)), "->", videoOut}}
+	case opts.NativeGPU:
 		enc = nativeEncodeStep(opts, videoOut)
 	}
 	p.Steps = append(p.Steps,

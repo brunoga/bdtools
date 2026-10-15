@@ -26,6 +26,11 @@ type picture struct {
 	width    int // luma width (multiple of 16)
 	height   int
 
+	// the luma's half-sample planes, for an encoder (halfPel)
+	hpel   [3][]byte
+	hpelOK bool
+	hpelMu sync.Mutex
+
 	// motion data per 4x4 block, stride mbW*4
 	mvs  [2][]mv
 	refs [2][]int8
@@ -124,8 +129,49 @@ func allocNewPicture(mbW, mbH int) *picture {
 	return p
 }
 
+// halfPel gives the picture's luma at its half-sample positions, three
+// planes laid out as plane 0 (b, h and j of 8.4.2.2.1), computed on the
+// first call after the picture is decoded in full, for an encoder whose
+// search reads them instead of filtering every candidate block: a
+// quarter-sample prediction is then an average of two samples, and
+// exactly the decoder's. The planes cover the border the prediction may
+// reach (lumaMC's clamping) and no more.
+func (p *picture) halfPel() *[3][]byte {
+	p.hpelMu.Lock()
+	defer p.hpelMu.Unlock()
+	if p.hpelOK {
+		return &p.hpel
+	}
+	ss, n := p.stride[0], len(p.planes[0])
+	for i := range p.hpel {
+		if len(p.hpel[i]) != n {
+			p.hpel[i] = make([]byte, n)
+		}
+	}
+	// 6-tap filters reach 2 samples before and 3 after: the border of
+	// padY allows [-padY+2, w+padY-3); the prediction reads at most
+	// [-w-3, width+18]. Tiles of 16 over a range that is a multiple of
+	// 16 wide and high.
+	const reach = padY - 8
+	src := p.planes[0]
+	var tmp [21 * 16]int16
+	for y := -reach; y < p.height+reach; y += 16 {
+		for x := -reach; x < p.width+reach; x += 16 {
+			so := p.origin[0] + y*ss + x
+			hpelH(p.hpel[0][so:], ss, src, so, ss, 16, 16)
+			hpelV(p.hpel[1][so:], ss, src, so, ss, 16, 16)
+			hpelJ(p.hpel[2][so:], ss, tmp[:], src, so, ss, 16, 16)
+		}
+	}
+	p.hpelOK = true
+	return &p.hpel
+}
+
 // reset prepares a picture for decoding a new view component.
 func (p *picture) reset() {
+	p.hpelMu.Lock()
+	p.hpelOK = false
+	p.hpelMu.Unlock()
 	p.shortRef, p.longRef, p.outputNeeded = false, false, false
 	p.idr, p.mmco5 = false, false
 	p.nonExisting = false

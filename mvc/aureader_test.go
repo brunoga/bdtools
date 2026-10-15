@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 )
 
 // TestAUReader checks that splitting into access units and decoding each
@@ -56,4 +57,40 @@ func TestAUReader(t *testing.T) {
 			t.Errorf("%s: output differs after AU splitting (%d AUs)", n, aus)
 		}
 	}
+}
+
+// An encoder writing access units into a pipe gets each one back as soon
+// as the next begins: the reader must not wait for a buffer's worth of
+// input.
+func TestAUReaderReturnsAccessUnitsAsPiped(t *testing.T) {
+	pr, pw := io.Pipe()
+	au := func(frameNum byte) []byte {
+		// one P slice: first_mb_in_slice 0, slice_type 0, pps 0, frame_num
+		return []byte{0, 0, 1, 0x41, 0xe0 | frameNum>>3, frameNum<<5 | 0x08, 0x80}
+	}
+	go func() {
+		for i := range byte(3) {
+			if _, err := pw.Write(au(i)); err != nil {
+				return
+			}
+		}
+	}()
+	r := NewAUReader(pr)
+	got := make(chan []byte, 1)
+	go func() {
+		a, err := r.Next()
+		if err != nil {
+			t.Error(err)
+		}
+		got <- a
+	}()
+	select {
+	case a := <-got:
+		if len(a) != 7 || a[3] != 0x41 {
+			t.Errorf("first access unit = % x", a)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first access unit was not returned once the second had been written")
+	}
+	_ = pw.Close()
 }

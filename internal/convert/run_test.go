@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 func runnerOpts(t *testing.T) Options {
@@ -1069,5 +1071,154 @@ func keepsFELLayers(t *testing.T, fs felSource, enc Encoder) {
 	}
 	if mean[FELKeep] < mean[FELReencode]+1 {
 		t.Errorf("the rebuilt enhancement layer (%.2f dB) is not clearly better than the re-encoded one (%.2f dB)", mean[FELKeep], mean[FELReencode])
+	}
+}
+
+// A 3D source converts to MVC: one eye's size in the track, an mvcC
+// mapping telling players the second view is there, and every picture
+// decoding with its dependent view. With x264 for the left eye, and with
+// the encoder here.
+func TestRunnerConvertsToMVC(t *testing.T) {
+	if _, err := LookPath("x264"); err != nil {
+		t.Skip("x264 not installed")
+	}
+	testConvertsToMVC(t, EncoderSoftware)
+}
+
+func TestRunnerConvertsToMVCBuiltin(t *testing.T) {
+	testConvertsToMVC(t, EncoderBuiltin)
+}
+
+// --encoder copy keeps the source's left eye: every slice of the base
+// view comes out byte for byte as it went in, with a new right eye.
+func TestRunnerCopiesTheLeftEye(t *testing.T) {
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.Layout = EncoderCopy, CodecH264, LayoutMVC
+	o.CRF = 25
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v", err)
+	}
+	sliceNALs := func(path string) [][]byte {
+		next, stop, err := OpenMVCMatroska(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = stop() }()
+		var got [][]byte
+		for {
+			base, _, _, err := next()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range nals(base) {
+				if typ := n[0] & 0x1f; typ == 1 || typ == 5 {
+					got = append(got, append([]byte(nil), n...))
+				}
+			}
+		}
+		return got
+	}
+	in, res := sliceNALs(source), sliceNALs(out)
+	if len(in) == 0 || len(in) != len(res) {
+		t.Fatalf("%d left eye slices in, %d out", len(in), len(res))
+	}
+	for i := range in {
+		if !bytes.Equal(in[i], res[i]) {
+			t.Fatalf("left eye slice %d differs from the source's", i)
+		}
+	}
+	src, tracks, err := probeMatroska(context.Background(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, err := SelectTracks(tracks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newMkvDemux(src, sel, t.TempDir(), nil)
+	if err := g.start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.f.Close() }()
+	d := mvc.NewDecoder(mvc.Options{})
+	st, err := d.DecodeStream(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next}, mvc.DecodeOptions{}, func(sf *mvc.StereoFrame) error {
+		if sf.Dependent == nil {
+			return errors.New("a picture without its right eye")
+		}
+		return nil
+	})
+	if err != nil || st.Errors > 0 || st.Frames != len(in) {
+		t.Fatalf("decoding the output: %v, %d errors, %d frames (want %d)", err, st.Errors, st.Frames, len(in))
+	}
+}
+
+func testConvertsToMVC(t *testing.T, enc Encoder) {
+	t.Helper()
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.Layout = enc, CodecH264, LayoutMVC
+	o.CRF, o.Preset = 25, "ultrafast"
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v", err)
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := rd.Tracks[0]
+	if v.Type != mkv.TypeVideo || v.Width != 640 || v.Height != 480 || v.StereoMode != 0 {
+		t.Errorf("video track %+v, want 640x480 with no stereo mode", v)
+	}
+	mvcC := false
+	for _, a := range v.BlockAdditions {
+		if a.Type == mkv.FourCC("mvcC") && len(a.ExtraData) > 0 {
+			mvcC = true
+		}
+	}
+	if !mvcC {
+		t.Errorf("no mvcC BlockAdditionMapping on the video track: %+v", v.BlockAdditions)
+	}
+
+	src, tracks, err := probeMatroska(context.Background(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel, err := SelectTracks(tracks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newMkvDemux(src, sel, t.TempDir(), nil)
+	if err := g.start(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := mvc.NewDecoder(mvc.Options{}).DecodeStream(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: g.Next},
+		mvc.DecodeOptions{}, func(sf *mvc.StereoFrame) error {
+			if sf.Dependent != nil && (sf.Dependent.Width != 640 || sf.Dependent.Height != 480) {
+				t.Errorf("dependent view %dx%d", sf.Dependent.Width, sf.Dependent.Height)
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Frames == 0 || st.Errors != 0 || st.DependentFrames != st.Frames {
+		t.Errorf("%d frames, %d with a dependent view, %d errors", st.Frames, st.DependentFrames, st.Errors)
+	}
+	if _, err := g.finish(); err != nil {
+		t.Fatal(err)
 	}
 }

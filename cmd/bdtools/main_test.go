@@ -107,6 +107,39 @@ func TestDryRunShowsTheChosenLayout(t *testing.T) {
 	}
 }
 
+// MVC output encodes its left eye with the encoder here whatever GPU the
+// machine has: players' MVC decoders do not play a GPU-encoded one.
+func TestMVCDefaultsToBuiltin(t *testing.T) {
+	out, _, code := capture(t, "--dry-run", "--layout", "mvc",
+		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 {
+		t.Fatalf("MVC with the default encoder should work, exit = %d", code)
+	}
+	if !strings.Contains(out, "builtin h264") || strings.Contains(out, "nvenc") {
+		t.Errorf("MVC should encode the left eye with the builtin encoder:\n%s", out)
+	}
+	sw, _, code := capture(t, "--dry-run", "--layout", "mvc", "--encoder", "software",
+		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(sw, "x264 ") {
+		t.Errorf("MVC with --encoder software should use x264, exit = %d:\n%s", code, sw)
+	}
+	cp, _, code := capture(t, "--dry-run", "--layout", "mvc", "--encoder", "copy",
+		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(cp, "copied") {
+		t.Errorf("MVC with --encoder copy should keep the left eye, exit = %d:\n%s", code, cp)
+	}
+	_, stderr, code := capture(t, "--dry-run", "--layout", "mvc", "--encoder", "nvenc",
+		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 2 || !strings.Contains(stderr, "x264") {
+		t.Errorf("MVC with NVENC should be refused with the reason, exit = %d:\n%s", code, stderr)
+	}
+	own, _, code := capture(t, "--dry-run", "--layout", "mvc", "--encoder", "builtin",
+		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(own, "builtin h264") {
+		t.Errorf("MVC with the builtin encoder should work and say so, exit = %d:\n%s", code, own)
+	}
+}
+
 // The eye swap is the decoder's: it works with every encoder and is never a
 // filter.
 func TestSwapWorksWithEitherEncoder(t *testing.T) {
@@ -175,6 +208,15 @@ func TestUnsupportedSourceIsRefused(t *testing.T) {
 	_, errOut, code := capture(t, "--dry-run", "--encoder", "x264", "--input", "/in/film.mp4", "--output", "/out/a.mkv")
 	if code != 2 || !strings.Contains(errOut, "Blu-ray") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+// A 3D remux with nothing else given keeps the disc's MVC video as it
+// is: the bit depth that an encode would default to does not apply.
+func TestRemuxDefaultsKeepTheDisc(t *testing.T) {
+	_, stderr, code := capture(t, "--dry-run", "--remux", "--input", "/in/a.iso", "--output", "/out/a.m2ts", "--temp", "/tmp/w")
+	if code != 0 {
+		t.Errorf("a plain --remux should be accepted, exit = %d:\n%s", code, stderr)
 	}
 }
 

@@ -45,14 +45,14 @@ func (a *AUReader) nextNAL() ([]byte, error) {
 			}
 			return nil, io.EOF
 		}
-		// read more data into a fresh buffer holding the unconsumed tail
+		// read more data into a fresh buffer holding the unconsumed tail:
+		// whatever the reader has, not a full buffer's worth, so that an
+		// encoder feeding a pipe gets its access units back as it
+		// writes them
 		nb := make([]byte, len(a.buf), len(a.buf)+1<<20)
 		copy(nb, a.buf)
-		n, err := io.ReadFull(a.r, nb[len(nb):cap(nb)])
+		n, err := a.r.Read(nb[len(nb):cap(nb)])
 		a.buf = nb[:len(nb)+n]
-		if err == io.ErrUnexpectedEOF {
-			err = io.EOF
-		}
 		if err == io.EOF {
 			a.eof = true
 		} else if err != nil {

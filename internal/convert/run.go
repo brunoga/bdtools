@@ -30,6 +30,9 @@ func (r Reporter) Report(format string, args ...any) {
 // Runner executes a conversion.
 type Runner struct {
 	Opts Options
+	// baseAU, when set (--encoder copy), gets each base view access unit
+	// as the source gives it, before the decoder does.
+	baseAU func(au []byte, pts int64) error
 	// GOOS is the platform whose toolchain and encoders apply.
 	GOOS string
 	// Report receives progress lines.
@@ -253,6 +256,20 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 // decoders here, with ffmpeg for what they do not decode (HEVC's format
 // range extensions, interlaced H.264).
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
+	if r.Opts.Encoder == EncoderCopy {
+		// the left eye's access units go to the sink as they are, as
+		// well as to the decoder
+		inner := next
+		next = func() (base, dep []byte, pts int64, err error) {
+			base, dep, pts, err = inner()
+			if err == nil && base != nil && r.baseAU != nil {
+				if err := r.baseAU(base, pts); err != nil {
+					return nil, nil, 0, err
+				}
+			}
+			return base, dep, pts, err
+		}
+	}
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
 	}

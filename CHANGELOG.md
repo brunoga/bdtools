@@ -5,6 +5,43 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--layout mvc` writes a frame-packed 3D MKV (the dependent view in a
+  `mvcC` BlockAddition) for players with an MVC decoder, and codes both
+  eyes with the H.264 encoder here (`--encoder builtin`, the default
+  for this layout): the right eye from the left and from its own past
+  and future pictures, the left as High profile with B pictures. One
+  slice per picture in both views, as players' MVC decoders stutter on
+  more; a picture's macroblock rows are decided in parallel instead (a
+  wavefront), and the B pictures of a group and the next reference are
+  coded at once, in both views. The transforms, quantiser and block
+  matching run in AVX2. A feature film codes at about 30 frames a
+  second on a 24-core machine. `--encoder software` uses x264 for the
+  left eye instead; a GPU encoder is refused, as players' MVC decoders
+  fail on NVENC's output. What was learnt on the Amlogic decoder is in
+  `docs/mvc-player-compatibility.md`.
+- `--layout mvc --encoder copy` keeps a 3D source's left eye exactly as
+  it is (no generation loss on the 2D picture, nothing to encode for it)
+  and codes only the right eye, smaller.
+- `--aq N` (`--layout mvc`, the built-in encoder): adaptive quantisation,
+  each macroblock's quantiser moved by its energy. Off by default: on
+  Gravity it costs about a VMAF point at equal size, whichever way the
+  offsets are centred.
+- `qcmp -every N` scores every Nth picture, for a film-length comparison
+  in a fraction of the time; `qcmp` reads MVC MKV files and scores both
+  eyes.
+- `BDTOOLS_CPUPROFILE=file` writes a CPU profile of a run.
+
+### Fixed
+
+- `--remux` of a 3D disc with nothing else given was refused ("cannot
+  change the bit depth"): the 10-bit default meant for encodes was applied
+  to it. A remux keeps the disc's depth.
+- `mvc.NewAUReader` on a pipe returned nothing until a megabyte had
+  arrived, which deadlocked an encoder feeding it small pictures (the
+  dark opening of a film) while waiting for its first access unit back.
+
 ## [0.8.6] - 2026-10-12
 
 ### Fixed

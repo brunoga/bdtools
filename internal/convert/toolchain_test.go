@@ -250,7 +250,7 @@ func TestMediaFoundationEncoder(t *testing.T) {
 	if got := ParseEncoder("mf"); got != EncoderMediaFoundation {
 		t.Errorf(`ParseEncoder("mf") = %q`, got)
 	}
-	if enc := Encoders("windows"); len(enc) != 3 || enc[0] != EncoderNVENC || enc[1] != EncoderMediaFoundation {
+	if enc := Encoders("windows"); len(enc) != 5 || enc[0] != EncoderNVENC || enc[1] != EncoderMediaFoundation {
 		t.Errorf("windows encoders %v: NVENC, then Media Foundation, then software", enc)
 	}
 	o := DefaultOptions()

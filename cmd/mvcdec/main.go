@@ -3,6 +3,7 @@
 // Inputs:
 //
 //	mvcdec [flags] movie.m2ts           Blu-ray transport stream (PIDs 0x1011/0x1012)
+//	mvcdec [flags] movie.mkv            Matroska, the dependent view in a mvcC BlockAddition or a second track
 //	mvcdec [flags] stream.264           Annex B stream (MVC views interleaved)
 //	mvcdec [flags] base.264 dep.mvc     separate base and dependent view streams
 //
@@ -13,14 +14,18 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	pversion "github.com/brunoga/bdtools/internal/version"
 
+	"github.com/brunoga/bdtools/internal/convert"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -66,7 +71,7 @@ func main() {
 	showVer := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "mvcdec %s — H.264/MVC stereo decoder\n\n", pversion.Resolve(version))
-		fmt.Fprintf(os.Stderr, "usage: mvcdec [flags] input.{m2ts,264} [dependent.mvc]\n")
+		fmt.Fprintf(os.Stderr, "usage: mvcdec [flags] input.{m2ts,264,mkv} [dependent.mvc]\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -128,10 +133,21 @@ func main() {
 	}
 
 	dec := mvc.NewDecoder(mvc.Options{BaseOnly: *baseOnly, Threads: *threads})
-	src := mvc.Source{Format: mvc.FormatByName(flag.Arg(0)), R: open(flag.Arg(0))}
-	if flag.NArg() == 2 {
-		src.Format = mvc.FormatSplit
-		src.Dependent = open(flag.Arg(1))
+	var src mvc.Source
+	if strings.EqualFold(filepath.Ext(flag.Arg(0)), ".mkv") {
+		// a Matroska file: both views from its blocks
+		next, stop, err := convert.OpenMVCMatroska(context.Background(), flag.Arg(0))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer func() { _ = stop() }()
+		src = mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}
+	} else {
+		src = mvc.Source{Format: mvc.FormatByName(flag.Arg(0)), R: open(flag.Arg(0))}
+		if flag.NArg() == 2 {
+			src.Format = mvc.FormatSplit
+			src.Dependent = open(flag.Arg(1))
+		}
 	}
 	start := time.Now()
 	st, err := dec.DecodeStream(src, opts, func(sf *mvc.StereoFrame) error {

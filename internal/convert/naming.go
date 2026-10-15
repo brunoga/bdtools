@@ -22,6 +22,8 @@ func DetailTags(o Options, audio []Track, height int, picture []string) string {
 	case o.TwoD:
 	case o.Layout == LayoutHalfSBS:
 		tags = append(tags, "3D HSBS")
+	case o.Layout == LayoutMVC:
+		tags = append(tags, "3D MVC")
 	default:
 		tags = append(tags, "3D FSBS")
 	}
@@ -55,7 +57,7 @@ func DetailTags(o Options, audio []Track, height int, picture []string) string {
 		tags = append(tags, fmt.Sprintf("QP%d", o.CRF))
 	}
 	tags = append(tags, map[Encoder]string{EncoderNVENC: "NVENC", EncoderVAAPI: "VAAPI",
-		EncoderVideoToolbox: "VideoToolbox", EncoderMediaFoundation: "MF",
+		EncoderVideoToolbox: "VideoToolbox", EncoderMediaFoundation: "MF", EncoderBuiltin: "bdtools", EncoderCopy: "copy",
 		EncoderSoftware: map[Codec]string{CodecH264: "x264", CodecH265: "x265", CodecAV1: "SVT-AV1"}[o.Codec]}[o.Encoder])
 	return joinTags(tags, audio)
 }
