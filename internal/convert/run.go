@@ -106,6 +106,10 @@ type Runner struct {
 	// at offset sequence burnSeq.
 	burn    *pgsBurner
 	burnSeq int
+	// framedIn is how a 2D-coded source's frame holds both eyes (a framed
+	// layout), framedSwap that the right eye comes first.
+	framedIn   Layout
+	framedSwap bool
 
 	// Version is bdtools' version, which the files written say made them.
 	Version string
@@ -189,6 +193,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if err != nil {
 		return err
 	}
+	askedTwoD := r.Opts.TwoD
 	r.flat = r.Opts.TwoD || !threeD(tracks)
 	r.Opts.TwoD = r.flat
 	selectTracks := SelectTracks
@@ -203,6 +208,12 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return err
 	}
 	r.Selected = sel
+	if !threeD(tracks) && !r.Opts.Remux {
+		r.resolveFramed(sel.Base)
+		if r.framedIn != "" && !askedTwoD {
+			r.flat, r.Opts.TwoD = false, false
+		}
+	}
 	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
 		return r.remuxBuiltin(ctx, src, sel)
 	}
@@ -210,11 +221,15 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
 			"remux to .m2ts, or add --2d for its base view alone")
 	}
-	if r.flat {
+	switch {
+	case r.framedIn != "" && !r.flat:
+		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle",
+			r.framedIn, sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+	case r.flat:
 		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle",
 			sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 		r.check2D()
-	} else {
+	default:
 		r.Report.Report("source: base view track %d, dependent view track %d, %d audio, %d subtitle",
 			sel.Base.ID, sel.Dependent.ID, len(sel.Audio), len(sel.Subtitles))
 	}
@@ -245,6 +260,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {
 		return err
+	}
+	if r.framedIn != "" {
+		pics = r.framedSource(pics)
 	}
 	video, decErr := r.decodeAndEncode(ctx, pics, g.KeepFrame)
 	extras, finErr := g.finish()
@@ -280,7 +298,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
 	}
-	if !r.flat {
+	if !r.flat && r.framedIn == "" {
 		return cpu(), nil
 	}
 	codec, ok := map[string]gpu.VideoCodec{"V_MPEG4/ISO/AVC": gpu.DecodeH264, "V_MPEGH/ISO/HEVC": gpu.DecodeHEVC,

@@ -82,6 +82,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		} else {
 			r.Report.Report("decoding and encoding (MVC: the left eye with %s, the right eye here)", r.Opts.Encoder)
 		}
+	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecH264:
+		sink = &gpuSink{r: r, open: openBuiltinAVC}
+		verb = "encoded"
+		r.Report.Report("decoding and encoding (h264, the encoder here, in process)")
 	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecH265:
 		sink = &gpuSink{r: r, open: openBuiltinHEVC}
 		verb = "encoded"
@@ -350,7 +354,7 @@ func (s *gpuSink) put(p picture) error {
 	if s.r.flat {
 		return s.enc.Encode(func(dst *gpu.Picture) { drawFlat(dst, p) })
 	}
-	return s.enc.Encode(func(dst *gpu.Picture) { drawSBS(dst, p.stereo, s.r.Opts.SwapLR, s.r.Opts.Layout == LayoutHalfSBS) })
+	return s.enc.Encode(func(dst *gpu.Picture) { drawFramed(dst, p.stereo, s.r.Opts.SwapLR, s.r.Opts.Layout) })
 }
 
 func (s *gpuSink) finish() error {
@@ -416,7 +420,11 @@ func (s *programSink) start(path string, first picture, num, den int) error {
 		return nil
 	}
 	s.flat = nil
-	s.y4m = mvc.NewY4MWriter(stdin, mvc.LayoutSideBySide)
+	layout := mvc.LayoutSideBySide
+	if s.r.Opts.Layout.overUnder() {
+		layout = mvc.LayoutTopBottom
+	}
+	s.y4m = mvc.NewY4MWriter(stdin, layout)
 	s.y4m.SwapViews = s.r.Opts.SwapLR
 	s.y4m.Depth = s.r.Opts.BitDepth
 	s.y4m.FPSNum, s.y4m.FPSDen = num, den
@@ -477,6 +485,9 @@ func (s *programSink) abort() error {
 // the file states, so that output states BT.709 for an HD source that says
 // nothing.
 func (r *Runner) noteDiscColour(sf picture) {
+	if r.colour != nil {
+		return // a framed source's, from its decoder
+	}
 	p, t, m, full := sf.stereo.ColorInfo()
 	c := gpu.ColorInfo{Primaries: p, Transfer: t, Matrix: m, FullRange: full}
 	switch {

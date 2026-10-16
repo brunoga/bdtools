@@ -22,6 +22,12 @@ const (
 	// 1920x1080 total, so 960x1080 per eye. Half the horizontal detail, and
 	// roughly half the bitrate.
 	LayoutHalfSBS Layout = "half"
+	// LayoutFullOU stacks both eyes at source size, the left on top:
+	// 1920x2160 from a 1080p disc.
+	LayoutFullOU Layout = "ou"
+	// LayoutHalfOU squeezes both eyes, the left on top, into one
+	// source-height frame: 1920x540 per eye.
+	LayoutHalfOU Layout = "half-ou"
 	// LayoutMVC keeps the two eyes as Blu-ray 3D does: MVC, an H.264 left
 	// eye any player shows in 2D and a right eye coded as a second view of
 	// it, which 3D players decode with it and show frame packed. 1920x1080
@@ -33,6 +39,19 @@ const (
 	// iPhones and the Meta Quest. NVENC codes it.
 	LayoutMVHEVC Layout = "mvhevc"
 )
+
+// framed reports whether the layout puts both eyes in one frame: side by
+// side or over-under, full or half.
+func (l Layout) framed() bool {
+	return l == LayoutFullSBS || l == LayoutHalfSBS || l == LayoutFullOU || l == LayoutHalfOU
+}
+
+// halved reports whether a framed layout squeezes each eye to half its
+// width (side by side) or height (over-under).
+func (l Layout) halved() bool { return l == LayoutHalfSBS || l == LayoutHalfOU }
+
+// overUnder reports whether the eyes are stacked, the left on top.
+func (l Layout) overUnder() bool { return l == LayoutFullOU || l == LayoutHalfOU }
 
 // Options configure a conversion.
 type Options struct {
@@ -111,6 +130,13 @@ type Options struct {
 	// (--layout mvhevc, whose file carries no subtitle track), in each eye
 	// at the depth the disc gives it.
 	BurnSubs int
+	// InputLayout is how a 2D-coded source's frame holds two eyes: side
+	// by side or over-under, full or half (LayoutFullSBS, LayoutHalfSBS,
+	// LayoutFullOU, LayoutHalfOU); "" when it holds one picture, InputAuto
+	// to go by what a Matroska source says.
+	InputLayout Layout
+	// InputSwap says the framed source's right eye comes first.
+	InputSwap bool
 	// BitDepth is the output's: 8 (or 0), or 10 for HEVC (Main 10) and AV1.
 	// The source is 8-bit either way; at 10 the encoder predicts and
 	// quantises at finer precision, which shows as less banding in smooth
@@ -269,6 +295,7 @@ func DefaultOptions() Options {
 		VAAPIDevice:     "/dev/dri/renderD128",
 		SpatialFOV:      90,
 		SpatialBaseline: 63,
+		InputLayout:     InputAuto,
 	}
 }
 
@@ -298,9 +325,9 @@ func (o Options) Validate(goos string) error {
 		}
 		// Everything below describes the decode-and-encode path, which a
 		// remux does not take. Saying so beats silently ignoring settings.
-		if o.Layout == LayoutHalfSBS {
+		if o.Layout.halved() || o.Layout.overUnder() {
 			return fmt.Errorf("--remux cannot change the layout: it copies the disc's " +
-				"MVC video without re-encoding, and half-SBS needs a rescale")
+				"MVC video without re-encoding")
 		}
 		if o.SwapLR {
 			return fmt.Errorf("--remux cannot swap the eyes: it copies the disc's " +
@@ -322,7 +349,7 @@ func (o Options) Validate(goos string) error {
 		return fmt.Errorf("output must be a .mkv (got %q)", ext)
 	}
 	switch o.Layout {
-	case LayoutFullSBS, LayoutHalfSBS:
+	case LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU:
 	case LayoutMVHEVC:
 		if o.TwoD {
 			break
@@ -363,7 +390,7 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: with --layout mvc the player places them in 3D itself")
 		}
 	default:
-		return fmt.Errorf("unknown layout %q (want %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutMVC, LayoutMVHEVC)
+		return fmt.Errorf("unknown layout %q (want %q, %q, %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU, LayoutMVC, LayoutMVHEVC)
 	}
 	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) {
 		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture (--layout mvhevc): the other outputs carry subtitle tracks")
@@ -373,8 +400,10 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.Encoder == EncoderBuiltin && (o.Layout != LayoutMVC || o.TwoD) {
 		switch {
-		case o.Codec != CodecH265:
-			return fmt.Errorf("--encoder builtin codes MVC (--layout mvc) and H.265 (--codec h265)")
+		case o.Codec == CodecAV1:
+			return fmt.Errorf("--encoder builtin codes H.264 and H.265: AV1 needs SVT-AV1 (--encoder software) or a GPU")
+		case o.Codec == CodecH264 && o.BitDepth == 10:
+			return fmt.Errorf("--encoder builtin codes H.264 in 8 bits: use --bit-depth 8, or --codec h265 for 10")
 		case o.DVFEL.layered():
 			return fmt.Errorf("--dv-fel %s needs NVENC or x265 (--encoder software)", o.DVFEL)
 		}
@@ -444,7 +473,7 @@ func (o Options) tenBit() bool { return o.BitDepth == 10 }
 // the standalone binary — the same encoder library, reached by a route that
 // can filter — rather than being refused, which is what used to happen.
 func (o Options) NeedsFilters() bool {
-	return o.Layout == LayoutHalfSBS && !o.TwoD
+	return o.Layout.halved() && !o.TwoD
 }
 
 // EncodesViaFFmpeg reports whether ffmpeg runs the encode: always for a
@@ -493,13 +522,21 @@ func encoderList(encs []Encoder) string {
 // halfFilter squeezes a stacked pair back to source width, which is half-SBS.
 const halfFilter = "scale=iw/2:ih"
 
+// halfOUFilter squeezes a stacked pair back to source height, which is
+// half over-under.
+const halfOUFilter = "scale=iw:ih/2"
+
 // videoFilters is the chain the encoder applies to the stacked frames, in the
 // order they must happen: squeeze, then anything the encoder itself needs
 // (VAAPI's upload). Empty when there is nothing to do.
 func videoFilters(opts Options, encoderChain string) string {
 	var parts []string
-	if opts.Layout == LayoutHalfSBS && !opts.TwoD {
+	switch {
+	case opts.TwoD:
+	case opts.Layout == LayoutHalfSBS:
 		parts = append(parts, halfFilter)
+	case opts.Layout == LayoutHalfOU:
+		parts = append(parts, halfOUFilter)
 	}
 	if c := opts.Color; c != nil {
 		// The frames carry the colour, which this ffmpeg's encoders take
@@ -544,8 +581,13 @@ func BuildPlan(goos string, opts Options) (*Plan, error) {
 // nativeEncodeStep is the encode with the GPU driven in process.
 func nativeEncodeStep(opts Options, out string) Step {
 	argv := []string{string(opts.Encoder), string(opts.Codec), "qp", strconv.Itoa(opts.CRF)}
-	if opts.Layout == LayoutHalfSBS {
+	switch opts.Layout {
+	case LayoutHalfSBS:
 		argv = append(argv, "half-SBS")
+	case LayoutFullOU:
+		argv = append(argv, "over-under")
+	case LayoutHalfOU:
+		argv = append(argv, "half over-under")
 	}
 	return Step{Name: "encode", Builtin: true, Argv: append(argv, "->", out)}
 }
@@ -600,6 +642,8 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 		}
 		enc = Step{Name: "encode", Builtin: true, Argv: []string{"builtin h265, " + depth + ", qp",
 			strconv.Itoa(builtinQP(opts.CRF)), "->", videoOut}}
+	case opts.Encoder == EncoderBuiltin && opts.Codec == CodecH264:
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{"builtin h264, 8-bit, qp", strconv.Itoa(opts.CRF), "->", videoOut}}
 	case opts.NativeGPU:
 		enc = nativeEncodeStep(opts, videoOut)
 	}

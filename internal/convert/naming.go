@@ -22,6 +22,10 @@ func DetailTags(o Options, audio []Track, height int, picture []string) string {
 	case o.TwoD:
 	case o.Layout == LayoutHalfSBS:
 		tags = append(tags, "3D HSBS")
+	case o.Layout == LayoutFullOU:
+		tags = append(tags, "3D FOU")
+	case o.Layout == LayoutHalfOU:
+		tags = append(tags, "3D HOU")
 	case o.Layout == LayoutMVC:
 		tags = append(tags, "3D MVC")
 	case o.Layout == LayoutMVHEVC:

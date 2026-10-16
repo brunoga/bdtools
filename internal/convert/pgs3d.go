@@ -45,9 +45,11 @@ type pgs3D struct {
 	src    mkv.Source
 	track  mkv.Track
 	half   bool
+	ou     bool                    // over-under: the eyes stacked, the left on top
 	offset func(time.Duration) int // pixels at the source's width, positive toward the viewer
 
 	width    int                // the source plane's width, from its compositions
+	height   int                // and its height
 	windows  map[byte]pgsWindow // as the source defines them
 	palettes map[byte]*[256]byte
 	palette  byte              // the composition's palette
@@ -56,14 +58,15 @@ type pgs3D struct {
 
 type pgsWindow struct{ x, y, w, h int }
 
-func newPGS3D(src mkv.Source, half bool, offset func(time.Duration) int) *pgs3D {
+func newPGS3D(src mkv.Source, layout Layout, offset func(time.Duration) int) *pgs3D {
+	half, ou := layout.halved(), layout.overUnder()
 	t := src.Track()
 	if t.Name == "" {
 		t.Name = "3D"
 	} else {
 		t.Name += " (3D)"
 	}
-	return &pgs3D{src: src, track: t, half: half, offset: offset, width: 1920,
+	return &pgs3D{src: src, track: t, half: half, ou: ou, offset: offset, width: 1920, height: 1080,
 		windows: map[byte]pgsWindow{}, palettes: map[byte]*[256]byte{}, objects: map[uint16][]byte{}}
 }
 
@@ -122,6 +125,7 @@ func (p *pgs3D) rewrite(ds []byte, offset int) ([]byte, error) {
 				return nil, errors.New("a short composition")
 			}
 			p.width = int(binary.BigEndian.Uint16(s))
+			p.height = int(binary.BigEndian.Uint16(s[2:]))
 			p.palette = s[9]
 		case segWDS:
 			if len(s) < 1 || len(s) < 1+9*int(s[0]) {
@@ -135,6 +139,9 @@ func (p *pgs3D) rewrite(ds []byte, offset int) ([]byte, error) {
 		case segPDS:
 			p.readPalette(s)
 		}
+	}
+	if p.ou {
+		return p.rewriteOU(types, payloads, offset)
 	}
 	eye, scale := p.width, 1
 	if p.half {
@@ -178,6 +185,119 @@ func (p *pgs3D) rewrite(ds []byte, offset int) ([]byte, error) {
 		}
 	}
 	return out, nil
+}
+
+// rewriteOU is rewrite for over-under: each eye's copy below the other's,
+// apart by the offset across, the plane twice as high (or squeezed to its
+// height, every object to half its height, for half over-under).
+func (p *pgs3D) rewriteOU(types []byte, payloads [][]byte, offset int) ([]byte, error) {
+	eyeH, scale := p.height, 1
+	if p.half {
+		eyeH, scale = p.height/2, 2
+	}
+	shifts := func(id byte) (left, right int) {
+		w, ok := p.windows[id]
+		if !ok {
+			return offset, -offset
+		}
+		clamp := func(s int) int { return min(max(s, -w.x), p.width-(w.x+w.w)) }
+		return clamp(offset), clamp(-offset)
+	}
+	var out []byte
+	for i, t := range types {
+		s := payloads[i]
+		switch t {
+		case segPCS:
+			out = appendSegment(out, segPCS, p.compositionOU(s, eyeH, scale, shifts))
+		case segWDS:
+			out = appendSegment(out, segWDS, p.windowsOU(s, eyeH, scale, shifts))
+		case segODS:
+			if !p.half {
+				out = appendSegment(out, t, s)
+				continue
+			}
+			squeezed, err := p.squeezeObject(s)
+			if err != nil {
+				return nil, err
+			}
+			for _, seg := range squeezed {
+				out = appendSegment(out, segODS, seg)
+			}
+		default:
+			out = appendSegment(out, t, s)
+		}
+	}
+	return out, nil
+}
+
+// compositionOU is composition for over-under.
+func (p *pgs3D) compositionOU(s []byte, eyeH, scale int, shifts func(byte) (int, int)) []byte {
+	out := append([]byte(nil), s[:11]...)
+	binary.BigEndian.PutUint16(out[2:], uint16(2*eyeH)) //nolint:gosec // a frame height
+	n := int(s[10])
+	var objs [][]byte
+	for o := s[11:]; len(objs) < n && len(o) >= 8; {
+		size := 8
+		if o[3]&0x80 != 0 {
+			size = 16
+		}
+		if len(o) < size {
+			break
+		}
+		objs = append(objs, o[:size])
+		o = o[size:]
+	}
+	out[10] = byte(2 * len(objs)) //nolint:gosec // at most 2 x 255
+	for side := range 2 {
+		for _, o := range objs {
+			c := append([]byte(nil), o...)
+			left, right := shifts(o[2])
+			x := int(binary.BigEndian.Uint16(o[4:]))
+			y := int(binary.BigEndian.Uint16(o[6:])) / scale
+			if side == 0 {
+				x += left
+			} else {
+				x += right
+				y += eyeH
+				c[2] += rightWindow
+			}
+			binary.BigEndian.PutUint16(c[4:], uint16(max(x, 0))) //nolint:gosec // inside the frame
+			binary.BigEndian.PutUint16(c[6:], uint16(y))         //nolint:gosec // inside the frame
+			if scale > 1 && len(c) == 16 {
+				binary.BigEndian.PutUint16(c[10:], binary.BigEndian.Uint16(c[10:])/2)
+				binary.BigEndian.PutUint16(c[14:], (binary.BigEndian.Uint16(c[14:])+1)/2)
+			}
+			out = append(out, c...)
+		}
+	}
+	return out
+}
+
+// windowsOU is windowDefinition for over-under.
+func (p *pgs3D) windowsOU(s []byte, eyeH, scale int, shifts func(byte) (int, int)) []byte {
+	n := int(s[0])
+	out := []byte{byte(2 * n)} //nolint:gosec // at most 2 x 255
+	for side := range 2 {
+		for k := range n {
+			w := s[1+9*k : 1+9*(k+1)]
+			c := append([]byte(nil), w...)
+			left, right := shifts(w[0])
+			x := int(binary.BigEndian.Uint16(w[1:]))
+			y := int(binary.BigEndian.Uint16(w[3:])) / scale
+			if side == 0 {
+				x += left
+			} else {
+				x += right
+				y += eyeH
+				c[0] += rightWindow
+			}
+			binary.BigEndian.PutUint16(c[1:], uint16(max(x, 0)))                                           //nolint:gosec // inside the frame
+			binary.BigEndian.PutUint16(c[3:], uint16(y))                                                   //nolint:gosec // inside the frame
+			binary.BigEndian.PutUint16(c[7:], uint16((int(binary.BigEndian.Uint16(w[7:]))+scale-1)/scale)) //nolint:gosec // a height
+			out = append(out, c...)
+		}
+	}
+	return out
 }
 
 // composition rewrites a presentation composition segment.
@@ -297,6 +417,23 @@ func (p *pgs3D) squeezeObject(s []byte) ([][]byte, error) {
 	alpha := p.palettes[p.palette]
 	if alpha == nil {
 		alpha = new([256]byte)
+	}
+	if p.ou {
+		// Half the rows: each pair the more opaque pixel of the two.
+		nh := (h + 1) / 2
+		half := make([]byte, w*nh)
+		for y := range nh {
+			for x := range w {
+				a := pix[2*y*w+x]
+				if 2*y+1 < h {
+					if b := pix[(2*y+1)*w+x]; alpha[b] > alpha[a] {
+						a = b
+					}
+				}
+				half[y*w+x] = a
+			}
+		}
+		return objectSegments(obj[:3], w, nh, encodeRLE(half, w, nh)), nil
 	}
 	nw := (w + 1) / 2
 	half := make([]byte, nw*h)
@@ -433,5 +570,5 @@ func (r *Runner) subtitles3D(src mkv.Source, t Track) mkv.Source {
 	default:
 		r.Report.Report("3D subtitles: track %d follows offset sequence %d", t.ID, seq)
 	}
-	return newPGS3D(src, r.Opts.Layout == LayoutHalfSBS, func(at time.Duration) int { return r.depth.offset(seq, at) })
+	return newPGS3D(src, r.Opts.Layout, func(at time.Duration) int { return r.depth.offset(seq, at) })
 }
