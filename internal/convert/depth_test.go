@@ -115,7 +115,8 @@ func TestBitDepthAutoSelection(t *testing.T) {
 		asked = append(asked, depth)
 		return e == EncoderMediaFoundation
 	}
-	if got := DefaultEncoder(t.Context(), "windows", CodecH265, 10, ""); got != EncoderSoftware {
+	// No x265 either: the encoder here.
+	if got := DefaultEncoder(t.Context(), "windows", CodecH265, 10, ""); got != EncoderBuiltin {
 		t.Errorf("10-bit on Windows chose %s", got)
 	}
 	if got := DefaultEncoder(t.Context(), "windows", CodecH265, 8, ""); got != EncoderMediaFoundation {

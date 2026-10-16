@@ -4,19 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
 )
 
-// mvhevcSink writes a 3D picture as MV-HEVC on NVENC: the left eye as the
-// base layer, the right as a second layer predicted from it, in one
-// Annex B stream the MP4 muxer takes apart.
+// mvhevcSink writes a 3D picture as MV-HEVC, on NVENC or the encoder in
+// this program (--encoder builtin): the left eye as the base layer, the
+// right as a second layer predicted from it, in one Annex B stream the
+// MP4 muxer takes apart.
 type mvhevcSink struct {
 	r    *Runner
 	path string
 	f    *os.File
 	enc  gpu.StereoEncoder
+	// frame is a picture's duration, w and h one eye's size (for the
+	// subtitles burned in).
+	frame time.Duration
+	w, h  int
 }
 
 func (s *mvhevcSink) start(path string, first picture, num, den int) error {
@@ -31,20 +37,29 @@ func (s *mvhevcSink) start(path string, first picture, num, den int) error {
 	w, h, _ := first.size() // one eye's picture: the views are layers, not halves
 	cfg := gpu.Config{Codec: gpu.HEVC, Width: w, Height: h, FPSNum: num, FPSDen: den,
 		QP: o.CRF, CQ: o.nvencCQ(), BitDepth: o.BitDepth, Color: o.Color, Views: 2}
-	enc, err := gpu.Open(gpu.NVENC, cfg, f)
+	var enc gpu.Encoder
+	name := "NVENC"
+	if o.Encoder == EncoderBuiltin {
+		name = "built-in"
+		enc, err = openBuiltinHEVC(cfg, f)
+	} else {
+		enc, err = gpu.Open(gpu.NVENC, cfg, f)
+	}
 	if err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
-		return fmt.Errorf("opening the NVENC MV-HEVC encoder: %w", err)
+		return fmt.Errorf("opening the %s MV-HEVC encoder: %w", name, err)
 	}
 	se, ok := enc.(gpu.StereoEncoder)
 	if !ok {
 		_ = enc.Close()
 		_ = f.Close()
 		_ = os.Remove(path)
-		return errors.New("the NVENC encoder does not take two views")
+		return fmt.Errorf("the %s encoder does not take two views", name)
 	}
 	s.path, s.f, s.enc = path, f, se
+	s.w, s.h = w, h
+	s.frame = time.Duration(int64(time.Second) * int64(den) / int64(max(num, 1)))
 	return nil
 }
 
@@ -62,6 +77,10 @@ func (s *mvhevcSink) put(p picture) error {
 	return s.enc.EncodeStereo(func(l, r *gpu.Picture) {
 		drawFlat(l, lp)
 		drawFlat(r, rp)
+		if b := s.r.burn; b != nil && s.r.timeline != nil {
+			t := s.r.timeline(p.pts)
+			b.draw(l, r, s.w, s.h, t, s.r.depth.offsetNow(s.r.burnSeq, t, s.frame))
+		}
 	})
 }
 

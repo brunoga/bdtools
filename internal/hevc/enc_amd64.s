@@ -370,50 +370,6 @@ next:
 	VZEROUPPER
 	RET
 
-// func quantAVX2(c *int32, n int, scale, add, qbits int) int
-// Quantises the n (a multiple of 8) coefficients at c in place:
-// sign(c) * min((|c| * scale + add) >> qbits, 32767), returning how many
-// are not zero. The products stay below 2^31 for the transforms'
-// coefficients (at most 16 bits and a little) and the scales (at most
-// 26214).
-TEXT ·quantAVX2(SB), NOSPLIT, $0-48
-	MOVQ c+0(FP), DI
-	MOVQ n+8(FP), CX
-	MOVQ scale+16(FP), AX
-	MOVQ add+24(FP), BX
-	MOVQ qbits+32(FP), DX
-	VMOVD AX, X10
-	VPBROADCASTD X10, Y10
-	VMOVD BX, X11
-	VPBROADCASTD X11, Y11
-	VMOVQ DX, X12
-	MOVL $32767, AX
-	VMOVD AX, X13
-	VPBROADCASTD X13, Y13
-	VPXOR Y14, Y14, Y14
-	XORQ R8, R8               // the zero levels
-	MOVQ CX, R9
-qloop:
-	VMOVDQU (DI), Y0
-	VPABSD Y0, Y1
-	VPMULLD Y10, Y1, Y1
-	VPADDD Y11, Y1, Y1
-	VPSRLD X12, Y1, Y1
-	VPMINSD Y13, Y1, Y1
-	VPSIGND Y0, Y1, Y1
-	VMOVDQU Y1, (DI)
-	VPCMPEQD Y14, Y1, Y2
-	VMOVMSKPS Y2, AX
-	POPCNTL AX, AX
-	ADDQ AX, R8
-	ADDQ $32, DI
-	SUBQ $8, CX
-	JNZ qloop
-	SUBQ R8, R9
-	MOVQ R9, ret+40(FP)
-	VZEROUPPER
-	RET
-
 // func fdct8ColsAVX2(dst unsafe.Pointer, src *int16, pairs *int32, rnd, shift, wide int)
 // fdctColsAVX2 for an 8x8 matrix, in 128-bit registers: the four row
 // pairs interleaved in X4-X11 (low and high halves of the columns).
@@ -565,5 +521,106 @@ anext:
 	ADDQ R10, DX
 	DECQ R11
 	JNZ arow
+	VZEROUPPER
+	RET
+
+// One edge category's statistics: where s (Y9) equals C, count (in the
+// words of N) and add up d (Y10, into the dwords of S). Uses Y8.
+#define SAOCAT(C, S, N) \
+	VPCMPEQW C, Y9, Y8 \
+	VPSUBW Y8, N, N \
+	VPAND Y10, Y8, Y8 \
+	VPMADDWD Y15, Y8, Y8 \
+	VPADDD Y8, S, S
+
+// The sum of the dwords of R, into AX. Uses X8.
+#define HSUMD(R, X) \
+	VEXTRACTI128 $1, R, X8 \
+	VPADDD X8, X, X \
+	VPHADDD X, X, X \
+	VPHADDD X, X, X \
+	VMOVD X, AX
+
+// func saoEOAVX2(rec *uint16, rs int, src *uint16, ss int, w, h, off0, off1 int, out *int32)
+// The edge offset statistics of a w x h block (w a multiple of 16) for
+// one class, whose two neighbours are at off0 and off1 samples: for the
+// categories s = sign(v-a)+sign(v-b) = -2, -1, 1, 2, the sums of
+// src - rec in out[0..3] and the counts in out[4..7].
+TEXT ·saoEOAVX2(SB), NOSPLIT, $0-72
+	MOVQ rec+0(FP), SI
+	MOVQ rs+8(FP), R8
+	MOVQ src+16(FP), DI
+	MOVQ ss+24(FP), R9
+	MOVQ w+32(FP), CX
+	MOVQ h+40(FP), DX
+	MOVQ off0+48(FP), R12
+	MOVQ off1+56(FP), R13
+	SHLQ $1, R8
+	SHLQ $1, R9
+	SHLQ $1, R12
+	SHLQ $1, R13
+	VPCMPEQW Y15, Y15, Y15
+	VPSRLW $15, Y15, Y15          // 1
+	VPSLLW $1, Y15, Y11           // 2
+	VPXOR Y14, Y14, Y14
+	VPSUBW Y11, Y14, Y14          // -2
+	VPXOR Y13, Y13, Y13
+	VPSUBW Y15, Y13, Y13          // -1
+	VMOVDQA Y15, Y12              // 1
+	VPXOR Y0, Y0, Y0
+	VPXOR Y1, Y1, Y1
+	VPXOR Y2, Y2, Y2
+	VPXOR Y3, Y3, Y3
+	VPXOR Y4, Y4, Y4
+	VPXOR Y5, Y5, Y5
+	VPXOR Y6, Y6, Y6
+	VPXOR Y7, Y7, Y7
+eorow:
+	XORQ AX, AX
+	MOVQ CX, BX
+eocol:
+	LEAQ (SI)(AX*1), R10
+	VMOVDQU (R10), Y8
+	VMOVDQU (R10)(R12*1), Y9
+	VPSUBW Y9, Y8, Y9
+	VPSIGNW Y9, Y15, Y9
+	VMOVDQU (R10)(R13*1), Y10
+	VPSUBW Y10, Y8, Y10
+	VPSIGNW Y10, Y15, Y10
+	VPADDW Y10, Y9, Y9
+	VMOVDQU (DI)(AX*1), Y10
+	VPSUBW Y8, Y10, Y10
+	SAOCAT(Y14, Y0, Y4)
+	SAOCAT(Y13, Y1, Y5)
+	SAOCAT(Y12, Y2, Y6)
+	SAOCAT(Y11, Y3, Y7)
+	ADDQ $32, AX
+	SUBQ $16, BX
+	JNZ eocol
+	ADDQ R8, SI
+	ADDQ R9, DI
+	DECQ DX
+	JNZ eorow
+	MOVQ out+64(FP), DI
+	HSUMD(Y0, X0)
+	MOVL AX, 0(DI)
+	HSUMD(Y1, X1)
+	MOVL AX, 4(DI)
+	HSUMD(Y2, X2)
+	MOVL AX, 8(DI)
+	HSUMD(Y3, X3)
+	MOVL AX, 12(DI)
+	VPMADDWD Y15, Y4, Y4
+	HSUMD(Y4, X4)
+	MOVL AX, 16(DI)
+	VPMADDWD Y15, Y5, Y5
+	HSUMD(Y5, X5)
+	MOVL AX, 20(DI)
+	VPMADDWD Y15, Y6, Y6
+	HSUMD(Y6, X6)
+	MOVL AX, 24(DI)
+	VPMADDWD Y15, Y7, Y7
+	HSUMD(Y7, X7)
+	MOVL AX, 28(DI)
 	VZEROUPPER
 	RET

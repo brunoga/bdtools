@@ -1,5 +1,7 @@
 package hevc
 
+import "math"
+
 // The encoder's forward transforms and quantisation. Neither is normative:
 // these follow the reference software, whose transforms are the matrices
 // of 8.6.4.2 applied with its rounding, and whose quantiser rounds with a
@@ -166,57 +168,94 @@ var quantScales = [6]int32{26214, 23302, 20560, 18396, 16384, 14564}
 type quantizer struct {
 	scale int64
 	qBits uint
-	add   int64
 }
 
 // newQuantizer sets up quantisation at qp (with the bit depth offset
-// already added) for a transform of log2Size at depth; intra rounds
-// closer to the next level than inter.
-func newQuantizer(qp, log2Size, depth int, intra bool) quantizer {
+// already added) for a transform of log2Size at depth.
+func newQuantizer(qp, log2Size, depth int) quantizer {
 	transformShift := 15 - depth - log2Size
-	qBits := uint(14 + qp/6 + transformShift)
-	offset := int64(85)
-	if intra {
-		offset = 171
-	}
-	return quantizer{scale: int64(quantScales[qp%6]), qBits: qBits, add: offset << (qBits - 9)}
+	return quantizer{scale: int64(quantScales[qp%6]), qBits: uint(14 + qp/6 + transformShift)}
 }
 
-// level quantises one coefficient.
-func (q *quantizer) level(c int32) int32 {
-	a := int64(c)
-	neg := a < 0
-	if neg {
-		a = -a
-	}
-	l := (a*q.scale + q.add) >> q.qBits
-	l = min(l, 32767)
-	if neg {
-		return int32(-l)
-	}
-	return int32(l)
-}
-
-// quantize quantises c (n*n coefficients) in place, returning the number
-// of non-zero levels.
-func (q *quantizer) quantize(c []int32) int {
-	if nz, ok := quantFast(q, c); ok {
-		return nz
-	}
-	return q.quantizeGo(c)
-}
-
-func (q *quantizer) quantizeGo(c []int32) int {
-	nz := 0
-	for i, v := range c {
-		if v == 0 {
+// signHide makes each 4x4 group of levels (n x n, row major, scanned
+// with scanIdx) whose first and last coefficients are more than 3 scan
+// positions apart carry its first coefficient's sign in the parity of
+// its level sum (sign data hiding, 7.4.9.11): where the parity is wrong,
+// one level moves by one, the one whose quantisation error that grows
+// least (the reference software's choice, without the rate terms). orig
+// holds the coefficients before quantisation.
+func signHide(levels, orig []int32, log2, scanIdx int, q *quantizer) {
+	n := 1 << log2
+	sbScan := subBlockScan(log2, scanIdx)
+	posScan := scanOrder[1][scanIdx]
+	one := int64(1) << q.qBits
+	for sb := range sbScan {
+		var idx [16]int
+		first, last := -1, -1
+		sum := int32(0)
+		for k := range 16 {
+			x := int(sbScan[sb][0])<<2 + int(posScan[k][0])
+			y := int(sbScan[sb][1])<<2 + int(posScan[k][1])
+			idx[k] = y*n + x
+			if l := levels[idx[k]]; l != 0 {
+				if first < 0 {
+					first = k
+				}
+				last = k
+				sum += iabs32(l)
+			}
+		}
+		if first < 0 || last-first <= 3 {
 			continue
 		}
-		l := q.level(v)
-		c[i] = l
-		if l != 0 {
-			nz++
+		signNeg := levels[idx[first&15]] < 0
+		if signNeg == (sum&1 == 1) {
+			continue // the parity says the sign already
+		}
+		best, bestCost, change := -1, int64(math.MaxInt64), int32(0)
+		for k := 15; k >= 0; k-- {
+			i := idx[k]
+			l := iabs32(levels[i])
+			// The error of the level as it is: positive when the
+			// coefficient lies above it.
+			e := int64(iabs32(orig[i]))*q.scale - int64(l)<<q.qBits
+			up := one - 2*e
+			down := one + 2*e
+			var cost int64
+			var ch int32
+			switch {
+			case l != 0 && up < down:
+				cost, ch = up, 1
+			case l != 0:
+				if k == first && l == 1 {
+					continue // the first would move: its sign is the one hidden
+				}
+				cost, ch = down, -1
+			default:
+				// A zero becomes one: before the first, only with the
+				// first's sign (it becomes the first).
+				if k < first && (orig[i] < 0) != signNeg {
+					continue
+				}
+				cost, ch = up, 1
+			}
+			if cost < bestCost {
+				best, bestCost, change = i, cost, ch
+			}
+		}
+		if best < 0 {
+			continue
+		}
+		l := levels[best]
+		switch {
+		case l > 0:
+			levels[best] = l + change
+		case l < 0:
+			levels[best] = l - change
+		case orig[best] < 0:
+			levels[best] = -1
+		default:
+			levels[best] = 1
 		}
 	}
-	return nz
 }

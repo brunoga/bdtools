@@ -106,8 +106,8 @@ func subBlockScan(log2Size, scanIdx int) [][2]uint8 {
 
 // writeResidual codes the levels of a transform block (size 1 << log2Size
 // of component ci, row major, at least one non-zero) with scan scanIdx.
-// Sign hiding and transform skip are off in the streams written.
-func writeResidual(bc binCoder, coeffs []int32, log2Size, ci, scanIdx int) {
+// Transform skip is off in the streams written.
+func writeResidual(bc binCoder, coeffs []int32, log2Size, ci, scanIdx int, signHiding bool) {
 	size := 1 << log2Size
 	sbScan := subBlockScan(log2Size, scanIdx)
 	posScan := scanOrder[1][scanIdx]
@@ -264,8 +264,18 @@ func writeResidual(bc binCoder, coeffs []int32, log2Size, ci, scanIdx int) {
 			g2 = iabs32(lv[lastG1Pos]) > 2 //nolint:gosec // an index below 16
 			bc.decision(ctxCoeffAbsLevelGreater2Flag+inc, boolInt(g2))
 		}
-		for n := 15; n >= 0; n-- {
+		// Signs; with sign data hiding, the first's is in the sum's
+		// parity when the group spans more than four positions.
+		firstSig, lastSig := 16, -1
+		for n := range 16 {
 			if lv[n] != 0 {
+				firstSig = min(firstSig, n)
+				lastSig = n
+			}
+		}
+		hidden := signHiding && lastSig-firstSig > 3
+		for n := 15; n >= 0; n-- {
+			if lv[n] != 0 && (!hidden || n != firstSig) {
 				bc.bypass(boolInt(lv[n] < 0))
 			}
 		}

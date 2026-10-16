@@ -44,7 +44,15 @@ type AudioSource struct {
 	wavFrame int // bytes per sample frame
 	wavLeft  int64
 	samples  int64
+	// total counts the samples of the frames given, start the ones before
+	// the last.
+	total, start int64
 }
+
+// SampleStart is how many samples came before the frame Next last gave,
+// counted over the whole file (across any gap): where a decoder of the
+// file, which knows nothing of the gaps, has it.
+func (a *AudioSource) SampleStart() int64 { return a.start }
 
 // SyncPoint says when the byte at Offset of a demuxed audio file is
 // presented, on the output's timeline.
@@ -207,6 +215,8 @@ func (a *AudioSource) emit(data []byte, samples int, start int64) Frame {
 	}
 	a.started = true
 	f := Frame{PTS: a.t, Order: a.t, Keyframe: true, Data: data}
+	a.start = a.total
+	a.total += int64(samples)
 	a.samples += int64(samples)
 	a.t = a.base + time.Duration(a.samples*int64(time.Second)/int64(a.rate))
 	return f

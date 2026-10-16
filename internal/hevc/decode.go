@@ -22,6 +22,9 @@ type Picture struct {
 	FullRange                   bool
 	// Left and Top are the window's offset in the coded picture.
 	Left, Top int
+	// Layer is 0 for the base layer, 1 for MV-HEVC's second view (when
+	// the decoder is told to decode it, SetLayers).
+	Layer int
 }
 
 // mvField is a prediction block's motion, kept per 4x4 block for the
@@ -68,6 +71,14 @@ type picture struct {
 type Decoder struct {
 	spss [16]*sps
 	ppss [64]*pps
+	vps  [16]*vpsInfo
+
+	// The second layer (MV-HEVC's second view), decoded when asked: a
+	// decoder of its own, sharing the parameter sets, predicting from
+	// this one's pictures (base, from it).
+	ext   *Decoder
+	base  *Decoder
+	layer int
 
 	dpb   []*picture
 	pool  []*picture
@@ -118,16 +129,43 @@ func (d *Decoder) SetThreads(n int) {
 	}
 }
 
+// SetLayers sets how many layers are decoded: 1, the base layer (the
+// default; the others are skipped), or 2, MV-HEVC's two views, whose
+// pictures come out with their Layer. Before decoding.
+func (d *Decoder) SetLayers(n int) {
+	if n < 2 || d.accel != nil {
+		d.ext = nil
+		return
+	}
+	e := &Decoder{first: true, base: d, layer: 1}
+	e.SetThreads(d.threads)
+	d.ext = e
+}
+
 // Errors is how many slices could not be decoded.
-func (d *Decoder) Errors() int { return d.errors + int(d.asyncErrors.Load()) }
+func (d *Decoder) Errors() int {
+	n := d.errors + int(d.asyncErrors.Load())
+	if d.ext != nil {
+		n += d.ext.Errors()
+	}
+	return n
+}
 
 // Decode decodes the NAL units of an access unit given at pts, giving out
 // the pictures that are due, in output order.
 func (d *Decoder) Decode(au []byte, pts int64, out func(*Picture) error) error {
 	d.out = out
 	d.pts = pts
+	if d.ext != nil {
+		d.ext.out, d.ext.pts = out, pts
+	}
 	for _, n := range nalUnits(au) {
 		if err := d.nal(&n); err != nil {
+			return err
+		}
+	}
+	if d.ext != nil {
+		if err := d.ext.deliver(false); err != nil {
 			return err
 		}
 	}
@@ -139,6 +177,12 @@ func (d *Decoder) Flush(out func(*Picture) error) error {
 	d.out = out
 	if err := d.finishPicture(); err != nil {
 		return err
+	}
+	if d.ext != nil {
+		// After the base layer's last picture, which it predicts from.
+		if err := d.ext.Flush(out); err != nil {
+			return err
+		}
 	}
 	for {
 		ok, err := d.bump()
@@ -158,34 +202,66 @@ func (d *Decoder) Flush(out func(*Picture) error) error {
 }
 
 func (d *Decoder) nal(n *nalUnit) error {
-	if n.layer != 0 {
-		return nil // other layers (MV-HEVC's second view, SHVC)
-	}
 	r := &bits{b: n.rbsp}
+	if n.typ == nalVPS || n.typ == nalSPS || n.typ == nalPPS {
+		// The parameter sets of every layer share their identifiers.
+		err := d.paramSet(n, r)
+		if d.ext != nil {
+			d.ext.spss, d.ext.ppss, d.ext.vps = d.spss, d.ppss, d.vps
+		}
+		return err
+	}
+	if n.layer != 0 {
+		if n.layer == 1 && d.ext != nil && d.accel == nil {
+			return d.ext.unit(n, r)
+		}
+		return nil // other layers (SHVC, more views)
+	}
+	return d.unit(n, r)
+}
+
+// paramSet reads a parameter set: the VPS for the layers it describes
+// (a bad one only matters to them), the second layer's SPS and PPS when
+// it is decoded.
+func (d *Decoder) paramSet(n *nalUnit, r *bits) error {
+	var err error
 	switch {
 	case n.typ == nalVPS:
+		if d.parseVPS(r) != nil && len(r.b) > 0 {
+			d.vps[r.b[0]>>4] = nil
+		}
+		return nil
+	case n.layer != 0 && d.ext == nil:
 		return nil
 	case n.typ == nalSPS:
-		if err := d.parseSPS(r); err != nil {
-			if _, ok := err.(unsupported); ok {
-				return err
-			}
-			d.errors++
+		err = d.parseSPS(r, n.layer)
+	default:
+		err = d.parsePPS(r)
+	}
+	if err != nil {
+		if _, ok := err.(unsupported); ok {
+			return err
 		}
-		return nil
-	case n.typ == nalPPS:
-		if err := d.parsePPS(r); err != nil {
-			if _, ok := err.(unsupported); ok {
-				return err
-			}
-			d.errors++
-		}
-		return nil
+		d.errors++
+	}
+	return nil
+}
+
+// unit handles a NAL unit of the decoder's layer other than a parameter
+// set.
+func (d *Decoder) unit(n *nalUnit, r *bits) error {
+	switch {
 	case n.typ == nalEOS || n.typ == nalEOB:
 		if err := d.finishPicture(); err != nil {
 			return err
 		}
 		d.first = true
+		if d.ext != nil {
+			if err := d.ext.finishPicture(); err != nil {
+				return err
+			}
+			d.ext.first = true
+		}
 		return nil
 	case n.typ <= nalCRA && (n.typ <= nalRASLR || n.typ >= nalBLAWLP):
 		return d.slice(n, r)
@@ -371,6 +447,16 @@ func (d *Decoder) startPicture(h *sliceHeader, n *nalUnit) error {
 	// The reference picture set (8.3.2).
 	if err := d.applyRPS(h, n, poc); err != nil {
 		return err
+	}
+	// The second layer's: the base layer's picture of the access unit
+	// (F.8.1.3), a long-term reference while this one decodes.
+	d.refs.interLayer = nil
+	if h.interLayer {
+		b := d.base
+		if b == nil || b.cur == nil || b.cur.poc != poc {
+			return errStream
+		}
+		d.refs.interLayer = b.cur
 	}
 	// C.5.2.2: free and output what the new picture needs room for.
 	d.removeUnused()
@@ -618,7 +704,7 @@ func (d *Decoder) emit(pic *picture) error {
 	p := &Picture{
 		Width: s.width - l - r, Height: s.height - t - b, BitDepth: s.bitDepth,
 		StrideY: pic.strideY, StrideC: pic.strideC,
-		PTS: pic.pts, Left: l, Top: t,
+		PTS: pic.pts, Left: l, Top: t, Layer: d.layer,
 		Primaries: s.primaries, Transfer: s.transfer, Matrix: s.matrix, FullRange: s.fullRange,
 	}
 	if s.timeScale > 0 && s.unitsInTick > 0 {
@@ -720,7 +806,11 @@ func (d *Decoder) finishPicture() error {
 // buildRefLists makes a P or B slice's reference picture lists (8.3.4).
 func (d *Decoder) buildRefLists(h *sliceHeader) bool {
 	ps := &d.refs
-	total := len(ps.stCurrBefore) + len(ps.stCurrAfter) + len(ps.ltCurr)
+	var il []*picture
+	if ps.interLayer != nil {
+		il = []*picture{ps.interLayer}
+	}
+	total := len(ps.stCurrBefore) + len(ps.stCurrAfter) + len(ps.ltCurr) + len(il)
 	if total == 0 {
 		return false
 	}
@@ -737,10 +827,18 @@ func (d *Decoder) buildRefLists(h *sliceHeader) bool {
 		if l == 1 {
 			first, second = second, first
 		}
+		// F.8.3.4: the inter-layer reference after the pictures before in
+		// list 0, last in list 1 (RefPicSetInterLayer0).
 		for len(temp) < max(n, total) {
 			for _, p := range first {
 				temp = append(temp, p)
 				tempLT = append(tempLT, false)
+			}
+			if l == 0 {
+				for _, p := range il {
+					temp = append(temp, p)
+					tempLT = append(tempLT, true)
+				}
 			}
 			for _, p := range second {
 				temp = append(temp, p)
@@ -749,6 +847,12 @@ func (d *Decoder) buildRefLists(h *sliceHeader) bool {
 			for _, p := range ps.ltCurr {
 				temp = append(temp, p)
 				tempLT = append(tempLT, true)
+			}
+			if l == 1 {
+				for _, p := range il {
+					temp = append(temp, p)
+					tempLT = append(tempLT, true)
+				}
 			}
 		}
 		for i := range n {

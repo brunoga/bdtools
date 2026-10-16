@@ -625,6 +625,9 @@ type esWriter struct {
 	// PES header), and the rest comes in the next packet.
 	supHeld        []byte
 	supPTS, supDTS int64
+	// burn, when set, sees each PGS segment written, with its PTS: the
+	// track burned into the picture.
+	burn func(pts int64, seg []byte)
 }
 
 // syncEvery is how often a sync point is recorded when the timestamps run
@@ -775,6 +778,17 @@ func (g *goDemux) start() error {
 		g.writers[uint16(t.ID)] = w //nolint:gosec // track ids are PIDs
 	}
 	return nil
+}
+
+// tapSubtitles has fn see the PGS segments of subtitle track id as they
+// are demuxed (after start).
+func (g *goDemux) tapSubtitles(id int, fn func(pts int64, seg []byte)) bool {
+	w := g.writers[uint16(id)] //nolint:gosec // track ids are PIDs
+	if w == nil || w.track.StreamID != "S_HDMV/PGS" {
+		return false
+	}
+	w.burn = fn
+	return true
 }
 
 // fileSafe keeps the letters and digits of a string the disc supplied, for
@@ -1289,6 +1303,9 @@ func writeSup(w *esWriter, pts, dts int64, seg []byte) error {
 		binary.BigEndian.PutUint32(hdr[6:], uint32(dts)) //nolint:gosec // as above
 		if _, err = w.w.Write(hdr[:]); err == nil {
 			_, err = w.w.Write(seg[:n])
+		}
+		if w.burn != nil {
+			w.burn(pts, seg[:n])
 		}
 		w.n += int64(n) + 10
 		seg = seg[n:]

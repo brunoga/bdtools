@@ -107,6 +107,10 @@ type Options struct {
 	// for players that show a side-by-side frame as it is (Subs3DOn); or
 	// both, the 3D track after its flat one (Subs3DBoth).
 	Subs3D Subs3D
+	// BurnSubs, when not 0, is the subtitle track drawn into the picture
+	// (--layout mvhevc, whose file carries no subtitle track), in each eye
+	// at the depth the disc gives it.
+	BurnSubs int
 	// BitDepth is the output's: 8 (or 0), or 10 for HEVC (Main 10) and AV1.
 	// The source is 8-bit either way; at 10 the encoder predicts and
 	// quantises at finer precision, which shows as less banding in smooth
@@ -326,11 +330,11 @@ func (o Options) Validate(goos string) error {
 		if o.Codec != CodecH265 {
 			return fmt.Errorf("--layout mvhevc is HEVC (MV-HEVC is its multiview extension): use --codec h265")
 		}
-		if o.Encoder != EncoderNVENC || o.GPUAPI == GPUFFmpeg {
-			return fmt.Errorf("--layout mvhevc is coded by NVENC in process (--encoder nvenc, the default for it): no other encoder here codes MV-HEVC")
+		if o.Encoder != EncoderBuiltin && (o.Encoder != EncoderNVENC || o.GPUAPI == GPUFFmpeg) {
+			return fmt.Errorf("--layout mvhevc is coded by NVENC in process (--encoder nvenc) or the encoder here (--encoder builtin): no other encoder codes MV-HEVC")
 		}
 		if o.Subs3D.threeD() {
-			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: an MV-HEVC file carries none")
+			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: an MV-HEVC file carries none (--burn-subs draws one track into both eyes)")
 		}
 		if o.SpatialFOV <= 0 || o.SpatialFOV > 360 {
 			return fmt.Errorf("--spatial-fov %g: a horizontal field of view in degrees, up to 360", o.SpatialFOV)
@@ -361,8 +365,19 @@ func (o Options) Validate(goos string) error {
 	default:
 		return fmt.Errorf("unknown layout %q (want %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutMVC, LayoutMVHEVC)
 	}
-	if (o.Encoder == EncoderBuiltin || o.Encoder == EncoderCopy) && (o.Layout != LayoutMVC || o.TwoD) {
-		return fmt.Errorf("--encoder %s codes MVC (--layout mvc) only", o.Encoder)
+	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) {
+		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture (--layout mvhevc): the other outputs carry subtitle tracks")
+	}
+	if o.Encoder == EncoderCopy && (o.Layout != LayoutMVC || o.TwoD) {
+		return fmt.Errorf("--encoder copy codes MVC (--layout mvc) only")
+	}
+	if o.Encoder == EncoderBuiltin && (o.Layout != LayoutMVC || o.TwoD) {
+		switch {
+		case o.Codec != CodecH265:
+			return fmt.Errorf("--encoder builtin codes MVC (--layout mvc) and H.265 (--codec h265)")
+		case o.DVFEL.layered():
+			return fmt.Errorf("--dv-fel %s needs NVENC or x265 (--encoder software)", o.DVFEL)
+		}
 	}
 	if !o.Codec.Valid() {
 		return fmt.Errorf("unknown codec %q (want %s)", o.Codec, codecList(Codecs()))
@@ -562,8 +577,12 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 		if opts.tenBit() {
 			depth = "10-bit"
 		}
-		enc = Step{Name: "encode", Builtin: true, Argv: []string{"nvenc mv-hevc (the left eye as the base layer, the right predicted from it), " + depth + ", qp",
-			strconv.Itoa(opts.CRF), "->", videoOut}}
+		coder, qp := "nvenc", opts.CRF
+		if opts.Encoder == EncoderBuiltin {
+			coder, qp = "builtin", builtinQP(opts.CRF)
+		}
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{coder + " mv-hevc (the left eye as the base layer, the right predicted from it), " + depth + ", qp",
+			strconv.Itoa(qp), "->", videoOut}}
 	case opts.Layout == LayoutMVC && !opts.TwoD:
 		left := "x264 " + strings.Join(mvcX264Args(opts), " ")
 		switch opts.Encoder {
@@ -574,6 +593,13 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 		}
 		enc = Step{Name: "encode", Builtin: true, Argv: []string{"left eye:", left, "| right eye: MVC, qp",
 			strconv.Itoa(mvcDepQP(opts.CRF)), "->", videoOut}}
+	case opts.Encoder == EncoderBuiltin && opts.Codec == CodecH265:
+		depth := "8-bit"
+		if opts.tenBit() {
+			depth = "10-bit"
+		}
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{"builtin h265, " + depth + ", qp",
+			strconv.Itoa(builtinQP(opts.CRF)), "->", videoOut}}
 	case opts.NativeGPU:
 		enc = nativeEncodeStep(opts, videoOut)
 	}

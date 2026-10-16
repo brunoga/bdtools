@@ -241,6 +241,13 @@ func (c *picCoder) intSearch(x0, y0, w, h, partIdx, l, refIdx int) mvSearch {
 	try(best)
 	try(pos{int(ms.preds[1].x) >> 2, int(ms.preds[1].y) >> 2})
 	try(pos{0, 0})
+	if l == 0 && refIdx == c.ilr {
+		// The other view: the disparity is horizontal, and can be far
+		// from the predictors.
+		for x := -searchRange; x <= searchRange; x += 4 {
+			try(pos{origin.x + x, origin.y})
+		}
+	}
 	// A diamond search from the best start, narrowing.
 	for step := 4; step >= 1; step >>= 1 {
 		for {
@@ -363,19 +370,28 @@ func (c *picCoder) searchCandidates(x0, y0, w, h, partIdx int, bi *interCand) (a
 		if hd.typ == sliceB {
 			nref = min(nref, 2)
 		}
+		var rbuf [16]int
+		rs := rbuf[:0]
+		for r := range nref {
+			rs = append(rs, r)
+		}
+		// The other view's picture, always: it is the same instant.
+		if l == 0 && c.ilr >= nref {
+			rs = append(rs, c.ilr)
+		}
 		// Several references: their whole-sample searches, then the
 		// sub-sample one for the best alone.
 		subOnly := -1
-		if nref > 1 {
+		if len(rs) > 1 {
 			bestInt := math.Inf(1)
-			for r := range nref {
+			for _, r := range rs {
 				ms := c.intSearch(x0, y0, w, h, partIdx, l, r)
 				if cost := ms.cost + c.lambdaS*refBits(r, hd.numRefIdx[l]); cost < bestInt {
 					bestInt, subOnly = cost, r
 				}
 			}
 		}
-		for r := range nref {
+		for _, r := range rs {
 			if subOnly >= 0 && r != subOnly {
 				continue
 			}
@@ -696,12 +712,11 @@ func (c *picCoder) codeBlockPred(x, y, log2, ci int, node *cuNode) (bool, []int3
 		qpi := min(max(c.qp, -s.qpBdOffsetC), 57)
 		qp = chromaQP(qpi) + s.qpBdOffsetC
 	}
-	q := newQuantizer(qp, log2, depth, false)
-	if q.quantize(coef) == 0 {
+	q := newQuantizer(qp, log2, depth)
+	levels := c.quantize(&q, coef, log2, ci, 0)
+	if levels == nil {
 		return false, nil
 	}
-	levels := c.levels(n * n)
-	copy(levels, coef)
 	copy(sd.coeffs[:n*n], levels)
 	sd.predMode = modeInter
 	sd.reconstruct(x, y, log2, ci, false)

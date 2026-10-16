@@ -605,6 +605,17 @@ func (g *mkvDemux) noteDepth(au []byte, t time.Duration) {
 	g.depth.add(ticks90k(gop.pts)+g.depthBase, gop)
 }
 
+// tapSubtitles has fn see the PGS segments of subtitle track id as they
+// are demuxed (after start).
+func (g *mkvDemux) tapSubtitles(id int, fn func(pts int64, seg []byte)) bool {
+	w := g.writers[uint64(id)] //nolint:gosec // a track number
+	if w == nil || w.track.StreamID != "S_HDMV/PGS" {
+		return false
+	}
+	w.burn = fn
+	return true
+}
+
 // write puts an audio or subtitle frame in its track's file, dropping what
 // comes before the first picture.
 func (g *mkvDemux) write(p mkv.Packet) error {
@@ -752,7 +763,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	r.rateNum, r.rateDen = src.rateNum, src.rateDen
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
-	if r.Opts.Subs3D.threeD() {
+	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat {
 		r.depth = &depthMap{}
 		g.depth = r.depth
 		// A Matroska file does not say which offset sequence a subtitle
@@ -765,6 +776,10 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		if g.f != nil {
 			_ = g.f.Close()
 		}
+		return err
+	}
+	if err := r.setupBurn(g.tapSubtitles); err != nil {
+		_ = g.f.Close()
 		return err
 	}
 	if r.Opts.Remux {

@@ -57,6 +57,9 @@ type sliceHeader struct {
 	dataOffset         int   // the slice data's first byte in the RBSP
 	sliceQP            int
 	poc                int
+	// interLayer: the second layer's picture predicts from the base
+	// layer's picture of its access unit.
+	interLayer bool
 }
 
 // parseSliceHeader reads a slice segment header; a dependent segment takes
@@ -120,9 +123,22 @@ func (d *Decoder) parseSliceHeader(r *bits, nal *nalUnit, prev *sliceHeader) (*s
 			h.colourPlane = r.u(2)
 		}
 		idr := nal.typ == nalIDRWRADL || nal.typ == nalIDRNLP
-		if !idr {
+		// A second layer's picture: its layer in the VPS.
+		var v *vpsInfo
+		li := 0
+		if d.layer > 0 {
+			if v = d.vps[s.vpsID]; v == nil {
+				return nil, errStream
+			}
+			if li = v.layerIdx(d.layer); li < 0 {
+				return nil, errStream
+			}
+		}
+		if !idr || v != nil && !v.pocLsbNotPresent[li] {
 			h.pocLsb = r.u(s.log2MaxPOCLsb)
 			h.poc = d.computePOC(h, nal, s)
+		}
+		if !idr {
 			h.shortTermRefSPS = r.flag()
 			if !h.shortTermRefSPS {
 				start := r.pos
@@ -201,6 +217,15 @@ func (d *Decoder) parseSliceHeader(r *bits, nal *nalUnit, prev *sliceHeader) (*s
 				h.temporalMVP = r.flag()
 			}
 		}
+		if v != nil && len(v.directRef[li]) > 0 {
+			h.interLayer = true
+			if !v.defaultRefLayersActive {
+				h.interLayer = r.flag() // inter_layer_pred_enabled_flag
+			}
+			if h.interLayer && len(v.directRef[li]) > 1 {
+				return nil, unsupported("a layer predicting from several")
+			}
+		}
 		if s.sao {
 			h.saoLuma = r.flag()
 			h.saoChroma = r.flag()
@@ -230,6 +255,7 @@ func (d *Decoder) parseSliceHeader(r *bits, nal *nalUnit, prev *sliceHeader) (*s
 					numPicTotal++
 				}
 			}
+			numPicTotal += boolInt(h.interLayer)
 			if p.listsModification && numPicTotal > 1 {
 				n := 0
 				for 1<<n < numPicTotal {

@@ -70,8 +70,9 @@ const (
 	// EncoderMediaFoundation is the encoder a Windows GPU driver installs as
 	// a Media Foundation transform: Intel Quick Sync, AMD AMF. Windows only.
 	EncoderMediaFoundation Encoder = "mediafoundation"
-	// EncoderBuiltin is the H.264 encoder in this program, which codes
-	// both eyes of an MVC file: no tool needed, every platform.
+	// EncoderBuiltin is the encoders in this program: H.264 for both eyes
+	// of an MVC file (--layout mvc), HEVC for the rest (--codec h265). No
+	// tool needed, every platform.
 	EncoderBuiltin Encoder = "builtin"
 	// EncoderCopy keeps a 3D source's left eye as it is and codes the
 	// right eye here (--layout mvc): the 2D picture stays the disc's.
@@ -273,7 +274,7 @@ var (
 	toolFFmpeg = Tool{
 		Name:        "ffmpeg",
 		Binaries:    []string{"ffmpeg"},
-		Purpose:     "encode the stacked frames with a hardware encoder",
+		Purpose:     "encode the stacked frames with a hardware encoder; code DTS and PCM audio as AC-3 for an MV-HEVC .mp4",
 		VersionArgs: []string{"-version"},
 		Install: map[string]string{
 			"linux":   "install ffmpeg",
@@ -485,6 +486,11 @@ func DefaultEncoder(ctx context.Context, goos string, codec Codec, depth int, va
 		if ProbeEncoder(ctx, enc, codec, vaapiDevice, false) {
 			return enc
 		}
+	}
+	// No GPU encoder: x265 (or SVT-AV1, x264) when it is installed; for
+	// HEVC without it, the encoder here.
+	if codec == CodecH265 && !Detect(ctx, goos, EncoderSoftware, codec, false).OK() {
+		return EncoderBuiltin
 	}
 	return EncoderSoftware
 }

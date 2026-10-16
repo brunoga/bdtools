@@ -5,6 +5,36 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--encoder builtin` codes HEVC (`--codec h265`) with the encoder in this
+  program: every layout but MV-HEVC and Dolby Vision's kept layers, 8 or
+  10 bits, no x265 or GPU needed. `--crf` N codes at QP N-5, which matched
+  x265 medium's CRF N in size and PSNR on a film minute. It is the
+  automatic choice for HEVC when no GPU encoder works and x265 is
+  missing. Picture sizes that are not multiples of 8 are padded and
+  cropped by the conformance window.
+- `--layout mvhevc` without NVIDIA: `--encoder builtin` codes MV-HEVC
+  with the encoder in this program, the right eye a second layer
+  predicted from the left (on a film slice it took 44% of the bytes of
+  the right eye coded alone, at the same PSNR). It is the default for
+  the layout when NVENC does not work here.
+- `--burn-subs ID` draws a subtitle track into both eyes of an MV-HEVC
+  picture, at the depth the disc gives it: the .mp4's players show no
+  Blu-ray subtitles.
+- MV-HEVC output keeps DTS and PCM tracks: ffmpeg codes them as AC-3
+  (5.1 at most, 640 kb/s), timed from the source, gaps and late starts
+  included. They were left out.
+- The HEVC decoder decodes MV-HEVC's second view (`SetLayers(2)`): NVENC's,
+  x265's and the encoder's own streams decode bit for bit as ffmpeg
+  decodes them.
+
+### Changed
+
+- The HEVC encoder codes with sign data hiding, SAO and rate-distortion
+  optimised quantisation: 9% smaller than x265 medium at equal PSNR on
+  the film minute (1% before), at 51 pictures a second against 63.
+
 ## [0.11.0] - 2026-10-17
 
 ### Added

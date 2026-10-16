@@ -14,8 +14,6 @@ func satd16x8(a []uint16, as int, b []uint16, bs int) int {
 
 func forwardTransformFast([]int16, []int32, int, int, *transformScratch) bool { return false }
 
-func quantFast(*quantizer, []int32) (int, bool) { return 0, false }
-
 func inverseTransformFast([]int32, int, int) bool { return false }
 
 func ssdBlock(a []uint16, as int, b []uint16, bs, w, h int) int64 {
@@ -24,4 +22,8 @@ func ssdBlock(a []uint16, as int, b []uint16, bs, w, h int) int64 {
 
 func avgBlock(dst []uint16, ds int, a []uint16, as int, b []uint16, bs, w, h int) {
 	avgBlockGo(dst, ds, a, as, b, bs, w, h)
+}
+
+func saoEO(rec []uint16, r0, rs int, src []uint16, s0, ss, w, h, off0, off1 int, sum, cnt *[4]int64) {
+	saoEOGo(rec, r0, rs, src, s0, ss, w, h, off0, off1, sum, cnt)
 }

@@ -77,6 +77,7 @@ type picShared struct {
 	lambda, lambdaS float64
 	refs            [2][]*picture
 	planes          [2][]*refPlanes
+	ilr             int // the inter-layer reference's index in list 0, -1 for none
 	wppCtx          [][numContexts]uint8
 	// rows counts each CTB row's CTBs coded, for the wavefront: the row
 	// below waits on its row's condition alone.
@@ -95,6 +96,8 @@ type picCoder struct {
 	res     [32 * 32]int32
 	res16   [32 * 32]int16
 	coef    [32 * 32]int32
+	orig    [32 * 32]int32 // coefficients before quantisation
+	rq      rdoqScratch
 	tscr    transformScratch
 	pred    [64 * 64]uint16
 	predCU  [64 * 64]uint16    // an inter CU's prediction, luma
@@ -164,19 +167,24 @@ func newPicCoder(sh *picShared) *picCoder {
 // start readies the coders for a picture at qp of slice type typ and POC
 // poc with the reference lists given (the decoder's pictures): the slice
 // header the model decodes by, and the block state cleared.
-func (sh *picShared) start(pic *picture, src *Source, qp, typ, poc int, refs [2][]*picture, planes [2][]*refPlanes) {
+// ilr is the index in list 0 of the inter-layer reference (-1 for none),
+// a long-term reference; tmvp says whether the slice may predict from
+// the collocated picture's motion (not an IDR picture's).
+func (sh *picShared) start(pic *picture, src *Source, qp, typ, poc int, refs [2][]*picture, planes [2][]*refPlanes, ilr int, tmvp bool) {
 	s := sh.s
 	sh.pic = pic
 	sh.src = src
 	sh.qp = qp
 	sh.refs = refs
 	sh.planes = planes
+	sh.ilr = ilr
 	sh.h = sliceHeader{firstSliceInPic: true, typ: typ, picOutput: true, sliceQP: qp,
 		qpDelta: qp - sh.p.initQP, maxMergeCand: 5, poc: poc, colFromL0: true}
 	if typ != sliceI {
 		sh.h.numRefIdx = [2]int{len(refs[0]), len(refs[1])}
-		sh.h.temporalMVP = s.temporalMVP
+		sh.h.temporalMVP = s.temporalMVP && tmvp
 	}
+	sh.h.saoLuma, sh.h.saoChroma = s.sao, s.sao
 	// The picture's identity (POC, reference POCs) was set when its job
 	// was dispatched, before any picture predicted from it started.
 	sh.f.begin(pic, s, sh.p)
@@ -214,6 +222,9 @@ func (c *picCoder) begin() {
 	for l := range 2 {
 		c.sd.refList[l] = sh.refs[l]
 		c.sd.refIsLT[l] = make([]bool, len(sh.refs[l]))
+	}
+	if sh.ilr >= 0 {
+		c.sd.refIsLT[0][sh.ilr] = true
 	}
 	c.bits = 0
 }
@@ -303,6 +314,10 @@ func (c *picCoder) codeRow(ctbY int) []byte {
 			}
 		}
 		node := c.decideCTU(x0, y0)
+		if s.sao {
+			c.decideSAO(ctbX, ctbY)
+			c.writeSAO(&c.enc, ctbX, ctbY)
+		}
 		c.writeCU(&c.enc, node, 0)
 		c.markCU(node)
 		sh.ps.ctbDecoded[addr] = true
@@ -821,22 +836,40 @@ func (c *picCoder) codeBlock(x, y, log2, ci, mode int) (bool, []int32) {
 		qpi := min(max(c.qp, -s.qpBdOffsetC), 57)
 		qp = chromaQP(qpi) + s.qpBdOffsetC
 	}
-	q := newQuantizer(qp, log2, depth, true)
-	if q.quantize(coef) == 0 {
+	q := newQuantizer(qp, log2, depth)
+	levels := c.quantize(&q, coef, log2, ci, scanIdxFor(true, mode, log2, ci))
+	if levels == nil {
 		return false, nil
 	}
-	levels := c.levels(n * n)
-	copy(levels, coef)
 	copy(sd.coeffs[:n*n], levels)
 	sd.reconstruct(x, y, log2, ci, false)
 	return true, levels
 }
 
+// quantize quantises a block's coefficients (with sign data hiding when
+// the stream has it, along the block's scan), returning its levels from
+// the CTU's arena, or nil when they are all zero.
+func (c *picCoder) quantize(q *quantizer, coef []int32, log2, ci, scanIdx int) []int32 {
+	n := 1 << log2
+	hide := c.e.c.signHiding
+	copy(c.orig[:n*n], coef) // RDOQ and sign hiding read them
+	nz := c.rdoq(q, coef, log2, ci, scanIdx)
+	if nz == 0 {
+		return nil
+	}
+	if hide {
+		signHide(coef, c.orig[:n*n], log2, scanIdx, q)
+	}
+	levels := c.levels(n * n)
+	copy(levels, coef)
+	return levels
+}
+
 // pictureSSE is the squared error of the picture's reconstruction per
 // plane.
 func (sh *picShared) pictureSSE() [3]float64 {
-	s, pic, src := sh.s, sh.pic, sh.src
-	w, h := s.width, s.height
+	pic, src := sh.pic, sh.src
+	w, h := sh.e.o.Width, sh.e.o.Height // the picture, not its padding
 	return [3]float64{
 		float64(ssdBlock(src.Y, src.StrideY, pic.y, pic.strideY, w, h)),
 		float64(ssdBlock(src.Cb, src.StrideC, pic.cb, pic.strideC, w/2, h/2)),
@@ -1052,19 +1085,19 @@ func (c *picCoder) codeTree(bc binCoder, n, parent *tuNode, cu *cuNode, blkIdx i
 	}
 	intra := !cu.inter
 	if cbfLuma {
-		writeResidual(bc, n.luma, log2, 0, scanIdxFor(intra, mode, log2, 0))
+		writeResidual(bc, n.luma, log2, 0, scanIdxFor(intra, mode, log2, 0), c.e.c.signHiding)
 	}
 	chromaMode := cu.modes[0]
 	if log2 > 2 {
 		for ci := range 2 {
 			if cbf[ci] {
-				writeResidual(bc, n.chroma[ci], log2-1, ci+1, scanIdxFor(intra, chromaMode, log2-1, ci+1))
+				writeResidual(bc, n.chroma[ci], log2-1, ci+1, scanIdxFor(intra, chromaMode, log2-1, ci+1), c.e.c.signHiding)
 			}
 		}
 	} else if blkIdx == 3 {
 		for ci := range 2 {
 			if cbf[ci] {
-				writeResidual(bc, parent.chroma[ci], 2, ci+1, scanIdxFor(intra, chromaMode, 2, ci+1))
+				writeResidual(bc, parent.chroma[ci], 2, ci+1, scanIdxFor(intra, chromaMode, 2, ci+1), c.e.c.signHiding)
 			}
 		}
 	}

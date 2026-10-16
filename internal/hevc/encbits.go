@@ -98,7 +98,12 @@ func escapeNAL(dst []byte, rbsp []byte, zeros int) ([]byte, int) {
 // writeNAL appends a NAL unit with a four byte start code: its two header
 // bytes for type typ (layer 0, temporal id 0), then the RBSP escaped.
 func writeNAL(dst []byte, typ int, rbsp []byte) []byte {
-	dst = append(dst, 0, 0, 0, 1, byte(typ<<1), 1)
+	return writeLayerNAL(dst, typ, 0, rbsp)
+}
+
+// writeLayerNAL writes a NAL unit of layer nuh_layer_id layer.
+func writeLayerNAL(dst []byte, typ, layer int, rbsp []byte) []byte {
+	dst = append(dst, 0, 0, 0, 1, byte(typ<<1|layer>>5), byte(layer&31)<<3|1)
 	dst, _ = escapeNAL(dst, rbsp, 0)
 	// An RBSP ending in a zero byte (cabac_zero_word) is followed by 0x03.
 	if len(rbsp) > 0 && rbsp[len(rbsp)-1] == 0 {
