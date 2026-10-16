@@ -330,7 +330,8 @@ scheduler such as pipeliner retry it.
 | `--output` | — | Destination `.mkv` (or `.m2ts`, `.ts` for a `--remux` keeping a 3D disc's MVC) |
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
-| `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size) or `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) |
+| `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size), `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) — or `mvhevc` (MV-HEVC in an .mp4 or .mov, for Apple devices and the Meta Quest) — see [MV-HEVC output](#mv-hevc-output) |
+| `--spatial-fov`, `--spatial-baseline`, `--spatial-disparity` | `90`, `63`, `0` | `--layout mvhevc`: what the file says of its stereo pair (degrees of horizontal field of view per eye; millimetres between the cameras; a shift of the views in -1..1 of the width). Apple's Photos marks a file spatial only with a field of view and a baseline or disparity |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the H.264 encoder here, for `--layout mvc`, or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
 | `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
@@ -368,6 +369,31 @@ binary: the same encoder library, reached by a route that can filter, with
 `--crf` and `--preset` passed straight through. Unfiltered software encoding
 still uses the standalone binary, which is fewer moving parts and works on a
 machine that has x264 but no ffmpeg.
+
+### MV-HEVC output
+
+`--layout mvhevc` writes the film as MV-HEVC in an MP4 (or QuickTime, with
+a `.mov` output): the left eye as an HEVC base layer any player shows in
+2D, the right eye as a second layer predicted from it, with the stereo
+signalling Apple's players and the Meta Quest read (`vexu` and `hfov` in
+the sample entry, the layered configuration `lhvC` beside `hvcC`, both
+layers in every sample, as Apple's HEVC Stereo Video profile asks). NVENC
+codes it in process, so it needs an NVIDIA GPU; `--crf` is NVENC's
+constant quality as for the other layouts. The output is 8-bit unless
+`--bit-depth 10` asks for Main 10: Apple devices take either, but the
+Quest's players decode 10-bit MV-HEVC slowly or not at all, and iPhone
+recordings are 8-bit.
+The audio tracks go in as AC-3 or E-AC-3 (a TrueHD track contributes its
+AC-3 core; DTS and PCM tracks are left out for now), and subtitles are
+left out. The file states the disc's colour signalling, and BT.709 (a
+Blu-ray's HD colour) for an HD disc whose stream states none, in the
+stream and in a `colr` box, as Apple's players go by what the file says.
+Verify a file with `ffmpeg -view_ids 1 -i file.mp4 ...` (ffmpeg
+7.1 and later decode the second view). On the Quest, SKYBOX plays these
+files from its 2.0.2 beta (set its 3D mode to side by side); the
+headset's own player shows only the base layer of a local MV-HEVC file,
+and 4XVR's own MV-HEVC decoder plays iPhone recordings only (see
+[docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md)).
 
 ### MVC output
 

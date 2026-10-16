@@ -153,3 +153,41 @@ mvcenc -dep right.yuv -o out.264 -mkv out.mkv -mvcc base.264   # a given left ey
 and `-slices` the right eye. `-mkv` with `-mvcc` writes what bdtools
 writes: an MKV with the dependent view in a `mvcC` BlockAddition, the file
 to put in front of the player.
+
+## MV-HEVC on the Meta Quest (2026-10-16)
+
+`--layout mvhevc` files were tried on a Quest with 4XVR Video Player, the
+one Quest player that advertises MV-HEVC. The headset's own player shows
+the base layer alone for any local MV-HEVC file, a known-good iPhone-style
+sample included: its 3D modes are side by side and top/bottom, and Meta's
+documented route for MV-HEVC is an upload of iPhone recordings through
+the phone app, converted on Meta's servers.
+
+4XVR decodes MV-HEVC with a decoder of its own ("soft-decoding", since
+its version 1.2.10 of January 2024, before ffmpeg could decode MV-HEVC)
+written for iPhone 15 Pro files. It plays the iPhone-style sample. On our
+files it refuses 10-bit ("performance"), and on 8-bit it shows the second
+layer, which it puts on the left eye, as blocks: a diagnostic file with a
+different pattern in each layer showed both eyes with the base layer's
+picture, the left one smeared, so the second layer comes out as its
+inter-view prediction with the residual mangled. The same with no
+B-frames, with every picture a reference, with BT.709 stated, in a
+QuickTime container; x265's multiview output (muxed by the same writer)
+does not play in it at all. ffmpeg 8 decodes every one of these files
+cleanly in both views, and they follow Apple's HEVC Stereo Video profile
+point by point. 4XVR is not a reference for MV-HEVC.
+
+SKYBOX plays them. Its MV-HEVC support is in the 2.0.2 beta (build 3854,
+October 2026; the store build 1.2.1 shows the base layer only), reached
+through Quest Settings > Privacy & safety > Installed apps > SKYBOX >
+Release Channels > "2.0.2 Preview". It played the iPhone-style sample,
+the NVENC file (Q6, with the fixes below) and an x265 multiview encode
+of the same minute, all correctly in 3D. One quirk: it decodes the two
+views into a side-by-side picture and the 3D mode has to be set to side
+by side by hand, as the eyes show next to each other until it is.
+
+Two defects of the writer were found and fixed on the way: the camera
+baseline and comfort boxes belong inside the stereo view box (`eyes`),
+and the edit list must start at the first picture shown, after the
+B-frame lead. The stereo NVENC path now codes every B-frame as a
+reference, as Apple's own files do.

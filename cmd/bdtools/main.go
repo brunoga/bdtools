@@ -59,12 +59,15 @@ func run(argv []string, stdout, stderr *os.File) int {
 		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
 		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC)")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
+		spFOV    = fs.Float64("spatial-fov", 90, "--layout mvhevc: the horizontal field of view of each eye's picture, in degrees, as the file states it")
+		spBase   = fs.Float64("spatial-baseline", 63, "--layout mvhevc: the distance between the two cameras, in millimetres, as the file states it (Apple's Photos marks a file spatial only with it or a disparity)")
+		spDisp   = fs.Float64("spatial-disparity", 0, "--layout mvhevc: a shift of the two views, -1 to 1 of the picture's width (0: none)")
 		aq       = fs.Float64("aq", 0, "the built-in encoder's adaptive quantisation strength (--layout mvc): each macroblock's quantiser moved by its energy, flat and dark ones lower; 0 (the default) leaves every macroblock at the picture's")
-		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye side by side), half (960p per eye, ~half the size) or mvc (Blu-ray 3D's format: an H.264 left eye any player shows in 2D, with the right eye as a second view that 3D players frame pack; --codec h264, x264 for the left eye)")
+		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye side by side), half (960p per eye, ~half the size), mvhevc (MV-HEVC in an .mp4 or .mov for Apple devices and the Meta Quest, coded by NVENC) or mvc (Blu-ray 3D's format: an H.264 left eye any player shows in 2D, with the right eye as a second view that 3D players frame pack; --codec h264, x264 for the left eye)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc, mediafoundation (Windows; also mf), builtin (the H.264 encoder here, for --layout mvc) or copy (--layout mvc: the source's left eye as it is, only the right eye coded)")
 		codec    = fs.String("codec", string(convert.CodecH265), "output video codec: h265 (HDR10, HDR10+ and Dolby Vision kept; what home theatre players play), h264 (plays anywhere, 8-bit, larger) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 0, "quality target, 0-51; lower is better (not comparable between codecs); default: by the source, 20 for 3D, 18 for Ultra HD, 16 for HD")
-		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: 10 when the codec and encoder can")
+		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: 10 when the codec and encoder can, 8 for --layout mvhevc")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
@@ -146,6 +149,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if convert.Layout(*layout) == convert.LayoutMVC && !given["codec"] {
 		cod = convert.CodecH264 // MVC is H.264's
 	}
+	if convert.Layout(*layout) == convert.LayoutMVHEVC && !given["codec"] {
+		cod = convert.CodecH265 // MV-HEVC is HEVC's
+	}
 	if !cod.Valid() {
 		fmt.Fprintf(stderr, "bdtools: unknown codec %q\n", cod)
 		return 2
@@ -159,6 +165,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		// Players' MVC decoders play the left eye coded here (or by
 		// x264), never a GPU-encoded one.
 		enc = convert.EncoderBuiltin
+	}
+	if enc == convert.EncoderAuto && convert.Layout(*layout) == convert.LayoutMVHEVC {
+		enc = convert.EncoderNVENC // the one encoder here that codes MV-HEVC
 	}
 	if enc == convert.EncoderAuto {
 		// An encoder for the depth the run will settle on: 10 bits by
@@ -186,12 +195,18 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 	o.BitDepth = *depth
 	if o.BitDepth == 0 && !*remux && cod != convert.CodecH264 && enc != convert.EncoderMediaFoundation {
-		// 10 bits by default, except for a remux, which keeps the disc's
+		// 10 bits by default, except for a remux, which keeps the disc's,
+		// and for MV-HEVC, whose players take 8 (the Quest's decode 10
+		// slowly or not at all; iPhone files are 8-bit)
 		o.BitDepth = 10
+		if o.Layout == convert.LayoutMVHEVC {
+			o.BitDepth = 8
+		}
 	}
 	o.Subs3D = convert.Subs3D(*subs3D)
-	if (*remux || o.Layout == convert.LayoutMVC) && !given["subs-3d"] {
-		// A remux keeps the disc's own; MVC's 3D player places them.
+	if (*remux || o.Layout == convert.LayoutMVC || o.Layout == convert.LayoutMVHEVC) && !given["subs-3d"] {
+		// A remux keeps the disc's own; MVC's 3D player places them; an
+		// MV-HEVC file carries none.
 		o.Subs3D = convert.Subs3DOff
 	}
 	o.TwoD = *twoD
@@ -206,6 +221,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.SwapLR = *swapLR
 	o.DecodeThreads = *decThr
 	o.AQ = *aq
+	o.SpatialFOV, o.SpatialBaseline, o.SpatialDisparity = *spFOV, *spBase, *spDisp
 	o.KeepFallback = *keepFall
 	o.Remux = *remux
 	if !o.Remux {

@@ -207,6 +207,26 @@ func (e *nvenc) open() error {
 		cfg.u32(cc+nvH264IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 	case HEVC:
 		cfg.u32(cc+nvHEVCIDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
+		if e.stereo() {
+			// Stereo MV-HEVC: two views, the 3D reference displays SEI
+			// that names the eyes, and none of what the encoder refuses
+			// alongside it (lookahead, two passes).
+			if !e.supports(nvCapsSupportMVHEVC) {
+				return fmt.Errorf("%w: this GPU's NVENC does not encode MV-HEVC", ErrUnavailable)
+			}
+			f := cfg.getU32(cc + nvHEVCFlags)
+			f |= 1<<nvHEVCMVHEVCBit | 1<<nvHEVC3DRefDisplayBit
+			cfg.u32(cc+nvHEVCFlags, f)
+			cfg.u32(cc+nvHEVCNumViews, 2)
+			cfg.u32(rc+nvRCFlags, cfg.getU32(rc+nvRCFlags)&^(1<<nvRCLookaheadBit))
+			cfg.u32(rc+nvRCMultiPass, 0)
+			// As Apple's own files, every picture a reference: a player
+			// that discards non-reference base pictures would lose the
+			// second view's inter-layer references with them.
+			if e.supports(nvCapsSupportBFrameRef) {
+				cfg.u32(cc+nvHEVCBFramesAsRef, nvBFrameRefEach)
+			}
+		}
 		if c := e.cfg.Color; c != nil {
 			vui := cc + nvHEVCVUI
 			cfg.u32(vui+nvVUISignalPresent, 1)
@@ -217,12 +237,13 @@ func (e *nvenc) open() error {
 			cfg.u32(vui+nvVUITransfer, uint32(c.Transfer))   //nolint:gosec // a code point
 			cfg.u32(vui+nvVUIMatrix, uint32(c.Matrix))       //nolint:gosec // a code point
 		}
+		depth := uint32(nvBitDepth8)
 		if e.cfg.BitDepth == 10 {
 			cfg.bytes(nvCfgProfileGUID, nvHEVCMain10GUID)
-			f := cfg.getU32(cc + nvHEVCFlags)
-			f = f&^(7<<nvHEVCPixelBitDepthBit) | 2<<nvHEVCPixelBitDepthBit
-			cfg.u32(cc+nvHEVCFlags, f)
+			depth = nvBitDepth10
 		}
+		cfg.u32(cc+nvHEVCOutputBitDepth, depth)
+		cfg.u32(cc+nvHEVCInputBitDepth, depth)
 	case AV1:
 		cfg.u32(cc+nvAV1IDRPeriod, uint32(e.cfg.GOP)) //nolint:gosec // small
 		cfg.u32(cc+nvAV1Level, nvLevelAV1Auto)
@@ -231,11 +252,11 @@ func (e *nvenc) open() error {
 		// sequence header again on every keyframe so a player can start
 		// anywhere.
 		f := cfg.getU32(cc + nvAV1Flags)
-		f &^= 3<<nvAV1ChromaFormatBit | 7<<nvAV1InputBitDepthBit | 7<<nvAV1PixelBitDepthBit |
-			1<<nvAV1AnnexBBit | 1<<nvAV1DisableSeqHdrBit
+		f &^= 3<<nvAV1ChromaFormatBit | 1<<nvAV1AnnexBBit | 1<<nvAV1DisableSeqHdrBit
 		f |= 1<<nvAV1ChromaFormatBit | 1<<nvAV1RepeatSeqHdrBit
-		d := uint32(e.cfg.BitDepth - 8) //nolint:gosec // 0 or 2
-		f |= d<<nvAV1InputBitDepthBit | d<<nvAV1PixelBitDepthBit
+		d := uint32(e.cfg.BitDepth) //nolint:gosec // 8 or 10
+		cfg.u32(cc+nvAV1OutputBitDepth, d)
+		cfg.u32(cc+nvAV1InputBitDepth, d)
 		if c := e.cfg.Color; c != nil {
 			cfg.u32(cc+nvAV1Primaries, uint32(c.Primaries)) //nolint:gosec // a code point
 			cfg.u32(cc+nvAV1Transfer, uint32(c.Transfer))   //nolint:gosec // a code point
@@ -266,7 +287,7 @@ func (e *nvenc) open() error {
 		return err
 	}
 
-	for i := 0; i < nvBuffers; i++ {
+	for i := 0; i < e.buffers(); i++ {
 		cib := newStruct(nvSizeCreateInputBuffer)
 		cib.u32(0, nvCreateInputBufferVer)
 		cib.u32(nvCIBWidth, uint32(e.cfg.Width))   //nolint:gosec // frame size
@@ -286,6 +307,41 @@ func (e *nvenc) open() error {
 	return nil
 }
 
+// stereo reports whether the session codes two views.
+func (e *nvenc) stereo() bool { return e.cfg.Views == 2 }
+
+// buffers is how many input/output pairs the session holds: two per
+// picture with two views.
+func (e *nvenc) buffers() int {
+	if e.stereo() {
+		return 2 * nvBuffers
+	}
+	return nvBuffers
+}
+
+// spare is how many pairs Encode keeps free (nvSpare, per view).
+func (e *nvenc) spare() int {
+	if e.stereo() {
+		return 2 * nvSpare
+	}
+	return nvSpare
+}
+
+// supports asks the session whether the encoder has a capability.
+func (e *nvenc) supports(capability uint32) bool {
+	cp := newStruct(nvSizeCapsParam)
+	cp.u32(0, nvCapsParamVer)
+	cp.u32(nvCapsToQuery, capability)
+	val := newStruct(4)
+	args := []uintptr{e.enc}
+	args = append(args, guidArg(nvCodecHEVCGUID)...)
+	args = append(args, cp.ptr(), val.ptr())
+	if call(e.fnp(nvFnGetEncodeCaps), args...) != nvSuccess {
+		return false
+	}
+	return val.getU32(0) != 0
+}
+
 // format is the input buffers' format: NV12, or P010 for 10-bit.
 func (e *nvenc) format() uint32 {
 	if e.cfg.BitDepth == 10 {
@@ -295,6 +351,46 @@ func (e *nvenc) format() uint32 {
 }
 
 func (e *nvenc) Encode(fill func(*Picture)) error {
+	if e.stereo() {
+		return errors.New("nvenc: a stereo session takes both eyes (EncodeStereo)")
+	}
+	if err := e.submit(0, fill); err != nil {
+		return err
+	}
+	e.frame++
+	return nil
+}
+
+// EncodeStereo encodes a picture's two eyes: the left as the base layer
+// (view 0), the right as view 1, with the same timestamp.
+func (e *nvenc) EncodeStereo(fill func(left, right *Picture)) error {
+	if !e.stereo() {
+		return errors.New("nvenc: not a stereo session")
+	}
+	var right *Picture
+	err := e.submit(0, func(left *Picture) {
+		// the right eye is drawn into its own buffer once the left is
+		// submitted; fill gets both at once, so draw the right into a
+		// copy and move it after
+		right = &Picture{Y: make([]byte, len(left.Y)), UV: make([]byte, len(left.UV)), Pitch: left.Pitch, Depth: left.Depth}
+		fill(left, right)
+	})
+	if err != nil {
+		return err
+	}
+	if err := e.submit(1, func(p *Picture) {
+		copy(p.Y, right.Y)
+		copy(p.UV, right.UV)
+	}); err != nil {
+		return err
+	}
+	e.frame++
+	return nil
+}
+
+// submit draws and encodes one picture of one view at the current frame's
+// timestamp.
+func (e *nvenc) submit(view int, fill func(*Picture)) error {
 	if e.err != nil {
 		return e.err
 	}
@@ -331,7 +427,9 @@ func (e *nvenc) Encode(fill func(*Picture)) error {
 	pp.uptr(nvPPOutputBitstream, pair.out)
 	pp.u32(nvPPBufferFmt, e.format())
 	pp.u32(nvPPPictureStruct, nvPicStructFrame)
-	e.frame++
+	if e.stereo() {
+		pp.u32(nvPPCodecPicParams+nvPPHEVCViewID, uint32(view)) //nolint:gosec // 0 or 1
+	}
 	e.pending = append(e.pending, idx)
 	st := call(e.fnp(nvFnEncodePicture), e.enc, pp.ptr())
 	switch st {
@@ -343,7 +441,7 @@ func (e *nvenc) Encode(fill func(*Picture)) error {
 		// meanwhile the decoder can be drawing the next pictures.
 		e.ready = append(e.ready, e.pending...)
 		e.pending = e.pending[:0]
-		return e.drain(nvSpare)
+		return e.drain(e.spare())
 	}
 	e.err = e.status("encoding", st)
 	return e.err
@@ -380,15 +478,16 @@ func (e *nvenc) drain(spare int) error {
 func (e *nvenc) Close() error {
 	var err error
 	if e.enc != 0 {
-		if e.err == nil {
-			// End of stream: the held-back pictures come out.
+		if e.err == nil && e.frame > 0 {
+			// End of stream: the held-back pictures come out. (A session
+			// given no picture is not flushed: a stereo one blocks on it.)
 			pp := newStruct(nvSizePicParams)
 			pp.u32(0, nvPicParamsVer)
 			pp.u32(nvPPEncodePicFlags, nvPicFlagEOS)
 			if err = e.status("flushing", call(e.fnp(nvFnEncodePicture), e.enc, pp.ptr())); err == nil {
 				e.ready = append(e.ready, e.pending...)
 				e.pending = e.pending[:0]
-				err = e.drain(nvBuffers)
+				err = e.drain(e.buffers())
 			}
 		}
 		for _, p := range e.pairs {

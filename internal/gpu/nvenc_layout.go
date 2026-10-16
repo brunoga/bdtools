@@ -2,23 +2,23 @@
 
 package gpu
 
-// NVENC API 12.0 (nv-codec-headers n12.0.16.1): versions, struct sizes and
+// NVENC API 13.0 (nv-codec-headers n13.0.19.0): versions, struct sizes and
 // field offsets, printed by gcc with offsetof from nvEncodeAPI.h.
 // TestNVENCLayout re-derives them when a C compiler and the header are at
 // hand. The structs have the same layout on 64-bit Linux and Windows.
 const (
-	nvencAPIVersion           = 0xc
-	nvFunctionListVer         = 0x7002000c
-	nvOpenSessionExParamsVer  = 0x7001000c
-	nvInitializeParamsVer     = 0xf005000c
-	nvConfigVer               = 0xf008000c
-	nvPresetConfigVer         = 0xf004000c
-	nvCreateInputBufferVer    = 0x7001000c
-	nvCreateBitstreamBufVer   = 0x7001000c
-	nvLockInputBufferVer      = 0x7001000c
-	nvLockBitstreamVer        = 0x7002000c
-	nvPicParamsVer            = 0xf006000c
-	nvRCParamsVer             = 0x7001000c
+	nvencAPIVersion           = 0xd
+	nvFunctionListVer         = 0x7002000d
+	nvOpenSessionExParamsVer  = 0x7001000d
+	nvInitializeParamsVer     = 0xf007000d
+	nvConfigVer               = 0xf009000d
+	nvPresetConfigVer         = 0xf005000d
+	nvCreateInputBufferVer    = 0x7002000d
+	nvCreateBitstreamBufVer   = 0x7001000d
+	nvLockInputBufferVer      = 0x7001000d
+	nvLockBitstreamVer        = 0xf002000d
+	nvPicParamsVer            = 0xf007000d
+	nvRCParamsVer             = 0x7001000d
 	nvSizeFunctionList        = 2552
 	nvFnGetPresetConfigEx     = 320
 	nvFnInitializeEncoder     = 96
@@ -34,6 +34,12 @@ const (
 	nvFnDestroyEncoder        = 224
 	nvFnOpenSessionEx         = 240
 	nvFnGetLastErrorString    = 304
+	nvFnGetEncodeCaps         = 64
+	nvCapsParamVer            = 0x7001000d
+	nvSizeCapsParam           = 256
+	nvCapsToQuery             = 4
+	nvCapsSupportMVHEVC       = 58
+	nvCapsSupportBFrameRef    = 43
 
 	nvSizeOpenSessionExParams = 1552
 	nvOSDeviceType            = 4
@@ -54,6 +60,8 @@ const (
 	nvRCFlags           = 36 // the bitfield word after vbvInitialDelay
 	nvRCInitialRCQP     = 64
 	nvRCTargetQuality   = 88
+	nvRCLookaheadBit    = 5
+	nvRCMultiPass       = 100
 	nvH264IDRPeriod     = 8
 	nvHEVCIDRPeriod     = 20
 	nvAV1Level          = 0
@@ -65,10 +73,19 @@ const (
 	nvAV1DisableSeqHdrBit   = 4
 	nvAV1RepeatSeqHdrBit    = 5
 	nvAV1ChromaFormatBit    = 7
-	nvAV1InputBitDepthBit   = 12
-	nvAV1PixelBitDepthBit   = 15
+	nvAV1OutputBitDepth     = 112
+	nvAV1InputBitDepth      = 116
 	nvHEVCFlags             = 16 // the bitfield word after maxCUSize
-	nvHEVCPixelBitDepthBit  = 11
+	nvHEVCRepeatSPSPPSBit   = 7
+	nvHEVCMVHEVCBit         = 21
+	nvHEVC3DRefDisplayBit   = 22
+	nvHEVCOutputBitDepth    = 200
+	nvHEVCInputBitDepth     = 204
+	nvHEVCNumViews          = 212
+	nvHEVCBFramesAsRef      = 180
+	nvBFrameRefEach         = 1
+	nvBitDepth8             = 8
+	nvBitDepth10            = 10
 	nvCfgProfileGUID        = 4
 	nvHEVCVUI               = 64 // NV_ENC_CONFIG_HEVC_VUI_PARAMETERS in the HEVC config
 	nvVUISignalPresent      = 8
@@ -85,7 +102,7 @@ const (
 	nvAV1Range              = 80
 	nvLevelAV1Auto          = 24
 	nvTierAV1Main           = 0
-	nvSizeInitializeParams  = 1808
+	nvSizeInitializeParams  = 1800
 	nvIPEncodeGUID          = 4
 	nvIPPresetGUID          = 20
 	nvIPEncodeWidth         = 36
@@ -114,6 +131,8 @@ const (
 	nvLBOutputBitstream     = 8
 	nvLBSize                = 36
 	nvLBDataPtr             = 56
+	nvLBOutputTimeStamp     = 40
+	nvLBPictureType         = 64
 	nvSizePicParams         = 3360
 	nvPPInputWidth          = 4
 	nvPPInputHeight         = 8
@@ -124,6 +143,8 @@ const (
 	nvPPOutputBitstream     = 48
 	nvPPBufferFmt           = 64
 	nvPPPictureStruct       = 68
+	nvPPCodecPicParams      = 80
+	nvPPHEVCViewID          = 108 // in NV_ENC_PIC_PARAMS_HEVC
 
 	nvDeviceTypeCUDA    = 1
 	nvBufferFormatNV12  = 1

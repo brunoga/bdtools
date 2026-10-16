@@ -123,6 +123,11 @@ func TestMVCDefaultsToBuiltin(t *testing.T) {
 	if code != 0 || !strings.Contains(sw, "x264 ") {
 		t.Errorf("MVC with --encoder software should use x264, exit = %d:\n%s", code, sw)
 	}
+	mv, _, code := capture(t, "--dry-run", "--layout", "mvhevc",
+		"--input", "/in/a.iso", "--output", "/out/a.mp4", "--temp", "/tmp/w")
+	if code != 0 || !strings.Contains(mv, "mv-hevc") || !strings.Contains(mv, "8-bit") {
+		t.Errorf("--layout mvhevc should plan an 8-bit NVENC MV-HEVC encode into an MP4, exit = %d:\n%s", code, mv)
+	}
 	cp, _, code := capture(t, "--dry-run", "--layout", "mvc", "--encoder", "copy",
 		"--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
 	if code != 0 || !strings.Contains(cp, "copied") {

@@ -24,6 +24,8 @@ func DetailTags(o Options, audio []Track, height int, picture []string) string {
 		tags = append(tags, "3D HSBS")
 	case o.Layout == LayoutMVC:
 		tags = append(tags, "3D MVC")
+	case o.Layout == LayoutMVHEVC:
+		tags = append(tags, "3D MV-HEVC")
 	default:
 		tags = append(tags, "3D FSBS")
 	}

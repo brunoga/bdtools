@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,11 @@ const (
 	// it, which 3D players decode with it and show frame packed. 1920x1080
 	// per eye; --codec h264, 8-bit.
 	LayoutMVC Layout = "mvc"
+	// LayoutMVHEVC is MV-HEVC in an MP4 (or QuickTime) file: the left eye
+	// an HEVC base layer any player shows in 2D, the right a second layer
+	// predicted from it, with Apple's stereo signalling, for Vision Pro,
+	// iPhones and the Meta Quest. NVENC codes it.
+	LayoutMVHEVC Layout = "mvhevc"
 )
 
 // Options configure a conversion.
@@ -114,6 +120,15 @@ type Options struct {
 	// The decoder stacks the views the other way round, so no filter is
 	// involved and any encoder will do.
 	SwapLR bool
+	// SpatialFOV, SpatialBaseline and SpatialDisparity are what an MV-HEVC
+	// file (--layout mvhevc) says of its stereo pair: the horizontal field
+	// of view of each eye's picture in degrees, the distance between the
+	// cameras in millimetres, and a shift of the views in -1..1 of the
+	// width. Apple's Photos marks a file spatial only with a field of view
+	// and a baseline or disparity.
+	SpatialFOV       float64
+	SpatialBaseline  float64
+	SpatialDisparity float64
 	// AQ is the strength of the built-in encoder's adaptive quantisation
 	// (--layout mvc): each macroblock's quantiser moved by its energy, flat
 	// and dark ones lower, busy ones higher. Off (0) by default: measured
@@ -242,12 +257,14 @@ type Plan struct {
 // platform — the encoder is resolved separately, by what is installed.
 func DefaultOptions() Options {
 	return Options{
-		Layout:      LayoutFullSBS,
-		Encoder:     EncoderAuto,
-		Codec:       CodecH264,
-		CRF:         18,
-		Preset:      "slow",
-		VAAPIDevice: "/dev/dri/renderD128",
+		Layout:          LayoutFullSBS,
+		Encoder:         EncoderAuto,
+		Codec:           CodecH264,
+		CRF:             18,
+		Preset:          "slow",
+		VAAPIDevice:     "/dev/dri/renderD128",
+		SpatialFOV:      90,
+		SpatialBaseline: 63,
 	}
 }
 
@@ -293,11 +310,34 @@ func (o Options) Validate(goos string) error {
 		}
 		return nil
 	}
-	if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".mkv" {
+	if ext := strings.ToLower(filepath.Ext(o.Output)); o.Layout == LayoutMVHEVC && !o.TwoD {
+		if ext != ".mp4" && ext != ".mov" {
+			return fmt.Errorf("--layout mvhevc writes an MP4 or QuickTime file: the output must be a .mp4 or .mov (got %q)", ext)
+		}
+	} else if ext != ".mkv" {
 		return fmt.Errorf("output must be a .mkv (got %q)", ext)
 	}
 	switch o.Layout {
 	case LayoutFullSBS, LayoutHalfSBS:
+	case LayoutMVHEVC:
+		if o.TwoD {
+			break
+		}
+		if o.Codec != CodecH265 {
+			return fmt.Errorf("--layout mvhevc is HEVC (MV-HEVC is its multiview extension): use --codec h265")
+		}
+		if o.Encoder != EncoderNVENC || o.GPUAPI == GPUFFmpeg {
+			return fmt.Errorf("--layout mvhevc is coded by NVENC in process (--encoder nvenc, the default for it): no other encoder here codes MV-HEVC")
+		}
+		if o.Subs3D.threeD() {
+			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: an MV-HEVC file carries none")
+		}
+		if o.SpatialFOV <= 0 || o.SpatialFOV > 360 {
+			return fmt.Errorf("--spatial-fov %g: a horizontal field of view in degrees, up to 360", o.SpatialFOV)
+		}
+		if o.SpatialBaseline < 0 || o.SpatialDisparity < -1 || o.SpatialDisparity > 1 {
+			return errors.New("--spatial-baseline is millimetres, --spatial-disparity -1 to 1")
+		}
 	case LayoutMVC:
 		if o.TwoD {
 			break
@@ -319,7 +359,7 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: with --layout mvc the player places them in 3D itself")
 		}
 	default:
-		return fmt.Errorf("unknown layout %q (want %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutMVC)
+		return fmt.Errorf("unknown layout %q (want %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutMVC, LayoutMVHEVC)
 	}
 	if (o.Encoder == EncoderBuiltin || o.Encoder == EncoderCopy) && (o.Layout != LayoutMVC || o.TwoD) {
 		return fmt.Errorf("--encoder %s codes MVC (--layout mvc) only", o.Encoder)
@@ -517,6 +557,13 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 	p := &Plan{Intermediates: []string{videoOut}}
 	enc := encodeStep(opts, videoOut)
 	switch {
+	case opts.Layout == LayoutMVHEVC && !opts.TwoD:
+		depth := "8-bit"
+		if opts.tenBit() {
+			depth = "10-bit"
+		}
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{"nvenc mv-hevc (the left eye as the base layer, the right predicted from it), " + depth + ", qp",
+			strconv.Itoa(opts.CRF), "->", videoOut}}
 	case opts.Layout == LayoutMVC && !opts.TwoD:
 		left := "x264 " + strings.Join(mvcX264Args(opts), " ")
 		switch opts.Encoder {
