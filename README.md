@@ -174,9 +174,10 @@ needs none. A container with the whole toolchain is published as
 
 ## Probing a source before downloading it
 
-[`probe`](probe) identifies a Blu-ray image or a Matroska file from the little
-a pre-download sample holds — for a torrent, a piece or two — and reports what
-the container states: 2D or 3D and how (MVC, side by side, top-bottom), the
+[`probe`](probe) identifies a Blu-ray image, a Matroska file or an MP4 from the
+little a pre-download sample holds — for a torrent, a piece or two — and reports
+what the container states: 2D or 3D and how (MVC, MV-HEVC, side by side,
+top-bottom), the
 feature's length, and its video, audio and subtitle tracks. It reads no
 video and pulls in nothing of the decoder.
 
@@ -189,6 +190,9 @@ if errors.As(err, &missing) {
 if r.Is3D && r.Layout == probe.LayoutMVC { /* a Blu-ray 3D */ }
 
 r, err = probe.Matroska(prefix, name) // the first 32 KiB or so of an MKV
+
+r, err = probe.MP4(sample, fileSize, name) // an io.ReaderAt, like Image
+if r.Layout == probe.LayoutMVHEVC { /* Apple spatial video: Vision Pro, Quest */ }
 ```
 
 A disc image keeps its UDF directory at the front and its playlists and clip
@@ -199,6 +203,13 @@ sample cannot satisfy is an error naming them, never a panic and never a
 plausible wrong answer. Fields a source does not state are left zero: a
 disc's "multi-channel" audio has no channel count until the probe can read
 the stream's first frames, which it does when the sample holds them.
+
+An MP4 or QuickTime file keeps every track's description in its movie box,
+which a writer puts either before the media data or after it — so it, too, is
+in the first or the last piece, and the media data box between is skipped by
+its size, never read. MV-HEVC is told by the track's layered configuration
+(`lhvC`, beside the base layer's `hvcC`); Apple's `vexu` box, when present,
+confirms both eyes, and a frame-packed track is told by its `st3d` box.
 
 ## H.264/MVC decoder performance
 
@@ -312,4 +323,4 @@ the headers are; `testdata/vaoff.c` generates `vaapi_layout.go`).
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
 | `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |
-| `probe` | identifying a disc image or Matroska file from a pre-download sample |
+| `probe` | identifying a disc image, Matroska file or MP4 from a pre-download sample |

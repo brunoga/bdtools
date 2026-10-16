@@ -5,6 +5,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `probe.MP4` identifies an MP4 or QuickTime file from a sample: tracks,
+  sizes, languages, duration, and whether the video is stereoscopic. MV-HEVC
+  (Apple spatial video) is told by the track's layered configuration, `lhvC`,
+  and reported as the new `LayoutMVHEVC`; Apple's `vexu` box, when present,
+  must name both eyes, and a frame-packed track is told by its `st3d` box.
+  The movie box sits in the file's first or last piece, so the two a disc
+  probe fetches suffice; a read the sample lacks is a `*MissingDataError`
+  naming the bytes, as for a disc. `probe.Path` takes `.mp4`, `.mov` and
+  `.m4v`, and `KindMP4` is new.
+
 ## [0.12.0] - 2026-10-16
 
 ### Added
