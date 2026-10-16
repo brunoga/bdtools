@@ -479,6 +479,13 @@ func (sd *sliceDec) reconstruct(x0, y0, log2Size, ci int, transformSkip bool) {
 // inverseTransform turns scaled coefficients into the residual (8.6.4.2):
 // columns, clipped to 16 bits, then rows.
 func inverseTransform(c []int32, log2Size, depth int, dst bool) {
+	if !dst && inverseTransformFast(c, log2Size, depth) {
+		return
+	}
+	inverseTransformGo(c, log2Size, depth, dst)
+}
+
+func inverseTransformGo(c []int32, log2Size, depth int, dst bool) {
 	n := 1 << log2Size
 	var tmp [32 * 32]int32
 	var col, out [32]int32
