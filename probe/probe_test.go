@@ -345,12 +345,12 @@ func TestStereoModes(t *testing.T) {
 }
 
 func TestPathRefusesOtherFiles(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "x.mp4")
+	p := filepath.Join(t.TempDir(), "x.avi")
 	if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Path(p); err == nil {
-		t.Error("an MP4 must not probe")
+		t.Error("an AVI must not probe")
 	}
 }
 

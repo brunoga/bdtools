@@ -100,4 +100,5 @@ Measurement:
 |---|---|
 | Builtin H.264 for every layout | Wired and tested; not yet competitive (see item 4) |
 | 1. SBS and OU | Done: `--layout ou`/`half-ou` out; side-by-side and over-under sources in (`--input-layout`, Matroska stereo mode) |
-| 2. MP4 and MOV | Next |
+| 2. MP4 and MOV | Done: MP4/MOV sources (MV-HEVC and st3d 3D included), MP4/MOV output for every layout but MVC, burn-in for any MP4 |
+| 3. Audio codecs in Go | Next |

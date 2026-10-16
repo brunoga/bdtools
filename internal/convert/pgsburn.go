@@ -183,13 +183,17 @@ func (b *pgsBurner) at(t time.Duration) pgsEvent {
 }
 
 // draw draws the subtitle showing at t into the eyes, the left shifted
-// right by offset (positive toward the viewer) and the right left.
+// right by offset (positive toward the viewer) and the right left; right
+// nil for a 2D picture.
 func (b *pgsBurner) draw(left, right *gpu.Picture, w, h int, t time.Duration, offset int) {
 	ev := b.at(t)
 	if len(ev.placed) == 0 || ev.pal == nil {
 		return
 	}
 	for i, pic := range []*gpu.Picture{left, right} {
+		if pic == nil {
+			continue
+		}
 		dx := offset
 		if i == 1 {
 			dx = -offset
@@ -256,4 +260,40 @@ func drawObject(pic *gpu.Picture, w, h int, ev pgsEvent, p pgsPlaced, dx int) {
 			}
 		}
 	}
+}
+
+// burnFrame draws the burned-in subtitle (--burn-subs) into an encoder's
+// picture: the whole of a 2D one, or each eye's part of a frame holding
+// both (stereo), which a half layout squeezes.
+func (r *Runner) burnFrame(dst *gpu.Picture, p picture, stereo bool, l Layout) {
+	b := r.burn
+	if b == nil || r.timeline == nil {
+		return
+	}
+	t := r.timeline(p.pts)
+	w, h, _ := p.size()
+	if !stereo {
+		b.draw(dst, nil, w, h, t, 0)
+		return
+	}
+	bps := 1
+	if dst.Depth > 8 {
+		bps = 2
+	}
+	ew, eh := w, h // each eye's part of the frame
+	switch {
+	case l.overUnder() && l.halved():
+		eh = h / 2
+	case !l.overUnder() && l.halved():
+		ew = w / 2
+	}
+	right := *dst
+	if l.overUnder() {
+		right.Y, right.UV = dst.Y[eh*dst.Pitch:], dst.UV[eh/2*dst.Pitch:]
+	} else {
+		right.Y, right.UV = dst.Y[ew*bps:], dst.UV[ew*bps:]
+	}
+	// The offset is in the plane's pixels, scaled with it.
+	off := r.depth.offsetNow(r.burnSeq, t, r.burnFrameDur)
+	b.draw(dst, &right, ew, eh, t, off)
 }

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/mvc"
@@ -202,6 +203,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			} else {
 				r.Report.Report("frame rate %d/%d", num, den)
 			}
+			r.burnFrameDur = time.Duration(int64(time.Second) * int64(den) / int64(num))
 			r.fpsNum, r.fpsDen = num, den
 			prog.begin(num, den, skip)
 		}
@@ -352,9 +354,15 @@ func (s *gpuSink) put(p picture) error {
 		return s.layers.put(p)
 	}
 	if s.r.flat {
-		return s.enc.Encode(func(dst *gpu.Picture) { drawFlat(dst, p) })
+		return s.enc.Encode(func(dst *gpu.Picture) {
+			drawFlat(dst, p)
+			s.r.burnFrame(dst, p, false, "")
+		})
 	}
-	return s.enc.Encode(func(dst *gpu.Picture) { drawFramed(dst, p.stereo, s.r.Opts.SwapLR, s.r.Opts.Layout) })
+	return s.enc.Encode(func(dst *gpu.Picture) {
+		drawFramed(dst, p.stereo, s.r.Opts.SwapLR, s.r.Opts.Layout)
+		s.r.burnFrame(dst, p, true, s.r.Opts.Layout)
+	})
 }
 
 func (s *gpuSink) finish() error {
@@ -401,6 +409,9 @@ type programSink struct {
 }
 
 func (s *programSink) start(path string, first picture, num, den int) error {
+	if s.r.burn != nil {
+		s.r.Report.Report("warning: --burn-subs draws with the encoders in process (builtin, GPU), not %s: no subtitles burned", filepath.Base(s.bin))
+	}
 	o := s.r.Opts
 	o.frameW, o.frameH = s.r.frameSize(first)
 	step := encodeStep(o, path)

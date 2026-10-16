@@ -16,6 +16,7 @@ import (
 	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/esinfo"
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mp4"
 )
 
 // Matroska sources: a Blu-ray 3D remuxed to MKV (MakeMKV, mkvmerge), read in
@@ -25,13 +26,41 @@ import (
 // tracks are written out in the same formats the Blu-ray demuxer writes, so
 // the mux treats them alike, and their names and forced flags are kept.
 
-// isMatroska reports whether a source is a Matroska file.
+// isMatroska reports whether a source is a file the container path reads:
+// Matroska, or MP4 and QuickTime (read as Matroska is, see internal/mp4).
 func isMatroska(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mkv", ".mk3d":
+	case ".mkv", ".mk3d", ".mp4", ".mov", ".m4v":
 		return true
 	}
 	return false
+}
+
+// isMP4 reports whether a source is an MP4 or QuickTime file.
+func isMP4(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mp4", ".mov", ".m4v":
+		return true
+	}
+	return false
+}
+
+// frameReader is a container's frames in file order: a Matroska file's,
+// or an MP4 one's.
+type frameReader interface {
+	Next() (mkv.Packet, error)
+	Track(n uint64) *mkv.ReadTrack
+}
+
+// container is an opened source file: its reader and what it says of
+// itself.
+type container struct {
+	frameReader
+	tracks   []mkv.ReadTrack
+	chapters []time.Duration
+	duration time.Duration
+	// layerParams is an MV-HEVC track's second layer's parameter sets.
+	layerParams map[uint64][]byte
 }
 
 // mkvSource is a Matroska input.
@@ -41,6 +70,10 @@ type mkvSource struct {
 	tracks   []mkv.ReadTrack
 	chapters []time.Duration
 	duration time.Duration
+	// mvhevc says the HEVC track is MV-HEVC, its second layer the right
+	// eye; layerParams are that layer's parameter sets.
+	mvhevc      bool
+	layerParams map[uint64][]byte
 	// dependent is the track number of a separate MVC track, 0 when the
 	// video track carries both views.
 	dependent uint64
@@ -66,17 +99,25 @@ func doviConfig(t mkv.ReadTrack) *dovi.Config {
 	return nil
 }
 
-func openMatroska(path string) (*os.File, *mkv.Reader, error) {
+func openMatroska(path string) (*os.File, *container, error) {
 	f, err := os.Open(path) //nolint:gosec // the operator's input
 	if err != nil {
 		return nil, nil, err
+	}
+	if isMP4(path) {
+		r, err := mp4.NewReader(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+		return f, &container{frameReader: r, tracks: r.Tracks, duration: r.Duration, layerParams: r.LayerParams}, nil
 	}
 	r, err := mkv.NewReader(f)
 	if err != nil {
 		_ = f.Close()
 		return nil, nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	return f, r, nil
+	return f, &container{frameReader: r, tracks: r.Tracks, chapters: r.Chapters, duration: r.Duration}, nil
 }
 
 // mkvProbeFrames is how many frames per track the probe looks at: enough
@@ -91,12 +132,12 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 	}
 	defer func() { _ = f.Close() }()
 	src := &mkvSource{path: path, name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
-		tracks: r.Tracks, chapters: r.Chapters, duration: r.Duration}
+		tracks: r.tracks, chapters: r.chapters, duration: r.duration, layerParams: r.layerParams}
 
 	samples := map[uint64][]byte{}
 	counts := map[uint64]int{}
 	wanted := 0
-	for _, t := range r.Tracks {
+	for _, t := range r.tracks {
 		if t.Type == mkv.TypeVideo || t.Type == mkv.TypeAudio {
 			wanted++
 		}
@@ -132,7 +173,7 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		}
 	}
 
-	for _, t := range r.Tracks {
+	for _, t := range r.tracks {
 		if t.Type == mkv.TypeVideo && src.rateNum == 0 {
 			src.rateNum, src.rateDen = rateFromDuration(t.DefaultDuration)
 			if src.rateNum == 0 {
@@ -141,7 +182,7 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		}
 	}
 	var tracks []Track
-	for _, t := range r.Tracks {
+	for _, t := range r.tracks {
 		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced} //nolint:gosec // track numbers are small
 		if t.Type == mkv.TypeVideo {
 			tr.Height, tr.Width, tr.StereoMode = t.Height, t.Width, t.StereoMode
@@ -174,6 +215,16 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 				if c.EL {
 					tr.Info += " with an enhancement layer"
 				}
+			}
+			if len(r.layerParams[t.Number]) > 0 {
+				// MV-HEVC: the second layer, in the same track, is the
+				// dependent view.
+				src.mvhevc = true
+				tracks = append(tracks, tr)
+				dep := tr
+				dep.Type, dep.StreamID, dep.Info = "MV-HEVC", streamMVHEVC, "the second view, a layer of the HEVC track"
+				tracks = append(tracks, dep)
+				continue
 			}
 		case "V_MPEG4/ISO/MVC":
 			// A separate dependent-view track, paired by timestamp.
@@ -441,7 +492,7 @@ type mkvDemux struct {
 	report  Reporter
 	tmp     string
 	f       *os.File
-	r       *mkv.Reader
+	r       *container
 	video   uint64
 	nalSize int
 	raw     bool   // the video is framed by start codes (VC-1, MPEG-2): its blocks go as they are
@@ -478,6 +529,9 @@ func (g *mkvDemux) start() error {
 	if t := r.Track(g.video); t != nil {
 		g.nalSize = videoNALSize(t)
 		g.params = videoParams(t)
+		if lp := g.src.layerParams[t.Number]; len(lp) > 0 && g.src.mvhevc {
+			g.params = append(g.params, lp...)
+		}
 		switch {
 		case isVC1(t):
 			g.raw, g.params, g.seqCode = true, vc1Headers(t), 0x0f
@@ -566,7 +620,7 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 				return au, d, pts, nil
 			}
 			g.noteDepth(au, p.Time)
-			if hasSlice(au, false) {
+			if hasSlice(au, false) && !g.src.mvhevc {
 				g.aus++
 				if !hasNAL(au, 20) {
 					g.noDep++

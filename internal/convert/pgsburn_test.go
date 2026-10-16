@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // feedSet gives a display set to a burner, segment by segment, at pts.
@@ -68,6 +69,39 @@ func TestBurnSubtitles(t *testing.T) {
 		b.draw(l2, r2, w, h, 2500*time.Millisecond, off)
 		if luma(l2, x+off, y) != 0 || luma(r2, x-off, y) != 0 {
 			t.Errorf("%d-bit: still drawn after the set that clears it", depth)
+		}
+	}
+}
+
+// A subtitle burned into a frame holding both eyes lands in each eye's
+// part: the right half of a side-by-side frame, the lower half of an
+// over-under one, squeezed with a half layout.
+func TestBurnFrameEyes(t *testing.T) {
+	const x, y, ow, oh = 900, 950, 40, 10
+	pix := make([]byte, ow*oh)
+	for i := range pix {
+		pix[i] = 1
+	}
+	for _, tc := range []struct {
+		layout         Layout
+		fw, fh         int
+		lx, ly, rx, ry int
+	}{
+		{LayoutFullSBS, 3840, 1080, x, y, 1920 + x, y},
+		{LayoutHalfSBS, 1920, 1080, x / 2, y, 960 + x/2, y},
+		{LayoutFullOU, 1920, 2160, x, y, x, 1080 + y},
+		{LayoutHalfOU, 1920, 1080, x, y / 2, x, 540 + y/2},
+	} {
+		r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
+		r.burn = newPGSBurner()
+		feedSet(r.burn, 0, displaySet(x, y, ow, oh, pix))
+		r.timeline = func(pts int64) time.Duration { return time.Second }
+		dst := &gpu.Picture{Y: make([]byte, tc.fw*tc.fh), UV: make([]byte, tc.fw*tc.fh/2), Pitch: tc.fw, Depth: 8}
+		eye := testFrame(1920, 1080, 0)
+		r.burnFrame(dst, picture{stereo: &mvc.StereoFrame{Base: eye, Dependent: eye}}, true, tc.layout)
+		if dst.Y[tc.ly*tc.fw+tc.lx] != 235 || dst.Y[tc.ry*tc.fw+tc.rx] != 235 {
+			t.Errorf("%s: left eye %d at (%d,%d), right eye %d at (%d,%d), want 235", tc.layout,
+				dst.Y[tc.ly*tc.fw+tc.lx], tc.lx, tc.ly, dst.Y[tc.ry*tc.fw+tc.rx], tc.rx, tc.ry)
 		}
 	}
 }
