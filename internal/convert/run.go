@@ -104,8 +104,9 @@ type Runner struct {
 	offsetSequence func(Track) int
 	// burn draws the subtitle track --burn-subs names into the picture,
 	// at offset sequence burnSeq.
-	burn    *pgsBurner
-	burnSeq int
+	burn         *pgsBurner
+	burnSeq      int
+	burnFrameDur time.Duration // a picture's, for the depth map
 	// framedIn is how a 2D-coded source's frame holds both eyes (a framed
 	// layout), framedSwap that the right eye comes first.
 	framedIn   Layout
@@ -298,6 +299,14 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	cpu := func() pictureSource {
 		return newMVCPictures(mvc.Source{Format: mvc.FormatAccessUnits, AccessUnits: next}, r.Opts.DecodeThreads, r.Report)
 	}
+	if !r.flat && r.Selected.Dependent.StreamID == streamMVHEVC {
+		r.Report.Report("decoding MV-HEVC here, both views")
+		return &mvhevcPictures{next: next, threads: r.Opts.DecodeThreads, colour: func(c gpu.ColorInfo) {
+			if c.Primaries != 2 || c.Transfer != 2 || c.Matrix != 2 {
+				r.colour, r.Opts.Color = &c, &c
+			}
+		}}, nil
+	}
 	if !r.flat && r.framedIn == "" {
 		return cpu(), nil
 	}
@@ -418,7 +427,7 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 	if r.Opts.BurnSubs == 0 {
 		return nil
 	}
-	if r.flat {
+	if r.flat && !isMP4Output(r.Opts.Output) {
 		r.Report.Report("2D: --burn-subs does not apply; the subtitles are kept as they are")
 		return nil
 	}
@@ -468,7 +477,7 @@ func (r *Runner) check2D() {
 // the source is: nothing is extracted.
 func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
 	if unsupportedContainer(r.Opts.Input) {
-		return nil, fmt.Errorf("cannot read %s: the source must be a Blu-ray or a Matroska remux of one", filepath.Base(r.Opts.Input))
+		return nil, fmt.Errorf("cannot read %s: the source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file", filepath.Base(r.Opts.Input))
 	}
 	if isMatroska(r.Opts.Input) {
 		_, tracks, err := probeMatroska(ctx, r.Opts.Input)

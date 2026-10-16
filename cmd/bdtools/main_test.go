@@ -171,7 +171,7 @@ func TestInvalidOptionsExitTwo(t *testing.T) {
 	cases := [][]string{
 		{"--dry-run", "--encoder", "x264", "--output", "/out/a.mkv"},                         // no input
 		{"--dry-run", "--encoder", "x264", "--input", "/in/a.iso"},                           // no output
-		{"--dry-run", "--encoder", "x264", "--input", "/in/a.iso", "--output", "/out/a.mp4"}, // not mkv
+		{"--dry-run", "--encoder", "x264", "--input", "/in/a.iso", "--output", "/out/a.avi"}, // not a container written
 		{"--dry-run", "--encoder", "x264", "--input", "/in/a.iso", "--output", "/out/a.mkv", "--crf", "99"},
 		{"--dry-run", "--encoder", "x264", "--input", "/in/a.iso", "--output", "/out/a.mkv", "--layout", "sbs"},
 		{"--encoder", "nonsense"},
@@ -210,7 +210,7 @@ func TestRemovedFlagsAreRefused(t *testing.T) {
 
 // A container nothing here reads is refused up front, by name.
 func TestUnsupportedSourceIsRefused(t *testing.T) {
-	_, errOut, code := capture(t, "--dry-run", "--encoder", "x264", "--input", "/in/film.mp4", "--output", "/out/a.mkv")
+	_, errOut, code := capture(t, "--dry-run", "--encoder", "x264", "--input", "/in/film.vob", "--output", "/out/a.mkv")
 	if code != 2 || !strings.Contains(errOut, "Blu-ray") {
 		t.Errorf("exit %d, stderr %q", code, errOut)
 	}
@@ -236,7 +236,7 @@ func TestCheckForABuiltinRemux(t *testing.T) {
 // The help starts with a banner naming the tool and its version.
 func TestHelpHasABanner(t *testing.T) {
 	_, errOut, _ := capture(t, "-h")
-	if !strings.HasPrefix(errOut, "bdtools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "side by side") {
+	if !strings.HasPrefix(errOut, "bdtools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "3D or 2D") {
 		t.Errorf("help starts %q", strings.SplitN(errOut, "\n", 2)[0])
 	}
 }

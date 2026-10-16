@@ -14,6 +14,21 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   half) converts as a 3D source, to any 3D output or to 2D (the left
   eye). A Matroska file's stereo mode says so; `--input-layout` says it
   for the rest, or (`2d`) takes the frame as one picture.
+- MP4 and QuickTime sources (`.mp4`, `.mov`, `.m4v`), read in Go: H.264,
+  HEVC and AV1 video, AC-3, E-AC-3 and PCM audio, edit lists kept. An
+  MV-HEVC file (Apple spatial video) is a 3D source, both views decoded
+  here; a side-by-side or over-under one (st3d) is too.
+- `probe.MP4` identifies an MP4 or QuickTime file from a sample: its
+  tracks, sizes, languages and duration, and whether it is 3D: MV-HEVC
+  (`LayoutMVHEVC`, unless Apple's `vexu` names one eye) or a frame holding
+  both eyes (`st3d`). The movie box is at the file's start or end, so the
+  first and last pieces of a download suffice; a read the sample lacks is
+  a `*MissingDataError`. `probe.Path` takes `.mp4`, `.mov` and `.m4v`;
+  `KindMP4` is new.
+- MP4 and QuickTime output for every layout but MVC: H.264 (avc1), HEVC
+  and AV1 (av01), a frame holding both eyes flagged (st3d) and shaped as
+  in Matroska. `--burn-subs` draws a subtitle track into any MP4 output,
+  in each eye's part of a 3D frame.
 - `--encoder builtin` codes H.264 (8-bit) for every layout, not only
   MVC, and is the default for H.264 when no GPU encoder works and x264
   is missing.

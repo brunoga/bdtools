@@ -24,7 +24,7 @@ import (
 // track, the DTS of DTS-HD) is left out unless --keep-fallback asks for it,
 // in which case it is its own track beside the main one.
 func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra, chapters []time.Duration) error {
-	if !r.flat && r.Opts.Layout == LayoutMVHEVC {
+	if isMP4Output(r.Opts.Output) {
 		return r.muxMP4(ctx, video, extras)
 	}
 	num, den := r.fpsNum, r.fpsDen

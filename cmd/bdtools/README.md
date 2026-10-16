@@ -15,8 +15,11 @@ Turns Blu-rays into files any player handles:
   just the tracks you want.
 
 It reads `.iso` images and BDMV folders in place (no mounting, no
-extraction), playlists, `.m2ts`/`.ssif` streams, AVCHD 3D recordings and
-Matroska remuxes (MakeMKV's, mkvmerge's), and picks the feature itself. The
+extraction), playlists, `.m2ts`/`.ssif` streams, AVCHD 3D recordings,
+Matroska remuxes (MakeMKV's, mkvmerge's) and MP4 and QuickTime files
+(MV-HEVC spatial video and side-by-side or over-under 3D included), and
+picks the feature itself. It writes Matroska, or MP4 and QuickTime
+(`.mp4`, `.mov`) for every layout but MVC. The
 demuxer, the decoders (H.264/MVC, HEVC, MPEG-2 and VC-1, all in Go), the
 Dolby Vision processing and the Matroska muxer are built in; a GPU decodes
 and encodes in process through its own system library (NVIDIA, Intel, AMD,
@@ -332,7 +335,7 @@ scheduler such as pipeliner retry it.
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
 | `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size), `ou` (1080p per eye over-under, the left on top), `half-ou` (540p per eye over-under), `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) — or `mvhevc` (MV-HEVC in an .mp4 or .mov, for Apple devices and the Meta Quest) — see [MV-HEVC output](#mv-hevc-output) |
 | `--input-layout` | `auto` | how a 2D-coded source's frame holds a 3D pair: `auto` (as a Matroska file's stereo mode says), `2d` (one picture), `full` or `half` (side by side), `ou` or `half-ou` (over-under). A framed source converts like a disc's two views, to any 3D layout or, with `--2d`, to its left eye |
-| `--burn-subs` | none | `--layout mvhevc`: a subtitle track (its id, as `--list` shows it) drawn into both eyes at the disc's depth, as the file carries no subtitle track |
+| `--burn-subs` | none | an MP4 or QuickTime output (MV-HEVC included), which carries no subtitle track: a subtitle track (its id, as `--list` shows it) drawn into both eyes at the disc's depth, as the file carries no subtitle track |
 | `--spatial-fov`, `--spatial-baseline`, `--spatial-disparity` | `90`, `63`, `0` | `--layout mvhevc`: what the file says of its stereo pair (degrees of horizontal field of view per eye; millimetres between the cameras; a shift of the views in -1..1 of the width). Apple's Photos marks a file spatial only with a field of view and a baseline or disparity |
 | `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the encoders here, H.264 (8-bit, MVC included) and HEVC (MV-HEVC included) (no tools; `--crf` N codes at QP N-5, which matched x265 medium's CRF N in size and PSNR; the default when no GPU encoder works and x265 is missing), or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
 | `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |

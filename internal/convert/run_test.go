@@ -22,6 +22,7 @@ import (
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/hevc"
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/internal/mp4"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -1498,6 +1499,192 @@ func TestRunnerTakesFramedSources(t *testing.T) {
 			}
 			if v := track(o.Output); v.Width != tc.w || v.Height != tc.h || v.StereoMode != tc.stereo {
 				t.Errorf("video %dx%d stereo mode %d, want %dx%d mode %d\n%s", v.Width, v.Height, v.StereoMode, tc.w, tc.h, tc.stereo, strings.Join(lines, "\n"))
+			}
+		})
+	}
+}
+
+// An MP4 or QuickTime file is a source like a Matroska one: its video,
+// its AC-3 and PCM audio, into an MKV.
+func TestRunnerConvertsMP4Sources(t *testing.T) {
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to make the sources")
+	}
+	for _, tc := range []struct {
+		name, ext string
+		audio     []string
+		codec     string
+	}{
+		{"mp4-ac3", ".mp4", []string{"-c:a", "ac3"}, "A_AC3"},
+		{"mov-pcm", ".mov", []string{"-c:a", "pcm_s16be"}, "A_PCM/INT/LIT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			work := t.TempDir()
+			src := filepath.Join(work, "Source"+tc.ext)
+			args := append([]string{"-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2", "-f", "lavfi", "-i", "sine=f=440:r=48000:d=2",
+				"-ac", "2", "-c:v", "libx264"}, tc.audio...)
+			if out, err := exec.CommandContext(context.Background(), ff, append(args, src)...).CombinedOutput(); err != nil { //nolint:gosec // test
+				t.Skipf("making the source: %v %s", err, out)
+			}
+			out := filepath.Join(work, "Out.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = src, out, filepath.Join(work, "t")
+			o.Encoder, o.Codec, o.BitDepth, o.CRF = EncoderBuiltin, CodecH265, 8, 26
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			f, err := os.Open(out) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+			rd, err := mkv.NewReader(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rd.Tracks) != 2 || rd.Tracks[0].Width != 320 || rd.Tracks[1].CodecID != tc.codec {
+				t.Fatalf("tracks %+v\n%s", rd.Tracks, strings.Join(lines, "\n"))
+			}
+			frames := 0
+			for {
+				p, err := rd.Next()
+				if err != nil {
+					break
+				}
+				if p.Track == rd.Tracks[0].Number {
+					frames++
+				}
+			}
+			if frames != 48 {
+				t.Errorf("%d pictures, want 48", frames)
+			}
+		})
+	}
+}
+
+// An MV-HEVC file (Apple spatial video, or this program's own) is a 3D
+// source: both views decode here and come out side by side, or as
+// MV-HEVC again.
+func TestRunnerConvertsMVHEVCSources(t *testing.T) {
+	work := t.TempDir()
+	src := filepath.Join(work, "Spatial.mp4")
+	vf, err := os.Open("../mkv/testdata/mvhevc.hevc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = vf.Close() }()
+	v, err := mkv.NewVideoSource(vf, mkv.HEVC, 24000, 1001, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	of, err := os.Create(src) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = mp4.Mux(of, []mkv.Source{v}, mp4.Options{FPSNum: 24000, FPSDen: 1001, Spatial: &mp4.Spatial{FOV: 90}})
+	if cerr := of.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		layout Layout
+		out    string
+	}{{LayoutFullSBS, "SBS.mkv"}, {LayoutMVHEVC, "Again.mp4"}} {
+		t.Run(string(tc.layout), func(t *testing.T) {
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = src, filepath.Join(work, tc.out), filepath.Join(work, "t"+tc.out)
+			o.Encoder, o.Codec, o.Layout, o.BitDepth, o.CRF = EncoderBuiltin, CodecH265, tc.layout, 8, 24
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			if tc.layout == LayoutMVHEVC {
+				f, err := os.Open(o.Output) //nolint:gosec // test
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = f.Close() }()
+				r, err := mp4.NewReader(f)
+				if err != nil || len(r.LayerParams[r.Tracks[0].Number]) == 0 {
+					t.Fatalf("no MV-HEVC out (%v)", err)
+				}
+				return
+			}
+			f, err := os.Open(o.Output) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+			rd, err := mkv.NewReader(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n := 0
+			for {
+				p, err := rd.Next()
+				if err != nil {
+					break
+				}
+				if p.Track == rd.Tracks[0].Number {
+					n++
+				}
+			}
+			if v := rd.Tracks[0]; v.Width != 1280 || v.Height != 368 || n != 24 {
+				t.Errorf("video %dx%d, %d pictures; want 1280x368, 24\n%s", v.Width, v.Height, n, strings.Join(lines, "\n"))
+			}
+		})
+	}
+}
+
+// Every layout writes MP4 and QuickTime too: HEVC side by side into an
+// .mp4, H.264 over-under into a .mov, each flagged (st3d) and shaped as
+// in Matroska, the AC-3 track with it, and ffmpeg decodes them.
+func TestRunnerWritesMP4(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		codec        Codec
+		layout       Layout
+		out          string
+		codecID      string
+		w, h, stereo int
+		dw, dh       int
+	}{
+		{"hevc-sbs", CodecH265, LayoutFullSBS, "SBS.mp4", "V_MPEGH/ISO/HEVC", 1280, 480, 1, 1280, 960},
+		{"h264-ou", CodecH264, LayoutFullOU, "OU.mov", "V_MPEG4/ISO/AVC", 640, 960, 3, 1280, 960},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			work := t.TempDir()
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = mvcMatroska(t), filepath.Join(work, tc.out), filepath.Join(work, "t")
+			o.Encoder, o.Codec, o.Layout, o.BitDepth, o.CRF = EncoderBuiltin, tc.codec, tc.layout, 8, 24
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			f, err := os.Open(o.Output) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+			r, err := mp4.NewReader(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := r.Tracks[0]
+			if v.CodecID != tc.codecID || v.Width != tc.w || v.Height != tc.h || v.StereoMode != tc.stereo ||
+				v.DisplayWidth != tc.dw || v.DisplayHeight != tc.dh {
+				t.Errorf("video %s %dx%d (shown %dx%d) stereo %d; want %s %dx%d (%dx%d) %d", v.CodecID, v.Width, v.Height,
+					v.DisplayWidth, v.DisplayHeight, v.StereoMode, tc.codecID, tc.w, tc.h, tc.dw, tc.dh, tc.stereo)
+			}
+			if ff, err := LookPath("ffmpeg"); err == nil {
+				cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-i", o.Output, "-f", "null", "-") //nolint:gosec // test
+				if msg, err := cmd.CombinedOutput(); err != nil || len(msg) > 0 {
+					t.Errorf("ffmpeg: %v %s", err, msg)
+				}
 			}
 		})
 	}

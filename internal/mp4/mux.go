@@ -219,6 +219,12 @@ func (tr *track) lead() int64 {
 }
 
 func (tr *track) videoSample(data []byte) ([]byte, error) {
+	switch tr.t.CodecID {
+	case "V_AV1":
+		return data, nil // OBUs, as MP4 has them
+	case "V_MPEG4/ISO/AVC":
+		return avcSample(data)
+	}
 	out := make([]byte, 0, len(data))
 	for len(data) >= 4 {
 		l := int(binary.BigEndian.Uint32(data))
@@ -375,6 +381,9 @@ func (m *muxer) trak(id int, tr *track) ([]byte, int64, error) {
 	volume := 0
 	if tr.video() {
 		width, height = tr.t.Width, tr.t.Height
+		if tr.t.DisplayWidth > 0 && tr.t.DisplayHeight > 0 {
+			width, height = tr.t.DisplayWidth, tr.t.DisplayHeight
+		}
 	} else {
 		volume = 0x0100
 	}
@@ -505,6 +514,12 @@ func (m *muxer) stbl(tr *track) ([]byte, error) {
 // sampleEntry builds the track's sample description.
 func (m *muxer) sampleEntry(tr *track) ([]byte, error) {
 	if tr.video() {
+		switch tr.t.CodecID {
+		case "V_MPEG4/ISO/AVC":
+			return m.visualEntry(tr, "avc1", "avcC")
+		case "V_AV1":
+			return m.visualEntry(tr, "av01", "av1C")
+		}
 		return m.hvc1(tr)
 	}
 	switch tr.t.CodecID {
@@ -514,6 +529,47 @@ func (m *muxer) sampleEntry(tr *track) ([]byte, error) {
 		return m.ac3(tr, true)
 	}
 	return nil, fmt.Errorf("mp4: audio %s is not written (AC-3 and E-AC-3 are)", tr.t.CodecID)
+}
+
+// visualEntry writes an H.264 (avc1) or AV1 (av01) sample entry: the
+// track's configuration record as Matroska's codec private data has it,
+// the colour, square samples and, for a frame holding both eyes, its
+// layout (Google's st3d: over-under or side by side).
+func (m *muxer) visualEntry(tr *track, typ, config string) ([]byte, error) {
+	if len(tr.t.CodecPrivate) == 0 {
+		return nil, fmt.Errorf("mp4: no %s decoder configuration", typ)
+	}
+	entry := bytes.Join([][]byte{
+		make([]byte, 6), u16(1),
+		u16(0), u16(0), make([]byte, 12),
+		u16(tr.t.Width), u16(tr.t.Height),
+		u32(0x00480000), u32(0x00480000), u32(0), u16(1),
+		make([]byte, 32),
+		u16(0x0018), u16(0xffff),
+		box(config, tr.t.CodecPrivate),
+	}, nil)
+	entry = append(entry, m.common(tr)...)
+	return box(typ, entry), nil
+}
+
+// common is the boxes every video sample entry ends with: colour, pixel
+// aspect, and a frame-packed layout.
+func (m *muxer) common(tr *track) []byte {
+	var out []byte
+	if c := tr.t.Colour; c != nil {
+		rng := byte(0)
+		if c.FullRange {
+			rng = 0x80
+		}
+		out = append(out, box("colr", []byte("nclx"), u16(c.Primaries), u16(c.Transfer), u16(c.Matrix), []byte{rng})...)
+	}
+	out = append(out, box("pasp", u32(1), u32(1))...)
+	// Matroska's 1 (side by side) and 3 (over-under), the left eye first,
+	// as st3d's 2 (left-right) and 1 (top-bottom).
+	if mode := map[int]byte{1: 2, 3: 1}[tr.t.StereoMode]; mode != 0 {
+		out = append(out, fullBox("st3d", 0, 0, []byte{mode})...)
+	}
+	return out
 }
 
 func (m *muxer) hvc1(tr *track) ([]byte, error) {
@@ -549,14 +605,7 @@ func (m *muxer) hvc1(tr *track) ([]byte, error) {
 	if stereo {
 		entry = append(entry, box("lhvC", m.lhvC(hvcC, tr.layer1))...)
 	}
-	if c := tr.t.Colour; c != nil {
-		rng := byte(0)
-		if c.FullRange {
-			rng = 0x80
-		}
-		entry = append(entry, box("colr", []byte("nclx"), u16(c.Primaries), u16(c.Transfer), u16(c.Matrix), []byte{rng})...)
-	}
-	entry = append(entry, box("pasp", u32(1), u32(1))...)
+	entry = append(entry, m.common(tr)...)
 	if stereo {
 		entry = append(entry, m.vexu()...)
 	}
@@ -701,4 +750,24 @@ func (r *bitReader) u(n int) uint32 {
 		r.pos++
 	}
 	return v
+}
+
+// avcSample is an H.264 frame without its in-band parameter sets, which
+// the avcC carries.
+func avcSample(data []byte) ([]byte, error) {
+	out := make([]byte, 0, len(data))
+	for len(data) >= 4 {
+		l := int(binary.BigEndian.Uint32(data))
+		if l < 1 || 4+l > len(data) {
+			return nil, errors.New("mp4: a video frame's NAL unit length is wrong")
+		}
+		nal := data[4 : 4+l]
+		data = data[4+l:]
+		if t := nal[0] & 0x1f; t == 7 || t == 8 || t == 13 {
+			continue
+		}
+		out = binary.BigEndian.AppendUint32(out, uint32(l)) //nolint:gosec // a NAL unit length
+		out = append(out, nal...)
+	}
+	return out, nil
 }

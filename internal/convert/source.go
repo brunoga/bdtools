@@ -66,7 +66,7 @@ const streamDVEL = "V_DOLBYVISION/EL"
 // all.
 func (t Track) Kind() Kind {
 	switch {
-	case t.StreamID == "V_MPEG4/ISO/MVC":
+	case t.StreamID == "V_MPEG4/ISO/MVC", t.StreamID == streamMVHEVC:
 		return KindDependentView
 	case t.StreamID == streamDVEL:
 		return KindEnhancement

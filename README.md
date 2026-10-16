@@ -43,7 +43,7 @@ their own. See [what works where](cmd/bdtools/README.md#what-works-where).
 
 The H.264/MVC decoder is usable on its own as a library (below), and
 `mvcdec` decodes a stream to raw YUV or Y4M. [`probe`](probe) identifies a
-disc image or MKV from a pre-download sample.
+disc image, an MKV or an MP4 from a pre-download sample.
 
 ## Build
 
@@ -174,9 +174,10 @@ needs none. A container with the whole toolchain is published as
 
 ## Probing a source before downloading it
 
-[`probe`](probe) identifies a Blu-ray image or a Matroska file from the little
-a pre-download sample holds — for a torrent, a piece or two — and reports what
-the container states: 2D or 3D and how (MVC, side by side, top-bottom), the
+[`probe`](probe) identifies a Blu-ray image, a Matroska file or an MP4 or
+QuickTime file from the little a pre-download sample holds — for a torrent, a
+piece or two — and reports what the container states: 2D or 3D and how (MVC,
+MV-HEVC, side by side, top-bottom), the
 feature's length, and its video, audio and subtitle tracks. It reads no
 video and pulls in nothing of the decoder.
 
@@ -189,6 +190,9 @@ if errors.As(err, &missing) {
 if r.Is3D && r.Layout == probe.LayoutMVC { /* a Blu-ray 3D */ }
 
 r, err = probe.Matroska(prefix, name) // the first 32 KiB or so of an MKV
+
+r, err = probe.MP4(sample, fileSize, name) // an io.ReaderAt: the movie box is at the start or the end
+if r.Is3D && r.Layout == probe.LayoutMVHEVC { /* Apple spatial video */ }
 ```
 
 A disc image keeps its UDF directory at the front and its playlists and clip
@@ -312,4 +316,4 @@ the headers are; `testdata/vaoff.c` generates `vaapi_layout.go`).
 | `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
 | `internal/esinfo` | audio and video stream headers, for track listings |
 | `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |
-| `probe` | identifying a disc image or Matroska file from a pre-download sample |
+| `probe` | identifying a disc image, a Matroska file or an MP4 or QuickTime file from a pre-download sample |

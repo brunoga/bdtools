@@ -38,9 +38,37 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		return err
 	}
 	defer closeVideo()
-	v, err := mkv.NewVideoSource(vr, mkv.HEVC, num, den, 0)
+	mvhevc := !r.flat && r.Opts.Layout == LayoutMVHEVC
+	codec := mkv.HEVC
+	switch r.Opts.Codec {
+	case CodecH264:
+		codec = mkv.H264
+	case CodecAV1:
+		codec = mkv.AV1
+	}
+	stereo := 0
+	if !r.flat && r.Opts.Layout.framed() {
+		stereo = 1 // side by side, left eye first
+		if r.Opts.Layout.overUnder() {
+			stereo = 3
+		}
+	}
+	v, err := mkv.NewVideoSource(vr, codec, num, den, stereo)
 	if err != nil {
 		return fmt.Errorf("muxing: %w", err)
+	}
+	// Each eye 16:9 from square pixels, as in Matroska.
+	switch t := v.Track(); {
+	case stereo == 0:
+	case r.Opts.Layout.halved():
+		v.SetDisplaySize(t.Width, t.Height)
+	case r.Opts.Layout.overUnder():
+		v.SetDisplaySize(2*t.Width, t.Height)
+	default:
+		v.SetDisplaySize(t.Width, 2*t.Height)
+	}
+	if r.dovi != nil || r.Opts.DVFEL.layered() {
+		r.Report.Report("warning: an MP4 file here carries no Dolby Vision: the HDR10 base layer alone")
 	}
 	r.carryHDR(v)
 	if r.videoDelay > 0 {
@@ -97,9 +125,9 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 	}
 	if subs > 0 {
 		if r.burn != nil {
-			r.Report.Report("leaving out %d subtitle track(s): an MV-HEVC file carries none here (track %d is drawn into the picture)", subs, r.Opts.BurnSubs)
+			r.Report.Report("leaving out %d subtitle track(s): an MP4 file carries none here (track %d is drawn into the picture)", subs, r.Opts.BurnSubs)
 		} else {
-			r.Report.Report("leaving out %d subtitle track(s): an MV-HEVC file carries none here (--burn-subs draws one into the picture)", subs)
+			r.Report.Report("leaving out %d subtitle track(s): an MP4 file carries none here", subs)
 		}
 	}
 	r.Report.Report("muxing %s", r.Opts.Output)
@@ -109,11 +137,11 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		return err
 	}
 	o := r.Opts
-	err = mp4.Mux(out, sources, mp4.Options{
-		FPSNum: num, FPSDen: den,
-		Spatial:   &mp4.Spatial{FOV: o.SpatialFOV, Baseline: o.SpatialBaseline, Disparity: o.SpatialDisparity},
-		QuickTime: strings.ToLower(filepath.Ext(o.Output)) == ".mov",
-	})
+	mo := mp4.Options{FPSNum: num, FPSDen: den, QuickTime: strings.ToLower(filepath.Ext(o.Output)) == ".mov"}
+	if mvhevc {
+		mo.Spatial = &mp4.Spatial{FOV: o.SpatialFOV, Baseline: o.SpatialBaseline, Disparity: o.SpatialDisparity}
+	}
+	err = mp4.Mux(out, sources, mo)
 	if cerr := out.Close(); err == nil {
 		err = cerr
 	}
@@ -125,4 +153,13 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		return fmt.Errorf("muxing: %w", err)
 	}
 	return os.Rename(tmp, r.Opts.Output)
+}
+
+// isMP4Output reports whether the output is an MP4 or QuickTime file.
+func isMP4Output(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mp4", ".mov", ".m4v":
+		return true
+	}
+	return false
 }

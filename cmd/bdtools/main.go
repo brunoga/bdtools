@@ -88,7 +88,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc or software); or drop it (the HDR10 base layer as it is)")
 		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf plus 12)")
 		inLayout = fs.String("input-layout", "auto", "how a 2D-coded source's frame holds a 3D pair: auto (as a Matroska file says), 2d (one picture), full or half (side by side), ou or half-ou (over-under, the left eye on top)")
-		burnSubs = fs.Int("burn-subs", 0, "--layout mvhevc: draw this subtitle track (its id, as --list shows it) into both eyes at the disc's depth; an MV-HEVC file carries no subtitle track")
+		burnSubs = fs.Int("burn-subs", 0, "an MP4 or QuickTime output (which carries no subtitle track): draw this subtitle track (its id, as --list shows it) into both eyes at the disc's depth; an MV-HEVC file carries no subtitle track")
 		subs3D   = fs.String("subs-3d", "both", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
@@ -96,8 +96,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 		showVer  = fs.Bool("version", false, "print the version and exit")
 	)
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "bdtools %s — Blu-ray to MKV: 3D side by side, or 2D\n\n", pversion.Resolve(version))
-		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] [--remux] --input SRC --output DST.mkv (or .m2ts for an MVC --remux)\n\n"+
+		fmt.Fprintf(stderr, "bdtools %s — Blu-ray (or MKV, MP4, MOV) to MKV or MP4: 3D or 2D\n\n", pversion.Resolve(version))
+		fmt.Fprintf(stderr, "usage: bdtools [--check] [--dry-run] [--remux] --input SRC --output DST.mkv (.mp4, .mov; .m2ts for an MVC --remux)\n\n"+
 			"Converts a Blu-ray into an MKV: a 3D (MVC) source side by side, so an\n"+
 			"ordinary decoder can play it, or a 2D one (Ultra HD included, HDR10,\n"+
 			"HDR10+ and Dolby Vision kept) as it is, with the tracks you choose;\n"+

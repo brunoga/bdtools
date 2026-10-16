@@ -250,7 +250,7 @@ func (s Subs3D) threeD() bool { return s == Subs3DOn || s == Subs3DBoth }
 // is a DVD's, which is never 3D.
 func unsupportedContainer(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp4", ".m4v", ".mov", ".vob":
+	case ".vob":
 		return true
 	}
 	return false
@@ -314,7 +314,7 @@ func (o Options) Validate(goos string) error {
 	}
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
-			"a playlist or an m2ts) or a Matroska remux of one", filepath.Base(o.Input))
+			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
 	}
 	if o.Remux {
 		// MVC has no home in Matroska that players agree on, so a 3D remux
@@ -341,12 +341,17 @@ func (o Options) Validate(goos string) error {
 		}
 		return nil
 	}
-	if ext := strings.ToLower(filepath.Ext(o.Output)); o.Layout == LayoutMVHEVC && !o.TwoD {
+	switch ext := strings.ToLower(filepath.Ext(o.Output)); {
+	case o.Layout == LayoutMVHEVC && !o.TwoD:
 		if ext != ".mp4" && ext != ".mov" {
 			return fmt.Errorf("--layout mvhevc writes an MP4 or QuickTime file: the output must be a .mp4 or .mov (got %q)", ext)
 		}
-	} else if ext != ".mkv" {
-		return fmt.Errorf("output must be a .mkv (got %q)", ext)
+	case o.Layout == LayoutMVC && !o.TwoD:
+		if ext != ".mkv" {
+			return fmt.Errorf("--layout mvc writes Matroska: the output must be a .mkv (got %q)", ext)
+		}
+	case ext != ".mkv" && ext != ".mp4" && ext != ".mov":
+		return fmt.Errorf("output must be a .mkv, .mp4 or .mov (got %q)", ext)
 	}
 	switch o.Layout {
 	case LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU:
@@ -392,7 +397,7 @@ func (o Options) Validate(goos string) error {
 	default:
 		return fmt.Errorf("unknown layout %q (want %q, %q, %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU, LayoutMVC, LayoutMVHEVC)
 	}
-	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) {
+	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) && !isMP4Output(o.Output) {
 		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture (--layout mvhevc): the other outputs carry subtitle tracks")
 	}
 	if o.Encoder == EncoderCopy && (o.Layout != LayoutMVC || o.TwoD) {
