@@ -32,10 +32,6 @@ const (
 // toAC3 transcodes the track e (of format DTS or WAV) to an AC-3 file
 // beside it, returning the file and its sync points.
 func (r *Runner) toAC3(ctx context.Context, e extra, format mkv.AudioFormat) (string, []mkv.SyncPoint, error) {
-	ff, err := r.resolve(toolFFmpeg)
-	if err != nil {
-		return "", nil, errors.New("ffmpeg transcodes it to AC-3, and it is not installed")
-	}
 	// Where the source's frames start, in samples counted over the file,
 	// and when they play: a point at the start and at every jump.
 	f, err := os.Open(e.path) //nolint:gosec // our work directory
@@ -81,24 +77,23 @@ func (r *Runner) toAC3(ctx context.Context, e extra, format mkv.AudioFormat) (st
 		return "", nil, errors.New("no audio")
 	}
 	out := strings.TrimSuffix(e.path, filepath.Ext(e.path)) + ".ac3"
-	kbps := "640k"
-	args := []string{"-v", "error", "-nostdin", "-y", "-i", e.path}
-	if channels > 6 {
-		args = append(args, "-ac", "6")
+	var bits, delay int
+	if format == mkv.WAV {
+		// PCM: the encoder here.
+		bits, delay, err = pcmToAC3(e.path, out)
+		if err == nil {
+			r.Report.Report("coding the %s track %d as AC-3 here (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
+		}
 	}
-	if channels <= 2 {
-		kbps = "320k"
-	}
-	args = append(args, "-ar", strconv.Itoa(ac3Rate), "-c:a", "ac3", "-b:a", kbps, "-f", "ac3", out)
-	cmd := exec.CommandContext(ctx, ff, args...) //nolint:gosec // our ffmpeg, our files
-	if msg, err := cmd.CombinedOutput(); err != nil {
-		return "", nil, fmt.Errorf("ffmpeg: %v %s", err, strings.TrimSpace(string(msg)))
+	if format != mkv.WAV || err != nil {
+		if bits, delay, err = r.ffmpegAC3(ctx, e, channels, out); err != nil {
+			return "", nil, err
+		}
 	}
 	st, err := os.Stat(out)
 	if err != nil {
 		return "", nil, err
 	}
-	bits, _ := strconv.Atoi(strings.TrimSuffix(kbps, "k"))
 	size := int64(bits) * 1000 * ac3Frame / ac3Rate / 8 // bytes a frame at the constant rate
 	frames := st.Size() / size
 	// A sync point for each frame where the source's timeline moves on
@@ -107,7 +102,7 @@ func (r *Runner) toAC3(ctx context.Context, e extra, format mkv.AudioFormat) (st
 	m := -1
 	for k := range frames {
 		// The frame's first sample, in the source's samples.
-		s := (k*ac3Frame - ac3Delay) * int64(rate) / ac3Rate
+		s := (k*ac3Frame - int64(delay)) * int64(rate) / ac3Rate
 		mi := m
 		for mi+1 < len(marks) && marks[mi+1].sample <= s {
 			mi++
@@ -122,4 +117,28 @@ func (r *Runner) toAC3(ctx context.Context, e extra, format mkv.AudioFormat) (st
 		}
 	}
 	return out, sync, nil
+}
+
+// ffmpegAC3 codes the track with ffmpeg (DTS, and PCM the encoder here
+// does not take), giving the AC-3 rate in kb/s and the coded delay.
+func (r *Runner) ffmpegAC3(ctx context.Context, e extra, channels int, out string) (kbps, delay int, err error) {
+	ff, err := r.resolve(toolFFmpeg)
+	if err != nil {
+		return 0, 0, errors.New("ffmpeg transcodes it to AC-3, and it is not installed")
+	}
+	kbps = 640
+	args := []string{"-v", "error", "-nostdin", "-y", "-i", e.path}
+	if channels > 6 {
+		args = append(args, "-ac", "6")
+	}
+	if channels <= 2 {
+		kbps = 320
+	}
+	args = append(args, "-ar", strconv.Itoa(ac3Rate), "-c:a", "ac3", "-b:a", fmt.Sprint(kbps, "k"), "-f", "ac3", out)
+	cmd := exec.CommandContext(ctx, ff, args...) //nolint:gosec // our ffmpeg, our files
+	if msg, err := cmd.CombinedOutput(); err != nil {
+		return 0, 0, fmt.Errorf("ffmpeg: %v %s", err, strings.TrimSpace(string(msg)))
+	}
+	r.Report.Report("coding the %s track %d as AC-3 with ffmpeg (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
+	return kbps, ac3Delay, nil
 }

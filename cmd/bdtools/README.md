@@ -393,8 +393,9 @@ under half of the left, against nearly as much for NVENC's. The output is 8-bit 
 Quest's players decode 10-bit MV-HEVC slowly or not at all, and iPhone
 recordings are 8-bit.
 The audio tracks go in as AC-3 or E-AC-3: a TrueHD track contributes its
-AC-3 core, and ffmpeg codes a DTS or PCM track as AC-3 (5.1 at most, 640
-kb/s), in step with the picture as the disc has it. The file carries no
+AC-3 core, a PCM track is coded as AC-3 here (5.1 at most, 640 kb/s;
+7.1 folded down, 96 and 192 kHz brought to 48), and ffmpeg codes a DTS
+one, all in step with the picture as the disc has it. The file carries no
 subtitle track, as its players show text and a Blu-ray's are pictures:
 `--burn-subs ID` draws one subtitle track into both eyes, at the depth
 the disc gives it. The file states the disc's colour signalling, and BT.709 (a

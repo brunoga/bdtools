@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -17,9 +18,6 @@ import (
 // and its gap move to the AC-3 frames that hold those samples (less the
 // encoder's delay), and the AC-3 decodes.
 func TestPCMToAC3KeepsTheTimeline(t *testing.T) {
-	if _, err := LookPath("ffmpeg"); err != nil {
-		t.Skip("no ffmpeg")
-	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "track.wav")
 	const rate, secs = 48000, 2
@@ -121,5 +119,77 @@ func TestDTSToAC3(t *testing.T) {
 	}
 	if tr := a.Track(); tr.Channels != 6 {
 		t.Errorf("%d channels, want 6", tr.Channels)
+	}
+}
+
+// goertzel is the power of frequency hz in x (at 48 kHz).
+func goertzel(x []float64, hz float64) float64 {
+	w := 2 * math.Pi * hz / 48000
+	c := 2 * math.Cos(w)
+	var s1, s2 float64
+	for _, v := range x {
+		s1, s2 = v+c*s1-s2, s1
+	}
+	return (s1*s1 + s2*s2 - c*s1*s2) / float64(len(x)*len(x))
+}
+
+// 7.1 PCM at 96 kHz codes as 5.1 at 48: each channel's tone where it
+// belongs, the sides and backs both in the surrounds.
+func TestPCM71At96kHz(t *testing.T) {
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to decode with")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "71.wav")
+	// FL FR FC LFE BL BR SL SR
+	freqs := []float64{440, 660, 880, 50, 1100, 1320, 1540, 1760}
+	const rate, n = 96000, 96000
+	data := make([]byte, 0, n*8*3)
+	for i := range n {
+		for _, f := range freqs {
+			v := int32(0.25 * math.Sin(2*math.Pi*f*float64(i)/rate) * (1 << 23))
+			data = append(data, byte(v), byte(v>>8), byte(v>>16))
+		}
+	}
+	hdr := wavHeader(8, rate, 24, wavMask(8, true), uint32(len(data))) //nolint:gosec // small
+	if err := os.WriteFile(path, append(hdr, data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "71.ac3")
+	kbps, delay, err := pcmToAC3(path, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kbps != 640 || delay <= 256 {
+		t.Errorf("%d kb/s, delay %d", kbps, delay)
+	}
+	pcm, err := exec.CommandContext(t.Context(), ff, "-v", "error", "-err_detect", "crccheck", "-i", out, "-f", "f64le", "-c:a", "pcm_f64le", "-").Output() //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ffmpeg's 5.1: L R C LFE Ls Rs.
+	ch := make([][]float64, 6)
+	for i := 0; i+48 <= len(pcm); i += 48 {
+		for c := range 6 {
+			ch[c] = append(ch[c], math.Float64frombits(binary.LittleEndian.Uint64(pcm[i+8*c:])))
+		}
+	}
+	want := [][]float64{{440}, {660}, {880}, {50}, {1100, 1540}, {1320, 1760}}
+	for c, fs := range want {
+		x := ch[c][4800 : len(ch[c])-4800]
+		for _, f := range fs {
+			if p := goertzel(x, f); p < 1e-4 {
+				t.Errorf("channel %d: no %g Hz (power %g)", c, f, p)
+			}
+		}
+		for _, other := range freqs {
+			if slices.Contains(fs, other) || c == 3 {
+				continue
+			}
+			if p := goertzel(x, other); p > 1e-5 {
+				t.Errorf("channel %d: %g Hz leaks in (power %g)", c, other, p)
+			}
+		}
 	}
 }
