@@ -5,10 +5,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-16
+
 ### Added
 
 - `--encoder builtin` codes HEVC (`--codec h265`) with the encoder in this
-  program: every layout but MV-HEVC and Dolby Vision's kept layers, 8 or
+  program: every layout but Dolby Vision's kept layers, 8 or
   10 bits, no x265 or GPU needed. `--crf` N codes at QP N-5, which matched
   x265 medium's CRF N in size and PSNR on a film minute. It is the
   automatic choice for HEVC when no GPU encoder works and x265 is
@@ -603,7 +605,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/brunoga/bdtools/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/brunoga/bdtools/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/brunoga/bdtools/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/brunoga/bdtools/compare/v0.8.6...v0.9.0
