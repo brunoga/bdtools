@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-16
+
 ### Added
 
 - `--layout mvhevc` writes MV-HEVC in an MP4 or QuickTime file for Apple
@@ -550,7 +552,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/brunoga/bdtools/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/brunoga/bdtools/compare/v0.8.6...v0.9.0
 [0.8.6]: https://github.com/brunoga/bdtools/compare/v0.8.5...v0.8.6
 [0.8.5]: https://github.com/brunoga/bdtools/compare/v0.8.4...v0.8.5
