@@ -51,7 +51,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	case !r.flat && r.Opts.Layout == LayoutMVHEVC:
 		sink = &mvhevcSink{r: r}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (MV-HEVC: both eyes on NVENC, the right predicted from the left)")
+		on := "NVENC"
+		if r.Opts.Encoder == EncoderBuiltin {
+			on = "the built-in encoder"
+		}
+		r.Report.Report("decoding and encoding (MV-HEVC: both eyes on " + on + ", the right predicted from the left)")
 	case !r.flat && r.Opts.Layout == LayoutMVC:
 		s := &mvcSink{r: r, ctx: ctx}
 		switch r.Opts.Encoder {
@@ -78,6 +82,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		} else {
 			r.Report.Report("decoding and encoding (MVC: the left eye with %s, the right eye here)", r.Opts.Encoder)
 		}
+	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecH265:
+		sink = &gpuSink{r: r, open: openBuiltinHEVC}
+		verb = "encoded"
+		r.Report.Report("decoding and encoding (h265, the encoder here, in process)")
 	case r.Opts.NativeGPU:
 		k, _ := hwKind(r.Opts.Encoder)
 		sink = &gpuSink{r: r, kind: k}

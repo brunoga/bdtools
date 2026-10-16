@@ -63,7 +63,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		spBase   = fs.Float64("spatial-baseline", 63, "--layout mvhevc: the distance between the two cameras, in millimetres, as the file states it (Apple's Photos marks a file spatial only with it or a disparity)")
 		spDisp   = fs.Float64("spatial-disparity", 0, "--layout mvhevc: a shift of the two views, -1 to 1 of the picture's width (0: none)")
 		aq       = fs.Float64("aq", 0, "the built-in encoder's adaptive quantisation strength (--layout mvc): each macroblock's quantiser moved by its energy, flat and dark ones lower; 0 (the default) leaves every macroblock at the picture's")
-		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye side by side), half (960p per eye, ~half the size), mvhevc (MV-HEVC in an .mp4 or .mov for Apple devices and the Meta Quest, coded by NVENC) or mvc (Blu-ray 3D's format: an H.264 left eye any player shows in 2D, with the right eye as a second view that 3D players frame pack; --codec h264, x264 for the left eye)")
+		layout   = fs.String("layout", string(convert.LayoutFullSBS), "full (1080p per eye side by side), half (960p per eye, ~half the size), mvhevc (MV-HEVC in an .mp4 or .mov for Apple devices and the Meta Quest, coded by NVENC or, without it, the encoder here) or mvc (Blu-ray 3D's format: an H.264 left eye any player shows in 2D, with the right eye as a second view that 3D players frame pack; --codec h264, x264 for the left eye)")
 		encoder  = fs.String("encoder", string(convert.EncoderAuto), "auto, software, vaapi, videotoolbox, nvenc, mediafoundation (Windows; also mf), builtin (the H.264 encoder here, for --layout mvc) or copy (--layout mvc: the source's left eye as it is, only the right eye coded)")
 		codec    = fs.String("codec", string(convert.CodecH265), "output video codec: h265 (HDR10, HDR10+ and Dolby Vision kept; what home theatre players play), h264 (plays anywhere, 8-bit, larger) or av1 (smaller again, newest decoders)")
 		crf      = fs.Int("crf", 0, "quality target, 0-51; lower is better (not comparable between codecs); default: by the source, 20 for 3D, 18 for Ultra HD, 16 for HD")
@@ -87,6 +87,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
 		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc or software); or drop it (the HDR10 base layer as it is)")
 		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf plus 12)")
+		burnSubs = fs.Int("burn-subs", 0, "--layout mvhevc: draw this subtitle track (its id, as --list shows it) into both eyes at the disc's depth; an MV-HEVC file carries no subtitle track")
 		subs3D   = fs.String("subs-3d", "both", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
 		keepTemp = fs.Bool("keep-temp", false, "leave the work directory's files behind instead of deleting them")
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
@@ -167,7 +168,12 @@ func run(argv []string, stdout, stderr *os.File) int {
 		enc = convert.EncoderBuiltin
 	}
 	if enc == convert.EncoderAuto && convert.Layout(*layout) == convert.LayoutMVHEVC {
-		enc = convert.EncoderNVENC // the one encoder here that codes MV-HEVC
+		// The two encoders that code MV-HEVC: NVENC, much the faster, when
+		// it works here, else the encoder in this program.
+		enc = convert.EncoderBuiltin
+		if convert.ProbeNative(convert.EncoderNVENC, convert.CodecH265, 8, *vaapi) {
+			enc = convert.EncoderNVENC
+		}
 	}
 	if enc == convert.EncoderAuto {
 		// An encoder for the depth the run will settle on: 10 bits by
@@ -204,6 +210,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		}
 	}
 	o.Subs3D = convert.Subs3D(*subs3D)
+	o.BurnSubs = *burnSubs
 	if (*remux || o.Layout == convert.LayoutMVC || o.Layout == convert.LayoutMVHEVC) && !given["subs-3d"] {
 		// A remux keeps the disc's own; MVC's 3D player places them; an
 		// MV-HEVC file carries none.

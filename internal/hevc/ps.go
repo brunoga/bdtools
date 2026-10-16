@@ -23,6 +23,8 @@ type scalingList struct {
 
 type sps struct {
 	id            int
+	layer         int // nuh_layer_id
+	vpsID         int
 	profile       int // general_profile_idc
 	chromaFormat  int
 	sepColour     bool
@@ -345,32 +347,64 @@ func parseSTRPS(r *bits, sets []stRPS, idx int, inSlice bool) (stRPS, error) {
 	return s, nil
 }
 
-func (d *Decoder) parseSPS(r *bits) error {
-	s := &sps{primaries: 2, transfer: 2, matrix: 2}
-	r.skip(4) // sps_video_parameter_set_id
+func (d *Decoder) parseSPS(r *bits, layer int) error {
+	s := &sps{primaries: 2, transfer: 2, matrix: 2, layer: layer}
+	vpsID := r.u(4)
+	s.vpsID = vpsID
 	maxSub := r.u(3)
-	r.skip(1)
-	s.profile = parseProfileTierLevel(r, maxSub)
+	// A second layer's SPS can take its format and buffer sizes from the
+	// VPS (MultiLayerExtSpsFlag, F.7.3.2.2.1).
+	multi := layer != 0 && maxSub == 7
+	var v *vpsInfo
+	li := 0
+	if layer != 0 {
+		if v = d.vps[vpsID]; v == nil {
+			return errStream
+		}
+		if li = v.layerIdx(layer); li < 0 {
+			return errStream
+		}
+	}
+	if multi {
+		maxSub = v.maxSub
+	} else {
+		r.skip(1)
+		s.profile = parseProfileTierLevel(r, maxSub)
+	}
 	s.id = r.ue()
 	if s.id > 15 {
 		return errStream
 	}
-	s.chromaFormat = r.ue()
-	if s.chromaFormat == 3 {
-		s.sepColour = r.flag()
+	if multi {
+		ri := v.repIdx[li]
+		if r.flag() { // update_rep_format_flag
+			ri = r.u(8)
+		}
+		if ri >= len(v.reps) {
+			return errStream
+		}
+		f := &v.reps[ri]
+		s.chromaFormat, s.sepColour = f.chromaFormat, f.sepColour
+		s.width, s.height, s.confWin = f.width, f.height, f.confWin
+		s.bitDepth, s.bitDepthC = f.bitDepth, f.bitDepthC
+	} else {
+		s.chromaFormat = r.ue()
+		if s.chromaFormat == 3 {
+			s.sepColour = r.flag()
+		}
+		s.width = r.ue()
+		s.height = r.ue()
+		if r.flag() {
+			for i := range 4 {
+				s.confWin[i] = r.ue() * 2 // SubWidthC, SubHeightC: 2 for 4:2:0
+			}
+		}
+		s.bitDepth = r.ue() + 8
+		s.bitDepthC = r.ue() + 8
 	}
 	if s.chromaFormat != 1 {
 		return unsupported("a chroma format other than 4:2:0")
 	}
-	s.width = r.ue()
-	s.height = r.ue()
-	if r.flag() {
-		for i := range 4 {
-			s.confWin[i] = r.ue() * 2 // SubWidthC, SubHeightC: 2 for 4:2:0
-		}
-	}
-	s.bitDepth = r.ue() + 8
-	s.bitDepthC = r.ue() + 8
 	if s.bitDepth > 12 || s.bitDepthC > 12 {
 		return unsupported("a bit depth above 12")
 	}
@@ -378,10 +412,17 @@ func (d *Decoder) parseSPS(r *bits) error {
 	if s.log2MaxPOCLsb > 16 {
 		return errStream
 	}
-	subOrdering := r.flag()
+	subOrdering := !multi && r.flag()
 	first := maxSub
 	if subOrdering {
 		first = 0
+	}
+	if multi {
+		first = maxSub + 1 // none: the VPS's
+		s.maxDecPicBuf, s.maxReorder, s.maxLatency = v.maxDecPicBuf[li], v.maxReorder[li], v.maxLatency[li]
+		if s.maxDecPicBuf == 0 {
+			s.maxDecPicBuf, s.maxReorder = 16, 15
+		}
 	}
 	for i := first; i <= maxSub; i++ {
 		s.maxDecPicBuf = r.ue() + 1
@@ -404,6 +445,9 @@ func (d *Decoder) parseSPS(r *bits) error {
 	s.scalingListEnabled = r.flag()
 	if s.scalingListEnabled {
 		s.scaling = defaultScaling()
+		if multi && r.flag() { // sps_infer_scaling_list_flag
+			return unsupported("a scaling list inferred from another layer")
+		}
 		if r.flag() {
 			if err := parseScalingList(r, &s.scaling); err != nil {
 				return err

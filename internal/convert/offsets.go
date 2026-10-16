@@ -3,6 +3,7 @@ package convert
 import (
 	"bytes"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -195,6 +196,9 @@ func parseOFMD(p []byte) (offsetGOP, bool) {
 
 // depthMap is a title's offset metadata on the output's timeline.
 type depthMap struct {
+	// mu guards the map read while it grows (subtitles burned into the
+	// picture read it as the demuxer adds to it).
+	mu    sync.Mutex
 	frame time.Duration // one frame
 	gops  []depthGOP
 }
@@ -206,7 +210,26 @@ type depthGOP struct {
 
 // add records a GOP's offsets, its first frame at at.
 func (m *depthMap) add(at time.Duration, g offsetGOP) {
+	m.mu.Lock()
 	m.gops = append(m.gops, depthGOP{at, g.offsets})
+	m.mu.Unlock()
+}
+
+// offsetNow is offset while the map grows: sorted on the way, at a frame
+// of frame.
+func (m *depthMap) offsetNow(seq int, t, frame time.Duration) int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.frame <= 0 {
+		m.frame = frame
+	}
+	if !sort.SliceIsSorted(m.gops, func(i, j int) bool { return m.gops[i].at < m.gops[j].at }) {
+		sort.SliceStable(m.gops, func(i, j int) bool { return m.gops[i].at < m.gops[j].at })
+	}
+	return m.offsetLocked(seq, t)
 }
 
 // frontMost, as a sequence, is the one nearest the viewer at each frame:
@@ -217,6 +240,15 @@ const frontMost = -2
 // viewer: the frame showing at t, or the GOP's last when t is past it (a
 // gap in the metadata). Zero where nothing says.
 func (m *depthMap) offset(seq int, t time.Duration) int {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.offsetLocked(seq, t)
+}
+
+func (m *depthMap) offsetLocked(seq int, t time.Duration) int {
 	if m == nil || seq < 0 && seq != frontMost || len(m.gops) == 0 || m.frame <= 0 {
 		return 0
 	}
@@ -246,6 +278,8 @@ func (m *depthMap) offset(seq int, t time.Duration) int {
 
 // sort orders the GOPs by time, as they may arrive out of order.
 func (m *depthMap) sort() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	sort.SliceStable(m.gops, func(i, j int) bool { return m.gops[i].at < m.gops[j].at })
 }
 

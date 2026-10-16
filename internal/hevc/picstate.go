@@ -31,8 +31,11 @@ type saoParams struct {
 // reference lists.
 type refState struct {
 	stCurrBefore, stCurrAfter, ltCurr []*picture
-	refList                           [2][]*picture
-	refIsLT                           [2][]bool
+	// interLayer is the base layer's picture of the access unit when the
+	// second layer's picture predicts from it (RefPicSetInterLayer0).
+	interLayer *picture
+	refList    [2][]*picture
+	refIsLT    [2][]bool
 }
 
 // picState is what decoding a picture keeps: per-block information for

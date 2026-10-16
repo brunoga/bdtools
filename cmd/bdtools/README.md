@@ -331,8 +331,9 @@ scheduler such as pipeliner retry it.
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
 | `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
 | `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size), `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) — or `mvhevc` (MV-HEVC in an .mp4 or .mov, for Apple devices and the Meta Quest) — see [MV-HEVC output](#mv-hevc-output) |
+| `--burn-subs` | none | `--layout mvhevc`: a subtitle track (its id, as `--list` shows it) drawn into both eyes at the disc's depth, as the file carries no subtitle track |
 | `--spatial-fov`, `--spatial-baseline`, `--spatial-disparity` | `90`, `63`, `0` | `--layout mvhevc`: what the file says of its stereo pair (degrees of horizontal field of view per eye; millimetres between the cameras; a shift of the views in -1..1 of the width). Apple's Photos marks a file spatial only with a field of view and a baseline or disparity |
-| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the H.264 encoder here, for `--layout mvc`, or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
+| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the encoders here, H.264 for `--layout mvc` and HEVC for `--codec h265` and `--layout mvhevc` (no tools; `--crf` N codes at QP N-5, which matched x265 medium's CRF N in size and PSNR; the default when no GPU encoder works and x265 is missing), or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
 | `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
@@ -378,14 +379,21 @@ a `.mov` output): the left eye as an HEVC base layer any player shows in
 signalling Apple's players and the Meta Quest read (`vexu` and `hfov` in
 the sample entry, the layered configuration `lhvC` beside `hvcC`, both
 layers in every sample, as Apple's HEVC Stereo Video profile asks). NVENC
-codes it in process, so it needs an NVIDIA GPU; `--crf` is NVENC's
-constant quality as for the other layouts. The output is 8-bit unless
+codes it in process when it works here (an NVIDIA GPU of the RTX 50
+series), and the HEVC encoder in this program otherwise
+(`--encoder builtin`, which works anywhere). `--crf` is NVENC's constant
+quality as for the other layouts; the encoder here codes at QP `--crf`-5,
+about six times slower than NVENC but much smaller: its right eye costs
+under half of the left, against nearly as much for NVENC's. The output is 8-bit unless
 `--bit-depth 10` asks for Main 10: Apple devices take either, but the
 Quest's players decode 10-bit MV-HEVC slowly or not at all, and iPhone
 recordings are 8-bit.
-The audio tracks go in as AC-3 or E-AC-3 (a TrueHD track contributes its
-AC-3 core; DTS and PCM tracks are left out for now), and subtitles are
-left out. The file states the disc's colour signalling, and BT.709 (a
+The audio tracks go in as AC-3 or E-AC-3: a TrueHD track contributes its
+AC-3 core, and ffmpeg codes a DTS or PCM track as AC-3 (5.1 at most, 640
+kb/s), in step with the picture as the disc has it. The file carries no
+subtitle track, as its players show text and a Blu-ray's are pictures:
+`--burn-subs ID` draws one subtitle track into both eyes, at the depth
+the disc gives it. The file states the disc's colour signalling, and BT.709 (a
 Blu-ray's HD colour) for an HD disc whose stream states none, in the
 stream and in a `colr` box, as Apple's players go by what the file says.
 Verify a file with `ffmpeg -view_ids 1 -i file.mp4 ...` (ffmpeg

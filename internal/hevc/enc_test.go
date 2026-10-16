@@ -120,9 +120,12 @@ func TestEncoderRoundTrip(t *testing.T) {
 	}{{"8bit-intra", 8, 1, 0, 4}, {"10bit-intra", 10, 1, 0, 4}, {"8bit-P", 8, 0, 0, 4}, {"10bit-P", 10, 0, 0, 4},
 		{"8bit-B", 8, 0, 3, 7}, {"10bit-B", 10, 6, 3, 9},
 		// Partial groups at keyframes and at the end, in deep hierarchies.
-		{"8bit-B7-tail", 8, 11, 7, 21}, {"8bit-B1-tail", 8, 5, 1, 12}} {
+		{"8bit-B7-tail", 8, 11, 7, 21}, {"8bit-B1-tail", 8, 5, 1, 12}, {"10bit-cropped", 10, 0, 3, 6}} {
 		t.Run(tc.name, func(t *testing.T) {
-			const w, h = 200, 136
+			w, h := 200, 136
+			if tc.name == "10bit-cropped" {
+				w, h = 202, 130 // not multiples of 8: a conformance window
+			}
 			depth, frames := tc.depth, tc.frames
 			o := EncoderOptions{Width: w, Height: h, BitDepth: depth, QP: 27, FPSNum: 25, FPSDen: 1, Keyint: tc.keyint, BFrames: tc.bframes}
 			// With the loop filter off everywhere (the encoder's decoder
@@ -346,39 +349,6 @@ func TestForwardTransformFast(t *testing.T) {
 }
 
 // The fast quantiser is the Go one.
-func TestQuantFast(t *testing.T) {
-	seed := uint32(9)
-	for _, depth := range []int{8, 10} {
-		for qp := 0; qp <= 51+6*(depth-8); qp += 3 {
-			for log2 := 2; log2 <= 5; log2++ {
-				for _, intra := range []bool{false, true} {
-					q := newQuantizer(qp, log2, depth, intra)
-					n := 1 << (2 * log2)
-					a := make([]int32, n)
-					for i := range a {
-						seed = seed*1664525 + 1013904223
-						a[i] = int32(seed>>14)%100000 - 50000 //nolint:gosec // in range
-					}
-					b := append([]int32(nil), a...)
-					nzGo := q.quantizeGo(a)
-					nz, ok := quantFast(&q, b)
-					if !ok {
-						continue
-					}
-					if nz != nzGo {
-						t.Fatalf("qp %d %dx%d: %d levels, want %d", qp, 1<<log2, 1<<log2, nz, nzGo)
-					}
-					for i := range a {
-						if a[i] != b[i] {
-							t.Fatalf("qp %d %dx%d: level %d = %d, want %d", qp, 1<<log2, 1<<log2, i, b[i], a[i])
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
 // The fast inverse transform is the Go one, bit for bit.
 func TestInverseTransformFast(t *testing.T) {
 	seed := uint32(11)
@@ -443,5 +413,33 @@ func TestPlaneBands(t *testing.T) {
 		}
 		a.release()
 		b.release()
+	}
+}
+
+// The SAO edge statistics kernel is the Go one.
+func TestSAOEOFast(t *testing.T) {
+	seed := uint32(13)
+	rnd := func() uint16 {
+		seed = seed*1664525 + 1013904223
+		return uint16(seed >> 16)
+	}
+	const stride = 80
+	for _, depth := range []int{8, 10} {
+		rec := make([]uint16, stride*72)
+		src := make([]uint16, stride*72)
+		for i := range rec {
+			rec[i] = rnd() & uint16(1<<depth-1) & 0xfff8 // runs of equal samples too
+			src[i] = rnd() & uint16(1<<depth-1)
+		}
+		for _, w := range []int{15, 16, 31, 63} {
+			for _, off := range [][2]int{{-1, 1}, {-stride, stride}, {-stride - 1, stride + 1}, {-stride + 1, stride - 1}} {
+				var s1, c1, s2, c2 [4]int64
+				saoEO(rec, stride+1, stride, src, stride+1, stride, w, 63, off[0], off[1], &s1, &c1)
+				saoEOGo(rec, stride+1, stride, src, stride+1, stride, w, 63, off[0], off[1], &s2, &c2)
+				if s1 != s2 || c1 != c2 {
+					t.Fatalf("%d-bit w %d offsets %v: %v %v, want %v %v", depth, w, off, s1, c1, s2, c2)
+				}
+			}
+		}
 	}
 }

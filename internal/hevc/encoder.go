@@ -70,8 +70,9 @@ type Encoder struct {
 	// emit takes the jobs the planner makes, in decoding order: submit,
 	// or a dry run's list.
 	emit func(*picJob)
-	// lastOut is the frame the verification's decoder gave out last.
-	lastOut int
+	// lastOut is the frame the verification's decoder gave out last, by
+	// layer.
+	lastOut [2]int
 }
 
 // gopPicture is a picture waiting to be coded.
@@ -81,7 +82,14 @@ type gopPicture struct {
 	poc   int
 	idr   bool
 	level int // 0 an anchor, deeper B pictures higher
+	// layer is 1 for the second view's picture, which twin is of a base
+	// layer picture.
+	layer int
+	twin  *gopPicture
 }
+
+// key is a picture's in the encoder's maps: its frame and layer.
+func (p *gopPicture) key() int { return p.frame<<1 | p.layer }
 
 // picJob is a picture planned: what it predicts from and how, then its
 // access unit and its decoded picture.
@@ -96,6 +104,9 @@ type picJob struct {
 	pic    *picture  // the reconstruction, loop filtered as its rows end
 	planes refPlanes // its fractional planes, for the pictures predicted from it
 	sum    uint32    // its checksum, once coded
+	// ilr is the index in refs[0] of the inter-layer reference (the base
+	// layer's picture of a second view's), -1 for none.
+	ilr int
 }
 
 const (
@@ -162,6 +173,9 @@ type EncoderOptions struct {
 	// and the first level of B pictures code (each deeper level one more);
 	// 0 picks 4 and 8, the cascade x265 uses, which measured best.
 	QPOffsetP, QPOffsetB int
+	// Views is 2 for MV-HEVC: EncodeStereo takes the left view, coded as
+	// the base layer, and the right, a second layer predicted from it.
+	Views int
 	// Primaries, Transfer and Matrix are the colour description the
 	// stream states (H.273); 0 or 2 for unspecified.
 	Primaries, Transfer, Matrix int
@@ -176,8 +190,8 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.BitDepth != 8 && o.BitDepth != 10 {
 		return nil, fmt.Errorf("hevc: bit depth %d: want 8 or 10", o.BitDepth)
 	}
-	if o.Width <= 0 || o.Height <= 0 || o.Width%8 != 0 || o.Height%8 != 0 {
-		return nil, fmt.Errorf("hevc: picture size %dx%d: want multiples of 8", o.Width, o.Height)
+	if o.Width <= 0 || o.Height <= 0 || o.Width%2 != 0 || o.Height%2 != 0 {
+		return nil, fmt.Errorf("hevc: picture size %dx%d: want even dimensions", o.Width, o.Height)
 	}
 	if o.QP < 0 || o.QP > 51 {
 		return nil, fmt.Errorf("hevc: QP %d: want 0..51", o.QP)
@@ -217,7 +231,13 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		}
 		return v
 	}
-	e := &Encoder{o: o, byFrame: map[int]*picJob{}, lastOut: -1}
+	if o.Views == 0 {
+		o.Views = 1
+	}
+	if o.Views != 1 && o.Views != 2 {
+		return nil, fmt.Errorf("hevc: %d views: want 1 or 2", o.Views)
+	}
+	e := &Encoder{o: o, byFrame: map[int]*picJob{}, lastOut: [2]int{-1, -1}}
 	e.cond = sync.NewCond(&e.mu)
 	e.emit = e.submit
 	dpb, reorder := planDPB(o)
@@ -225,14 +245,17 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		return nil, fmt.Errorf("hevc: %d B pictures and %d references need %d pictures of decoded picture buffer: at most 16", o.BFrames, o.Refs, dpb)
 	}
 	e.c = encParams{
-		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
+		// The coded size is a multiple of 8 (the minimum CU), the
+		// conformance window cropping the padding.
+		width: (o.Width + 7) &^ 7, height: (o.Height + 7) &^ 7, bitDepth: o.BitDepth,
+		cropRight: (o.Width+7)&^7 - o.Width, cropBottom: (o.Height+7)&^7 - o.Height,
 		fpsNum: o.FPSNum, fpsDen: o.FPSDen,
 		primaries: cp(o.Primaries), transfer: cp(o.Transfer), matrix: cp(o.Matrix), fullRange: o.FullRange,
 		log2Ctb: 6, log2MinCb: 3, log2MinTb: 2, log2MaxTb: 5,
 		maxTrDepthIntra: 1, maxTrDepthInter: 1,
 		maxDecPicBuf: dpb, maxReorder: reorder, log2MaxPOCLsb: 8,
-		tmvp: true, strongIntra: true, wpp: true,
-		initQP: 26,
+		tmvp: true, strongIntra: true, wpp: true, signHiding: true, sao: true,
+		initQP: 26, views: o.Views,
 	}
 	var err error
 	if e.s, e.p, err = e.c.parameterSets(); err != nil {
@@ -240,6 +263,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	}
 	e.hdr = e.c.headers()
 	e.dec = New()
+	e.dec.SetLayers(o.Views)
 	if !o.NoVerify {
 		e.want = map[int]uint32{}
 		e.verifyQ = make(chan verifyItem, 1024)
@@ -252,9 +276,11 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	return e, nil
 }
 
-// buffer takes a copy of the source into a buffer of the encoder's.
+// buffer takes a copy of the source into a buffer of the encoder's, of
+// the coded size, its edges repeated into the padding.
 func (e *Encoder) buffer(src *Source) *Source {
-	w, h := e.o.Width, e.o.Height
+	w, h := e.s.width, e.s.height
+	ow, oh := e.o.Width, e.o.Height
 	var b *Source
 	e.mu.Lock()
 	if n := len(e.pool); n > 0 {
@@ -265,13 +291,18 @@ func (e *Encoder) buffer(src *Source) *Source {
 	if b == nil {
 		b = &Source{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4), StrideY: w, StrideC: w / 2}
 	}
-	for y := range h {
-		copy(b.Y[y*w:y*w+w], src.Y[y*src.StrideY:])
+	pad := func(dst []uint16, dw, dh int, sp []uint16, stride, sw, sh int) {
+		for y := range dh {
+			row := dst[y*dw : y*dw+dw]
+			copy(row, sp[min(y, sh-1)*stride:min(y, sh-1)*stride+sw])
+			for x := sw; x < dw; x++ {
+				row[x] = row[sw-1]
+			}
+		}
 	}
-	for y := range h / 2 {
-		copy(b.Cb[y*w/2:y*w/2+w/2], src.Cb[y*src.StrideC:])
-		copy(b.Cr[y*w/2:y*w/2+w/2], src.Cr[y*src.StrideC:])
-	}
+	pad(b.Y, w, h, src.Y, src.StrideY, ow, oh)
+	pad(b.Cb, w/2, h/2, src.Cb, src.StrideC, ow/2, oh/2)
+	pad(b.Cr, w/2, h/2, src.Cr, src.StrideC, ow/2, oh/2)
 	return b
 }
 
@@ -279,17 +310,38 @@ func (e *Encoder) buffer(src *Source) *Source {
 // once it is coded, in decoding order, the parameter sets before an IDR
 // picture. It blocks while the pipeline is full.
 func (e *Encoder) Encode(src *Source) ([][]byte, error) {
-	if len(src.Y) < e.o.Height*src.StrideY || len(src.Cb) < e.o.Height/2*src.StrideC {
+	if e.o.Views != 1 {
+		return nil, errors.New("hevc: an encoder of two views takes them with EncodeStereo")
+	}
+	if !e.fits(src) {
 		return nil, errors.New("hevc: a source picture too small for the encoder's size")
 	}
 	e.waitRoom()
-	e.plan(e.buffer(src))
+	e.plan(e.buffer(src), nil)
 	return e.collect(false)
+}
+
+// EncodeStereo takes a picture of two views (an encoder of Views 2): each
+// access unit holds the left view's picture and the right's.
+func (e *Encoder) EncodeStereo(left, right *Source) ([][]byte, error) {
+	if e.o.Views != 2 {
+		return nil, errors.New("hevc: an encoder of one view takes its pictures with Encode")
+	}
+	if !e.fits(left) || !e.fits(right) {
+		return nil, errors.New("hevc: a source picture too small for the encoder's size")
+	}
+	e.waitRoom()
+	e.plan(e.buffer(left), e.buffer(right))
+	return e.collect(false)
+}
+
+func (e *Encoder) fits(src *Source) bool {
+	return len(src.Y) >= e.o.Height*src.StrideY && len(src.Cb) >= e.o.Height/2*src.StrideC
 }
 
 // plan takes the next picture in display order into the plan: the groups
 // it completes become jobs.
-func (e *Encoder) plan(src *Source) {
+func (e *Encoder) plan(src, right *Source) {
 	idr := e.n%e.o.Keyint == 0
 	if idr {
 		// The pictures waiting cannot predict across an IDR picture: they
@@ -301,7 +353,11 @@ func (e *Encoder) plan(src *Source) {
 		e.planPending()
 		e.poc = 0
 	}
-	e.queue = append(e.queue, &gopPicture{src: src, frame: e.n, poc: e.poc, idr: idr})
+	p := &gopPicture{src: src, frame: e.n, poc: e.poc, idr: idr}
+	if e.o.Views == 2 {
+		p.twin = &gopPicture{src: right, frame: e.n, poc: e.poc, idr: idr, layer: 1}
+	}
+	e.queue = append(e.queue, p)
 	e.n++
 	e.poc++
 	// A group ends at an anchor: an IDR picture (alone), or the
@@ -326,12 +382,13 @@ func (e *Encoder) planFlush() {
 // one) and its reordering (the most pictures preceding one in decoding
 // order and following it in output order).
 func planDPB(o EncoderOptions) (dpb, reorder int) {
+	o.Views = 1 // each layer's buffer is the base layer's
 	measure := func(frames int) {
 		e := &Encoder{o: o}
 		var jobs []*picJob
 		e.emit = func(j *picJob) { jobs = append(jobs, j) }
 		for range frames {
-			e.plan(nil)
+			e.plan(nil, nil)
 		}
 		e.planFlush()
 		// Each coded video sequence (from an IDR picture) on its own.
@@ -380,7 +437,7 @@ func planDPB(o EncoderOptions) (dpb, reorder int) {
 // may: a group being gathered, and groups being coded.
 func (e *Encoder) waitRoom() {
 	e.mu.Lock()
-	limit := 2*(e.o.BFrames+1) + 2*e.o.Pipeline
+	limit := (2*(e.o.BFrames+1) + 2*e.o.Pipeline) * e.o.Views
 	for e.toCode() > limit && e.err == nil {
 		e.cond.Wait()
 	}
@@ -437,7 +494,7 @@ func (e *Encoder) planGroup() {
 	}
 	e.bees = e.bees[:0]
 	anchor.level = 0
-	e.emit(e.planPicture(anchor))
+	e.emitJob(e.planPicture(anchor))
 	e.planPending()
 	var bisect func(lo, hi, level int)
 	bisect = func(lo, hi, level int) {
@@ -462,16 +519,55 @@ func (e *Encoder) planPending() {
 		jobs = append(jobs, e.planPicture(p))
 	}
 	for _, j := range jobs {
-		e.emit(j)
+		e.emitJob(j)
 	}
 	e.pending = e.pending[:0]
+}
+
+// emitJob emits a base layer job and, with two views, its twin's after
+// it, in the same access unit.
+func (e *Encoder) emitJob(j *picJob) {
+	e.emit(j)
+	if j.p.twin != nil {
+		e.emit(e.twinJob(j))
+	}
+}
+
+// twinJob plans the second view's picture of a base layer job: the same
+// type (P for an IDR picture's) and references, the second view's own
+// pictures, with the base layer's picture after the ones before it in
+// list 0 (F.8.3.4, a long-term reference).
+func (e *Encoder) twinJob(j *picJob) *picJob {
+	t := &picJob{p: j.p.twin, typ: j.typ, qp: j.qp, ilr: -1}
+	twins := func(ps []*gopPicture) []*gopPicture {
+		out := make([]*gopPicture, 0, len(ps)+1)
+		for _, p := range ps {
+			out = append(out, p.twin)
+		}
+		return out
+	}
+	t.kept = twins(j.kept)
+	if j.typ == sliceI {
+		t.typ = sliceP
+		t.refs[0] = []*gopPicture{j.p}
+		t.ilr = 0
+		return t
+	}
+	nb := 0
+	for nb < len(j.refs[0]) && j.refs[0][nb].poc < j.p.poc {
+		nb++
+	}
+	t.refs[0] = append(append(twins(j.refs[0][:nb]), j.p), twins(j.refs[0][nb:])...)
+	t.ilr = nb
+	t.refs[1] = twins(j.refs[1])
+	return t
 }
 
 // submit adds a job to the pipeline and starts what can start.
 func (e *Encoder) submit(j *picJob) {
 	e.mu.Lock()
 	e.jobs = append(e.jobs, j)
-	e.byFrame[j.p.frame] = j
+	e.byFrame[j.p.key()] = j
 	e.dispatch()
 	e.mu.Unlock()
 }
@@ -489,7 +585,7 @@ func (e *Encoder) planPicture(p *gopPicture) *picJob {
 	}
 	slices.SortFunc(before, func(a, b *gopPicture) int { return b.poc - a.poc })
 	slices.SortFunc(after, func(a, b *gopPicture) int { return a.poc - b.poc })
-	j := &picJob{p: p, typ: sliceI}
+	j := &picJob{p: p, typ: sliceI, ilr: -1}
 	switch {
 	case p.idr || len(before) == 0 && len(after) == 0:
 	case len(after) == 0:
@@ -550,9 +646,13 @@ func (e *Encoder) dispatch() {
 				pocs[l][i] = int32(r.poc) //nolint:gosec // a POC
 			}
 		}
+		var lt [2][16]bool
+		if j.ilr >= 0 {
+			lt[0][j.ilr] = true
+		}
 		j.pic.poc = j.p.poc
 		j.pic.refPOC = append(j.pic.refPOC[:0], pocs)
-		j.pic.refLT = append(j.pic.refLT[:0], [2][16]bool{})
+		j.pic.refLT = append(j.pic.refLT[:0], lt)
 		clear(j.pic.ctbSlice)
 		j.state = jobCoding
 		go e.code(j, coder)
@@ -589,22 +689,24 @@ func (e *Encoder) code(j *picJob, c *picShared) {
 	e.mu.Lock()
 	for l := range 2 {
 		for _, r := range j.refs[l] {
-			rj := e.byFrame[r.frame]
+			rj := e.byFrame[r.key()]
 			refs[l] = append(refs[l], rj.pic)
 			planes[l] = append(planes[l], &rj.planes)
 		}
 	}
 	e.mu.Unlock()
 	p := j.p
-	c.start(j.pic, p.src, j.qp, j.typ, p.poc, refs, planes)
+	c.start(j.pic, p.src, j.qp, j.typ, p.poc, refs, planes, j.ilr, !p.idr)
 	subs := c.codePicture()
 	var au []byte
 	nalType := nalTrailR
 	if p.idr {
-		au = append(au, e.hdr...)
+		if p.layer == 0 {
+			au = append(au, e.hdr...)
+		}
 		nalType = nalIDRNLP
 	}
-	au = sliceSegment(au, nalType, func(w *bitWriter, offsets []int) {
+	au = sliceSegment(au, nalType, p.layer, func(w *bitWriter, offsets []int) {
 		e.sliceHeader(w, j)
 		writeEntryPoints(w, offsets)
 	}, subs)
@@ -612,7 +714,7 @@ func (e *Encoder) code(j *picJob, c *picShared) {
 		e.reconHook(j.pic, p.frame)
 	}
 	sse := c.pictureSSE()
-	sum := pictureSum(j.pic.y, j.pic.cb, j.pic.cr, j.pic.strideY, j.pic.strideC, e.s.width, e.s.height)
+	sum := pictureSum(j.pic.y, j.pic.cb, j.pic.cr, j.pic.strideY, j.pic.strideC, e.o.Width, e.o.Height)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.st.Pictures++
@@ -631,7 +733,7 @@ func (e *Encoder) code(j *picJob, c *picShared) {
 	// The jobs coded go to the verification in decoding order.
 	for e.sendAt < len(e.jobs) && e.jobs[e.sendAt].state == jobCoded {
 		if j := e.jobs[e.sendAt]; e.verifyQ != nil {
-			e.verifyQ <- verifyItem{frame: j.p.frame, au: j.au, sum: j.sum}
+			e.verifyQ <- verifyItem{key: j.p.key(), frame: j.p.frame, au: j.au, sum: j.sum}
 		}
 		e.sendAt++
 	}
@@ -658,6 +760,7 @@ func pictureSum(y, cb, cr []uint16, strideY, strideC, w, h int) uint32 {
 // verifyItem is an access unit to verify, and the checksum of the
 // encoder's picture of it.
 type verifyItem struct {
+	key   int // the picture's frame and layer
 	frame int
 	au    []byte
 	sum   uint32
@@ -671,7 +774,7 @@ func (e *Encoder) verify() {
 		e.vmu.Lock()
 		failed := e.verr != nil
 		if !failed {
-			e.want[j.frame] = j.sum
+			e.want[j.key] = j.sum
 		}
 		e.vmu.Unlock()
 		if failed {
@@ -701,16 +804,17 @@ func (e *Encoder) check(p *Picture) error {
 	e.vmu.Lock()
 	defer e.vmu.Unlock()
 	frame := int(p.PTS)
-	want, ok := e.want[frame]
+	key := frame<<1 | p.Layer&1
+	want, ok := e.want[key]
 	if !ok {
 		return nil
 	}
-	delete(e.want, frame)
+	delete(e.want, key)
 	e.checked++
-	if frame <= e.lastOut && e.verr == nil {
-		e.verr = fmt.Errorf("hevc: picture %d decodes out of display order, after picture %d", frame, e.lastOut)
+	if frame <= e.lastOut[p.Layer&1] && e.verr == nil {
+		e.verr = fmt.Errorf("hevc: picture %d decodes out of display order, after picture %d", frame, e.lastOut[p.Layer&1])
 	}
-	e.lastOut = frame
+	e.lastOut[p.Layer&1] = frame
 	if got := pictureSum(p.Y, p.Cb, p.Cr, p.StrideY, p.StrideC, p.Width, p.Height); got != want && e.verr == nil {
 		e.verr = fmt.Errorf("hevc: picture %d decodes to another picture than the encoder's", frame)
 	}
@@ -726,8 +830,20 @@ func (e *Encoder) collect(all bool) ([][]byte, error) {
 	var out [][]byte
 	for {
 		for e.outAt < len(e.jobs) && e.jobs[e.outAt].state == jobCoded {
-			out = append(out, e.jobs[e.outAt].au)
-			e.jobs[e.outAt].au = nil
+			j := e.jobs[e.outAt]
+			if j.p.twin != nil {
+				// An access unit holds both views: the twin's too.
+				if e.outAt+1 >= len(e.jobs) || e.jobs[e.outAt+1].state != jobCoded {
+					break
+				}
+				t := e.jobs[e.outAt+1]
+				out = append(out, append(j.au, t.au...))
+				j.au, t.au = nil, nil
+				e.outAt += 2
+				continue
+			}
+			out = append(out, j.au)
+			j.au = nil
 			e.outAt++
 		}
 		if e.err == nil {
@@ -765,7 +881,7 @@ func (e *Encoder) collect(all bool) ([][]byte, error) {
 	drop := 0
 	for drop < e.outAt && drop < e.sendAt && e.jobs[drop].p.frame < minRef {
 		j := e.jobs[drop]
-		delete(e.byFrame, j.p.frame)
+		delete(e.byFrame, j.p.key())
 		j.planes.release()
 		e.pics = append(e.pics, j.pic)
 		j.pic = nil
@@ -789,11 +905,14 @@ func (e *Encoder) sliceHeader(w *bitWriter, j *picJob) {
 	if p.idr {
 		w.flag(false) // no_output_of_prior_pics_flag
 	}
-	w.ue(0)             // slice_pic_parameter_set_id
-	w.ue(uint32(j.typ)) //nolint:gosec // 0..2
-	if !p.idr {
+	w.ue(uint32(p.layer)) //nolint:gosec // slice_pic_parameter_set_id: the layer's
+	w.ue(uint32(j.typ))   //nolint:gosec // 0..2
+	if !p.idr || p.layer > 0 {
+		// A second layer's IDR picture states its POC too (F.7.3.6.1).
 		w.u(uint(s.log2MaxPOCLsb), uint32(p.poc&(1<<s.log2MaxPOCLsb-1))) //nolint:gosec // masked
-		w.flag(false)                                                    // short_term_ref_pic_set_sps_flag
+	}
+	if !p.idr {
+		w.flag(false) // short_term_ref_pic_set_sps_flag
 		used := func(k *gopPicture) bool {
 			return slices.Contains(j.refs[0], k) || slices.Contains(j.refs[1], k)
 		}
@@ -823,6 +942,10 @@ func (e *Encoder) sliceHeader(w *bitWriter, j *picJob) {
 			w.flag(true) // slice_temporal_mvp_enabled_flag
 		}
 	}
+	if s.sao {
+		w.flag(true) // slice_sao_luma_flag
+		w.flag(true) // slice_sao_chroma_flag
+	}
 	if j.typ != sliceI {
 		w.flag(true)                     // num_ref_idx_active_override_flag
 		w.ue(uint32(len(j.refs[0]) - 1)) //nolint:gosec // small
@@ -830,7 +953,7 @@ func (e *Encoder) sliceHeader(w *bitWriter, j *picJob) {
 			w.ue(uint32(len(j.refs[1]) - 1)) //nolint:gosec // small
 			w.flag(false)                    // mvd_l1_zero_flag
 		}
-		if s.temporalMVP {
+		if s.temporalMVP && !p.idr {
 			if j.typ == sliceB {
 				w.flag(true) // collocated_from_l0_flag
 			}

@@ -82,17 +82,6 @@ func forwardTransformFast(r []int16, c []int32, log2Size, depth int, scratch *tr
 	return true
 }
 
-//go:noescape
-func quantAVX2(c *int32, n int, scale, add, qbits int) int
-
-// quantFast is quantize in AVX2, false when it does not take the block.
-func quantFast(q *quantizer, c []int32) (int, bool) {
-	if !useAVX2 || len(c)&7 != 0 || len(c) == 0 || q.qBits > 31 || q.add >= 1<<31 {
-		return 0, false
-	}
-	return quantAVX2(&c[0], len(c), int(q.scale), int(q.add), int(q.qBits)), true
-}
-
 // idctPairs holds the inverse transforms' matrices (the transposes) as the
 // kernels take them, for 8, 16 and 32 points.
 var idctPairs8 [8 * 4]int32
@@ -177,4 +166,25 @@ func avgBlock(dst []uint16, ds int, a []uint16, as int, b []uint16, bs, w, h int
 	_ = a[(h-1)*as+w-1]
 	_ = b[(h-1)*bs+w-1]
 	avgAVX2(&dst[0], ds, &a[0], as, &b[0], bs, w, h)
+}
+
+//go:noescape
+func saoEOAVX2(rec *uint16, rs int, src *uint16, ss int, w, h, off0, off1 int, out *int32)
+
+// saoEO adds to sum and cnt the edge offset statistics of a w x h block
+// for the class whose neighbours are at off0 and off1 samples, its first
+// sample at rec[r0] and src[s0] (the neighbours inside rec).
+func saoEO(rec []uint16, r0, rs int, src []uint16, s0, ss, w, h, off0, off1 int, sum, cnt *[4]int64) {
+	w16 := w &^ 15
+	if useAVX2 && w16 > 0 && h > 0 && w16*h/16 < 32768 {
+		var out [8]int32
+		saoEOAVX2(&rec[r0], rs, &src[s0], ss, w16, h, off0, off1, &out[0])
+		for i := range 4 {
+			sum[i] += int64(out[i])
+			cnt[i] += int64(out[4+i])
+		}
+		saoEOGo(rec, r0+w16, rs, src, s0+w16, ss, w-w16, h, off0, off1, sum, cnt)
+		return
+	}
+	saoEOGo(rec, r0, rs, src, s0, ss, w, h, off0, off1, sum, cnt)
 }

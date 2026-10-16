@@ -74,8 +74,17 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 			core = true
 			r.Report.Report("carrying the AC-3 core of the %s track %d (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
 		default:
-			r.Report.Report("leaving out %s track %d: an MV-HEVC file carries AC-3 and E-AC-3 here", e.track.Type, e.track.ID)
-			continue
+			// DTS (DTS-HD's whole) and PCM: AC-3, coded by ffmpeg.
+			path, sync, err := r.toAC3(ctx, e, format)
+			if err != nil {
+				r.Report.Report("leaving out %s track %d: an MV-HEVC file carries AC-3 and E-AC-3 here, and %v", e.track.Type, e.track.ID, err)
+				continue
+			}
+			if f, err = open(path); err != nil {
+				return err
+			}
+			format, e.sync = mkv.AC3, sync
+			r.Report.Report("coding the %s track %d as AC-3 with ffmpeg (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
 		}
 		a, err := mkv.NewAudioSource(f, format, core, lang)
 		if err != nil {
@@ -87,7 +96,11 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		sources = append(sources, a)
 	}
 	if subs > 0 {
-		r.Report.Report("leaving out %d subtitle track(s): an MV-HEVC file carries none here", subs)
+		if r.burn != nil {
+			r.Report.Report("leaving out %d subtitle track(s): an MV-HEVC file carries none here (track %d is drawn into the picture)", subs, r.Opts.BurnSubs)
+		} else {
+			r.Report.Report("leaving out %d subtitle track(s): an MV-HEVC file carries none here (--burn-subs draws one into the picture)", subs)
+		}
 	}
 	r.Report.Report("muxing %s", r.Opts.Output)
 	tmp := r.Opts.Output + ".part"

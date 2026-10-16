@@ -20,6 +20,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/dovi"
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/hevc"
 	"github.com/brunoga/bdtools/internal/mkv"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -1232,12 +1233,24 @@ func TestRunnerConvertsToMVHEVC(t *testing.T) {
 	} else {
 		_ = probe.Close()
 	}
+	convertToMVHEVC(t, EncoderNVENC)
+}
+
+// --encoder builtin codes MV-HEVC too, with no GPU.
+func TestRunnerConvertsToMVHEVCBuiltin(t *testing.T) {
+	convertToMVHEVC(t, EncoderBuiltin)
+}
+
+// convertToMVHEVC converts the 3D test source to an MV-HEVC .mp4 with
+// enc, checking its boxes and, with ffmpeg, that both views decode.
+func convertToMVHEVC(t *testing.T, enc Encoder) {
+	t.Helper()
 	source := mvcMatroska(t)
 	work := t.TempDir()
 	out := filepath.Join(work, "Test Movie (2012) 3D.mp4")
 	o := DefaultOptions()
 	o.Input, o.Output, o.TempDir = source, out, work
-	o.Encoder, o.Codec, o.Layout = EncoderNVENC, CodecH265, LayoutMVHEVC
+	o.Encoder, o.Codec, o.Layout = enc, CodecH265, LayoutMVHEVC
 	o.CRF = 25
 	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
 		t.Fatalf("conversion failed: %v", err)
@@ -1260,8 +1273,102 @@ func TestRunnerConvertsToMVHEVC(t *testing.T) {
 	}
 	for view := 0; view < 2; view++ {
 		cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-view_ids", fmt.Sprint(view), "-i", out, "-f", "null", "-") //nolint:gosec // test
-		if msg, err := cmd.CombinedOutput(); err != nil {
+		if msg, err := cmd.CombinedOutput(); err != nil || len(msg) > 0 {
 			t.Fatalf("ffmpeg view %d: %v %s", view, err, msg)
 		}
 	}
+}
+
+// --encoder builtin with --codec h265 codes the side-by-side picture with
+// the HEVC encoder here: no tools, the source's frames, 10 bits by
+// default, and the stream decodes with the package decoder.
+func TestRunnerConvertsToHEVCBuiltin(t *testing.T) {
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.Layout, o.BitDepth = EncoderBuiltin, CodecH265, LayoutFullSBS, 10
+	o.CRF = 28
+	var lines []string
+	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := rd.Tracks[0]
+	if v.CodecID != "V_MPEGH/ISO/HEVC" || v.Width != 1280 || v.Height != 480 || v.StereoMode == 0 {
+		t.Fatalf("video track %+v, want HEVC 1280x480 side by side", v)
+	}
+	if depth := 8 + int(v.CodecPrivate[17]&7); depth != 10 {
+		t.Errorf("%d-bit output, want 10", depth)
+	}
+	var stream []byte
+	frames := 0
+	for {
+		p, err := rd.Next()
+		if err != nil {
+			break
+		}
+		if p.Track == v.Number {
+			frames++
+			stream = append(stream, avccToAnnexB(t, p.Data)...)
+		}
+	}
+	d := hevc.New()
+	pics := 0
+	count := func(*hevc.Picture) error { pics++; return nil }
+	if err := d.Decode(append(hvccParameterSets(t, v.CodecPrivate), stream...), 0, count); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Flush(count); err != nil {
+		t.Fatal(err)
+	}
+	if frames == 0 || pics != frames || d.Errors() != 0 {
+		t.Errorf("%d frames, %d decoded, %d errors", frames, pics, d.Errors())
+	}
+}
+
+// avccToAnnexB turns length-prefixed NAL units (4-byte lengths) into a
+// start code stream.
+func avccToAnnexB(t *testing.T, b []byte) []byte {
+	t.Helper()
+	var out []byte
+	for len(b) >= 4 {
+		n := int(b[0])<<24 | int(b[1])<<16 | int(b[2])<<8 | int(b[3])
+		if n > len(b)-4 {
+			t.Fatalf("a NAL unit of %d bytes in %d", n, len(b)-4)
+		}
+		out = append(append(out, 0, 0, 0, 1), b[4:4+n]...)
+		b = b[4+n:]
+	}
+	return out
+}
+
+// hvccParameterSets takes the NAL units of an hvcC record as a start code
+// stream.
+func hvccParameterSets(t *testing.T, rec []byte) []byte {
+	t.Helper()
+	if len(rec) < 23 {
+		t.Fatal("a short hvcC")
+	}
+	var out []byte
+	p := 23
+	for range int(rec[22]) {
+		n := int(rec[p+1])<<8 | int(rec[p+2])
+		p += 3
+		for range n {
+			l := int(rec[p])<<8 | int(rec[p+1])
+			out = append(append(out, 0, 0, 0, 1), rec[p+2:p+2+l]...)
+			p += 2 + l
+		}
+	}
+	return out
 }

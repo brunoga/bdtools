@@ -104,22 +104,30 @@ as the squared error of the reconstruction; lambda follows HM's
   path is now the anchors coded in sequence at about 0.7 s each with six
   cores busy on a picture's wavefront.
 
-## Where it stands (2026-10-17)
+## Where it stands (2026-10-16)
 
 The mid-film Gravity minute (1390 frames of 1080p, the left eye) on the
 24-core 285K, x265 4.3 against this encoder at its defaults, all
 decoded by ffmpeg 8 and scored against the source (BD-rate on luma
-PSNR, four rate points each):
+PSNR, four rate points each; times are the mean of the four):
 
 | encoder | BD-rate vs x265 medium | wall | CPU per picture |
 |---|---|---|---|
 | x265 medium | 0% | 14.9 s (93 fps) | 0.13 s |
-| this encoder | -1.2% | 21.9 s (63 fps) | 0.32 s |
+| this encoder | -9.1% | 27.2 s (51 fps) | 0.37 s |
 | x265 slow | -13.8% | 36.9 s (38 fps) | 0.30 s |
 
-Our time includes the verification decoder (about 3%). On the first
-240 pictures alone the encoder is 7% smaller than x265 medium; the full
-minute is the fairer measure.
+Sign data hiding, SAO (statistics on the reconstruction before
+deblocking, merge left and up) and RDOQ (each level the rounded one, one
+less or zero, then the best last position, bits from the CTU's context
+states) took it from -1.2% at 63 fps. On the first 240 pictures:
+-7.0% base, -8.4% with sign hiding, -11.5% with SAO, -14.6% with RDOQ,
+for 20% more CPU in all. QP 19 (--crf 24) now gives 14.7 MB at 45.05 dB
+where x265 medium's CRF 24 gives 15.0 MB at 44.80 dB.
+
+Our time includes the verification decoder (about 3%). The first 240
+pictures flatter the encoder against x265; the full minute is the
+fairer measure.
 
 How it got there from 5.6 fps (2026-10-16), in order of effect:
 decision shortcuts measured one by one against x265 (see the memory
@@ -130,8 +138,40 @@ pictures with sixteen pictures in flight (the anchor chain bound the
 clock with three), fractional reference planes, and AVX2 for SAD, SATD,
 SSD, the forward and inverse transforms and the quantiser.
 
-What is left: the CPU per picture is 2.5 times x265 medium's. Its
+What is left: the CPU per picture is 2.8 times x265 medium's. Its
 largest parts are the motion search (sub-sample SATD), the merge
 candidates, the reference planes and the residual trials; beyond that,
 x265's lookahead-driven analysis and its assembly for intra prediction
-and interpolation.
+and interpolation. A cheaper sub-sample search (four quarter-sample
+points, or four at both steps) was measured and rejected: it lost 0.7
+and 1.9 points for 4% and 7% less CPU.
+
+## MV-HEVC (2026-10-16)
+
+With `Views: 2` the encoder codes the left view as the base layer and
+the right as layer 1 (Annex F/G, Apple's HEVC Stereo Video profile):
+
+- The VPS extension, from NVENC's and x265's choices: splitting on, the
+  multiview dimension, view ids 0 and 1, layer 1 predicting from layer 0
+  by default (no flag in the slice headers), sample prediction only, one
+  picture format, one buffer size for both. Layer 1 has its SPS
+  (MultiLayerExtSpsFlag, the format from the VPS) and PPS, id 1, and the
+  3D reference displays SEI names the views left and right.
+- Each base picture gets a twin job on layer 1: the same type (P for an
+  IDR picture's), QP and reference picture set over layer 1's own
+  pictures, plus the base picture of the access unit as a long-term
+  reference after the pictures before it in list 0 (F.8.3.4). An IDR
+  picture's twin is an IDR P picture predicting from the base picture
+  alone, without temporal motion prediction.
+- The twin waits on the base picture's rows like any reference. The
+  search always tries the base picture, with a horizontal scan for the
+  disparity, which the predictors rarely carry.
+- The decoder in the loop decodes both layers (`SetLayers(2)`), and every
+  picture of both is checked.
+
+On 200 pictures of a 3D disc (the two eyes 24.4 dB apart) at QP 21,
+coding the right eye as layer 1 took 1.03 MB, 44% of the 2.36 MB it
+takes coded alone, at the same PSNR (42.1 dB); both views run at 22 pairs
+a second. NVENC's MVC right eye took 92% of its left. The decoder
+decodes NVENC's, x265's and this encoder's MV-HEVC bit for bit as
+ffmpeg 8 does (`TestDecodeMVHEVC`, `TestEncoderStereo`).

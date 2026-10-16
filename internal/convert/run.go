@@ -102,6 +102,10 @@ type Runner struct {
 	// and offsetSequence the sequence a subtitle track follows (-1: none).
 	depth          *depthMap
 	offsetSequence func(Track) int
+	// burn draws the subtitle track --burn-subs names into the picture,
+	// at offset sequence burnSeq.
+	burn    *pgsBurner
+	burnSeq int
 
 	// Version is bdtools' version, which the files written say made them.
 	Version string
@@ -224,12 +228,15 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	r.rateNum, r.rateDen = src.frameRate()
 	g := newGoDemux(src, sel, tmp, r.Report)
 	r.timeline = g.timeline
-	if r.Opts.Subs3D.threeD() {
+	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat {
 		r.depth = &depthMap{}
 		g.depth = r.depth
 		r.offsetSequence = func(t Track) int { return src.offsetSequence(uint16(t.ID)) } //nolint:gosec // a PID
 	}
 	if err := g.start(); err != nil {
+		return err
+	}
+	if err := r.setupBurn(g.tapSubtitles); err != nil {
 		return err
 	}
 	if r.Opts.Remux {
@@ -386,6 +393,44 @@ func peekInterlacedH264(next func() (base, dep []byte, pts int64, err error)) (f
 
 // decoderOpener opens a decoder of a codec: the GPU's, ffmpeg's or one here.
 type decoderOpener func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error)
+
+// setupBurn readies --burn-subs: the track's display sets followed as
+// tap hands them over.
+func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error {
+	if r.Opts.BurnSubs == 0 {
+		return nil
+	}
+	if r.flat {
+		r.Report.Report("2D: --burn-subs does not apply; the subtitles are kept as they are")
+		return nil
+	}
+	var t *Track
+	for i := range r.Selected.Subtitles {
+		if r.Selected.Subtitles[i].ID == r.Opts.BurnSubs {
+			t = &r.Selected.Subtitles[i]
+		}
+	}
+	if t == nil {
+		return fmt.Errorf("--burn-subs %d: not a subtitle track of the title kept (see --list, and --subs-lang)", r.Opts.BurnSubs)
+	}
+	b := newPGSBurner()
+	if !tap(t.ID, b.feed) {
+		return fmt.Errorf("--burn-subs %d: not a PGS subtitle track", t.ID)
+	}
+	r.burn, r.burnSeq = b, -1
+	if r.offsetSequence != nil {
+		r.burnSeq = r.offsetSequence(*t)
+	}
+	switch {
+	case r.burnSeq == frontMost:
+		r.Report.Report("burning subtitle track %d into the picture, at the offset nearest the viewer at each moment (the source does not say which it follows)", t.ID)
+	case r.burnSeq < 0:
+		r.Report.Report("burning subtitle track %d into the picture, at the screen (it follows no offset sequence)", t.ID)
+	default:
+		r.Report.Report("burning subtitle track %d into the picture, at the depth of offset sequence %d", t.ID, r.burnSeq)
+	}
+	return nil
+}
 
 // check2D says what a 2D conversion leaves aside.
 func (r *Runner) check2D() {
