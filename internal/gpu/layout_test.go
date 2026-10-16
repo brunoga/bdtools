@@ -17,7 +17,7 @@ import (
 // The NVENC and VAAPI layouts are numbers gcc printed from the C headers.
 // These tests print them again and compare, when a C compiler and the
 // headers are at hand: point MVC_NVENC_HEADERS at nv-codec-headers' include
-// directory (n12.0.16.1) and MVC_LIBVA_HEADERS at libva's include
+// directory (n13.0.19.0) and MVC_LIBVA_HEADERS at libva's include
 // directories (a list), or install them system-wide.
 
 // cRun compiles and runs a C program, skipping without a compiler.
@@ -87,8 +87,8 @@ func TestNVENCLayout(t *testing.T) {
 	}
 	src.WriteString("\treturn 0;\n}\n")
 	lines := strings.Split(strings.TrimSpace(cRun(t, src.String(), inc)), "\n")
-	if lines[0] != "12.0" {
-		t.Skipf("the headers are API %s; the layout is for 12.0", lines[0])
+	if lines[0] != "13.0" {
+		t.Skipf("the headers are API %s; the layout is for 13.0", lines[0])
 	}
 	for i, f := range nvencFacts {
 		if want := lines[1+i]; fmt.Sprint(f.got) != want {
@@ -181,10 +181,31 @@ var nvencFacts = []struct {
 	{"nvAV1DisableSeqHdrBit", nvAV1DisableSeqHdrBit, "AV1BIT(disableSeqHdr)"},
 	{"nvAV1RepeatSeqHdrBit", nvAV1RepeatSeqHdrBit, "AV1BIT(repeatSeqHdr)"},
 	{"nvAV1ChromaFormatBit", nvAV1ChromaFormatBit, "AV1BIT(chromaFormatIDC)"},
-	{"nvAV1InputBitDepthBit", nvAV1InputBitDepthBit, "AV1BIT(inputPixelBitDepthMinus8)"},
-	{"nvAV1PixelBitDepthBit", nvAV1PixelBitDepthBit, "AV1BIT(pixelBitDepthMinus8)"},
+	{"nvAV1OutputBitDepth", nvAV1OutputBitDepth, "offsetof(NV_ENC_CONFIG_AV1, outputBitDepth)"},
+	{"nvAV1InputBitDepth", nvAV1InputBitDepth, "offsetof(NV_ENC_CONFIG_AV1, inputBitDepth)"},
 	{"nvHEVCFlags", nvHEVCFlags, "offsetof(NV_ENC_CONFIG_HEVC, maxCUSize) + sizeof(NV_ENC_HEVC_CUSIZE)"},
-	{"nvHEVCPixelBitDepthBit", nvHEVCPixelBitDepthBit, "HEVCBIT(pixelBitDepthMinus8)"},
+	{"nvHEVCRepeatSPSPPSBit", nvHEVCRepeatSPSPPSBit, "HEVCBIT(repeatSPSPPS)"},
+	{"nvHEVCMVHEVCBit", nvHEVCMVHEVCBit, "HEVCBIT(enableMVHEVC)"},
+	{"nvHEVC3DRefDisplayBit", nvHEVC3DRefDisplayBit, "HEVCBIT(outputHevc3DReferenceDisplayInfo)"},
+	{"nvHEVCOutputBitDepth", nvHEVCOutputBitDepth, "offsetof(NV_ENC_CONFIG_HEVC, outputBitDepth)"},
+	{"nvHEVCInputBitDepth", nvHEVCInputBitDepth, "offsetof(NV_ENC_CONFIG_HEVC, inputBitDepth)"},
+	{"nvHEVCNumViews", nvHEVCNumViews, "offsetof(NV_ENC_CONFIG_HEVC, numViews)"},
+	{"nvHEVCBFramesAsRef", nvHEVCBFramesAsRef, "offsetof(NV_ENC_CONFIG_HEVC, useBFramesAsRef)"},
+	{"nvBFrameRefEach", nvBFrameRefEach, "NV_ENC_BFRAME_REF_MODE_EACH"},
+	{"nvBitDepth8", nvBitDepth8, "NV_ENC_BIT_DEPTH_8"},
+	{"nvBitDepth10", nvBitDepth10, "NV_ENC_BIT_DEPTH_10"},
+	{"nvRCLookaheadBit", nvRCLookaheadBit, "RCBIT(enableLookahead)"},
+	{"nvRCMultiPass", nvRCMultiPass, "offsetof(NV_ENC_RC_PARAMS, multiPass)"},
+	{"nvFnGetEncodeCaps", nvFnGetEncodeCaps, "offsetof(NV_ENCODE_API_FUNCTION_LIST, nvEncGetEncodeCaps)"},
+	{"nvCapsParamVer", nvCapsParamVer, "NV_ENC_CAPS_PARAM_VER"},
+	{"nvSizeCapsParam", nvSizeCapsParam, "sizeof(NV_ENC_CAPS_PARAM)"},
+	{"nvCapsToQuery", nvCapsToQuery, "offsetof(NV_ENC_CAPS_PARAM, capsToQuery)"},
+	{"nvCapsSupportMVHEVC", nvCapsSupportMVHEVC, "NV_ENC_CAPS_SUPPORT_MVHEVC_ENCODE"},
+	{"nvCapsSupportBFrameRef", nvCapsSupportBFrameRef, "NV_ENC_CAPS_SUPPORT_BFRAME_REF_MODE"},
+	{"nvLBOutputTimeStamp", nvLBOutputTimeStamp, "offsetof(NV_ENC_LOCK_BITSTREAM, outputTimeStamp)"},
+	{"nvLBPictureType", nvLBPictureType, "offsetof(NV_ENC_LOCK_BITSTREAM, pictureType)"},
+	{"nvPPCodecPicParams", nvPPCodecPicParams, "offsetof(NV_ENC_PIC_PARAMS, codecPicParams)"},
+	{"nvPPHEVCViewID", nvPPHEVCViewID, "offsetof(NV_ENC_PIC_PARAMS_HEVC, viewId)"},
 	{"nvCfgProfileGUID", nvCfgProfileGUID, "offsetof(NV_ENC_CONFIG, profileGUID)"},
 	{"nvHEVCVUI", nvHEVCVUI, "offsetof(NV_ENC_CONFIG_HEVC, hevcVUIParameters)"},
 	{"nvVUISignalPresent", nvVUISignalPresent, "offsetof(NV_ENC_CONFIG_HEVC_VUI_PARAMETERS, videoSignalTypePresentFlag)"},

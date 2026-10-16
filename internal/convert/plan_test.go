@@ -149,6 +149,13 @@ func TestValidateRejectsIncoherentOptions(t *testing.T) {
 		{"crf out of range", func(o *Options) { o.CRF = 99 }, "out of range"},
 		{"mvc with a GPU left eye", func(o *Options) { o.Layout, o.Codec, o.Encoder, o.NativeGPU = LayoutMVC, CodecH264, EncoderNVENC, true }, "x264"},
 		{"builtin for side by side", func(o *Options) { o.Encoder = EncoderBuiltin }, "mvc"},
+		{"mvhevc into an mkv", func(o *Options) { o.Layout, o.Codec, o.Encoder = LayoutMVHEVC, CodecH265, EncoderNVENC }, ".mp4 or .mov"},
+		{"mvhevc by x265", func(o *Options) {
+			o.Layout, o.Codec, o.Encoder, o.Output = LayoutMVHEVC, CodecH265, EncoderSoftware, "/out/x.mp4"
+		}, "NVENC"},
+		{"mvhevc as h264", func(o *Options) {
+			o.Layout, o.Codec, o.Encoder, o.Output = LayoutMVHEVC, CodecH264, EncoderNVENC, "/out/x.mp4"
+		}, "HEVC"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

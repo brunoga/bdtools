@@ -269,6 +269,10 @@ func (v *VideoSource) readFrame() error {
 		} else {
 			t := n[0] >> 1 & 0x3f
 			switch {
+			case n[0]&1 != 0 || n[1]>>3 != 0:
+				// another layer's NAL unit (MV-HEVC's second view): its
+				// parameter sets and slices have their own syntax, and
+				// the picture's order is the base layer's
 			case t == 35: // access unit delimiter
 				continue
 			case t == 32:
@@ -419,6 +423,11 @@ func (v *VideoSource) boundary(nals [][]byte, eof bool) (int, bool) {
 			starter = t == 9 || t == 7 || t == 8 || t == 6 || (t >= 14 && t <= 18)
 		} else {
 			if len(n) < 3 {
+				continue
+			}
+			if n[0]&1 != 0 || n[1]>>3 != 0 {
+				// another layer's (MV-HEVC's second view): in the access
+				// unit of the base layer's picture, never starting one
 				continue
 			}
 			t := n[0] >> 1 & 0x3f

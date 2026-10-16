@@ -534,7 +534,7 @@ func (s *mvcSink) abort() error {
 		_ = s.cmd.Process.Kill()
 		_ = s.stdin.Close()
 	}
-	<-s.done
+	<-s.done //nolint:errcheck // the pump's outcome does not matter to an abort
 	if s.cmd != nil {
 		_ = s.cmd.Wait()
 	}

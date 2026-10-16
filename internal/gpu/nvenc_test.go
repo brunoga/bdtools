@@ -4,6 +4,10 @@ package gpu
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -55,5 +59,77 @@ func TestNVENCConstantQuality(t *testing.T) {
 	cfg.CQ = 40
 	if coarse := encodeConfig(t, NVENC, cfg, n); len(coarse) >= len(fine) {
 		t.Errorf("CQ 40 took %d bytes, CQ 20 %d", len(coarse), len(fine))
+	}
+}
+
+// A stereo session codes two views: layer 1 NAL units appear, and each
+// view decodes back to its own pattern (ffmpeg's hevc decoder picks a
+// view with -view_ids).
+func TestNVENCMVHEVCDecodesBothViews(t *testing.T) {
+	const w, h, n = 640, 368, 24
+	cfg := Config{Codec: HEVC, Width: w, Height: h, FPSNum: 24000, FPSDen: 1001, QP: 24, GOP: 12, Views: 2}
+	var out bytes.Buffer
+	e, err := Open(NVENC, cfg, &out)
+	if errors.Is(err, ErrUnavailable) {
+		t.Skipf("NVENC: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	se, ok := e.(StereoEncoder)
+	if !ok {
+		t.Fatal("not a StereoEncoder")
+	}
+	for i := 0; i < n; i++ {
+		if err := se.EncodeStereo(func(left, right *Picture) {
+			fillGradient(left, w, h, i)
+			fillGradient(right, w, h, i+50) // a different picture for the other eye
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stream := out.Bytes()
+	if path := os.Getenv("NVENC_MVHEVC_DUMP"); path != "" {
+		if err := os.WriteFile(path, stream, 0o600); err != nil { //nolint:gosec // a test dump
+			t.Fatal(err)
+		}
+	}
+	layers := map[int]int{}
+	for i := 0; i+5 < len(stream); i++ {
+		if stream[i] == 0 && stream[i+1] == 0 && stream[i+2] == 1 {
+			layers[int(stream[i+3]&1)<<5|int(stream[i+4]>>3)]++
+		}
+	}
+	if layers[1] < n || layers[0] < n {
+		t.Fatalf("NAL units per layer %v, want at least %d in layers 0 and 1", layers, n)
+	}
+	ff, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to decode with")
+	}
+	for view := 0; view < 2; view++ {
+		cmd := exec.CommandContext(t.Context(), ff, "-v", "error", "-view_ids", fmt.Sprint(view), "-f", "hevc", "-i", "-", //nolint:gosec // test
+			"-f", "rawvideo", "-pix_fmt", "yuv420p", "-")
+		cmd.Stdin = bytes.NewReader(stream)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		dec, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("ffmpeg view %d: %v %s", view, err, stderr.String())
+		}
+		size := w * h * 3 / 2
+		if len(dec) != size*n {
+			t.Fatalf("view %d: decoded %d bytes, want %d frames of %dx%d", view, len(dec), n, w, h)
+		}
+		ref := &Picture{Y: make([]byte, w*h), UV: make([]byte, w*h/2), Pitch: w}
+		for i := range n {
+			fillGradient(ref, w, h, i+50*view)
+			if psnr := lumaPSNR(dec[i*size:i*size+w*h], ref.Y); psnr < 30 {
+				t.Errorf("view %d frame %d: luma PSNR %.1f dB", view, i, psnr)
+			}
+		}
 	}
 }

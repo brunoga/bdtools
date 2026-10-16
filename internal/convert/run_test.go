@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/dovi"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/mkv"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -1220,5 +1221,47 @@ func testConvertsToMVC(t *testing.T, enc Encoder) {
 	}
 	if _, err := g.finish(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// --layout mvhevc writes an MP4 whose hvc1 track holds both eyes as
+// MV-HEVC layers, with Apple's stereo boxes; ffmpeg decodes each view.
+func TestRunnerConvertsToMVHEVC(t *testing.T) {
+	if probe, err := gpu.Open(gpu.NVENC, gpu.Config{Codec: gpu.HEVC, Width: 640, Height: 480, FPSNum: 24, FPSDen: 1, Views: 2}, io.Discard); err != nil {
+		t.Skipf("NVENC MV-HEVC: %v", err)
+	} else {
+		_ = probe.Close()
+	}
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "Test Movie (2012) 3D.mp4")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.Layout = EncoderNVENC, CodecH265, LayoutMVHEVC
+	o.CRF = 25
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"hvc1", "lhvC", "vexu", "hfov"} {
+		if !bytes.Contains(b, []byte(want)) {
+			t.Errorf("no %s box", want)
+		}
+	}
+	if !bytes.Contains(b, []byte("colrnclx\x00\x01\x00\x01\x00\x01\x00")) {
+		t.Error("the file does not state BT.709 for the disc's unspecified HD colour")
+	}
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to decode with")
+	}
+	for view := 0; view < 2; view++ {
+		cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-view_ids", fmt.Sprint(view), "-i", out, "-f", "null", "-") //nolint:gosec // test
+		if msg, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg view %d: %v %s", view, err, msg)
+		}
 	}
 }

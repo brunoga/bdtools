@@ -369,3 +369,44 @@ func TestVideoReadBoundaries(t *testing.T) {
 		readChunk = 1 << 20
 	}
 }
+
+// An MV-HEVC stream (NVENC's, two views) gives one frame per access unit,
+// the second view's NAL units inside it after the base layer's, never
+// starting a frame of their own.
+func TestVideoSourceKeepsMVHEVCLayersTogether(t *testing.T) {
+	f, err := os.Open("testdata/mvhevc.hevc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	v, err := NewVideoSource(f, HEVC, 24000, 1001, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for {
+		fr, err := v.Next()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		n++
+		layers := map[int]int{}
+		for d := fr.Data; len(d) >= 4; {
+			l := int(d[0])<<24 | int(d[1])<<16 | int(d[2])<<8 | int(d[3])
+			if l < 2 || 4+l > len(d) {
+				t.Fatalf("frame %d: a NAL unit length of %d in %d bytes", n, l, len(d))
+			}
+			nal := d[4 : 4+l]
+			layers[int(nal[0]&1)<<5|int(nal[1]>>3)]++
+			d = d[4+l:]
+		}
+		if layers[0] == 0 || layers[1] == 0 {
+			t.Fatalf("frame %d holds NAL units of layers %v, want both", n, layers)
+		}
+	}
+	if n != 24 {
+		t.Fatalf("%d frames, want 24 access units", n)
+	}
+}

@@ -5,6 +5,24 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--layout mvhevc` writes MV-HEVC in an MP4 or QuickTime file for Apple
+  devices (Vision Pro, iPhone) and the Meta Quest: the left eye as an
+  HEVC base layer, the right as a layer predicted from it, coded by NVENC
+  in process, with Apple's stereo signalling (`vexu`, `hfov`, `lhvC`) and
+  `--spatial-fov`, `--spatial-baseline` and `--spatial-disparity` for
+  what the file states. Audio goes in as AC-3 or E-AC-3 (a TrueHD track's
+  AC-3 core); subtitles are left out. The file states the disc's colour
+  signalling, or BT.709 for an HD disc whose stream states none. The
+  output is 8-bit unless `--bit-depth 10` asks otherwise. Verified on
+  Apple's profile, with ffmpeg 8, and on a Meta Quest with SKYBOX 2.0.2.
+
+### Changed
+
+- The NVENC binding speaks NVENC API 13 (driver 570 and later), which
+  MV-HEVC needs.
+
 ## [0.9.0] - 2026-10-15
 
 ### Added

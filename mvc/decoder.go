@@ -1145,6 +1145,15 @@ func (d *Decoder) ColorInfo() (primaries, transfer, matrix int, fullRange bool) 
 	return s.primaries, s.transfer, s.matrix, s.fullRange
 }
 
+// ColorInfo returns the colour description the frame's stream states (see
+// Decoder.ColorInfo).
+func (f *StereoFrame) ColorInfo() (primaries, transfer, matrix int, fullRange bool) {
+	if f == nil || f.d == nil {
+		return 2, 2, 2, false
+	}
+	return f.d.ColorInfo()
+}
+
 // FrameRate returns the frame rate carried by the most recent sequence
 // parameter set's VUI timing information, as a fraction (e.g. 24000/1001),
 // or 0/0 when the stream does not say.

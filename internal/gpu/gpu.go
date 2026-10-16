@@ -53,6 +53,10 @@ type Config struct {
 	// Color, when set, is the colour signalling the stream states (its
 	// VUI, or AV1's colour config): an HDR source's BT.2020 and PQ, say.
 	Color *ColorInfo
+	// Views is 2 for stereo MV-HEVC (HEVC on NVENC): the left eye as the
+	// base layer, the right as layer 1 predicted from it, each picture
+	// given through StereoEncoder.EncodeStereo. 0 or 1 is one view.
+	Views int
 }
 
 // Picture is the frame an encoder wants filled: a full-resolution luma
@@ -72,6 +76,15 @@ type Encoder interface {
 	// Close finishes the stream (the encoder may hold pictures back for
 	// B-frames) and releases the device.
 	Close() error
+}
+
+// StereoEncoder is an Encoder opened with Config.Views 2: it takes both
+// eyes of each picture.
+type StereoEncoder interface {
+	Encoder
+	// EncodeStereo asks fill to draw the left and right eyes of the next
+	// picture, then encodes them as the base layer and layer 1.
+	EncodeStereo(fill func(left, right *Picture)) error
 }
 
 // DefaultGOP is the keyframe interval when none is given: 250 frames, as
@@ -115,6 +128,9 @@ func Open(k Kind, cfg Config, w io.Writer) (Encoder, error) {
 		}
 	default:
 		return nil, fmt.Errorf("%w: %d-bit", ErrDepth, cfg.BitDepth)
+	}
+	if cfg.Views == 2 && (k != NVENC || cfg.Codec != HEVC) {
+		return nil, fmt.Errorf("%w: stereo MV-HEVC is NVENC's, as HEVC", ErrUnavailable)
 	}
 	switch k {
 	case NVENC:

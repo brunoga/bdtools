@@ -48,6 +48,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	switch {
 	case r.sink != nil: // a test's
 		sink = r.sink
+	case !r.flat && r.Opts.Layout == LayoutMVHEVC:
+		sink = &mvhevcSink{r: r}
+		verb = "encoded"
+		r.Report.Report("decoding and encoding (MV-HEVC: both eyes on NVENC, the right predicted from the left)")
 	case !r.flat && r.Opts.Layout == LayoutMVC:
 		s := &mvcSink{r: r, ctx: ctx}
 		switch r.Opts.Encoder {
@@ -171,6 +175,8 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 				default:
 					r.Report.Report("warning: an HDR source at 8 bits bands visibly; --bit-depth 10 (the default for it) keeps its precision")
 				}
+			} else if sf.stereo != nil {
+				r.noteDiscColour(sf)
 			}
 			sn, sd := src.frameRate()
 			var overruled bool
@@ -455,4 +461,24 @@ func (s *programSink) abort() error {
 	}
 	_ = os.Remove(s.path)
 	return err
+}
+
+// noteDiscColour records the colour signalling a 3D disc's stream states,
+// for the output to repeat. A Blu-ray's HD video is BT.709 whether its
+// stream says so or not, and the players an MV-HEVC file is for go by what
+// the file states, so that output states BT.709 for an HD source that says
+// nothing.
+func (r *Runner) noteDiscColour(sf picture) {
+	p, t, m, full := sf.stereo.ColorInfo()
+	c := gpu.ColorInfo{Primaries: p, Transfer: t, Matrix: m, FullRange: full}
+	switch {
+	case p != 2 || t != 2 || m != 2: // something stated
+	case r.Opts.Layout == LayoutMVHEVC && sf.stereo.Base.Width <= 1920 && sf.stereo.Base.Height <= 1080:
+		c = gpu.ColorInfo{Primaries: 1, Transfer: 1, Matrix: 1}
+		r.Report.Report("the disc's video states no colour; the file states BT.709, a Blu-ray's HD colour")
+	default:
+		return
+	}
+	r.colour = &c
+	r.Opts.Color = &c
 }
