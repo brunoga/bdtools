@@ -1,6 +1,6 @@
 // Package probe identifies a video source from the little of it that a
-// pre-download sample contains: a disc image's BDMV metadata, or a Matroska
-// file's header. It reports what the container states and never guesses.
+// pre-download sample contains: a disc image's BDMV metadata, a Matroska
+// file's header, or an MP4's movie box. It reports what the container states and never guesses.
 //
 // A Blu-ray image keeps its UDF directory at the front and its BDMV
 // metadata (playlists, clip info) at the end, so the first and last pieces
@@ -35,6 +35,7 @@ const (
 	KindUnknown  Kind = iota
 	KindDisc          // UDF/BDMV image or directory
 	KindMatroska      // Matroska file
+	KindMP4           // ISO base media file: MP4 or QuickTime
 )
 
 // Layout is how a source carries its views.
@@ -46,6 +47,10 @@ const (
 	LayoutSideBySide               // both eyes side by side in each frame
 	LayoutTopBottom                // both eyes one above the other
 	LayoutOther                    // stereoscopic, but not a layout named here
+	// LayoutMVHEVC is multiview HEVC: a second, dependent view in its own
+	// layer, as Apple's spatial video carries it. Like MVC each eye is a
+	// full picture, and a plain HEVC decoder shows only the base view.
+	LayoutMVHEVC
 )
 
 // Result is what a probe found. Fields the source does not state are zero.
@@ -162,7 +167,8 @@ func Matroska(r io.Reader, label string) (res *Result, err error) {
 }
 
 // Path probes whatever is at path, choosing by extension and by whether it
-// is a directory: a BDMV folder or .iso image, or a .mkv/.mk3d file.
+// is a directory: a BDMV folder or .iso image, a .mkv/.mk3d file, or an
+// .mp4/.mov/.m4v file.
 func Path(path string) (*Result, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -184,8 +190,15 @@ func Path(path string) (*Result, error) {
 		}
 		defer func() { _ = f.Close() }()
 		return Matroska(f, path)
+	case ext == ".mp4" || ext == ".mov" || ext == ".m4v":
+		f, err := os.Open(path) //nolint:gosec // the caller's path is the point
+		if err != nil {
+			return nil, fmt.Errorf("probe: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		return MP4(f, st.Size(), path)
 	}
-	return nil, fmt.Errorf("probe: %s is neither a disc image, a BDMV folder nor a Matroska file", path)
+	return nil, fmt.Errorf("probe: %s is not a disc image, a BDMV folder, a Matroska file or an MP4", path)
 }
 
 // --- discs ---------------------------------------------------------------------
