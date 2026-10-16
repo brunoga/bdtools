@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-16
+
 ### Added
 
 - Over-under output: `--layout ou` (the eyes stacked at full size, the
@@ -633,7 +635,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/brunoga/bdtools/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/brunoga/bdtools/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/brunoga/bdtools/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/brunoga/bdtools/compare/v0.9.0...v0.10.0
