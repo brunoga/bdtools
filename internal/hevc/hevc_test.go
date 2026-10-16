@@ -74,13 +74,13 @@ func referenceTransform(c []int32, log2, depth int, dst bool) []int32 {
 	return out
 }
 
-// bitWriter writes the codes the reader reads back.
-type bitWriter struct {
+// testWriter writes the codes the reader reads back.
+type testWriter struct {
 	b []byte
 	n int
 }
 
-func (w *bitWriter) put(v uint64, n int) {
+func (w *testWriter) put(v uint64, n int) {
 	for i := n - 1; i >= 0; i-- {
 		if w.n%8 == 0 {
 			w.b = append(w.b, 0)
@@ -92,7 +92,7 @@ func (w *bitWriter) put(v uint64, n int) {
 	}
 }
 
-func (w *bitWriter) ue(v int) {
+func (w *testWriter) ue(v int) {
 	x := uint64(v) + 1
 	l := 0
 	for x>>l > 1 {
@@ -103,7 +103,7 @@ func (w *bitWriter) ue(v int) {
 }
 
 func TestExpGolomb(t *testing.T) {
-	var w bitWriter
+	var w testWriter
 	vals := []int{0, 1, 2, 3, 7, 8, 254, 255, 1 << 20, 1<<31 - 2}
 	for _, v := range vals {
 		w.ue(v)

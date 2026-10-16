@@ -124,6 +124,7 @@ func (n *nalUnit) escaped(off int) int {
 // NAL unit types.
 const (
 	nalTrailN     = 0
+	nalTrailR     = 1
 	nalRASLR      = 9
 	nalBLAWLP     = 16
 	nalBLAWRADL   = 17

@@ -52,35 +52,41 @@ const (
 	rowFinal
 )
 
-// progress is how far a picture is decoded: its final CTB rows.
+// progress is how far a picture is decoded: its final CTB rows, each
+// with the condition the ones reading it wait on.
 type progress struct {
-	final   []atomic.Bool
+	final []rowDone
+	users atomic.Int32 // frames decoding it or predicting from it
+}
+
+// rowDone is a CTB row's final state and its waiters.
+type rowDone struct {
+	done    atomic.Bool
 	waiters atomic.Int32
 	mu      sync.Mutex
 	cond    sync.Cond
-	users   atomic.Int32 // frames decoding it or predicting from it
 }
 
 func (p *picture) resetProgress(rows int) {
 	if len(p.prog.final) != rows {
-		p.prog.final = make([]atomic.Bool, rows)
+		p.prog.final = make([]rowDone, rows)
+		for i := range p.prog.final {
+			p.prog.final[i].cond.L = &p.prog.final[i].mu
+		}
 	}
 	for i := range p.prog.final {
-		p.prog.final[i].Store(false)
-	}
-	if p.prog.cond.L == nil {
-		p.prog.cond.L = &p.prog.mu
+		p.prog.final[i].done.Store(false)
 	}
 }
 
 // setFinal marks CTB row r final.
 func (p *picture) setFinal(r int) {
-	pr := &p.prog
-	pr.final[r].Store(true)
-	if pr.waiters.Load() > 0 {
-		pr.mu.Lock()
-		pr.cond.Broadcast()
-		pr.mu.Unlock()
+	f := &p.prog.final[r]
+	f.done.Store(true)
+	if f.waiters.Load() > 0 {
+		f.mu.Lock()
+		f.cond.Broadcast()
+		f.mu.Unlock()
 	}
 }
 
@@ -99,16 +105,17 @@ func (p *picture) waitRows(r0, r1 int) {
 	last := len(pr.final) - 1
 	r0, r1 = min(max(r0, 0), last), min(max(r1, 0), last)
 	for r := r0; r <= r1; r++ {
-		if pr.final[r].Load() {
+		f := &pr.final[r]
+		if f.done.Load() {
 			continue
 		}
-		pr.mu.Lock()
-		pr.waiters.Add(1)
-		for !pr.final[r].Load() {
-			pr.cond.Wait()
+		f.mu.Lock()
+		f.waiters.Add(1)
+		for !f.done.Load() {
+			f.cond.Wait()
 		}
-		pr.waiters.Add(-1)
-		pr.mu.Unlock()
+		f.waiters.Add(-1)
+		f.mu.Unlock()
 	}
 }
 
@@ -124,7 +131,7 @@ func (p *picture) waitLines(y0, y1 int) {
 // done reports whether the whole picture is final.
 func (p *picture) done() bool {
 	for i := range p.prog.final {
-		if !p.prog.final[i].Load() {
+		if !p.prog.final[i].done.Load() {
 			return false
 		}
 	}
