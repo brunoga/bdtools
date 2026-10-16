@@ -158,7 +158,7 @@ func TestDefaultEncoderFallsBackToSoftware(t *testing.T) {
 	fakeLookPath(t, "x264")
 	fakeProbe(t)
 	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderSoftware {
-		t.Errorf("got %q, want x264 when no ffmpeg is installed", got)
+		t.Errorf("got %q, want x264 when only it is installed", got)
 	}
 }
 
@@ -176,8 +176,8 @@ func TestDefaultEncoderPrefersHardwareWhenItActuallyWorks(t *testing.T) {
 func TestDefaultEncoderSkipsAnEncoderThatDoesNotWork(t *testing.T) {
 	fakeLookPath(t, "ffmpeg")
 	fakeProbe(t) // nothing works
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderSoftware {
-		t.Errorf("got %q, want x264 when no hardware trial succeeds", got)
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, "/dev/dri/renderD128"); got != EncoderBuiltin {
+		t.Errorf("got %q, want the encoder here when no hardware trial succeeds and x264 is missing", got)
 	}
 }
 

@@ -122,7 +122,7 @@ func readLayout(t *testing.T, ds []byte) layoutOf {
 func TestPGS3DFull(t *testing.T) {
 	pix := bytes.Repeat([]byte{1}, 100*10)
 	src := &framesSource{frames: [][]byte{displaySet(800, 900, 100, 10, pix)}}
-	p := newPGS3D(src, false, func(time.Duration) int { return 6 })
+	p := newPGS3D(src, LayoutFullSBS, func(time.Duration) int { return 6 })
 	f, err := p.Next()
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestPGS3DFull(t *testing.T) {
 
 	// At the plane's edge the shift stops there, in each eye.
 	src = &framesSource{frames: [][]byte{displaySet(1815, 900, 100, 10, pix)}}
-	p = newPGS3D(src, false, func(time.Duration) int { return 20 })
+	p = newPGS3D(src, LayoutFullSBS, func(time.Duration) int { return 20 })
 	f, _ = p.Next()
 	if l := readLayout(t, f.Data); l.objects[0][1] != 1820 || l.objects[1][1] != 1920+1795 {
 		t.Errorf("at the edge: %v", l.objects)
@@ -163,7 +163,7 @@ func TestPGS3DHalf(t *testing.T) {
 		1, 1, 1, 1, 1, 1, 1, 1, 1,
 	}
 	src := &framesSource{frames: [][]byte{displaySet(800, 900, w, h, pix)}}
-	p := newPGS3D(src, true, func(time.Duration) int { return 6 })
+	p := newPGS3D(src, LayoutHalfSBS, func(time.Duration) int { return 6 })
 	f, err := p.Next()
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestPGS3DLargeObject(t *testing.T) {
 	if types, _, _ := segments(ds); bytes.Count(types, []byte{segODS}) < 3 {
 		t.Fatalf("the object should span several segments: %v", types)
 	}
-	p := newPGS3D(&framesSource{frames: [][]byte{ds}}, true, func(time.Duration) int { return 0 })
+	p := newPGS3D(&framesSource{frames: [][]byte{ds}}, LayoutHalfSBS, func(time.Duration) int { return 0 })
 	f, err := p.Next()
 	if err != nil {
 		t.Fatal(err)
@@ -350,13 +350,57 @@ func TestSubs3DValidation(t *testing.T) {
 	}
 }
 
+// Over-under, the object is in both eyes, the right eye's a plane below,
+// apart across by the offset; half over-under halves the heights.
+func TestPGS3DOverUnder(t *testing.T) {
+	pix := bytes.Repeat([]byte{1}, 9*4)
+	for _, tc := range []struct {
+		layout       Layout
+		height, y, h int
+	}{{LayoutFullOU, 2160, 900, 4}, {LayoutHalfOU, 1080, 450, 2}} {
+		src := &framesSource{frames: [][]byte{displaySet(800, 900, 9, 4, pix)}}
+		p := newPGS3D(src, tc.layout, func(time.Duration) int { return 6 })
+		f, err := p.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		types, payloads, err := segments(f.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, typ := range types {
+			s := payloads[i]
+			switch typ {
+			case segPCS:
+				if h := int(binary.BigEndian.Uint16(s[2:])); h != tc.height {
+					t.Errorf("%s: plane %d high, want %d", tc.layout, h, tc.height)
+				}
+				var got [][2]int
+				for o := s[11:]; len(o) >= 8; o = o[8:] {
+					got = append(got, [2]int{int(binary.BigEndian.Uint16(o[4:])), int(binary.BigEndian.Uint16(o[6:]))})
+				}
+				want := [][2]int{{806, tc.y}, {794, tc.y + tc.height/2}}
+				if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+					t.Errorf("%s: objects at %v, want %v", tc.layout, got, want)
+				}
+			case segODS:
+				if h := int(binary.BigEndian.Uint16(s[9:])); h != tc.h {
+					t.Errorf("%s: object %d high, want %d", tc.layout, h, tc.h)
+				}
+			}
+		}
+	}
+}
+
 // Whatever a display set holds, rewriting it fails or succeeds; it never
 // panics.
 func FuzzPGS3D(f *testing.F) {
-	f.Add(displaySet(800, 900, 9, 2, bytes.Repeat([]byte{1}, 18)), false)
-	f.Add(displaySet(10, 10, 3, 3, []byte{1, 2, 1, 2, 1, 2, 1, 2, 1}), true)
-	f.Fuzz(func(t *testing.T, ds []byte, half bool) {
-		p := newPGS3D(&framesSource{frames: [][]byte{ds, ds}}, half, func(time.Duration) int { return 7 })
+	f.Add(displaySet(800, 900, 9, 2, bytes.Repeat([]byte{1}, 18)), uint8(0))
+	f.Add(displaySet(10, 10, 3, 3, []byte{1, 2, 1, 2, 1, 2, 1, 2, 1}), uint8(1))
+	f.Add(displaySet(10, 10, 3, 3, []byte{1, 2, 1, 2, 1, 2, 1, 2, 1}), uint8(3))
+	f.Fuzz(func(t *testing.T, ds []byte, layout uint8) {
+		l := []Layout{LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU}[layout%4]
+		p := newPGS3D(&framesSource{frames: [][]byte{ds, ds}}, l, func(time.Duration) int { return 7 })
 		for range 2 {
 			if _, err := p.Next(); err != nil {
 				return

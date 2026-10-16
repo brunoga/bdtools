@@ -5,6 +5,19 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Over-under output: `--layout ou` (the eyes stacked at full size, the
+  left on top) and `--layout half-ou` (squeezed to the source's height),
+  flagged top-bottom in the file, 3D subtitles drawn in both eyes.
+- 3D sources in one frame: a side-by-side or over-under file (full or
+  half) converts as a 3D source, to any 3D output or to 2D (the left
+  eye). A Matroska file's stereo mode says so; `--input-layout` says it
+  for the rest, or (`2d`) takes the frame as one picture.
+- `--encoder builtin` codes H.264 (8-bit) for every layout, not only
+  MVC, and is the default for H.264 when no GPU encoder works and x264
+  is missing.
+
 ## [0.12.0] - 2026-10-16
 
 ### Added

@@ -27,6 +27,10 @@ type Track struct {
 	// Height is a video track's picture height, when the source states it
 	// before decoding (a Matroska file does; a disc's playlist does not).
 	Height int
+	// Width and StereoMode are a video track's picture width and Matroska
+	// stereo mode (1 side by side, 3 over-under, the left eye first; 11
+	// and 2 the right first), when the source states them.
+	Width, StereoMode int
 }
 
 // Kind classifies a track by what the conversion must do with it.

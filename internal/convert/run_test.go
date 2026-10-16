@@ -1372,3 +1372,133 @@ func hvccParameterSets(t *testing.T, rec []byte) []byte {
 	}
 	return out
 }
+
+// --encoder builtin with --codec h264 codes the side-by-side picture with
+// the H.264 encoder here, and ffmpeg decodes it without complaint.
+func TestRunnerConvertsToH264Builtin(t *testing.T) {
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.Layout, o.BitDepth = EncoderBuiltin, CodecH264, LayoutFullSBS, 8
+	o.CRF = 24
+	var lines []string
+	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := rd.Tracks[0]; v.CodecID != "V_MPEG4/ISO/AVC" || v.Width != 1280 || v.Height != 480 || v.StereoMode == 0 {
+		t.Fatalf("video track %+v, want H.264 1280x480 side by side", v)
+	}
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to decode with")
+	}
+	cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-i", out, "-f", "null", "-") //nolint:gosec // test
+	if msg, err := cmd.CombinedOutput(); err != nil || len(msg) > 0 {
+		t.Fatalf("ffmpeg: %v %s", err, msg)
+	}
+}
+
+// --layout ou and half-ou stack the eyes, the left on top: twice the
+// height, or squeezed to it, marked top-bottom in the file, each eye's
+// picture the source's (the eyes of the test source differ).
+func TestRunnerConvertsToOverUnder(t *testing.T) {
+	for _, tc := range []struct {
+		layout Layout
+		h      int
+	}{{LayoutFullOU, 960}, {LayoutHalfOU, 480}} {
+		t.Run(string(tc.layout), func(t *testing.T) {
+			source := mvcMatroska(t)
+			work := t.TempDir()
+			out := filepath.Join(work, "Test Movie (2012) 3D.mkv")
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = source, out, work
+			o.Encoder, o.Codec, o.Layout, o.BitDepth = EncoderBuiltin, CodecH265, tc.layout, 8
+			o.CRF = 24
+			if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v", err)
+			}
+			f, err := os.Open(out) //nolint:gosec // test
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+			rd, err := mkv.NewReader(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := rd.Tracks[0]
+			if v.Width != 640 || v.Height != tc.h || v.StereoMode != 3 {
+				t.Fatalf("video track %dx%d stereo mode %d, want 640x%d top-bottom (3)", v.Width, v.Height, v.StereoMode, tc.h)
+			}
+		})
+	}
+}
+
+// A side-by-side file converts as the 3D source it is: its Matroska
+// stereo mode says so, each eye is cut out, and it comes out over-under,
+// as MV-HEVC, or (told it is one picture, or asked for 2D) flat.
+func TestRunnerTakesFramedSources(t *testing.T) {
+	work := t.TempDir()
+	sbs := filepath.Join(work, "SBS.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = mvcMatroska(t), sbs, filepath.Join(work, "t0")
+	o.Encoder, o.Codec, o.Layout, o.BitDepth, o.CRF = EncoderBuiltin, CodecH265, LayoutFullSBS, 8, 20
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatalf("making the side-by-side file: %v", err)
+	}
+	track := func(path string) mkv.ReadTrack {
+		f, err := os.Open(path) //nolint:gosec // test
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		rd, err := mkv.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rd.Tracks[0]
+	}
+	for i, tc := range []struct {
+		name         string
+		set          func(o *Options)
+		out          string
+		w, h, stereo int
+	}{
+		{"to over-under", func(o *Options) { o.Layout = LayoutFullOU }, "OU.mkv", 640, 960, 3},
+		{"to half side by side", func(o *Options) { o.Layout = LayoutHalfSBS }, "HSBS.mkv", 640, 480, 1},
+		{"as one picture", func(o *Options) { o.InputLayout = "" }, "Flat.mkv", 1280, 480, 0},
+		{"to 2D", func(o *Options) { o.TwoD = true }, "2D.mkv", 640, 480, 0},
+		{"to MV-HEVC", func(o *Options) { o.Layout = LayoutMVHEVC }, "MVHEVC.mp4", 0, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = sbs, filepath.Join(work, tc.out), filepath.Join(work, fmt.Sprint("t", i+1))
+			o.Encoder, o.Codec, o.BitDepth, o.CRF = EncoderBuiltin, CodecH265, 8, 24
+			tc.set(&o)
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			if tc.w == 0 {
+				if b, err := os.ReadFile(o.Output); err != nil || !bytes.Contains(b, []byte("lhvC")) {
+					t.Fatalf("no MV-HEVC file (%v)", err)
+				}
+				return
+			}
+			if v := track(o.Output); v.Width != tc.w || v.Height != tc.h || v.StereoMode != tc.stereo {
+				t.Errorf("video %dx%d stereo mode %d, want %dx%d mode %d\n%s", v.Width, v.Height, v.StereoMode, tc.w, tc.h, tc.stereo, strings.Join(lines, "\n"))
+			}
+		})
+	}
+}

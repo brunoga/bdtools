@@ -403,8 +403,8 @@ func TestNativeGPUIsPreferred(t *testing.T) {
 	if got := DefaultEncoder(context.Background(), "linux", CodecH265, 8, ""); got != EncoderVAAPI {
 		t.Errorf("auto = %s, want vaapi", got)
 	}
-	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, ""); got != EncoderSoftware {
-		t.Errorf("auto for h264 = %s, want software", got)
+	if got := DefaultEncoder(context.Background(), "linux", CodecH264, 8, ""); got != EncoderBuiltin {
+		t.Errorf("auto for h264 without x264 = %s, want builtin", got)
 	}
 	o := DefaultOptions()
 	o.Input, o.Output, o.Encoder, o.Codec = "/in/a.iso", "/out/a.mkv", EncoderVAAPI, CodecH265

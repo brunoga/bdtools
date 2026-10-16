@@ -57,6 +57,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	}
 	defer closeVideo()
 	stereo := 1 // side by side, left eye first
+	if r.Opts.Layout.overUnder() {
+		stereo = 3 // top and bottom, left eye first
+	}
 	mvcOut := !r.flat && r.Opts.Layout == LayoutMVC
 	if r.flat || mvcOut {
 		stereo = 0 // MVC's second view is not in the frame
@@ -78,8 +81,10 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	}
 	switch t := v.Track(); {
 	case r.flat, mvcOut:
-	case r.Opts.Layout == LayoutHalfSBS:
+	case r.Opts.Layout.halved():
 		v.SetDisplaySize(t.Width, t.Height)
+	case r.Opts.Layout.overUnder():
+		v.SetDisplaySize(2*t.Width, t.Height)
 	default:
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}

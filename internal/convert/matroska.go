@@ -144,7 +144,7 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 	for _, t := range r.Tracks {
 		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced} //nolint:gosec // track numbers are small
 		if t.Type == mkv.TypeVideo {
-			tr.Height = t.Height
+			tr.Height, tr.Width, tr.StereoMode = t.Height, t.Width, t.StereoMode
 		}
 		b := samples[t.Number]
 		switch t.CodecID {
@@ -722,6 +722,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if err != nil {
 		return err
 	}
+	askedTwoD := r.Opts.TwoD
 	r.flat = r.Opts.TwoD || !threeD(tracks)
 	r.Opts.TwoD = r.flat
 	if r.Opts.Remux && !r.flat {
@@ -743,7 +744,15 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		sel.Audio = withFallbacks(sel.Audio, all, r.Report)
 	}
 	r.Selected = sel
-	if r.flat {
+	if !threeD(tracks) && !r.Opts.Remux {
+		r.resolveFramed(sel.Base)
+		if r.framedIn != "" && !askedTwoD {
+			r.flat, r.Opts.TwoD = false, false
+		}
+	}
+	if r.framedIn != "" && !r.flat {
+		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle", r.framedIn, sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+	} else if r.flat {
 		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 		r.check2D()
 	} else {
@@ -789,6 +798,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if err != nil {
 		_ = g.f.Close()
 		return err
+	}
+	if r.framedIn != "" {
+		pics = r.framedSource(pics)
 	}
 	video, decErr := r.decodeAndEncode(ctx, pics, nil)
 	extras, finErr := g.finish()
