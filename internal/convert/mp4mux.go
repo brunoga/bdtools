@@ -112,7 +112,6 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 				return err
 			}
 			format, e.sync = mkv.AC3, sync
-			r.Report.Report("coding the %s track %d as AC-3 with ffmpeg (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
 		}
 		a, err := mkv.NewAudioSource(f, format, core, lang)
 		if err != nil {

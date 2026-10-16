@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- An AC-3 encoder in Go (`internal/ac3`): mono to 5.1, every A/52 rate,
+  rematrixing, the bits a frame has left spent on its channels. On a film
+  soundtrack it measures 0.2 to 0.45 dB above ffmpeg's AC-3 encoder at
+  640, 448, 320 and 192 kb/s (behind at 128 kb/s stereo, where ffmpeg
+  couples the channels), at 80 times real time for 5.1.
+- PCM tracks go into an MP4 as AC-3 from that encoder, no ffmpeg needed:
+  7.1 and 7.0 folded to 5.1 and 5.0, 96 and 192 kHz brought to 48. DTS
+  still takes ffmpeg.
+
 ## [0.13.0] - 2026-10-16
 
 ### Added
