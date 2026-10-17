@@ -185,3 +185,24 @@ func TestDbgCDFCarry(t *testing.T) {
 		t.Logf("carry off %v: %d bytes, %.2f dB", off, n, psnr)
 	}
 }
+
+func TestDbgCompound(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgForceCompound, dbgForceInter, dbgInterModes = false, false, 0 }()
+	dbgForceCompound, dbgForceInter = true, true
+	// NEAREST_NEAREST, NEAR_NEAR, GLOBAL_GLOBAL, NEW_NEW, all
+	for _, m := range []int{1 << 0, 1 << 1, 1 << 6, 1 << 7, 0} {
+		dbgInterModes = m
+		t.Run(fmt.Sprint(m), func(t *testing.T) {
+			o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+			p := testPicture(96, 64, 8, 3)
+			var pics []*Source
+			for i := range 9 {
+				pics = append(pics, shifted(p, i, i/3))
+			}
+			checkDecodes(t, o, pics)
+		})
+	}
+}

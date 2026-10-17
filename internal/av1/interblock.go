@@ -18,8 +18,9 @@ var interCands = 2
 // Debugging: dbgInterModes keeps the inter modes of its bits (1 <<
 // (mode - NEARESTMV)); dbgForceInter prefers any inter coding to intra.
 var (
-	dbgInterModes int
-	dbgForceInter bool
+	dbgInterModes    int
+	dbgForceInter    bool
+	dbgForceCompound bool
 )
 
 // interStride is the stride of a plane's inter prediction.
@@ -50,7 +51,11 @@ func (t *tileEnc) interTxTypesFor(plane, txSz int) []int {
 func (t *tileEnc) writeInterModes(cd coder) {
 	b, s := &t.b, &t.stack
 	t.writeIsInter(cd, true)
-	t.writeRefFrame(cd, b.refFrame)
+	t.writeRefFrames(cd)
+	if t.isCompound() {
+		t.writeCompoundModes(cd)
+		return
+	}
 	c := t.cdf
 	cd.symbol(b2i(b.yMode != NEWMV), c.newMv[s.newMvContext][:])
 	if b.yMode != NEWMV {
@@ -86,7 +91,8 @@ var interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
 
 // interCand is an inter mode to try.
 type interCand struct {
-	ref       int
+	ref, ref2 int // ref2 NONE for a single reference
+	m2        mv
 	mode, idx int
 	m         mv
 	est       float64
@@ -114,6 +120,37 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	if len(cands) == 0 {
 		return math.Inf(1), nil
 	}
+	if f.fp.refSelect && min(b.bw4, b.bh4) >= 2 && !dbgNoCompound {
+		newOf := map[int]mv{}
+		for _, cd := range cands {
+			if cd.mode == NEWMV {
+				newOf[cd.ref] = cd.m
+			}
+		}
+		for _, pair := range [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}} {
+			r0, r1 := f.refs[pair[0]], f.refs[pair[1]]
+			if r0 == nil || r1 == nil || !seen[r0] || !seen[r1] || r0.disp >= f.fp.orderHint || r1.disp <= f.fp.orderHint {
+				continue
+			}
+			if pair[1] == ALTREF_FRAME && f.refs[BWDREF_FRAME] == r1 {
+				continue // the same pair
+			}
+			first := len(cands)
+			cands = t.compoundCands(pair[0], pair[1], newOf[pair[0]], newOf[pair[1]], cands)
+			t.estimate(cands[first:])
+		}
+		if dbgForceCompound {
+			var comp []interCand
+			for _, cd := range cands {
+				if cd.ref2 > INTRA_FRAME && (dbgInterModes == 0 || dbgInterModes>>uint(cd.mode-NEAREST_NEARESTMV)&1 != 0) {
+					comp = append(comp, cd)
+				}
+			}
+			if len(comp) > 0 {
+				cands = comp
+			}
+		}
+	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
@@ -124,8 +161,8 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m}
-		t.findMvStack(&t.stack, false, [2]int{cd.ref, NONE})
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2}
+		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
 		j := t.codeInter(dec, true)
 		if j < bestJ {
 			bestJ, bestDec = j, dec
@@ -134,7 +171,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	}
 	t.restore(best, true)
 	t.setupBlock(r, c, size)
-	t.findMvStack(&t.stack, false, [2]int{bestDec.refFrame, NONE})
+	t.findMvStack(&t.stack, bestDec.refFrame2 > INTRA_FRAME, [2]int{bestDec.refFrame, bestDec.refFrame2})
 	t.setInterState(bestDec)
 	t.setModes()
 	t.setInfo()
@@ -145,6 +182,10 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 func (t *tileEnc) setInterState(dec *blockDec) {
 	b := &t.b
 	b.isInter, b.refFrame, b.yMode, b.refMvIdx, b.mv = true, dec.refFrame, dec.yMode, dec.refMvIdx, dec.mv
+	b.refFrame2, b.mv2 = dec.refFrame2, dec.mv2
+	if b.refFrame2 <= INTRA_FRAME {
+		b.refFrame2, b.mv2 = NONE, mv{}
+	}
 	b.txSz = int(maxTxSizeRect[dec.size])
 	b.skip = dec.skip
 }
@@ -315,14 +356,18 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	t.setupBlock(dec.r, dec.c, dec.size)
 	b := &t.b
 	t.setInterState(dec)
-	t.findMvStack(&t.stack, false, [2]int{dec.refFrame, NONE})
+	comp := dec.refFrame2 > INTRA_FRAME
+	t.findMvStack(&t.stack, comp, [2]int{dec.refFrame, dec.refFrame2})
 	// the stack is the search's, so this changes nothing; but a vector a
 	// mode takes from the stack must be the stack's
 	if lo, hi := t.stack.refMvIdxRange(dec.yMode); dec.refMvIdx < lo || dec.refMvIdx > hi {
 		dec.refMvIdx = min(max(dec.refMvIdx, lo), hi)
 	}
-	if dec.yMode != NEWMV {
+	if getMode(dec.yMode, 0) != NEWMV {
 		dec.mv = t.stack.predMv(dec.yMode, dec.refMvIdx, 0)
+	}
+	if comp && getMode(dec.yMode, 1) != NEWMV {
+		dec.mv2 = t.stack.predMv(dec.yMode, dec.refMvIdx, 1)
 	}
 	t.setInterState(dec)
 	var ctx snapshot
@@ -419,17 +464,28 @@ func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
 		}
 		cands = keep
 	}
-	// estimates
-	w, h := int(blockWidth[size]), int(blockHeight[size])
-	for i := first; i < len(cands); i++ {
+	t.estimate(cands[first:])
+	return cands
+}
+
+// estimate sets candidates' estimates: their luma prediction's SATD and
+// rate (the stack the block's for their references).
+func (t *tileEnc) estimate(cands []interCand) {
+	f, b := t.f, &t.b
+	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
+	sl := math.Sqrt(f.lambda)
+	for i := range cands {
 		cd := &cands[i]
-		b.yMode, b.refMvIdx, b.mv = cd.mode, cd.idx, cd.m
+		b.refFrame, b.refFrame2 = cd.ref, cd.ref2
+		if b.refFrame2 <= INTRA_FRAME {
+			b.refFrame2 = NONE
+		}
+		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
 		t.setModes()
 		f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
-		satd := t.satd(0, c*4, r*4, w, h, t.interPred[0][:])
+		satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
 		t.cost.n = 0
 		t.writeInterModes(&t.cost)
 		cd.est = float64(satd) + sl*float64(t.cost.n)/costScale
 	}
-	return cands
 }

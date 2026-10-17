@@ -110,10 +110,14 @@ type blockState struct {
 	cflU, cflV       int // the CFL alphas
 	// An inter block's: its reference, its motion vector and RefMvIdx (its
 	// mode is yMode).
-	isInter    bool
-	refFrame   int
-	mv         mv
-	refMvIdx   int
+	isInter  bool
+	refFrame int
+	mv       mv
+	refMvIdx int
+	// a compound block's second reference (NONE for single prediction)
+	// and its motion vector
+	refFrame2  int
+	mv2        mv
 	filterMode int // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
@@ -137,7 +141,8 @@ type blockDec struct {
 	filterMode      int
 	isInter         bool
 	refFrame        int
-	mv              mv
+	refFrame2       int
+	mv, mv2         mv
 	refMvIdx        int
 	skip            bool // an inter block coded without residual
 	txDepth         int
@@ -231,7 +236,7 @@ type snapshot struct {
 	rec        [3][]uint16
 	mi         [7][]uint8
 	refs       [2][]int8
-	mvs        []mv
+	mvs        [2][]mv
 	above, aDc [3][16]uint8
 	left, lDc  [3][16]uint8
 	decoded    [3][18][18]bool
@@ -293,12 +298,14 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 				copy(s.refs[k][y*cols:(y+1)*cols], f.refFrames[k][f.mi(r+y, c):])
 			}
 		}
-		if cap(s.mvs) < 256 {
-			s.mvs = make([]mv, 256)
-		}
-		s.mvs = s.mvs[:cols*rows]
-		for y := range rows {
-			copy(s.mvs[y*cols:(y+1)*cols], f.mvs[0][f.mi(r+y, c):])
+		for k := range 2 {
+			if cap(s.mvs[k]) < 256 {
+				s.mvs[k] = make([]mv, 256)
+			}
+			s.mvs[k] = s.mvs[k][:cols*rows]
+			for y := range rows {
+				copy(s.mvs[k][y*cols:(y+1)*cols], f.mvs[k][f.mi(r+y, c):])
+			}
 		}
 	}
 	s.decoded = t.decoded
@@ -345,8 +352,10 @@ func (t *tileEnc) restore(s *snapshot, pixels bool) {
 				copy(f.refFrames[k][f.mi(r+y, c):f.mi(r+y, c)+cols], s.refs[k][y*cols:(y+1)*cols])
 			}
 		}
-		for y := range rows {
-			copy(f.mvs[0][f.mi(r+y, c):f.mi(r+y, c)+cols], s.mvs[y*cols:(y+1)*cols])
+		for k := range 2 {
+			for y := range rows {
+				copy(f.mvs[k][f.mi(r+y, c):f.mi(r+y, c)+cols], s.mvs[k][y*cols:(y+1)*cols])
+			}
 		}
 	}
 	t.decoded = s.decoded

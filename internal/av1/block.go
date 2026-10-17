@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ bool
+var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -24,7 +24,7 @@ var chromaCands = 2
 // setupBlock is decode_block's start: the block's availability.
 func (t *tileEnc) setupBlock(r, c, size int) {
 	b := &t.b
-	*b = blockState{r: r, c: c, size: size, bw4: int(num4x4BlocksWide[size]), bh4: int(num4x4BlocksHigh[size]), filterMode: -1}
+	*b = blockState{r: r, c: c, size: size, bw4: int(num4x4BlocksWide[size]), bh4: int(num4x4BlocksHigh[size]), filterMode: -1, refFrame2: NONE}
 	b.hasChroma = !(b.bh4 == 1 && r&1 == 0) && !(b.bw4 == 1 && c&1 == 0)
 	b.availU, b.availL = t.inside(r-1, c), t.inside(r, c-1)
 	b.availUC, b.availLC = b.availU, b.availL
@@ -52,8 +52,8 @@ func (t *tileEnc) setModes() {
 					f.uvMode[i] = uint8(b.uvMode) //nolint:gosec // a mode
 				}
 				if b.isInter {
-					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), NONE //nolint:gosec // a reference
-					f.mvs[0][i], f.isInter[i] = b.mv, 1
+					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), int8(b.refFrame2) //nolint:gosec // references
+					f.mvs[0][i], f.mvs[1][i], f.isInter[i] = b.mv, b.mv2, 1
 				} else {
 					f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
 					f.mvs[0][i], f.isInter[i] = mv{}, 0

@@ -126,6 +126,10 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			r := e.slots[fp.refIdx[ref-LAST_FRAME]]
 			f.refs[ref] = r
 			fi.orderHints[ref] = r.orderHint & (1<<orderHintBits - 1)
+			fp.refHints[ref-LAST_FRAME] = fi.orderHints[ref]
+			if r.disp > j.disp && !dbgNoCompound {
+				fp.refSelect = true // a reference after the frame: compound blocks
+			}
 		}
 		fi.setRefFrameSignBias()
 		f.inter = fi

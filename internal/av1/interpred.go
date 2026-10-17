@@ -57,6 +57,8 @@ func scaleMv(plane, x, y int, m mv, refW, refH, frameW, frameH int) (startX, sta
 type interScratch struct {
 	edge [(128 + 7) * (128 + 7)]uint16
 	mid  [(128 + 7) * 128]int32
+	// comp holds a compound block's two predictions (preds[])
+	comp [2][]int32
 }
 
 // subpelTaps is, by filter and position, the range of a Subpel_Filters
@@ -263,6 +265,30 @@ func predictInter(ref *refFrameState, plane, x, y, w, h int, m mv, filt [2]int, 
 	s.blockInterPred(ref, plane, startX, startY, w, h, filt, interRoundingFor(bitDepth, false), bitDepth, dst, nil, dstStride)
 }
 
+// predictCompound is a compound block's prediction (COMPOUND_AVERAGE):
+// each reference's at the compound rounding, averaged.
+func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w, h int, ref [2]int, m [2]mv, filt [2]int, bitDepth int, dst []uint16, dstStride int, s *interScratch) {
+	rnd := interRoundingFor(bitDepth, true)
+	for k := range 2 {
+		if cap(s.comp[k]) < 128*128 {
+			s.comp[k] = make([]int32, 128*128)
+		}
+		r := refs[ref[k]]
+		startX, startY, _, _ := scaleMv(plane, x, y, m[k], r.width, r.height, r.width, r.height)
+		s.blockInterPred(r, plane, startX, startY, w, h, filt, rnd, bitDepth, nil, s.comp[k], w)
+	}
+	sh := uint(1 + rnd.post)
+	maxV := int32(1)<<uint(bitDepth) - 1
+	p0, p1 := s.comp[0], s.comp[1]
+	for i := range h {
+		row := dst[i*dstStride : i*dstStride+w]
+		for j := range row {
+			v := (p0[i*w+j] + p1[i*w+j] + 1<<(sh-1)) >> sh
+			row[j] = uint16(clip(v, maxV)) //nolint:gosec // clipped
+		}
+	}
+}
+
 // predictInterBlock is compute_prediction's inter part for a plane of
 // block b: its prediction into dst (stride dstStride, from the block's
 // top left sample of the plane, the chroma one of the 4x4 chroma block
@@ -305,7 +331,10 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 		for x := 0; x < num4x4W*4; x += predW {
 			i := f.mi(candRow+r, candCol+c)
 			if f.refFrames[1][i] > INTRA_FRAME {
-				panic("av1: compound prediction is not implemented")
+				predictCompound(refs, plane, baseX+x, baseY+y, predW, predH, [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])},
+					[2]mv{f.mvs[0][i], f.mvs[1][i]}, filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)
+				c++
+				continue
 			}
 			predictInter(refs[f.refFrames[0][i]], plane, baseX+x, baseY+y, predW, predH, f.mvs[0][i], filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)
 			c++

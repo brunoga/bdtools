@@ -194,7 +194,12 @@ type frameParams struct {
 	show bool // shown (else showable later, by show_existing_frame)
 	// Inter frames: the slots refreshed, the slot each of the seven
 	// references is, mv precision and the frame's interpolation filter.
-	refresh         uint8
+	refresh uint8
+	// refSelect is reference_select (compound blocks allowed); refHints
+	// are the references' order hints (for skip_mode_present's
+	// condition).
+	refSelect       bool
+	refHints        [REFS_PER_FRAME]int
 	primaryRef      int // primary_ref_frame (PRIMARY_REF_NONE, or a reference)
 	refIdx          [REFS_PER_FRAME]int
 	highPrecisionMV bool
@@ -316,7 +321,10 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 		w.flag(f.txSelect)
 	}
 	if !f.key {
-		w.flag(false) // reference_select
+		w.flag(f.refSelect) // reference_select
+		if f.refSelect && f.skipModeAllowed() {
+			w.flag(false) // skip_mode_present
+		}
 	}
 	w.flag(f.reducedTx)
 	if !f.key {
@@ -325,6 +333,46 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 		}
 	}
 	return w.buf
+}
+
+// relativeDist is get_relative_dist with the sequence's order hints.
+func relativeDist(a, b int) int {
+	diff := a - b
+	m := 1 << (orderHintBits - 1)
+	return (diff & (m - 1)) - (diff & m)
+}
+
+// skipModeAllowed is skip_mode_params' skipModeAllowed: a reference
+// before the frame and one after it (or a second before it).
+func (f *frameParams) skipModeAllowed() bool {
+	hint := f.orderHint & (1<<orderHintBits - 1)
+	fwd, bwd := -1, -1
+	var fwdHint, bwdHint int
+	for i := range REFS_PER_FRAME {
+		h := f.refHints[i]
+		switch d := relativeDist(h, hint); {
+		case d < 0:
+			if fwd < 0 || relativeDist(h, fwdHint) > 0 {
+				fwd, fwdHint = i, h
+			}
+		case d > 0:
+			if bwd < 0 || relativeDist(h, bwdHint) < 0 {
+				bwd, bwdHint = i, h
+			}
+		}
+	}
+	switch {
+	case fwd < 0:
+		return false
+	case bwd >= 0:
+		return true
+	}
+	for i := range REFS_PER_FRAME {
+		if h := f.refHints[i]; relativeDist(h, fwdHint) < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // showExisting is the frame header OBU of a frame shown again

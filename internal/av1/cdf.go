@@ -33,26 +33,31 @@ type cdfs struct {
 	cflAlpha        [CFL_ALPHA_CONTEXTS][CFL_ALPHABET_SIZE + 1]uint16
 
 	// inter frames'
-	yModeInter  [BLOCK_SIZE_GROUPS][INTRA_MODES + 1]uint16
-	isInter     [IS_INTER_CONTEXTS][3]uint16
-	newMv       [NEW_MV_CONTEXTS][3]uint16
-	zeroMv      [ZERO_MV_CONTEXTS][3]uint16
-	refMv       [REF_MV_CONTEXTS][3]uint16
-	drlMode     [DRL_MODE_CONTEXTS][3]uint16
-	singleRef   [REF_CONTEXTS][SINGLE_REFS - 1][3]uint16
-	txfmSplit   [TXFM_PARTITION_CONTEXTS][3]uint16
-	interTxSet1 [2][17]uint16
-	interTxSet2 [13]uint16
-	interTxSet3 [4][3]uint16
-	mvJoint     [MV_CONTEXTS][MV_JOINTS + 1]uint16
-	mvClass     [MV_CONTEXTS][2][MV_CLASSES + 1]uint16
-	mvClass0Bit [MV_CONTEXTS][2][3]uint16
-	mvFr        [MV_CONTEXTS][2][MV_JOINTS + 1]uint16
-	mvClass0Fr  [MV_CONTEXTS][2][CLASS0_SIZE][MV_JOINTS + 1]uint16
-	mvClass0Hp  [MV_CONTEXTS][2][3]uint16
-	mvSign      [MV_CONTEXTS][2][3]uint16
-	mvBit       [MV_CONTEXTS][2][MV_OFFSET_BITS][3]uint16
-	mvHp        [MV_CONTEXTS][2][3]uint16
+	yModeInter   [BLOCK_SIZE_GROUPS][INTRA_MODES + 1]uint16
+	isInter      [IS_INTER_CONTEXTS][3]uint16
+	newMv        [NEW_MV_CONTEXTS][3]uint16
+	zeroMv       [ZERO_MV_CONTEXTS][3]uint16
+	refMv        [REF_MV_CONTEXTS][3]uint16
+	drlMode      [DRL_MODE_CONTEXTS][3]uint16
+	singleRef    [REF_CONTEXTS][SINGLE_REFS - 1][3]uint16
+	txfmSplit    [TXFM_PARTITION_CONTEXTS][3]uint16
+	compMode     [COMP_INTER_CONTEXTS][3]uint16
+	compRefType  [COMP_REF_TYPE_CONTEXTS][3]uint16
+	compRef      [REF_CONTEXTS][FWD_REFS - 1][3]uint16
+	compBwdRef   [REF_CONTEXTS][BWD_REFS - 1][3]uint16
+	compoundMode [COMPOUND_MODE_CONTEXTS][COMPOUND_MODES + 1]uint16
+	interTxSet1  [2][17]uint16
+	interTxSet2  [13]uint16
+	interTxSet3  [4][3]uint16
+	mvJoint      [MV_CONTEXTS][MV_JOINTS + 1]uint16
+	mvClass      [MV_CONTEXTS][2][MV_CLASSES + 1]uint16
+	mvClass0Bit  [MV_CONTEXTS][2][3]uint16
+	mvFr         [MV_CONTEXTS][2][MV_JOINTS + 1]uint16
+	mvClass0Fr   [MV_CONTEXTS][2][CLASS0_SIZE][MV_JOINTS + 1]uint16
+	mvClass0Hp   [MV_CONTEXTS][2][3]uint16
+	mvSign       [MV_CONTEXTS][2][3]uint16
+	mvBit        [MV_CONTEXTS][2][MV_OFFSET_BITS][3]uint16
+	mvHp         [MV_CONTEXTS][2][3]uint16
 
 	txbSkip      [TX_SIZES][TXB_SKIP_CONTEXTS][3]uint16
 	eobPt16      [PLANE_TYPES][2][6]uint16
@@ -103,6 +108,8 @@ func newCDFs(qIndex int) *cdfs {
 
 		yModeInter: defaultYModeCdf, isInter: defaultIsInterCdf, newMv: defaultNewMvCdf, zeroMv: defaultZeroMvCdf,
 		refMv: defaultRefMvCdf, drlMode: defaultDrlModeCdf, singleRef: defaultSingleRefCdf, txfmSplit: defaultTxfmSplitCdf,
+		compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
+		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf,
 		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
 	}
 	for i := range MV_CONTEXTS {
