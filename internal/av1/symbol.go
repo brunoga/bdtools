@@ -61,7 +61,7 @@ func (w *symbolWriter) encode(s int, cdf []uint16, n int) {
 	fh := 32768 - uint32(cdf[s]) // the decoder's f for s
 	nn := uint32(n - 1)
 	if s > 0 {
-		fl := 32768 - uint32(cdf[s-1])
+		fl := 32768 - uint32(cdf[s-1]) //nolint:gosec // s > 0 here
 		u := (r>>8)*(fl>>ecProbShift)>>(7-ecProbShift) + ecMinProb*(nn-uint32(s-1))
 		v := (r>>8)*(fh>>ecProbShift)>>(7-ecProbShift) + ecMinProb*(nn-uint32(s))
 		l += r - u
@@ -121,11 +121,6 @@ func (w *symbolWriter) literal(v uint32, n int) {
 	for i := n - 1; i >= 0; i-- {
 		w.boolean(v>>uint(i)&1 != 0)
 	}
-}
-
-// bitCount is about how many bits have been coded: for rate estimates.
-func (w *symbolWriter) bitCount() int {
-	return 8*len(w.precarry) + w.cnt + 10
 }
 
 // finish ends the coding (with the trailing one bit the spec's exit

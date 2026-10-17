@@ -350,14 +350,14 @@ func upsampleEdge(buf []int32, numPx int, maxV int32) {
 	var dup [64 + 3]int32
 	dup[0] = buf[edgeOff-1]
 	for i := -1; i < numPx; i++ {
-		dup[i+2] = buf[edgeOff+i]
+		dup[i+2] = buf[edgeOff+i] //nolint:gosec // numPx is at most 24 (upsampling is for w+h <= 16)
 	}
 	dup[numPx+2] = buf[edgeOff+numPx-1]
 	buf[edgeOff-2] = dup[0]
 	for i := range numPx {
-		s := -dup[i] + 9*dup[i+1] + 9*dup[i+2] - dup[i+3]
+		s := -dup[i] + 9*dup[i+1] + 9*dup[i+2] - dup[i+3] //nolint:gosec // as above
 		buf[edgeOff+2*i-1] = clip((s+8)>>4, maxV)
-		buf[edgeOff+2*i] = dup[i+2]
+		buf[edgeOff+2*i] = dup[i+2] //nolint:gosec // as above
 	}
 }
 

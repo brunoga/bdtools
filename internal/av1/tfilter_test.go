@@ -134,8 +134,9 @@ func TestTemporalFilterEncode(t *testing.T) {
 		src = append(src, noisy(c, depth, 5, uint64(i+31)))
 	}
 	o := EncoderOptions{Width: w, Height: h, BitDepth: depth, QIndex: 140, FPSNum: 25, FPSDen: 1}
+	defer func(was bool) { dbgNoTF = was }(dbgNoTF)
+	dbgNoTF = false // the filter on (off by default)
 	checkDecodesWith(t, o, src, nil)
-	defer func() { dbgNoTF = false }()
 	for _, off := range []bool{false, true} {
 		dbgNoTF = off
 		e, err := NewEncoder(o)

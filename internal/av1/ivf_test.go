@@ -2,6 +2,7 @@ package av1
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"os"
 	"os/exec"
@@ -46,7 +47,7 @@ func needDav1d(t *testing.T) {
 		if err != nil {
 			return
 		}
-		out, err := exec.Command(ff, "-hide_banner", "-decoders").Output() //nolint:gosec // a test
+		out, err := exec.CommandContext(context.Background(), ff, "-hide_banner", "-decoders").Output() //nolint:gosec // a test
 		dav1dOK = err == nil && bytes.Contains(out, []byte("libdav1d"))
 	})
 	if !dav1dOK {
@@ -67,7 +68,7 @@ func dav1dDecode(t *testing.T, data []byte, w, h, depth int) [][]byte {
 	if err != nil {
 		t.Skip("no ffmpeg")
 	}
-	if out, err := exec.Command(ff, "-hide_banner", "-decoders").Output(); err != nil || !bytes.Contains(out, []byte("libdav1d")) {
+	if out, err := exec.CommandContext(t.Context(), ff, "-hide_banner", "-decoders").Output(); err != nil || !bytes.Contains(out, []byte("libdav1d")) {
 		t.Skip("no libdav1d in ffmpeg")
 	}
 	dir := t.TempDir()
@@ -81,7 +82,7 @@ func dav1dDecode(t *testing.T, data []byte, w, h, depth int) [][]byte {
 		pix, bps = "yuv420p10le", 2
 	}
 	out := filepath.Join(dir, "out.yuv")
-	cmd := exec.Command(ff, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", in, "-f", "rawvideo", "-pix_fmt", pix, out) //nolint:gosec // a test
+	cmd := exec.CommandContext(t.Context(), ff, "-hide_banner", "-loglevel", "error", "-c:v", "libdav1d", "-i", in, "-f", "rawvideo", "-pix_fmt", pix, out) //nolint:gosec // a test
 	if msg, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("libdav1d: %v: %s", err, msg)
 	}

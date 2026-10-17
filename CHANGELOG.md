@@ -7,6 +7,28 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- An AV1 encoder in Go (internal/av1): `--encoder builtin --codec av1`,
+  the fallback when there is no GPU encoder and no SVT-AV1. Every stream
+  the tests code is decoded by libdav1d to the encoder's own
+  reconstruction, sample for sample.
+  - Key frames: every intra tool (the directional modes with their
+    angles, smooth and Paeth, filter intra, chroma from luma, the edge
+    filter), all partitions (to 4x4, the extended ones), transform
+    depths and types, rate-distortion quantisation, the deblocking
+    filter and CDEF chosen by search; +0.3% BD-rate (PSNR-Y) against
+    SVT-AV1 preset 4 `tune=1` on six 1080p disc frames.
+  - Inter frames: mini-GOP pyramids of 8 (the anchor coded first and
+    shown later), references before and after, compound prediction,
+    skip mode, the motion vector stack and every single-reference mode,
+    a motion search to 1/8 sample, inter transform trees, the CDFs
+    carried from frame to frame, a q index by depth; on two 30-picture
+    1080p clips +28% against SVT-AV1 preset 4.
+  - Parallel: tiles, and a mini-GOP's frames that do not depend on each
+    other, at once (the stream the same as one at a time). Still slow:
+    1-3 s a 1080p picture.
+  - libaom's temporal filter for the anchors is there but off: with only
+    the pictures before an anchor in its window it cost 7% here.
+
 - The Go H.264 encoder much closer to x264. Measured by BD-rate (PSNR-Y)
   against x264 medium `--tune psnr` on 240-picture clips from Blu-ray
   discs (live action and animation):

@@ -54,7 +54,9 @@ type step struct {
 var dbgNoOverlay bool
 
 // depthQ is how much finer (in q index) a frame at a depth codes.
-var depthQ = [...]int{24, 24, 16, 8, 0, 0, 0, 0}
+// (Measured on two 1080p disc clips: steeper than 24, 24, 16, 8 by
+// 3.5% BD-rate.)
+var depthQ = [...]int{40, 40, 28, 16, 0, 0, 0, 0}
 
 // miniGOP is the mini-GOP length.
 func (e *Encoder) miniGOP() int {

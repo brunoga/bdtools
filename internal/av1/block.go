@@ -25,7 +25,7 @@ var chromaCands = 2
 func (t *tileEnc) setupBlock(r, c, size int) {
 	b := &t.b
 	*b = blockState{r: r, c: c, size: size, bw4: int(num4x4BlocksWide[size]), bh4: int(num4x4BlocksHigh[size]), filterMode: -1, refFrame2: NONE}
-	b.hasChroma = !(b.bh4 == 1 && r&1 == 0) && !(b.bw4 == 1 && c&1 == 0)
+	b.hasChroma = (b.bh4 != 1 || r&1 != 0) && (b.bw4 != 1 || c&1 != 0)
 	b.availU, b.availL = t.inside(r-1, c), t.inside(r, c-1)
 	b.availUC, b.availLC = b.availU, b.availL
 	if b.hasChroma {

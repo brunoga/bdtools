@@ -51,7 +51,10 @@ const (
 )
 
 // dbgNoTF codes the anchors' sources unfiltered.
-var dbgNoTF bool
+// The filter is off: on two 1080p disc clips it cost 7.3% BD-rate (PSNR)
+// even with overlay frames, its window holding only pictures before the
+// anchor (libaom's has as many after it, from the lookahead).
+var dbgNoTF = true
 
 // tfWindowSize is how many pictures before and after the one filtered
 // the filter takes, of maxBefore and maxAfter available (the key frame
