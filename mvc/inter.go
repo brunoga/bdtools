@@ -239,7 +239,7 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 			}
 			ref.waitRows(bot/16 + 1)
 			lumaMC(m, pic.planes[0][yo:], pic.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
-			chromaMC2(pic.planes[1][co:], pic.planes[2][co:], pic.stride[1], ref, (px/2)*8+int(v.x), (py/2)*8+int(v.y), pw/2, ph/2)
+			chromaMC2(pic.planes[1][co:], pic.planes[2][co:], pic.stride[1], ref, (px/2)*8+int(v.x), (py/2)*8+int(v.y)+parityOffset(pic, ref), pw/2, ph/2)
 			return
 		}
 	}
@@ -295,7 +295,7 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 		v := pic.mvs[l][idx]
 		lumaMC(m, pic.planes[0][yo:], pic.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
 		cx := (px/2)*8 + int(v.x)
-		cy := (py/2)*8 + int(v.y)
+		cy := (py/2)*8 + int(v.y) + parityOffset(pic, ref)
 		chromaMC2(pic.planes[1][co:], pic.planes[2][co:], pic.stride[1], ref, cx, cy, pw/2, ph/2)
 		return
 	}
@@ -310,7 +310,7 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 		v := pic.mvs[l][idx]
 		lumaMC(m, m.predY[l][:], 16, ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
 		cx := (px/2)*8 + int(v.x)
-		cy := (py/2)*8 + int(v.y)
+		cy := (py/2)*8 + int(v.y) + parityOffset(pic, ref)
 		chromaMC2(m.predC[l][0][:], m.predC[l][1][:], 8, ref, cx, cy, pw/2, ph/2)
 	}
 	switch {
@@ -428,7 +428,7 @@ func copyBlockGeneric(dst []byte, ds int, src []byte, ss, w, h int) {
 // the reference when luma and chroma positions are both full-sample, so
 // the block is read once. It reports whether it handled the block.
 func weightedFullPel(pic, ref *picture, v mv, px, py, pw, ph int, pw8 *predWeight, l, ri, yo, co int) bool {
-	if v.x&7 != 0 || v.y&7 != 0 || pw < 8 {
+	if v.x&7 != 0 || v.y&7 != 0 || pw < 8 || parityOffset(pic, ref) != 0 {
 		return false
 	}
 	ix, iy := px+int(v.x>>2), py+int(v.y>>2)
@@ -450,4 +450,14 @@ func weightedFullPel(pic, ref *picture, v mv, px, py, pw, ph int, pw8 *predWeigh
 func chromaMC2Generic(cb, cr []byte, ds int, ref *picture, cx, cy, w, h int) {
 	chromaMCGeneric(cb, ds, ref, 1, cx, cy, w, h)
 	chromaMCGeneric(cr, ds, ref, 2, cx, cy, w, h)
+}
+
+// parityOffset is the chroma vector's vertical offset (in eighth
+// samples) for a field predicting from a field of the other parity
+// (Table 8-10): the chroma rows of the two lie a quarter sample apart.
+func parityOffset(cur, ref *picture) int {
+	if cur.parent == nil || ref.parent == nil {
+		return 0
+	}
+	return 2 * (cur.parity - ref.parity)
 }

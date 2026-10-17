@@ -83,7 +83,8 @@ type accessUnit struct {
 
 type curPic struct {
 	view    int
-	pic     *picture
+	pic     *picture // the frame (store)
+	target  *picture // what the slices decode into: the frame, or one of its fields
 	fc      *frameCtx
 	hdr     sliceHeader
 	jobs    chan *sliceJob
@@ -140,6 +141,11 @@ type Decoder struct {
 	rawNAL    []byte
 	stash     [][]byte // dependent view NALs received before their base view
 	replaying bool
+
+	// interlaced: the first field of a frame decoded last, while its
+	// second may follow, and the access unit held back for it
+	firstField *curPic
+	heldAU     *accessUnit
 
 	accel     Accel
 	accErr    error
@@ -385,6 +391,7 @@ func (d *Decoder) decodeNAL(nal []byte) error {
 // (7.4.1.2.4).
 func newPicture(a, b *sliceHeader) bool {
 	return b.firstMb == 0 || a.frameNum != b.frameNum || a.ppsID != b.ppsID ||
+		a.fieldPic != b.fieldPic || a.bottomField != b.bottomField ||
 		(a.nal.refIdc == 0) != (b.nal.refIdc == 0) || a.nal.idr != b.nal.idr ||
 		a.pocLsb != b.pocLsb || a.deltaPocBottom != b.deltaPocBottom ||
 		a.deltaPoc != b.deltaPoc || (a.nal.idr && a.idrPicID != b.idrPicID)
@@ -521,6 +528,16 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 		if s.numReorderFrames >= 0 {
 			d.reorder = s.numReorderFrames
 		}
+		if d.heldAU != nil {
+			// a first field's access unit: its second field continues
+			// it, anything else lets it go out as it is
+			if h.fieldPic && d.pairsFirstField(view, h) {
+				d.au = d.heldAU
+			} else {
+				d.queueAU(d.heldAU)
+			}
+			d.heldAU = nil
+		}
 		if d.au == nil {
 			d.au = &accessUnit{}
 		}
@@ -534,9 +551,18 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 	}
 	v.seen = true
 	poc, top, bot, fno := v.computePOC(h)
+	if h.fieldPic {
+		if d.accel != nil {
+			d.lastErr = errUnsupported
+			return errUnsupported
+		}
+		return d.startField(view, h, poc, fno)
+	}
+	d.endFirstField()
 	pic := d.allocPicture(s.widthMbs, s.heightMbs())
 	d.nextID++
 	pic.id = d.nextID
+	pic.resetFields()
 	pic.poc, pic.topPOC, pic.botPOC = poc, top, bot
 	pic.frameNum = h.frameNum
 	pic.viewID = h.nal.viewID
@@ -557,9 +583,18 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 		}
 		return nil
 	}
+	if s.chromaFormatIdc == 0 {
+		// monochrome: the chroma planes, never decoded, are grey (as
+		// other decoders give 4:0:0 out as 4:2:0)
+		for c := 1; c < 3; c++ {
+			for i := range pic.planes[c] {
+				pic.planes[c][i] = 128
+			}
+		}
+	}
 	fc := d.getFrameCtx(s.widthMbs, s.heightMbs())
 	fc.reset(pic, s)
-	cp := &curPic{view: view, pic: pic, fc: fc, hdr: *h, jobs: make(chan *sliceJob, 16)}
+	cp := &curPic{view: view, pic: pic, target: pic, fc: fc, hdr: *h, jobs: make(chan *sliceJob, 16)}
 	cp.hdr.mmco = append([]mmcoOp(nil), h.mmco...)
 	if n := len(v.refs); n > 0 {
 		if c := v.refs[n-1]; c.mbW == pic.mbW && c.mbH == pic.mbH {
@@ -656,7 +691,7 @@ func (d *Decoder) fillFrameNumGap(view int, h *sliceHeader) {
 		pic.poc = v.prevPocMsb + v.prevPocLsb
 		pic.topPOC, pic.botPOC = pic.poc, pic.poc
 		v.slidingWindow(s.maxNumRefFrames, fn, maxFrameNum)
-		pic.shortRef = true
+		pic.shortRef, pic.refMask = true, 3
 		v.refs = append(v.refs, pic)
 		v.prevRefFrameNum = fn
 		v.prevFrameNum = fn
@@ -689,7 +724,7 @@ func (d *Decoder) interViewRefs(h *sliceHeader, l int) []*picture {
 
 func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 	cp := d.cur
-	pic := cp.pic
+	pic := cp.target
 	v := &d.views[cp.view]
 	if h.firstMb >= pic.mbW*pic.mbH || cp.nslices >= maxSlices {
 		return errInvalid
@@ -709,7 +744,11 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 		// view (they are unmarked by its own decoding); in MVC a dependent
 		// view IDR may still be a P/B slice using inter-view references.
 		var l0, l1 []*picture
-		if !h.nal.idr {
+		switch {
+		case h.fieldPic:
+			// the second field of an IDR picture predicts from its first
+			l0, l1 = v.initFieldRefLists(h, pic.poc)
+		case !h.nal.idr:
 			l0, l1 = v.initRefLists(h, pic.poc)
 		}
 		lists := [2][]*picture{l0, l1}
@@ -748,7 +787,10 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 				}
 			}
 			if fallback == nil {
-				fallback = d.greyPicture(pic.mbW, pic.mbH)
+				fallback = d.greyPicture(cp.pic.mbW, cp.pic.mbH)
+			}
+			if h.fieldPic && fallback.parent == nil {
+				fallback = fallback.fieldRef(pic.parity)
 			}
 			for i, p := range lists[l] {
 				if p == nil {
@@ -771,8 +813,13 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 		for i, p := range job.refList[l] {
 			info.ids[l][i] = p.id
 			info.poc[l][i] = p.poc
-			info.lt[l][i] = p.longRef
-			d.hold(cp, p)
+			if f := p.parent; f != nil {
+				info.lt[l][i] = f.longRef
+				d.hold(cp, f)
+			} else {
+				info.lt[l][i] = p.longRef
+				d.hold(cp, p)
+			}
 		}
 	}
 	pic.setSliceRef(job.sliceIdx, info)
@@ -810,6 +857,9 @@ func (d *Decoder) runPicture(cp *curPic) {
 	}
 	fc.conceal(cp.conceal)
 	fc.finishRowsSafe()
+	if f := cp.target; f.parent != nil {
+		finishField(f)
+	}
 	d.sdPool.Put(sd)
 	d.poolMu.Lock()
 	for _, p := range cp.held {
@@ -842,7 +892,8 @@ func (s *sliceDec) runJob(fc *frameCtx, job *sliceJob) {
 	s.refInfo = &job.info
 	s.curPOC = job.curPOC
 	s.dq4, s.dq8 = &job.dq.dq4, &job.dq.dq8
-	s.dq4z, s.dq8z = &job.dq.dq4z, &job.dq.dq8z
+	s.dqt = job.dq
+	s.setField(h.fieldPic)
 	for len(fc.slices) <= job.sliceIdx {
 		fc.slices = append(fc.slices, sliceParams{})
 	}
@@ -853,6 +904,15 @@ func (s *sliceDec) runJob(fc *frameCtx, job *sliceJob) {
 		chromaQPOffset: h.pps.chromaQPOffset,
 	}
 	s.deblock = h.disableDeblock != 1
+	if h.fieldPic {
+		for l := range s.refList {
+			for _, r := range s.refList[l] {
+				if r.parent != nil {
+					r.ensureCopy()
+				}
+			}
+		}
+	}
 	s.setupInter()
 	s.setQP(h.pps.picInitQP + h.qpDelta)
 	s.lastDQ = 0
@@ -877,7 +937,18 @@ func (s *sliceDec) setupInter() {
 		return
 	}
 	cur := s.curPOC
-	s.colPic = s.refList[1][0]
+	s.colPic, s.colMode = s.refList[1][0], 0
+	if c := s.colPic; s.pic.parent == nil && c.parent == nil && c.asFields {
+		// a frame from a field pair: the field nearer in order (8.4.1.2.1)
+		par := 0
+		if iabs(c.topPOC-cur) >= iabs(c.botPOC-cur) {
+			par = 1
+		}
+		s.colPic, s.colMode = c.field(par), 1
+	} else if s.pic.parent != nil && c.parent != nil && !c.asField {
+		// a field from a frame (decoded as one)
+		s.colPic, s.colMode = c.parent, 2
+	}
 	if s.wpMode == wpImplicit {
 		for i := range s.refList[0] {
 			p0poc := s.refInfo.poc[0][i]
@@ -904,7 +975,22 @@ func (s *sliceDec) setupInter() {
 		}
 		clear(s.mapCol)
 		for i := len(s.refList[0]) - 1; i >= 0; i-- {
-			s.mapCol[s.refInfo.ids[0][i]] = i
+			id := s.refInfo.ids[0][i]
+			switch s.colMode {
+			case 1:
+				// the colocated field's references are fields: of the
+				// frames in list 0
+				s.mapCol[fieldID(id, 0)] = i
+				s.mapCol[fieldID(id, 1)] = i
+			case 2:
+				// the colocated frame's are frames: their fields of the
+				// current parity in list 0
+				if p := s.refList[0][i]; p.parent != nil && p.parity == s.pic.parity {
+					s.mapCol[p.parent.id] = i
+				}
+			default:
+				s.mapCol[id] = i
+			}
 		}
 		p1poc := s.refInfo.poc[1][0]
 		for i := range s.refList[0] {
@@ -1021,11 +1107,32 @@ func (d *Decoder) finishPicture() {
 		v.markPicture(pic, h)
 	}
 	mmco5 := h.hasMMCO5
-	pic.mmco5 = mmco5
+	pic.mmco5 = pic.mmco5 || mmco5
 	v.prevHadMMCO5 = mmco5
 	v.prevFrameNum = h.frameNum
 	if h.nal.refIdc != 0 {
 		v.prevRefFrameNum = h.frameNum
+	}
+	if h.fieldPic {
+		if pic.fieldsStarted != 3 {
+			d.firstField = cp
+		} else {
+			d.firstField = nil
+		}
+		if mmco5 {
+			// the field is treated as frame_num 0 / POC 0 afterwards
+			if h.bottomField {
+				pic.botPOC = 0
+			} else {
+				pic.topPOC = 0
+			}
+			pic.poc = 0
+			cp.target.poc = 0
+			pic.frameNum = 0
+			v.prevFrameNum, v.prevRefFrameNum, v.prevFrameNumOffset = 0, 0, 0
+			v.prevPocMsb, v.prevPocLsb = 0, 0
+		}
+		return
 	}
 	if mmco5 {
 		// the picture is treated as frame_num 0 / POC 0 afterwards
@@ -1063,6 +1170,17 @@ func (d *Decoder) finishAU() {
 		}
 		return
 	}
+	if b.asFields && b.fieldsStarted != 3 {
+		// a first field: its frame waits for the second
+		d.heldAU = au
+		return
+	}
+	d.queueAU(au)
+}
+
+// queueAU queues an access unit for output.
+func (d *Decoder) queueAU(au *accessUnit) {
+	b := au.pics[0]
 	if b.idr || b.mmco5 {
 		d.flushOutput()
 	}
@@ -1074,6 +1192,11 @@ func (d *Decoder) finishAU() {
 }
 
 func (d *Decoder) flushOutput() {
+	d.endFirstField()
+	if au := d.heldAU; au != nil {
+		d.heldAU = nil
+		d.queueAU(au)
+	}
 	for len(d.pending) > 0 {
 		d.outputOne()
 	}
@@ -1171,4 +1294,118 @@ func (d *Decoder) FrameRate() (num, den int) {
 		}
 	}
 	return num, den
+}
+
+// startField starts decoding a field picture: the second field of the
+// frame whose first field was decoded last (opposite parity, same
+// frame_num), or the first of a new frame.
+func (d *Decoder) startField(view int, h *sliceHeader, fpoc, fno int32) error {
+	s := h.sps
+	v := &d.views[view]
+	parity := 0
+	if h.bottomField {
+		parity = 1
+	}
+	var pic *picture
+	if d.pairsFirstField(view, h) {
+		pic = d.firstField.pic
+		d.firstField = nil
+		if parity == 0 {
+			pic.topPOC = fpoc
+		} else {
+			pic.botPOC = fpoc
+		}
+		pic.poc = min(pic.topPOC, pic.botPOC)
+		d.poolMu.Lock()
+		pic.decoding = true
+		d.poolMu.Unlock()
+	} else {
+		d.endFirstField()
+		pic = d.allocPicture(s.widthMbs, s.heightMbs())
+		d.nextID++
+		pic.id = d.nextID
+		pic.resetFields()
+		pic.asFields = true
+		pic.poc, pic.topPOC, pic.botPOC = fpoc, fpoc, fpoc
+		pic.frameNum = h.frameNum
+		pic.viewID = h.nal.viewID
+		pic.viewIdx = view
+		pic.idr = h.nal.idr
+		pic.anchor = h.nal.anchor || h.nal.idr
+		pic.interView = h.nal.interView
+		pic.outputNeeded = true
+		pic.pts = d.pts
+		pic.cropLeft, pic.cropRight, pic.cropTop, pic.cropBottom = s.cropLeft, s.cropRight, s.cropTop, s.cropBottom
+		if s.chromaFormatIdc == 0 {
+			for c := 1; c < 3; c++ {
+				for i := range pic.planes[c] {
+					pic.planes[c][i] = 128
+				}
+			}
+		}
+	}
+	pic.fieldsStarted |= 1 << parity
+	f := pic.field(parity)
+	f.reset()
+	f.asField = true
+	f.viewFrame()
+	f.syncFromFrame()
+	fc := d.getFrameCtx(s.widthMbs, s.heightMbs()/2)
+	fc.reset(f, s)
+	cp := &curPic{view: view, pic: pic, target: f, fc: fc, hdr: *h, jobs: make(chan *sliceJob, 16)}
+	cp.hdr.mmco = append([]mmcoOp(nil), h.mmco...)
+	d.cur = cp
+	d.sem <- struct{}{}
+	d.wg.Add(1)
+	go d.runPicture(cp)
+	v.prevFrameNumOffset = fno
+	d.au.pics[view] = pic
+	if view == 0 {
+		d.au.poc = pic.poc
+	}
+	return nil
+}
+
+// pairsFirstField reports whether a field picture is the second field of
+// the frame whose first field was decoded last.
+func (d *Decoder) pairsFirstField(view int, h *sliceHeader) bool {
+	ff := d.firstField
+	if ff == nil || ff.view != view || ff.hdr.frameNum != h.frameNum {
+		return false
+	}
+	return ff.hdr.bottomField != h.bottomField
+}
+
+// endFirstField gives up waiting for a second field: the first field's
+// frame is complete as it is (its other field's rows whatever the buffer
+// held), for whatever waits on it.
+func (d *Decoder) endFirstField() {
+	ff := d.firstField
+	if ff == nil {
+		return
+	}
+	d.firstField = nil
+	pic, f := ff.pic, ff.target
+	go func() {
+		f.waitRows(f.mbH)
+		pic.extendRows(0, pic.mbH)
+		pic.setProgress(pic.mbH)
+	}()
+}
+
+// finishField completes a field decoded into its frame: its copy to
+// predict from, then, with both fields in, the frame's borders and
+// progress.
+func finishField(f *picture) {
+	f.makeCopy()
+	f.setProgress(f.mbH)
+	p := f.parent
+	p.mu.Lock()
+	p.fieldsDone |= 1 << f.parity
+	both := p.fieldsDone == 3
+	p.mu.Unlock()
+	if both {
+		p.extendRows(0, p.mbH)
+		p.setProgress(p.mbH)
+	}
 }

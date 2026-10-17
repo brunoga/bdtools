@@ -46,6 +46,11 @@ func (v *viewState) computePOC(h *sliceHeader) (poc, top, bot int32, frameNumOff
 		top := msb + lsb
 		bot := top + h.deltaPocBottom
 		poc = min(top, bot)
+		if h.fieldPic {
+			// a field's own order count: TopFieldOrderCnt or
+			// BottomFieldOrderCnt, both msb + lsb
+			poc, bot = top, top
+		}
 		if h.nal.refIdc != 0 {
 			v.prevPocMsb = msb
 			v.prevPocLsb = lsb
@@ -88,6 +93,13 @@ func (v *viewState) computePOC(h *sliceHeader) (poc, top, bot int32, frameNumOff
 		}
 		top := expected + h.deltaPoc[0]
 		bot := top + s.offsetForTopToBottom + h.deltaPoc[1]
+		if h.fieldPic {
+			f := top
+			if h.bottomField {
+				f = expected + s.offsetForTopToBottom + h.deltaPoc[0]
+			}
+			return f, f, f, off
+		}
 		return min(top, bot), top, bot, off
 	default:
 		var off int32
@@ -120,12 +132,12 @@ func (v *viewState) removeRef(p *picture) {
 			break
 		}
 	}
-	p.shortRef, p.longRef = false, false
+	p.shortRef, p.longRef, p.refMask = false, false, 0
 }
 
 func (v *viewState) unmarkAll() {
 	for _, r := range v.refs {
-		r.shortRef, r.longRef = false, false
+		r.shortRef, r.longRef, r.refMask = false, false, 0
 	}
 	v.refs = v.refs[:0]
 }
@@ -144,21 +156,12 @@ func (v *viewState) numShortLong() (int, int) {
 
 // slidingWindow applies the sliding window marking (8.2.5.3).
 func (v *viewState) slidingWindow(maxRefs int, curFrameNum int, maxFrameNum int) {
-	if maxRefs < 1 {
-		maxRefs = 1
-	}
 	for {
 		ns, nl := v.numShortLong()
-		if ns+nl < maxRefs || ns == 0 {
+		if ns+nl < max(maxRefs, 1) || ns == 0 {
 			return
 		}
-		var oldest *picture
-		for _, r := range v.refs {
-			if r.shortRef && (oldest == nil || frameNumWrap(r, curFrameNum, maxFrameNum) < frameNumWrap(oldest, curFrameNum, maxFrameNum)) {
-				oldest = r
-			}
-		}
-		v.removeRef(oldest)
+		v.removeRef(v.oldestShort(curFrameNum, maxFrameNum, nil))
 	}
 }
 
@@ -169,70 +172,89 @@ func frameNumWrap(p *picture, cur, max int) int {
 	return p.frameNum
 }
 
-// markPicture performs reference picture marking for the decoded picture p
-// (8.2.5).
+// markPicture performs reference picture marking for the decoded picture
+// p (8.2.5): a frame, or one field of the frame store p (h.fieldPic).
+// The frames in refs are the frame stores with a field marked; a frame's
+// refMask says which, its shortRef and longRef which list it is in.
 func (v *viewState) markPicture(p *picture, h *sliceHeader) {
 	s := h.sps
-	maxFrameNum := 1 << s.log2MaxFrameNum
-	if h.nal.idr {
+	structure := uint8(3)
+	if h.fieldPic {
+		structure = 1
+		if h.bottomField {
+			structure = 2
+		}
+	}
+	// the second field of a frame whose first field is marked joins it
+	second := h.fieldPic && p.refMask != 0 && v.has(p)
+	if h.nal.idr && !second {
 		v.unmarkAll()
 		if h.longTermReference {
-			p.longRef = true
-			p.longTermFrameIdx = 0
+			p.longRef, p.longTermFrameIdx = true, 0
 			v.maxLongTermIdx = 0
 		} else {
 			p.shortRef = true
 			v.maxLongTermIdx = -1
 		}
+		p.refMask = structure
 		v.refs = append(v.refs, p)
 		return
 	}
-	becameLong := false
-	if h.adaptiveMarking {
-		cur := h.frameNum
+	maxFrameNum := 1 << s.log2MaxFrameNum
+	maxPicNum, curPicNum := maxFrameNum, h.frameNum
+	if h.fieldPic {
+		maxPicNum, curPicNum = 2*maxFrameNum, 2*h.frameNum+1
+	}
+	// extract: a picture number's frame number (or long-term frame
+	// index) and the fields it names
+	extract := func(n int) (int, uint8) {
+		if !h.fieldPic {
+			return n, 3
+		}
+		if n&1 != 0 {
+			return n >> 1, structure // the same parity
+		}
+		return n >> 1, structure ^ 3
+	}
+	unref := func(r *picture, mask uint8) {
+		if r.refMask &^= mask; r.refMask == 0 {
+			v.removeRef(r)
+		}
+	}
+	assigned := false
+	if !h.adaptiveMarking {
+		ns, nl := v.numShortLong()
+		if ns > 0 && ns+nl >= max(s.maxNumRefFrames, 1) && !second {
+			v.removeRef(v.oldestShort(h.frameNum, maxFrameNum, nil))
+		}
+	} else {
 		for _, m := range h.mmco {
 			switch m.op {
 			case 1:
-				pn := cur - int(m.diffPicNums+1)
-				for _, r := range v.refs {
-					if r.shortRef && frameNumWrap(r, cur, maxFrameNum) == pn {
-						v.removeRef(r)
-						break
-					}
+				fn, st := extract((curPicNum - int(m.diffPicNums+1)) & (maxPicNum - 1))
+				if r := v.findShort(fn); r != nil {
+					unref(r, st)
 				}
 			case 2:
-				for _, r := range v.refs {
-					if r.longRef && r.longTermFrameIdx == int(m.longTermPicNum) {
-						v.removeRef(r)
-						break
-					}
+				idx, st := extract(int(m.longTermPicNum))
+				if r := v.findLong(idx); r != nil {
+					unref(r, st)
 				}
 			case 3:
-				pn := cur - int(m.diffPicNums+1)
+				fn, _ := extract((curPicNum - int(m.diffPicNums+1)) & (maxPicNum - 1))
 				idx := int(m.longTermFrameIdx)
-				var target *picture
-				for _, r := range v.refs {
-					if r.shortRef && frameNumWrap(r, cur, maxFrameNum) == pn {
-						target = r
-						break
-					}
+				r := v.findShort(fn)
+				if r == nil {
+					continue
 				}
-				for _, r := range v.refs {
-					if r.longRef && r.longTermFrameIdx == idx && r != target {
-						v.removeRef(r)
-						break
-					}
+				if l := v.findLong(idx); l != nil && l != r {
+					v.removeRef(l)
 				}
-				if target != nil {
-					target.shortRef = false
-					target.longRef = true
-					target.longTermFrameIdx = idx
-				}
+				r.shortRef, r.longRef, r.longTermFrameIdx = false, true, idx
 			case 4:
 				v.maxLongTermIdx = int(m.maxLongTermIdxP1) - 1
 				for i := 0; i < len(v.refs); {
-					r := v.refs[i]
-					if r.longRef && r.longTermFrameIdx > v.maxLongTermIdx {
+					if r := v.refs[i]; r.longRef && r.longTermFrameIdx > v.maxLongTermIdx {
 						v.removeRef(r)
 						continue
 					}
@@ -243,31 +265,81 @@ func (v *viewState) markPicture(p *picture, h *sliceHeader) {
 				v.maxLongTermIdx = -1
 			case 6:
 				idx := int(m.longTermFrameIdx)
-				for _, r := range v.refs {
-					if r.longRef && r.longTermFrameIdx == idx {
-						v.removeRef(r)
-						break
-					}
+				if l := v.findLong(idx); l != nil && l != p {
+					v.removeRef(l)
 				}
-				p.longRef = true
-				p.longTermFrameIdx = idx
-				becameLong = true
-			}
-		}
-	} else {
-		v.slidingWindow(s.maxNumRefFrames, h.frameNum, maxFrameNum)
-	}
-	if !becameLong {
-		p.shortRef = true
-		// guard against streams exceeding max_num_ref_frames
-		if h.adaptiveMarking {
-			ns, nl := v.numShortLong()
-			if ns+nl >= max(s.maxNumRefFrames, 1) {
-				v.slidingWindow(s.maxNumRefFrames, h.frameNum, maxFrameNum)
+				p.shortRef, p.longRef, p.longTermFrameIdx = false, true, idx
+				p.refMask |= structure
+				if !v.has(p) {
+					v.refs = append(v.refs, p)
+				}
+				assigned = true
 			}
 		}
 	}
-	v.refs = append(v.refs, p)
+	if !assigned {
+		p.refMask |= structure
+		if !p.longRef {
+			p.shortRef = true
+		}
+		if !v.has(p) {
+			v.refs = append(v.refs, p)
+		}
+	}
+	// guard against streams exceeding max_num_ref_frames
+	if ns, nl := v.numShortLong(); ns+nl > max(s.maxNumRefFrames, 1) {
+		if r := v.oldestShort(h.frameNum, maxFrameNum, p); r != nil {
+			v.removeRef(r)
+		} else {
+			for _, r := range v.refs {
+				if r.longRef && r != p {
+					v.removeRef(r)
+					break
+				}
+			}
+		}
+	}
+}
+
+func (v *viewState) has(p *picture) bool {
+	for _, r := range v.refs {
+		if r == p {
+			return true
+		}
+	}
+	return false
+}
+
+// findShort and findLong return the frame in the short-term list with
+// the frame number, in the long-term list with the index.
+func (v *viewState) findShort(frameNum int) *picture {
+	for _, r := range v.refs {
+		if r.shortRef && r.frameNum == frameNum {
+			return r
+		}
+	}
+	return nil
+}
+
+func (v *viewState) findLong(idx int) *picture {
+	for _, r := range v.refs {
+		if r.longRef && r.longTermFrameIdx == idx {
+			return r
+		}
+	}
+	return nil
+}
+
+// oldestShort is the short-term frame with the least FrameNumWrap, but
+// not except.
+func (v *viewState) oldestShort(cur, maxFrameNum int, except *picture) *picture {
+	var oldest *picture
+	for _, r := range v.refs {
+		if r.shortRef && r != except && (oldest == nil || frameNumWrap(r, cur, maxFrameNum) < frameNumWrap(oldest, cur, maxFrameNum)) {
+			oldest = r
+		}
+	}
+	return oldest
 }
 
 // initRefLists builds the initial reference picture lists (8.2.4.2).
@@ -317,10 +389,84 @@ func (v *viewState) initRefLists(h *sliceHeader, curPOC int32) (l0, l1 []*pictur
 	return l0, l1
 }
 
+// initFieldRefLists builds the initial reference lists of a field
+// (8.2.4.2.2, 8.2.4.2.4 and 8.2.4.2.5): the frames ordered as for a frame
+// (by POC around the field's own, ties to the frame store's least field
+// POC), then their fields taken alternately, starting with the field's
+// own parity.
+func (v *viewState) initFieldRefLists(h *sliceHeader, curPOC int32) (l0, l1 []*picture) {
+	maxFrameNum := 1 << h.sps.log2MaxFrameNum
+	cur := h.frameNum
+	parity := 0
+	if h.bottomField {
+		parity = 1
+	}
+	var short, long []*picture
+	for _, r := range v.refs {
+		if r.longRef {
+			long = append(long, r)
+		} else if r.shortRef {
+			short = append(short, r)
+		}
+	}
+	sort.Slice(long, func(i, j int) bool { return long[i].longTermFrameIdx < long[j].longTermFrameIdx })
+	fields := func(frames []*picture) []*picture {
+		var out []*picture
+		i := [2]int{}
+		for i[0] < len(frames) || i[1] < len(frames) {
+			for k, par := range [2]int{parity, parity ^ 1} {
+				for i[k] < len(frames) && frames[i[k]].refMask>>par&1 == 0 {
+					i[k]++
+				}
+				if i[k] < len(frames) {
+					out = append(out, frames[i[k]].fieldRef(par))
+					i[k]++
+				}
+			}
+		}
+		return out
+	}
+	if h.sliceType == sliceP {
+		sort.Slice(short, func(i, j int) bool {
+			return frameNumWrap(short[i], cur, maxFrameNum) > frameNumWrap(short[j], cur, maxFrameNum)
+		})
+		return append(fields(short), fields(long)...), nil
+	}
+	var before, after []*picture
+	for _, r := range short {
+		if r.poc <= curPOC {
+			before = append(before, r)
+		} else {
+			after = append(after, r)
+		}
+	}
+	sort.Slice(before, func(i, j int) bool { return before[i].poc > before[j].poc })
+	sort.Slice(after, func(i, j int) bool { return after[i].poc < after[j].poc })
+	lt := fields(long)
+	l0 = append(fields(append(append([]*picture(nil), before...), after...)), lt...)
+	l1 = append(fields(append(append([]*picture(nil), after...), before...)), lt...)
+	if len(l1) > 1 && len(l0) == len(l1) {
+		same := true
+		for i := range l0 {
+			if l0[i] != l1[i] {
+				same = false
+				break
+			}
+		}
+		if same {
+			l1[0], l1[1] = l1[1], l1[0]
+		}
+	}
+	return l0, l1
+}
+
 // modifyRefList applies ref_pic_list_modification (8.2.4.3 and H.8.2.2.3).
 func (v *viewState) modifyRefList(list []*picture, n int, mods []refPicMod, h *sliceHeader, interView []*picture) []*picture {
 	maxPicNum := 1 << h.sps.log2MaxFrameNum
 	cur := h.frameNum
+	if h.fieldPic {
+		return v.modifyFieldRefList(list, n, mods, h)
+	}
 	// working list of n+1 entries
 	work := make([]*picture, n+1)
 	copy(work, list)
@@ -446,4 +592,68 @@ func dpbSize(s *sps) int {
 		n = s.maxNumRefFrames
 	}
 	return max(n, 1)
+}
+
+// modifyFieldRefList is modifyRefList for a field: picture numbers count
+// fields, 2 FrameNumWrap + 1 for the field's own parity and 2 FrameNumWrap
+// for the other (long-term ones likewise from LongTermFrameIdx).
+func (v *viewState) modifyFieldRefList(list []*picture, n int, mods []refPicMod, h *sliceHeader) []*picture {
+	maxPicNum := 2 << h.sps.log2MaxFrameNum
+	parity := 0
+	if h.bottomField {
+		parity = 1
+	}
+	work := make([]*picture, n+1)
+	copy(work, list)
+	picNumPred := 2*h.frameNum + 1
+	refIdx := 0
+	for _, m := range mods {
+		if refIdx >= n {
+			break
+		}
+		var pic *picture
+		switch m.idc {
+		case 0, 1:
+			abs := int(m.val) + 1
+			if m.idc == 0 {
+				picNumPred -= abs
+			} else {
+				picNumPred += abs
+			}
+			picNumPred &= maxPicNum - 1
+			par := parity
+			if picNumPred&1 == 0 {
+				par ^= 1
+			}
+			if r := v.findShort(picNumPred >> 1); r != nil && r.refMask>>par&1 != 0 {
+				pic = r.fieldRef(par)
+			}
+		case 2:
+			par := parity
+			if m.val&1 == 0 {
+				par ^= 1
+			}
+			if r := v.findLong(int(m.val >> 1)); r != nil && r.refMask>>par&1 != 0 {
+				pic = r.fieldRef(par)
+			}
+		default:
+			continue
+		}
+		for c := n; c > refIdx; c-- {
+			work[c] = work[c-1]
+		}
+		work[refIdx] = pic
+		refIdx++
+		ni := refIdx
+		for c := refIdx; c <= n; c++ {
+			if work[c] != pic || pic == nil {
+				work[ni] = work[c]
+				ni++
+			}
+		}
+		for ; ni <= n; ni++ {
+			work[ni] = nil
+		}
+	}
+	return work[:n]
 }

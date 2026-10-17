@@ -19,6 +19,37 @@ var (
 	zzPos8   [16]uint8 // 4x4 zigzag index -> offset with row stride 8
 	zz8Pos16 [64]uint8 // 8x8 zigzag index -> offset with row stride 16
 	blkOff16 [16]int   // raster 4x4 block -> offset in luma coefficients
+
+	// the same for the field scans (8.5.6, field macroblocks)
+	fldPos16  [16]uint8
+	fldPos8   [16]uint8
+	fld8Pos16 [64]uint8
+)
+
+// field4x4 and field8x8 map field scan indices to raster positions
+// (Tables 8-13 and 8-14).
+var field4x4 = [16]uint8{0, 4, 1, 8, 12, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15}
+
+var field8x8 = [64]uint8{
+	0, 8, 16, 1, 9, 24, 32, 17, 2, 25, 40, 48, 56, 33, 10, 3,
+	18, 41, 49, 57, 26, 11, 4, 19, 34, 42, 50, 58, 27, 12, 5, 20,
+	35, 43, 51, 59, 28, 13, 6, 21, 36, 44, 52, 60, 29, 14, 22, 37,
+	45, 53, 61, 30, 7, 15, 38, 46, 54, 62, 23, 31, 39, 47, 55, 63,
+}
+
+// scanSet is a scan's tables: indices to raster positions, and to
+// offsets in the transposed coefficient layouts.
+type scanSet struct {
+	z4     *[16]uint8
+	z8     *[64]uint8
+	pos16  *[16]uint8
+	pos8   *[16]uint8
+	pos8x8 *[64]uint8
+}
+
+var (
+	frameScan = scanSet{&zigzag4x4, &zigzag8x8, &zzPos16, &zzPos8, &zz8Pos16}
+	fieldScan = scanSet{&field4x4, &field8x8, &fldPos16, &fldPos8, &fld8Pos16}
 )
 
 func init() {
@@ -31,6 +62,13 @@ func init() {
 	for k := 0; k < 64; k++ {
 		p := int(zigzag8x8[k])
 		zz8Pos16[k] = uint8(p&7*16 + p>>3)
+		p = int(field8x8[k])
+		fld8Pos16[k] = uint8(p&7*16 + p>>3)
+	}
+	for k := 0; k < 16; k++ {
+		p := int(field4x4[k])
+		fldPos16[k] = uint8(p&3*16 + p>>2)
+		fldPos8[k] = uint8(p&3*8 + p>>2)
 	}
 }
 
