@@ -24,7 +24,7 @@ worked on one at a time in the order below.
 
 | Need | Today | Go replacement |
 |---|---|---|
-| H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +5.4% BD-rate and 3.4x the CPU of x264 medium on 240 film pictures |
+| H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +0.4% BD-rate (trellis) and 3.6x the CPU of x264 medium on 240 film pictures |
 | AV1 output | SVT-AV1 | An AV1 encoder in Go (the largest piece) |
 | Dolby Vision with the enhancement layer kept or re-encoded | NVENC or x265 | The two-layer form in the Go HEVC encoder |
 | Interlaced H.264 input | ffmpeg | Field and MBAFF decoding in the Go H.264 decoder |
@@ -101,4 +101,4 @@ Measurement:
 | 1. SBS and OU | Done: `--layout ou`/`half-ou` out; side-by-side and over-under sources in (`--input-layout`, Matroska stereo mode) |
 | 2. MP4 and MOV | Done: MP4/MOV sources (MV-HEVC and st3d 3D included), MP4/MOV output for every layout but MVC, burn-in for any MP4 |
 | 3. Audio codecs in Go | Done: AC-3 encoder (coupling to do for 128 kb/s stereo), DTS core decoder (bit-exact), AAC passthrough and an AAC-LC encoder (short blocks to do) |
-| 4. H.264 encoder | Next |
+| 4. H.264 encoder | In progress: trellis, deterministic output (B-pyramid and speed next) |

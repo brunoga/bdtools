@@ -325,14 +325,21 @@ func (c *depCoder) quantBlock(px, py, size int, pred []byte, lv []int32, rec []b
 		var r [16]int32
 		for k := 0; k < 16; k++ {
 			p := zigzag4x4[k]
-			l := quantLevel(d[p], mf[p], qbits, f)
-			lv[k] = l
-			if l != 0 {
-				coded = true
-				r[p] = encDequant4(l, ls[p], qp)
-			}
+			lv[k] = quantLevel(d[p], mf[p], qbits, f)
+			coded = coded || lv[k] != 0
+		}
+		if coded && c.trellising() {
+			t := &c.tc
+			t.load(c.e.contexts(), catLuma4x4, 16)
+			coded = trellisBlock(t, d[:], zigzag4x4[:], mf[:], qbits, trellisW4[qp][:], c.lambda2*trellisIntra, 0, 0, lv[:16])
 		}
 		if coded {
+			for k, l := range lv[:16] {
+				if l != 0 {
+					p := zigzag4x4[k]
+					r[p] = encDequant4(l, ls[p], qp)
+				}
+			}
 			encIDCT4(&r)
 		}
 		for y := 0; y < 4; y++ {
@@ -356,14 +363,21 @@ func (c *depCoder) quantBlock(px, py, size int, pred []byte, lv []int32, rec []b
 	var r [64]int32
 	for k := 0; k < 64; k++ {
 		p := zigzag8x8[k]
-		l := quantLevel(d[p], mf[p], qbits, f)
-		lv[k] = l
-		if l != 0 {
-			coded = true
-			r[p] = encDequant8(l, ls[p], qp)
-		}
+		lv[k] = quantLevel(d[p], mf[p], qbits, f)
+		coded = coded || lv[k] != 0
+	}
+	if coded && c.trellising() {
+		t := &c.tc
+		t.load(c.e.contexts(), catLuma8x8, 64)
+		coded = trellisBlock(t, d[:], zigzag8x8[:], mf[:], qbits, trellisW8[qp][:], c.lambda2*trellisIntra, 0, 0, lv[:64])
 	}
 	if coded {
+		for k, l := range lv[:64] {
+			if l != 0 {
+				p := zigzag8x8[k]
+				r[p] = encDequant8(l, ls[p], qp)
+			}
+		}
 		encIDCT8(&r)
 	}
 	for y := 0; y < 8; y++ {
@@ -465,6 +479,9 @@ func (c *depCoder) chromaQuant(mbX, mbY int, res *residual) {
 		mask, nz := fdctQuantChroma(src, so, c.src.StrideC, pred, mfc, &c.mfTC, qbc, fc, &out, &dcs)
 		for b := 0; b < 4; b++ {
 			copy(res.ac[comp][b][:], out[b][1:])
+		}
+		if c.trellising() && mask != 0 {
+			mask, nz = c.trellisChroma(src, so, pred, mask, qbc, res.ac[comp][:])
 		}
 		if mask != 0 {
 			chroma = 2

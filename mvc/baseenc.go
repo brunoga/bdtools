@@ -3,6 +3,7 @@ package mvc
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -92,6 +93,7 @@ type baseJob struct {
 	after    *baseJob // decoded before this picture is coded: its references come from it (nil: none)
 
 	list  [2][]*picture // its reference lists, set when it is launched
+	mvs   []mv          // a reference picture's list 0 vectors, once coded
 	coded chan struct{} // closed once au and err are set
 	au    []byte
 	err   error
@@ -409,6 +411,11 @@ func (e *BaseEncoder) run() {
 					break
 				}
 				e.dec.finishPicture()
+				for _, r := range e.dec.views[0].refs {
+					if r.shortRef && r.poc == j.poc {
+						r.encMV = j.mvs
+					}
+				}
 				for {
 					fr, ok := e.dec.NextFrame()
 					if !ok {
@@ -493,6 +500,7 @@ func (e *BaseEncoder) codePicture(j *baseJob, c *depCoder) ([]byte, error) {
 			r.halfPel()
 		}
 	}
+	c.seedVectors(j.poc)
 	c.src = *j.f.src
 	c.aq = o.AQ
 	c.planQP(qp)
@@ -538,6 +546,9 @@ func (e *BaseEncoder) codePicture(j *baseJob, c *depCoder) ([]byte, error) {
 	e.statsMu.Unlock()
 	for i := range workers {
 		out = appendNAL(out, hdr, parts[i])
+	}
+	if j.refIdc != 0 {
+		j.mvs = slices.Clone(c.prev[1])
 	}
 	return out, nil
 }
@@ -603,4 +614,33 @@ func (e *BaseEncoder) Stats() DepStats {
 	st := e.stats
 	e.statsMu.Unlock()
 	return DepStats{Skip: st.skip, Direct: st.direct, InterView: st.interView, Temporal: st.temporal, Bi: st.bi, Partitioned: st.parts, Intra: st.intra}
+}
+
+// seedVectors sets the coder's search starting points for the picture
+// at poc from its references' own vectors (rather than from whatever the
+// coder coded last, which depends on scheduling): list 0's from the
+// first reference's, list 1's from the future reference's, reversed and
+// scaled to the distance.
+func (c *depCoder) seedVectors(poc int32) {
+	seed := func(dst, src []mv, num, den int32) {
+		if src == nil || den == 0 {
+			clear(dst)
+			return
+		}
+		for i, m := range src {
+			dst[i] = mv{int16(int32(m.x) * num / den), int16(int32(m.y) * num / den)}
+		}
+	}
+	clear(c.prev[0])
+	if len(c.list[0]) > 0 {
+		seed(c.prev[1], c.list[0][0].encMV, 1, 1)
+	} else {
+		clear(c.prev[1])
+	}
+	if len(c.list[1]) > 0 && len(c.list[0]) > 0 {
+		f, p := c.list[1][0].poc, c.list[0][0].poc
+		seed(c.prev[2], c.list[1][0].encMV, -(f - poc), f-p)
+	} else {
+		clear(c.prev[2])
+	}
 }
