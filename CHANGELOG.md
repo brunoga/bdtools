@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Loop restoration in the AV1 encoder (Wiener, self-guided or switchable,
+  chosen per unit after CDEF, the unit size by rate and distortion), a
+  smaller lambda and finer key frames: 3.5% smaller on two 120-picture
+  1080p disc clips, +34% against SVT-AV1 preset 4 there (the 30-picture
+  clips flattered the encoder, their key frame a quarter of the bits).
 - The AV1 encoder faster and smaller: a tile's superblock rows coded at
   once (a wavefront: each row decides from the CDFs of the row above, the
   stream still exact and the same however scheduled), the HEVC encoder's

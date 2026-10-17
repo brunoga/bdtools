@@ -231,6 +231,34 @@ type frameParams struct {
 	cdefUV      [8][2]int
 	reducedTx   bool
 	tiles       tiling
+	// Loop restoration (when the sequence enables it): each plane's
+	// FrameRestorationType, lr_unit_shift (0..2: units of 64 << it) and
+	// lr_uv_shift.
+	lrType                 [3]int
+	lrUnitShift, lrUVShift int
+}
+
+// lrTypeCode is lr_type by FrameRestorationType (Remap_Lr_Type's inverse).
+var lrTypeCode = [4]uint32{RESTORE_NONE: 0, RESTORE_WIENER: 2, RESTORE_SGRPROJ: 3, RESTORE_SWITCHABLE: 1}
+
+// writeLRParams writes lr_params.
+func (f *frameParams) writeLRParams(w *bitWriter) {
+	uses, chroma := false, false
+	for i, t := range f.lrType {
+		w.f(lrTypeCode[t], 2)
+		uses = uses || t != RESTORE_NONE
+		chroma = chroma || (i > 0 && t != RESTORE_NONE)
+	}
+	if !uses {
+		return
+	}
+	w.flag(f.lrUnitShift > 0)
+	if f.lrUnitShift > 0 {
+		w.flag(f.lrUnitShift > 1) // lr_unit_extra_shift
+	}
+	if chroma {
+		w.flag(f.lrUVShift != 0)
+	}
 }
 
 // lossless reports whether the frame is coded losslessly.
@@ -328,7 +356,7 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 		}
 	}
 	if s.restoration && !f.lossless() {
-		panic("av1: lr_params")
+		f.writeLRParams(&w)
 	}
 	if !f.lossless() {
 		w.flag(f.txSelect)
