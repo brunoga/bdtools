@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -35,6 +36,28 @@ func ivf(w, h, num, den int, units [][]byte) []byte {
 	}
 	return b.Bytes()
 }
+
+// needDav1d skips a test without ffmpeg's libdav1d (before it spends
+// time encoding).
+func needDav1d(t *testing.T) {
+	t.Helper()
+	dav1dOnce.Do(func() {
+		ff, err := exec.LookPath("ffmpeg")
+		if err != nil {
+			return
+		}
+		out, err := exec.Command(ff, "-hide_banner", "-decoders").Output() //nolint:gosec // a test
+		dav1dOK = err == nil && bytes.Contains(out, []byte("libdav1d"))
+	})
+	if !dav1dOK {
+		t.Skip("no ffmpeg with libdav1d")
+	}
+}
+
+var (
+	dav1dOnce sync.Once
+	dav1dOK   bool
+)
 
 // dav1dDecode decodes an IVF file to its pictures' planes, 8 or 16 bits a
 // sample; it skips the test without ffmpeg's libdav1d.

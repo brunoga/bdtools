@@ -43,6 +43,7 @@ func checkDecodes(t *testing.T, o EncoderOptions, pics []*Source) {
 // not nil), giving the bytes and the first picture's luma PSNR.
 func checkDecodesWith(t *testing.T, o EncoderOptions, pics []*Source, setup func(*Encoder)) (int, float64) {
 	t.Helper()
+	needDav1d(t)
 	e, err := NewEncoder(o)
 	if err != nil {
 		t.Fatal(err)
@@ -175,5 +176,20 @@ func TestEncodeGOPs(t *testing.T) {
 			pics = append(pics, shifted(p, i, i/3))
 		}
 		checkDecodes(t, o, pics)
+	}
+}
+
+// The tiles coded at once (for the race detector, where there is no
+// decoder to check the stream with): a picture with four tiles and an
+// inter frame.
+func TestEncodeTilesConcurrently(t *testing.T) {
+	o := EncoderOptions{Width: 136, Height: 136, BitDepth: 8, QIndex: 150, TileColsLog2: 1, TileRowsLog2: 1, MiniGOP: 2}
+	e, err := NewEncoder(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := testPicture(136, 136, 8, 4)
+	if units := encodeAll(t, e, []*Source{p, shifted(p, 2, 1), shifted(p, 4, 2)}); len(units) != 3 {
+		t.Fatalf("%d units", len(units))
 	}
 }
