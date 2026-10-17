@@ -124,6 +124,9 @@ type Options struct {
 	// ToneMap makes an HDR picture SDR (BT.709), after any crop and
 	// scaling: see tonemap.go.
 	ToneMap bool
+	// SubsOCR reads each PGS subtitle track's pictures as text: a text
+	// track beside it (SRT in Matroska, tx3g in MP4).
+	SubsOCR bool
 	// SubsFiles are subtitle files (SRT, ASS, SSA, WebVTT) added to the
 	// output as tracks, after the source's.
 	SubsFiles []SubsFile

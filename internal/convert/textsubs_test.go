@@ -105,7 +105,7 @@ func readCues(t *testing.T, path string) (ids []string, private [][]byte, cues [
 	}
 	index := map[uint64]int{}
 	for _, tr := range tracks {
-		if tr.Type == mkv.TypeSubtitle {
+		if _, text := textStreamIDs[tr.CodecID]; tr.Type == mkv.TypeSubtitle && text {
 			index[tr.Number] = len(ids)
 			ids = append(ids, tr.CodecID)
 			private = append(private, tr.CodecPrivate)
