@@ -69,7 +69,7 @@ var dbgNoOverlay bool
 var depthQ = [...]int{40, 40, 28, 16, 0, 0, 0, 0}
 
 // keyQ is how much finer key frames code.
-var keyQ = 40
+var keyQ = 56
 
 // miniGOP is the mini-GOP length.
 func (e *Encoder) miniGOP() int {
