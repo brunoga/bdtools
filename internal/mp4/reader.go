@@ -767,3 +767,17 @@ func esdsConfig(b []byte) (object byte, config []byte) {
 	}
 	return object, config
 }
+
+// Resync goes on reading at the first sample stored at or after byte off
+// of the file: samples come from there on, in file order. It is for
+// reading parts of a file; r is the file NewReader read.
+func (r *Reader) Resync(_ io.ReadSeeker, off int64) error {
+	for i, ref := range r.order {
+		if r.tracks[ref.t].samples[ref.i].off >= off {
+			r.next = i
+			return nil
+		}
+	}
+	r.next = len(r.order)
+	return nil
+}

@@ -53,6 +53,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   black bar moved up into it), and a Dolby Vision film's RPUs say the
   active area they now have (level 5). A 4K FEL film cropped and scaled to
   1080p converts at 21 fps with the encoder here.
+- `--crop auto`: the black bars found before the conversion. The
+  conversion's own decoder decodes three pictures from a keyframe at each
+  of twelve places in the video (discs, Matroska and MP4 read in places,
+  without reading what lies between), and what is black in all that show
+  anything is cropped (a fade does not count; a film whose shape changes
+  keeps its largest picture). A few seconds for a disc: 138 rows above and
+  below on Godzilla vs. Kong's 2.39:1, 15 columns at the sides of Hugo.
 
 ### Fixed
 

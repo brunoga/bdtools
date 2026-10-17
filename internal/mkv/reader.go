@@ -791,3 +791,50 @@ func readFloat(b []byte) float64 {
 	}
 	return 0
 }
+
+// maxResync is how far Resync looks for a cluster.
+const maxResync = 64 << 20
+
+// Resync goes on reading at the first cluster that starts at or after byte
+// off of r, the file NewReader read: frames come from there on, in file
+// order. It is for reading parts of a file, looking at its pictures here
+// and there, without reading what lies between.
+func (m *Reader) Resync(r io.ReadSeeker, off int64) error {
+	if _, err := r.Seek(off, io.SeekStart); err != nil {
+		return err
+	}
+	br := bufio.NewReaderSize(r, 1<<20)
+	pos := off
+	var win uint32
+	for pos-off < maxResync {
+		b, err := br.ReadByte()
+		if err != nil {
+			return err
+		}
+		pos++
+		if win = win<<8 | uint32(b); win != idCluster {
+			continue
+		}
+		// A cluster's size, then its timestamp first (or a CRC-32 of it,
+		// as ffmpeg writes, and then its timestamp).
+		p, _ := br.Peek(16)
+		_, n := vint(p)
+		if n == 0 || n >= len(p) {
+			continue
+		}
+		if p[n] == 0xBF && n+6 < len(p) && p[n+1] == 0x84 {
+			n += 6
+		}
+		if p[n] != byte(idTimestamp) {
+			continue
+		}
+		start := pos - 4
+		if _, err := r.Seek(start, io.SeekStart); err != nil {
+			return err
+		}
+		m.r.Reset(r)
+		m.pos, m.clusterEnd, m.pending, m.next, m.ended = start, 0, nil, nil, false
+		return nil
+	}
+	return errors.New("mkv: no cluster found")
+}

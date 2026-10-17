@@ -264,6 +264,12 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if r.Opts.Remux {
 		return r.remuxToMKV(ctx, sel.Base, g.Next, g.KeepFrame, g.finish, g.src.chapters)
 	}
+	if r.Opts.Crop.Auto {
+		feed, done, err := r.discFeed(src, sel)
+		if err := r.resolveCrop(sel.Base, feed, done, err); err != nil {
+			return err
+		}
+	}
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {
 		return err
