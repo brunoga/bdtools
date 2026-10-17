@@ -8,8 +8,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - The Go H.264 encoder much closer to x264. Measured by BD-rate (PSNR-Y)
-  against x264 medium `--tune psnr` on four 240-picture clips from Blu-ray
-  discs (live action and animation), it goes from +41% to +12%:
+  against x264 medium `--tune psnr` on 240-picture clips from Blu-ray
+  discs (live action and animation):
   - trellis quantisation: every residual block's levels (luma 4x4 and
     8x8, inter and intra, chroma AC) chosen for the least error plus
     lambda times their CABAC bits;
@@ -20,10 +20,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     would come near the motion's cost (a cheap estimate gates it);
   - the 8x8 transform tried on every candidate near the best, not only
     on the winner;
-  - B pictures decided with a larger lambda.
-  It takes 4 to 5 times the CPU of x264 medium. Most of what is left
-  is rate control: x264's CRF and macroblock tree spend bits where later
-  pictures reuse them.
+  - B pictures decided with a larger lambda;
+  - a lookahead of 40 frames at half resolution: a macroblock tree (each
+    macroblock's quantiser lowered by how much later pictures predict
+    from it), scene cut detection (a new scene starts with an IDR
+    picture, x264's test), and its vectors as starting points for the
+    motion search, which also goes coarse to fine.
+  On Gravity, two Frozen II scenes and Blade Runner 2049 the mean goes
+  from +41% to +8%; with Godzilla vs. Kong (fast action) added, the
+  five's is +9%. It takes 4 times x264 medium's CPU.
 
 ### Fixed
 

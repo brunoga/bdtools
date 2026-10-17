@@ -72,7 +72,10 @@ type BaseEncoder struct {
 	stats   depStats
 	statsMu sync.Mutex
 
+	tree treeState // the macroblock tree's lookahead
+
 	noDeblock bool // tests: leave the pictures unfiltered
+	noTree    bool // tests and comparisons: no macroblock tree
 	noPyramid bool // tests and comparisons: every B picture a non-reference one
 }
 
@@ -80,6 +83,11 @@ type baseFrame struct {
 	src   *DepSource
 	index int // display order
 	pts   int64
+
+	low    *lowFrame          // the macroblock tree's lowres picture, while in its window
+	lowMV  map[int]*lowMotion // the lookahead's motion against other frames, by display index
+	treeQP []float32          // and its quantiser offsets per macroblock
+	cut    bool               // it starts a new scene: an IDR picture
 }
 
 // baseJob is a picture to code.
@@ -255,11 +263,20 @@ func (e *BaseEncoder) ppsRBSP() []byte {
 // before. The source is used until the frame is coded, so the caller must
 // not touch it again. Nothing may be encoded after Flush.
 func (e *BaseEncoder) Encode(src *DepSource, pts int64) ([][]byte, error) {
-	e.queue = append(e.queue, &baseFrame{src: src, index: e.given, pts: pts})
+	f := &baseFrame{src: src, index: e.given, pts: pts}
+	if !e.noTree {
+		e.analyse(f)
+	}
+	e.queue = append(e.queue, f)
 	e.given++
 	// A GOP's first frame is an IDR picture; a reference picture every
-	// BFrames+1 frames, queued once its B pictures are in.
-	if len(e.queue) >= e.o.BFrames+1 {
+	// BFrames+1 frames, queued once its B pictures are in (and the
+	// macroblock tree's window after them).
+	need := e.o.BFrames + 1
+	if !e.noTree {
+		need = max(need, treeWindow)
+	}
+	if len(e.queue) >= need {
 		e.queueGroup(false)
 	}
 	// hold back when the pictures pile up: the frames in flight hold
@@ -305,9 +322,13 @@ func (e *BaseEncoder) collect(limit int) ([][]byte, error) {
 // IDR picture at its start when one is due) then the B pictures before
 // it.
 func (e *BaseEncoder) queueGroup(flush bool) {
-	// an IDR picture when due, on its own
-	if e.sinceIDR == 0 || e.sinceIDR >= e.o.Keyint {
+	if !e.noTree {
+		e.buildTree()
+	}
+	// an IDR picture when due, or at a scene cut, on its own
+	if e.sinceIDR == 0 || e.sinceIDR >= e.o.Keyint || e.queue[0].cut {
 		e.queuePicture(e.queue[0], sliceI, true)
+		e.queue[0].low = nil // out of the tree's window
 		e.queue = e.queue[1:]
 		if !flush && len(e.queue) < e.o.BFrames+1 {
 			return
@@ -317,10 +338,7 @@ func (e *BaseEncoder) queueGroup(flush bool) {
 		}
 	}
 	// the reference, then the B pictures before it
-	n := min(len(e.queue), e.o.BFrames+1)
-	if e.sinceIDR+n > e.o.Keyint {
-		n = e.o.Keyint - e.sinceIDR
-	}
+	n := e.groupSize(e.queue, e.sinceIDR)
 	e.queuePicture(e.queue[n-1], sliceP, false)
 	bs := e.queue[:n-1]
 	if e.pyramid() && len(bs) >= 2 {
@@ -331,6 +349,9 @@ func (e *BaseEncoder) queueGroup(flush bool) {
 	}
 	for _, f := range bs {
 		e.queuePicture(f, sliceB, false)
+	}
+	for _, f := range e.queue[:n] {
+		f.low = nil
 	}
 	e.queue = e.queue[n:]
 }
@@ -541,6 +562,15 @@ func (e *BaseEncoder) codePicture(j *baseJob, c *depCoder) ([]byte, error) {
 	c.seedVectors(j.poc)
 	c.src = *j.f.src
 	c.aq = o.AQ
+	c.treeQP = j.f.treeQP
+	c.lowMV = [2][4]*lowMotion{}
+	for l, list := range c.list {
+		for r, p := range list {
+			if r < len(c.lowMV[l]) {
+				c.lowMV[l][r] = j.f.lowMV[j.f.index-int(j.poc-p.poc)/2]
+			}
+		}
+	}
 	c.planQP(qp)
 	var out []byte
 	if j.idr {
@@ -722,4 +752,20 @@ func (e *BaseEncoder) listModification(w *bitWriter, j *baseJob, list []*picture
 		pred = pn
 	}
 	w.ue(3) // end
+}
+
+// groupSize is how many of the frames (display order) the next group
+// takes, since pictures after an IDR one: BFrames+1, or fewer at the end,
+// at the key interval or before a scene cut.
+func (e *BaseEncoder) groupSize(frames []*baseFrame, since int) int {
+	n := min(len(frames), e.o.BFrames+1)
+	if since+n > e.o.Keyint {
+		n = e.o.Keyint - since
+	}
+	for k := 1; k < n; k++ {
+		if frames[k].cut {
+			return k
+		}
+	}
+	return n
 }

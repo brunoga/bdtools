@@ -72,9 +72,12 @@ type depCoder struct {
 	// quantiser in force after the last macroblock written, and lastDQ,
 	// whether it wrote a nonzero mb_qp_delta, for the next one's delta
 	// and context; only the slice's coder (not an estimate) moves them.
-	aq       float64
-	picQP    int
-	mbQP     []int8
+	aq     float64
+	picQP  int
+	mbQP   []int8
+	treeQP []float32 // the macroblock tree's offsets for the picture (nil: none)
+	// the lookahead's motion against each reference, by list (nil: none)
+	lowMV    [2][4]*lowMotion
 	mbEnergy []float64
 	qpY      int
 	lastDQ   int
@@ -266,7 +269,11 @@ func (c *depCoder) planQP(qp int) {
 		c.mbQP = make([]int8, c.mbW*c.mbH)
 	}
 	for i := range c.mbQP[:c.mbW*c.mbH] {
-		c.mbQP[i] = int8(qp)
+		q := qp
+		if c.treeQP != nil {
+			q = max(0, min(51, qp+int(math.Round(float64(c.treeQP[i])))))
+		}
+		c.mbQP[i] = int8(q)
 	}
 	if c.aq <= 0 {
 		return
@@ -299,8 +306,11 @@ func (c *depCoder) planQP(qp int) {
 	}
 	strength := c.aq * 1.0397
 	for i, e := range c.mbEnergy[:n] {
-		adj := strength * (e - mean)
-		c.mbQP[i] = int8(max(0, min(51, qp+int(math.Round(max(-6, min(6, adj)))))))
+		adj := max(-6, min(6, strength*(e-mean)))
+		if c.treeQP != nil {
+			adj += float64(c.treeQP[i])
+		}
+		c.mbQP[i] = int8(max(0, min(51, qp+int(math.Round(adj)))))
 	}
 }
 
@@ -645,15 +655,17 @@ func (c *depCoder) search(mbX, mbY, x, y, w, h, l, r int, extra []mv, wide bool)
 		}
 		tryInt(int(coarse.x)/4, int(coarse.y)/4, 1)
 	}
-	// integer diamond
-	for it := 0; it < 32; it++ {
-		cx, cy := int(best.x)/4, int(best.y)/4
-		prev := best
-		for _, d := range [4][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
-			tryInt(cx+d[0], cy+d[1], 1)
-		}
-		if best == prev {
-			break
+	// integer diamonds, coarse to fine: past a wrong start's local minimum
+	for _, step := range [3]int{4, 2, 1} {
+		for it := 0; it < 32; it++ {
+			cx, cy := int(best.x)/4, int(best.y)/4
+			prev := best
+			for _, d := range [4][2]int{{-step, 0}, {step, 0}, {0, -step}, {0, step}} {
+				tryInt(cx+d[0], cy+d[1], 1)
+			}
+			if best == prev {
+				break
+			}
 		}
 	}
 	// sub-sample refinement on SATD
@@ -1396,6 +1408,11 @@ func (m *depMB) setCand(k *cand) {
 func (c *depCoder) searchExtra(mbX, mbY, l, r int) []mv {
 	idx := mbY*c.mbW + mbX
 	extra := []mv{c.prev[c.refKind(l, r)][idx]}
+	if m := c.lowMV[l][r]; m != nil {
+		// the lookahead's, at half resolution: found by a wider search
+		v := m.mv[idx]
+		extra = append(extra, mv{v.x * 8, v.y * 8})
+	}
 	if a, ok := c.neighbour(mbX-1, mbY); ok && a.ref[l][1] == int8(r) {
 		extra = append(extra, a.mv[l][1])
 	}
