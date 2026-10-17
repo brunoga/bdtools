@@ -101,6 +101,12 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 		fp.interpFilter = EIGHTTAP
 	}
 	f := e.newFrame(fp, src)
+	fp.primaryRef = PRIMARY_REF_NONE
+	f.cdf0 = newCDFs(fp.qIndex)
+	if r := e.slots[fp.refIdx[0]]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
+		fp.primaryRef = 0 // LAST_FRAME's
+		f.cdf0 = r.cdf.loaded()
+	}
 	if !key {
 		fi := newInterFrameInfo()
 		fi.allowHighPrecisionMv = fp.highPrecisionMV
@@ -132,9 +138,15 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 	f.deblock(e.lfFixed)
 	f.cdef(e.cdefFixed)
 	var tiles [][]byte
-	for _, ops := range recs {
-		tiles = append(tiles, pack(ops, fp.qIndex, fp.adapt, f.cdefIdx, fp.cdefBits))
+	saved := f.cdf0
+	for i, ops := range recs {
+		b, end := pack(ops, f.cdf0, fp.adapt, f.cdefIdx, fp.cdefBits)
+		tiles = append(tiles, b)
+		if i == 0 && fp.adapt { // context_update_tile_id 0
+			saved = end
+		}
 	}
+	f.savedCDF = saved
 	e.frame = f
 	e.keep(f)
 	e.n++
@@ -144,9 +156,12 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 	return appendOBU(tu, obuFrame, payload), nil
 }
 
+// dbgNoCDFCarry starts every frame from the default CDFs.
+var dbgNoCDFCarry bool
+
 // keep puts a coded frame in the reference slots it refreshes.
 func (e *Encoder) keep(f *frameEnc) {
-	ref := &refFrameState{rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
+	ref := &refFrameState{cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
 	refresh := f.fp.refresh
 	if f.fp.key {
 		ref.frameType, refresh = KEY_FRAME, 0xff

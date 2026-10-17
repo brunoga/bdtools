@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4, dbgNoExt, dbgNoInter bool
+var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -94,14 +94,18 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, intra := t.snap(d, 2), t.snap(d, 3)
 	t.save(start, r, c, size, true)
-	ji, di := t.searchIntraBlock(r, c, size)
-	t.save(intra, r, c, size, true)
-	t.restore(start, true)
+	// inter first: when it codes no residual, intra is not tried
 	jn, dn := t.searchInterBlock(r, c, size)
-	if dn != nil && (jn < ji || dbgForceInter) {
+	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune) {
 		return jn, dn
 	}
-	t.restore(intra, true)
+	t.save(intra, r, c, size, true) // the inter's
+	t.restore(start, true)
+	ji, di := t.searchIntraBlock(r, c, size)
+	if dn != nil && jn < ji {
+		t.restore(intra, true)
+		return jn, dn
+	}
 	return ji, di
 }
 

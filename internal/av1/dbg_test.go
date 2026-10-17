@@ -168,3 +168,21 @@ func TestDbgInterMixed(t *testing.T) {
 		})
 	}
 }
+
+func TestDbgCDFCarry(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgNoCDFCarry = false }()
+	for _, off := range []bool{true, false} {
+		dbgNoCDFCarry = off
+		o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+		p := testPicture(200, 136, 8, 1)
+		var pics []*Source
+		for i := range 8 {
+			pics = append(pics, shifted(p, i, i/2))
+		}
+		n, psnr := checkDecodesWith(t, o, pics, nil)
+		t.Logf("carry off %v: %d bytes, %.2f dB", off, n, psnr)
+	}
+}

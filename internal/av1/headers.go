@@ -194,6 +194,7 @@ type frameParams struct {
 	// Inter frames: the slots refreshed, the slot each of the seven
 	// references is, mv precision and the frame's interpolation filter.
 	refresh         uint8
+	primaryRef      int // primary_ref_frame (PRIMARY_REF_NONE, or a reference)
 	refIdx          [REFS_PER_FRAME]int
 	highPrecisionMV bool
 	interpFilter    int
@@ -242,7 +243,7 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	w.flag(false)                                                // frame_size_override_flag
 	w.f(uint32(f.orderHint)&(1<<orderHintBits-1), orderHintBits) //nolint:gosec // its bits
 	if !f.key {
-		w.f(PRIMARY_REF_NONE, 3) // primary_ref_frame
+		w.f(uint32(f.primaryRef), 3) //nolint:gosec // primary_ref_frame
 		w.f(uint32(f.refresh), 8)
 		w.flag(false) // frame_refs_short_signaling
 		for _, i := range f.refIdx {

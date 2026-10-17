@@ -67,9 +67,11 @@ func (r *recorder) cdef(index int) {
 	r.ops = append(r.ops, symOp{kind: opCdef, s: uint16(index)}) //nolint:gosec // an index
 }
 
-// pack codes a tile's record.
-func pack(ops []symOp, qIndex int, adapt bool, cdefIdx []int8, cdefBits int) []byte {
-	c := newCDFs(qIndex)
+// pack codes a tile's record from the frame's CDFs (start, which it does
+// not change), giving the bytes and the CDFs as the tile ends.
+func pack(ops []symOp, start *cdfs, adapt bool, cdefIdx []int8, cdefBits int) ([]byte, *cdfs) {
+	cc := *start
+	c := &cc
 	base := unsafe.Pointer(c)
 	at := func(off uint32, n int) []uint16 {
 		return unsafe.Slice((*uint16)(unsafe.Add(base, uintptr(off)*2)), n)
@@ -89,7 +91,7 @@ func pack(ops []symOp, qIndex int, adapt bool, cdefIdx []int8, cdefBits int) []b
 			w.literal(uint32(cdefIdx[op.s]), cdefBits) //nolint:gosec // an index
 		}
 	}
-	return w.finish()
+	return w.finish(), c
 }
 
 // partitionCDFLen is a partition CDF's length by block size.

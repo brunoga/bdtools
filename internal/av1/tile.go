@@ -51,9 +51,19 @@ type frameEnc struct {
 	dcQ, acQ [3]int
 	lossless bool
 	lambda   float64 // distortion per bit
+	// cdf0 is the CDFs every tile starts from: the defaults, or those a
+	// reference kept (load_cdfs) with primary_ref_frame; savedCDF what the
+	// frame keeps for later frames.
+	cdf0, savedCDF *cdfs
 }
 
 func (f *frameEnc) mi(r, c int) int { return r*f.miCols + c }
+
+// startCDF is a copy of the CDFs the frame's tiles start from.
+func (f *frameEnc) startCDF() *cdfs {
+	c := *f.cdf0
+	return &c
+}
 
 // tileEnc codes one tile.
 type tileEnc struct {
@@ -142,7 +152,7 @@ type partNode struct {
 }
 
 func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) *tileEnc {
-	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: newCDFs(f.fp.qIndex)}
+	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: f.startCDF()}
 	t.w = &recorder{base: t.cdf}
 	t.live, t.sbCDF = t.cdf, new(cdfs)
 	for p := range 3 {
@@ -498,20 +508,42 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	}
 	bestJ := math.Inf(1)
 	var bestNode *partNode
-	bestLast := false
+	jOf := map[int]float64{}
+	bestI, last := -1, -1
 	for i, part := range cands {
-		if i > 0 {
+		// Pruned: everything else after a skipped inter block that is
+		// the whole partition; the extended partitions in a direction
+		// splitting it that way did not help.
+		if jn, ok := jOf[PARTITION_NONE]; ok && !dbgNoPrune {
+			if bestNode != nil && bestNode.part == PARTITION_NONE && bestNode.blocks[0].isInter && bestNode.blocks[0].skip {
+				break
+			}
+			switch part {
+			case PARTITION_HORZ_A, PARTITION_HORZ_B, PARTITION_HORZ_4:
+				if jh, ok := jOf[PARTITION_HORZ]; ok && jh >= jn {
+					continue
+				}
+			case PARTITION_VERT_A, PARTITION_VERT_B, PARTITION_VERT_4:
+				if jv, ok := jOf[PARTITION_VERT]; ok && jv >= jn {
+					continue
+				}
+			}
+		}
+		if last >= 0 {
 			t.restore(start, true)
 		}
+		last = i
 		t.cost.n = 0
 		t.writePartition(&t.cost, r, c, bSize, part)
 		j := f.lambda * float64(t.cost.n) / costScale
 		node := &partNode{part: part}
 		sub := int(partitionSubsize[part][bSize])
+		complete := true
 		switch part {
 		default:
 			for _, pb := range t.partitionBlocks(part, r, c, bSize) {
 				if j >= bestJ {
+					complete = false
 					break
 				}
 				bj, bd := t.searchBlock(r+pb.dr, c+pb.dc, pb.size)
@@ -521,6 +553,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		case PARTITION_SPLIT:
 			for k, o := range [4][2]int{{0, 0}, {0, half}, {half, 0}, {half, half}} {
 				if j >= bestJ {
+					complete = false
 					break
 				}
 				kj, kn := t.searchPartition(r+o[0], c+o[1], sub, 0)
@@ -528,15 +561,17 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 				node.kids[k] = kn
 			}
 		}
+		if complete {
+			jOf[part] = j
+		}
 		if j < bestJ {
-			bestJ, bestNode = j, node
-			bestLast = i == len(cands)-1
-			if !bestLast {
+			bestJ, bestNode, bestI = j, node, i
+			if i < len(cands)-1 {
 				t.save(best, r, c, bSize, true)
 			}
 		}
 	}
-	if !bestLast {
+	if bestI != last {
 		t.restore(best, true)
 	}
 	return bestJ, bestNode

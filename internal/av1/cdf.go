@@ -4,7 +4,11 @@ package av1
 // (the coefficients' chosen by the frame's q index, as init_coeff_cdfs
 // does) and adapts its own copy. Only the intra frame's are here.
 
-import "math"
+import (
+	"math"
+	"reflect"
+	"unsafe"
+)
 
 type cdfs struct {
 	yMode           [INTRA_MODE_CONTEXTS][INTRA_MODE_CONTEXTS][INTRA_MODES + 1]uint16
@@ -137,4 +141,39 @@ func symbolCost(s int, cdf []uint16) int32 {
 		lo = cdf[s-1]
 	}
 	return probCost[cdf[s]-lo]
+}
+
+// cdfCounts are where, in cdfs seen as uint16s, each CDF's count is: the
+// last entry of each innermost array.
+var cdfCounts = func() []int {
+	var out []int
+	typ := reflect.TypeFor[cdfs]()
+	for i := range typ.NumField() {
+		fld := typ.Field(i)
+		t, total := fld.Type, 1
+		for t.Kind() == reflect.Array {
+			total *= t.Len()
+			if t.Elem().Kind() != reflect.Array {
+				break
+			}
+			t = t.Elem()
+		}
+		row := t.Len()
+		base := int(fld.Offset / 2)
+		for r := range total / row {
+			out = append(out, base+r*row+row-1)
+		}
+	}
+	return out
+}()
+
+// loaded is a copy of saved frame CDFs as load_cdfs gives them: every
+// count 0.
+func (c *cdfs) loaded() *cdfs {
+	d := *c
+	flat := unsafe.Slice((*uint16)(unsafe.Pointer(&d)), unsafe.Sizeof(d)/2)
+	for _, i := range cdfCounts {
+		flat[i] = 0
+	}
+	return &d
 }
