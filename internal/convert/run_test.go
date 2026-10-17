@@ -1736,6 +1736,7 @@ func TestRunnerCropsAndScales(t *testing.T) {
 	o.Encoder, o.Codec, o.TwoD, o.BitDepth = EncoderBuiltin, CodecH265, true, 10
 	o.Crop, o.Scale = Crop{Top: 40, Bottom: 40}, Scale{W: 320, H: 240}
 	o.CRF = 28
+	o.Decoder = DecoderCPU // the transform under test, not a GPU decoder
 	var lines []string
 	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
 		t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
