@@ -237,9 +237,9 @@ func (r *Runner) resumeKey() (string, error) {
 		SwapLR    bool
 		BitDepth  int
 		Segment   int
-		DVFEL     FEL `json:",omitempty"`
-		DVELCRF   int `json:",omitempty"`
-		NVENCCQ   int `json:",omitempty"`
+		DVFEL     FEL   `json:",omitempty"`
+		DVELCRF   int   `json:",omitempty"`
+		NVENCCQ   int   `json:",omitempty"`
 		Crop      Crop  `json:",omitempty"`
 		Scale     Scale `json:",omitempty"`
 		ToneMap   bool  `json:",omitempty"`

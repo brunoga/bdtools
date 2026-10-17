@@ -83,8 +83,8 @@ type ReadTrack struct {
 
 // Packet is one frame of a track.
 type Packet struct {
-	Track    uint64
-	Time     time.Duration // the block's timestamp: the presentation time
+	Track uint64
+	Time  time.Duration // the block's timestamp: the presentation time
 	// Duration is the block's, when it states one (a subtitle's time on
 	// screen); 0 when it does not.
 	Duration time.Duration
