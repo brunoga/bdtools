@@ -526,5 +526,7 @@ func (e *Encoder) filterAnchor(gop []*frameJob) {
 	// cq_level, not the anchor's own
 	before, _ := tfWindowSize(len(srcs)-1, 0)
 	window := srcs[len(srcs)-1-before:]
-	gop[len(gop)-1].src = temporalFilter(window, before, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
+	a := gop[len(gop)-1]
+	a.orig = a.src
+	a.src = temporalFilter(window, before, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
 }

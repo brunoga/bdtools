@@ -117,7 +117,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	f := e.newFrame(fp, src)
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
-	if r := e.slots[fp.refIdx[0]]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
+	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
 		fp.primaryRef = 0 // LAST_FRAME's
 		f.cdf0 = r.cdf.loaded()
 	}
@@ -126,7 +126,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		fi.allowHighPrecisionMv = fp.highPrecisionMV
 		fi.enableOrderHint, fi.orderHintBits, fi.orderHint = true, orderHintBits, fp.orderHint&(1<<orderHintBits-1)
 		for ref := LAST_FRAME; ref <= ALTREF_FRAME; ref++ {
-			r := e.slots[fp.refIdx[ref-LAST_FRAME]]
+			r := j.refs[ref-LAST_FRAME]
 			f.refs[ref] = r
 			fi.orderHints[ref] = r.orderHint & (1<<orderHintBits - 1)
 			fp.refHints[ref-LAST_FRAME] = fi.orderHints[ref]
@@ -168,28 +168,18 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		}
 	}
 	f.savedCDF = saved
-	e.frame = f
-	e.keep(f, j.disp)
+	j.frame = f
+	*j.state = refFrameState{disp: j.disp, cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: fp.orderHint,
+		miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME, done: j.state.done}
+	if key {
+		j.state.frameType = KEY_FRAME
+	}
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
 	return appendOBU(nil, obuFrame, payload)
 }
 
 // dbgNoCDFCarry starts every frame from the default CDFs.
 var dbgNoCDFCarry bool
-
-// keep puts a coded frame in the reference slots it refreshes.
-func (e *Encoder) keep(f *frameEnc, disp int) {
-	ref := &refFrameState{disp: disp, cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
-	refresh := f.fp.refresh
-	if f.fp.key {
-		ref.frameType, refresh = KEY_FRAME, 0xff
-	}
-	for i := range NUM_REF_FRAMES {
-		if refresh>>uint(i)&1 != 0 {
-			e.slots[i] = ref
-		}
-	}
-}
 
 // newFrame sets a frame up: its source padded to whole superblocks.
 func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
@@ -251,8 +241,11 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 
 // Recon gives the last picture's reconstruction (its planes cropped to
 // the picture).
-func (e *Encoder) Recon() (y, cb, cr []uint16) {
-	f := e.frame
+func (e *Encoder) Recon() (y, cb, cr []uint16) { return e.frame.recon(e.o.Width, e.o.Height) }
+
+// recon is a frame's reconstruction cropped to the picture (width by
+// height).
+func (f *frameEnc) recon(width, height int) (y, cb, cr []uint16) {
 	crop := func(p, w, h int) []uint16 {
 		out := make([]uint16, w*h)
 		for i := range h {
@@ -260,6 +253,6 @@ func (e *Encoder) Recon() (y, cb, cr []uint16) {
 		}
 		return out
 	}
-	cw, ch := (e.o.Width+1)/2, (e.o.Height+1)/2
-	return crop(0, e.o.Width, e.o.Height), crop(1, cw, ch), crop(2, cw, ch)
+	cw, ch := (width+1)/2, (height+1)/2
+	return crop(0, width, height), crop(1, cw, ch), crop(2, cw, ch)
 }

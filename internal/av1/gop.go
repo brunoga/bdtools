@@ -9,7 +9,10 @@ package av1
 // predict from code finer). The coded frames are grouped into temporal
 // units, each ending with one shown picture, in display order.
 
-import "sort"
+import (
+	"sort"
+	"sync"
+)
 
 // Unit is a temporal unit: what a decoder needs to show the next
 // picture.
@@ -23,13 +26,32 @@ type Unit struct {
 type frameJob struct {
 	disp    int // in display order
 	src     *Source
+	orig    *Source // the source before the temporal filter (an anchor's)
 	key     bool
 	show    bool
 	depth   int // in the pyramid: 0 key, 1 the mini-GOP's last, ...
 	q       int
 	refresh uint8
 	refIdx  [REFS_PER_FRAME]int
+	// refs are the frames refIdx names (as planned); state is what this
+	// frame will be as a reference, filled once it is coded.
+	refs  [REFS_PER_FRAME]*refFrameState
+	state *refFrameState
+	frame *frameEnc
+	obu   []byte
+	recon *[3][]uint16
 }
+
+// step is a planned step of the stream: a frame coded, or one shown from
+// a slot (show_existing_frame).
+type step struct {
+	job      *frameJob
+	showSlot int // with job nil
+	disp     int
+}
+
+// dbgNoOverlay shows a filtered anchor itself.
+var dbgNoOverlay bool
 
 // depthQ is how much finer (in q index) a frame at a depth codes.
 var depthQ = [...]int{24, 24, 16, 8, 0, 0, 0, 0}
@@ -78,7 +100,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		if first.disp%e.keyint() == 0 {
 			first.key, first.show, first.depth = true, true, 0
 			e.tfPast = []*Source{first.src}
-			e.code(first, &out)
+			e.run([]step{e.plan(first)}, &out)
 			e.queue = e.queue[1:]
 			continue
 		}
@@ -98,20 +120,27 @@ func (e *Encoder) drain(flush bool) []Unit {
 		e.filterAnchor(gop)
 		if n == 1 {
 			last.show, last.depth = true, 1
-			e.code(last, &out)
+			e.run([]step{e.plan(last)}, &out)
 			continue
 		}
 		last.depth = 1
-		e.code(last, &out)
-		e.pyramid(a, a+n, 2, byDisp, &out)
+		steps := []step{e.plan(last)}
+		e.pyramid(a, a+n, 2, byDisp, &steps)
+		e.run(steps, &out)
 	}
 	return out
 }
 
-// pyramid codes the pictures a+1..b, b coded already (not shown).
-func (e *Encoder) pyramid(a, b, depth int, byDisp func(int) *frameJob, out *[]Unit) {
+// pyramid plans the pictures a+1..b, b planned already (not shown).
+func (e *Encoder) pyramid(a, b, depth int, byDisp func(int) *frameJob, steps *[]step) {
 	if b-a == 1 {
-		e.showSlot(b, out)
+		if j := byDisp(b); j.orig != nil && !dbgNoOverlay {
+			// the anchor was coded filtered: shown by an overlay, the
+			// source itself coded from it (and the others)
+			*steps = append(*steps, e.plan(&frameJob{disp: b, src: j.orig, show: true, depth: len(depthQ) - 1}))
+			return
+		}
+		*steps = append(*steps, e.planShow(b))
 		return
 	}
 	m := (a + b) / 2
@@ -119,53 +148,105 @@ func (e *Encoder) pyramid(a, b, depth int, byDisp func(int) *frameJob, out *[]Un
 	j.depth = depth
 	if m == a+1 {
 		j.show = true
-		e.code(j, out)
+		*steps = append(*steps, e.plan(j))
 	} else {
-		e.code(j, out)
-		e.pyramid(a, m, depth+1, byDisp, out)
+		*steps = append(*steps, e.plan(j))
+		e.pyramid(a, m, depth+1, byDisp, steps)
 	}
-	e.pyramid(m, b, depth+1, byDisp, out)
+	e.pyramid(m, b, depth+1, byDisp, steps)
 }
 
-// code codes a frame: its references and slot chosen, its q set.
-func (e *Encoder) code(j *frameJob, out *[]Unit) {
+// plan plans a frame: its q, its references and the slot it goes in,
+// as the slots will be when it is coded (the slots hold the frames to
+// come, filled as they are coded).
+func (e *Encoder) plan(j *frameJob) step {
 	j.q = e.o.QIndex
 	if e.o.QIndex > 0 && !dbgFlatQ {
 		j.q = max(e.o.QIndex-depthQ[j.depth], 1)
 	}
+	j.state = &refFrameState{disp: j.disp, done: make(chan struct{})}
 	if j.key {
 		j.refresh = 0xff
 	} else {
 		j.refIdx = e.refsFor(j.disp)
+		for i, s := range j.refIdx {
+			j.refs[i] = e.slots[s]
+		}
 		if !j.show || e.miniGOP() == 1 {
 			j.refresh = 1 << uint(e.slotFor(j.disp))
 		}
 	}
-	obu := e.codeFrame(j)
-	if j.key {
-		e.pending = appendOBU(e.pending, obuSequenceHeader, e.seq.sequenceHeader())
+	for i := range NUM_REF_FRAMES {
+		if j.refresh>>uint(i)&1 != 0 {
+			e.slots[i] = j.state
+		}
 	}
-	e.pending = append(e.pending, obu...)
-	if e.keepRecon {
-		y, cb, cr := e.Recon()
-		e.recons[j.disp] = &[3][]uint16{y, cb, cr}
-	}
-	if j.show {
-		e.emit(j.disp, out)
-	}
+	return step{job: j, disp: j.disp}
 }
 
-// showSlot shows a picture coded before, from its slot.
-func (e *Encoder) showSlot(disp int, out *[]Unit) {
+// planShow plans a picture coded before shown from its slot.
+func (e *Encoder) planShow(disp int) step {
 	for i, s := range e.slots {
 		if s != nil && s.disp == disp {
-			e.pending = append(e.pending, showExisting(i)...)
-			e.emit(disp, out)
-			return
+			return step{showSlot: i, disp: disp}
 		}
 	}
 	panic("av1: a picture to show is in no slot")
 }
+
+// run codes the planned frames, each once its references are coded
+// (frames that do not depend on each other at once), and gives the
+// temporal units in the planned order.
+func (e *Encoder) run(steps []step, out *[]Unit) {
+	var wg sync.WaitGroup
+	for _, s := range steps {
+		if j := s.job; j != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for _, r := range j.refs {
+					if r != nil {
+						<-r.done
+					}
+				}
+				j.obu = e.codeFrame(j)
+				if e.keepRecon {
+					y, cb, cr := j.frame.recon(e.o.Width, e.o.Height)
+					j.recon = &[3][]uint16{y, cb, cr}
+				}
+				close(j.state.done)
+				if dbgSerialFrames {
+					return
+				}
+			}()
+			if dbgSerialFrames {
+				wg.Wait()
+			}
+		}
+	}
+	wg.Wait()
+	for _, s := range steps {
+		j := s.job
+		if j == nil {
+			e.pending = append(e.pending, showExisting(s.showSlot)...)
+			e.emit(s.disp, out)
+			continue
+		}
+		if j.key {
+			e.pending = appendOBU(e.pending, obuSequenceHeader, e.seq.sequenceHeader())
+		}
+		e.pending = append(e.pending, j.obu...)
+		e.recons[j.disp] = j.recon
+		e.frame = j.frame
+		if j.show {
+			e.emit(j.disp, out)
+		}
+		j.frame, j.obu, j.src, j.orig = nil, nil, nil, nil
+	}
+}
+
+// dbgSerialFrames codes a mini-GOP's frames one at a time.
+var dbgSerialFrames bool
 
 // emit ends a temporal unit with the picture disp.
 func (e *Encoder) emit(disp int, out *[]Unit) {

@@ -1,6 +1,7 @@
 package av1
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 	"math/rand/v2"
@@ -191,5 +192,31 @@ func TestEncodeTilesConcurrently(t *testing.T) {
 	p := testPicture(136, 136, 8, 4)
 	if units := encodeAll(t, e, []*Source{p, shifted(p, 2, 1), shifted(p, 4, 2)}); len(units) != 3 {
 		t.Fatalf("%d units", len(units))
+	}
+}
+
+// Frames coded at once make the stream one at a time makes.
+func TestEncodeFramesConcurrently(t *testing.T) {
+	o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, MiniGOP: 8}
+	p := testPicture(96, 64, 8, 3)
+	var pics []*Source
+	for i := range 12 {
+		pics = append(pics, shifted(p, i, i/3))
+	}
+	code := func(serial bool) []byte {
+		dbgSerialFrames = serial
+		defer func() { dbgSerialFrames = false }()
+		e, err := NewEncoder(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b []byte
+		for _, u := range encodeAll(t, e, pics) {
+			b = append(b, u.Data...)
+		}
+		return b
+	}
+	if a, b := code(false), code(true); !bytes.Equal(a, b) {
+		t.Fatalf("at once %d bytes, one at a time %d: different", len(a), len(b))
 	}
 }
