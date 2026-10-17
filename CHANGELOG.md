@@ -36,6 +36,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   were scheduled (a coder's search starting points were the vectors of
   whatever picture it coded last); they now come from the reference
   pictures, and the same frames always code to the same stream.
+- Less CPU in the Go H.264 encoder's intra 4x4 mode ranking (an
+  unrolled 4x4 SATD), about 5% overall.
 - Less CPU in the encoder's wavefront: a worker waiting for the row
   above sleeps on that row instead of yielding to the scheduler, which
   cost a fifth of the CPU in its lock.

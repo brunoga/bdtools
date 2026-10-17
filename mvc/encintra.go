@@ -243,7 +243,13 @@ func (c *depCoder) intraNxNCand(mbX, mbY, n int, chroma int, nA, nB, nC, nD bool
 			if int8(mode) != pm {
 				bits = 4
 			}
-			est[mode] = float64(satdGeneric(c.src.Y, py*c.src.StrideY+px, c.src.StrideY, pred[:], 0, size, size, size)) + c.lambda*float64(bits)
+			var satd int
+			if size == 4 {
+				satd = satd4x4(c.src.Y, py*c.src.StrideY+px, c.src.StrideY, pred[:])
+			} else {
+				satd = satdBlock(c.src.Y, py*c.src.StrideY+px, c.src.StrideY, pred[:], 0, size, size, size)
+			}
+			est[mode] = float64(satd) + c.lambda*float64(bits)
 			rank[nm] = mode
 			nm++
 		}
@@ -682,4 +688,34 @@ func (c *depCoder) intraEstimate(mbX, mbY int) float64 {
 		best = min(best, c.satd(mbX*16, mbY*16, 16, 16, p[:]))
 	}
 	return float64(best) + c.lambda*6
+}
+
+// satd4x4 is satdGeneric for one 4x4 block, unrolled: the intra 4x4 mode
+// ranking calls it nine times a block.
+func satd4x4(src []byte, so, ss int, pred []byte) int {
+	s0, s1, s2, s3 := src[so:so+4], src[so+ss:so+ss+4], src[so+2*ss:so+2*ss+4], src[so+3*ss:so+3*ss+4]
+	p := pred[:16]
+	// rows: differences, then the horizontal transform
+	row := func(s []byte, q []byte) (int32, int32, int32, int32) {
+		d0 := int32(s[0]) - int32(q[0])
+		d1 := int32(s[1]) - int32(q[1])
+		d2 := int32(s[2]) - int32(q[2])
+		d3 := int32(s[3]) - int32(q[3])
+		a0, a1, a2, a3 := d0+d1, d0-d1, d2+d3, d2-d3
+		return a0 + a2, a1 + a3, a0 - a2, a1 - a3
+	}
+	r00, r01, r02, r03 := row(s0, p[0:4])
+	r10, r11, r12, r13 := row(s1, p[4:8])
+	r20, r21, r22, r23 := row(s2, p[8:12])
+	r30, r31, r32, r33 := row(s3, p[12:16])
+	abs := func(v int32) int32 {
+		m := v >> 31
+		return (v ^ m) - m
+	}
+	col := func(a, b, c, d int32) int32 {
+		a0, a1, a2, a3 := a+b, a-b, c+d, c-d
+		return abs(a0+a2) + abs(a1+a3) + abs(a0-a2) + abs(a1-a3)
+	}
+	sum := col(r00, r10, r20, r30) + col(r01, r11, r21, r31) + col(r02, r12, r22, r32) + col(r03, r13, r23, r33)
+	return int(sum) / 2
 }
