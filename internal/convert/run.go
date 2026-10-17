@@ -249,6 +249,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.frameRate()
 	g := newGoDemux(src, sel, tmp, r.Report)
+	g.setTrim(r.Opts.Trim)
 	r.timeline = g.timeline
 	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat {
 		r.depth = &depthMap{}
@@ -285,7 +286,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if finErr != nil {
 		return finErr
 	}
-	return r.mux(ctx, video, extras, g.src.chapters)
+	return r.mux(ctx, video, extras, trimChapters(g.src.chapters, r.Opts.Trim))
 }
 
 // pictures chooses the decoder for a source's video. A 3D pair goes to the

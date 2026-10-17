@@ -106,3 +106,4 @@ Measurement:
 | 6. Dolby Vision two layers | Done: `--dv-fel keep`/`reencode` with `--encoder builtin` (profile 7 out, no NVENC or x265) |
 | 7. Scaling, cropping, tone mapping | `--crop` (and `--crop auto`, the bars found at twelve places) and `--scale` done (2D, Lanczos, subtitles and DV L5 follow); `--tonemap` done (BT.2390 on max(R,G,B), dynamic peaks from DV L1 and HDR10+) |
 | 8. Text subtitles, PGS OCR | Done: SRT, ASS/SSA, WebVTT and tx3g carried (Matroska as they are, MP4 as tx3g), `--subs-file` adds files; `--subs-ocr` reads PGS as text (a CRNN trained here, internal/ocr) |
+| 9. Control features | Trimming (`--start`, `--end`, `--duration`) done; next: device presets, a target size, batch |

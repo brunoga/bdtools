@@ -668,6 +668,7 @@ type auPES struct {
 type goDemux struct {
 	src     *goSource
 	sel     Selection
+	trim    Trim // the part of the title converted (--start, --end)
 	report  Reporter
 	tmp     string
 	writers map[uint16]*esWriter
@@ -726,6 +727,32 @@ func newGoDemux(src *goSource, sel Selection, tmp string, report Reporter) *goDe
 	g.t0Known = g.ins[0] >= 0
 	return g
 }
+
+// setTrim windows the title to the trim: the playlist's clips now, a bare
+// file's when its first picture says where it starts.
+func (g *goDemux) setTrim(t Trim) {
+	g.trim = t
+	if t.IsZero() || !g.t0Known {
+		return
+	}
+	g.offsets = trimWindows(g.ins, g.outs, t)
+}
+
+// emptyClip reports whether the trim leaves nothing of clip k.
+func (g *goDemux) emptyClip(k int) bool { return g.ins[k] >= 0 && g.outs[k] <= g.ins[k] }
+
+// nextClip is the first clip from k the trim leaves something of, or
+// len(clips).
+func (g *goDemux) nextClip(k int) int {
+	for k < len(g.src.clips) && g.emptyClip(k) {
+		k++
+	}
+	return k
+}
+
+// trimMargin is how far past a clip's OUT time the base view is read: the
+// pictures shown before OUT that come later in decoding order (90 kHz).
+const trimMargin = 3 * 90000
 
 // ptsTagShift places the clip index above a 33-bit timestamp, so a frame
 // leaving the decoder (which lags its input) can be placed in its clip.
@@ -857,6 +884,12 @@ func (g *goDemux) handle(p m2ts.PES) error {
 		if !g.t0Known && p.PTS >= 0 {
 			// A bare file plays from its first picture.
 			g.ins[0], g.t0Known = p.PTS, true
+			if !g.trim.IsZero() {
+				g.ins[0] += int64(g.trim.Start) * 90000 / int64(time.Second)
+				if g.trim.End > 0 {
+					g.outs[0] = p.PTS + int64(g.trim.End)*90000/int64(time.Second)
+				}
+			}
 			for _, q := range g.pending {
 				if err := g.writeES(q); err != nil {
 					return err
@@ -960,7 +993,12 @@ func (g *goDemux) emitES(w *esWriter, p m2ts.PES) error {
 // it, the dependent view for the same picture. io.EOF ends the source.
 func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 	if g.r == nil && !g.eof {
-		if err := g.openClip(0); err != nil {
+		first := g.nextClip(0)
+		if first >= len(g.src.clips) {
+			g.eof = true
+			return nil, nil, 0, io.EOF
+		}
+		if err := g.openClip(first); err != nil {
 			return nil, nil, 0, err
 		}
 	}
@@ -1010,11 +1048,15 @@ func (g *goDemux) Next() (base, dep []byte, pts int64, err error) {
 			return nil, nil, 0, io.EOF
 		}
 		p, err := g.r.Next()
+		if err == nil && p.PID == g.basePID && p.PTS >= 0 && g.outs[g.clip] != math.MaxInt64 &&
+			p.PTS > g.outs[g.clip]+trimMargin {
+			err = io.EOF // past the clip's OUT (a trim's end): the rest is not played
+		}
 		if err != nil {
 			// The clip ended (or lost sync, which on a disc means the end
 			// of readable data): move to the next clip or finish.
-			if g.clip+1 < len(g.src.clips) {
-				if err := g.openClip(g.clip + 1); err != nil {
+			if next := g.nextClip(g.clip + 1); next < len(g.src.clips) {
+				if err := g.openClip(next); err != nil {
 					return nil, nil, 0, err
 				}
 				continue
