@@ -32,10 +32,11 @@ func smoothPicture(w, h, depth int) *Source {
 // TestLoopFilterDecodes codes pictures with the levels searched, at low
 // to high q, and compares them with the filter off.
 func TestLoopFilterDecodes(t *testing.T) {
-	for _, c := range []struct{ w, h, depth, q int }{
+	t.Parallel()
+	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 40}, {200, 136, 8, 120}, {200, 136, 8, 200}, {200, 136, 8, 250},
 		{202, 130, 8, 230}, {136, 72, 10, 100}, {136, 72, 10, 220}, {90, 70, 10, 250},
-	} {
+	}) {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 		for _, pic := range []*Source{testPicture(c.w, c.h, c.depth, 1), smoothPicture(c.w, c.h, c.depth)} {
 			// CDEF off, its choice not to blur the comparison
@@ -52,10 +53,11 @@ func TestLoopFilterDecodes(t *testing.T) {
 // TestLoopFilterFixed codes pictures with fixed levels and sharpnesses,
 // for every filter path and each plane on its own.
 func TestLoopFilterFixed(t *testing.T) {
-	for _, lv := range [][5]int{
+	t.Parallel()
+	for _, lv := range raceCut([][5]int{
 		{63, 63, 63, 63, 0}, {10, 40, 5, 63, 0}, {63, 0, 30, 0, 0}, {0, 63, 0, 20, 0},
 		{30, 30, 30, 30, 3}, {50, 50, 50, 50, 7}, {4, 4, 4, 4, 1}, {0, 0, 0, 0, 2},
-	} {
+	}) {
 		for _, c := range []struct{ w, h, depth, q int }{{200, 136, 8, 200}, {202, 130, 8, 60}, {136, 72, 10, 240}} {
 			o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 			for _, pic := range []*Source{testPicture(c.w, c.h, c.depth, 2), smoothPicture(c.w, c.h, c.depth)} {

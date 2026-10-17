@@ -126,6 +126,9 @@ func TestTemporalFilterMotion(t *testing.T) {
 // exactly with it; the PSNRs against the clean and the noisy sources and
 // the bytes are logged.
 func TestTemporalFilterEncode(t *testing.T) {
+	if raceOn {
+		t.Skip("the filter is off by default; slow under the race detector")
+	}
 	const w, h, depth, n = 160, 96, 8, 17
 	var clean, src []*Source
 	for i := range n {

@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- More inter tools in the AV1 encoder: the compound modes with one NEW
+  vector, switchable interpolation filters chosen per block by rate and
+  distortion, and OBMC (overlapped block motion compensation): 1.3%
+  smaller on the two 120-picture clips, +32.7% against SVT-AV1 preset 4
+  (was +34%), for about a quarter more time.
 - Loop restoration in the AV1 encoder (Wiener, self-guided or switchable,
   chosen per unit after CDEF, the unit size by rate and distortion), a
   smaller lambda and finer key frames: 3.5% smaller on two 120-picture

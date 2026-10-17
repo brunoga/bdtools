@@ -141,6 +141,18 @@ func TestBenchSeq(t *testing.T) {
 		keyQ = v
 		defer func() { keyQ = old }()
 	}
+	if os.Getenv("AV1NOFILTERRD") != "" {
+		filterRD = false
+		defer func() { filterRD = true }()
+	}
+	if os.Getenv("AV1NOOBMC") != "" {
+		dbgNoObmc = true
+		defer func() { dbgNoObmc = false }()
+	}
+	if os.Getenv("AV1NOSWITCHABLE") != "" {
+		dbgNoSwitchable = true
+		defer func() { dbgNoSwitchable = false }()
+	}
 	if os.Getenv("AV1NOPRUNE") != "" {
 		dbgNoPrune = true
 		defer func() { dbgNoPrune = false }()

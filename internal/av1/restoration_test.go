@@ -12,6 +12,7 @@ import (
 // both bit depths, sizes not whole units or superblocks, with deblocking
 // and CDEF, and inter frames.
 func TestLRFixed(t *testing.T) {
+	t.Parallel()
 	W, S, X := RESTORE_WIENER, RESTORE_SGRPROJ, RESTORE_SWITCHABLE
 	sets := []lrSettings{
 		{types: [3]int{W, W, W}},
@@ -25,9 +26,9 @@ func TestLRFixed(t *testing.T) {
 		{types: [3]int{X, X, X}, random: true},
 		{types: [3]int{X, X, X}, unitShift: 2, uvShift: 1, random: true},
 	}
-	for _, c := range []struct{ w, h, depth, q, n int }{
+	for _, c := range raceCut([]struct{ w, h, depth, q, n int }{
 		{200, 136, 8, 140, 1}, {90, 70, 10, 180, 1}, {264, 200, 8, 100, 1}, {136, 72, 10, 120, 3},
-	} {
+	}) {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1, MiniGOP: 2}
 		p := testPicture(c.w, c.h, c.depth, 5)
 		pics := []*Source{p}
@@ -57,9 +58,10 @@ func TestLRTiles(t *testing.T) {
 // TestLRSearch codes pictures with the restoration searched and compares
 // them with it off.
 func TestLRSearch(t *testing.T) {
-	for _, c := range []struct{ w, h, depth, q int }{
+	t.Parallel()
+	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 60}, {200, 136, 8, 140}, {200, 136, 8, 220}, {264, 200, 10, 120}, {90, 70, 10, 200}, {320, 240, 8, 160},
-	} {
+	}) {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 		for k, pic := range []*Source{testPicture(c.w, c.h, c.depth, 7), smoothPicture(c.w, c.h, c.depth)} {
 			var e, e0 *Encoder

@@ -203,6 +203,11 @@ type frameParams struct {
 	// condition).
 	refSelect bool
 	refHints  [REFS_PER_FRAME]int
+
+	// motionModeSwitchable is is_motion_mode_switchable: inter blocks may
+	// use OBMC (warped motion is off, so their use_obmc says).
+	motionModeSwitchable bool
+
 	// skipModePresent is skip_mode_present; skipModeFrame SkipModeFrame.
 	skipModePresent bool
 	skipModeFrame   [2]int
@@ -300,9 +305,11 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	w.flag(false) // render_and_frame_size_different
 	if !f.key {
 		w.flag(f.highPrecisionMV)
-		w.flag(false)                  // is_filter_switchable
-		w.f(uint32(f.interpFilter), 2) //nolint:gosec // a filter
-		w.flag(false)                  // is_motion_mode_switchable
+		w.flag(f.interpFilter == SWITCHABLE) // is_filter_switchable
+		if f.interpFilter != SWITCHABLE {
+			w.f(uint32(f.interpFilter), 2) //nolint:gosec // a filter
+		}
+		w.flag(f.motionModeSwitchable) // is_motion_mode_switchable
 	}
 	if f.adapt {
 		w.flag(false) // disable_frame_end_update_cdf
