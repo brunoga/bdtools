@@ -123,24 +123,14 @@ bdtools --input uhd.iso --output film.mkv --dv-fel keep --encoder nvenc
 bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only
 ```
 
-**Cropping and scaling.** A UHD film made 1080p, its black bars cut off
-(a 2.39:1 film on a 3840x2160 disc has 280 rows above and below; a
-1.85:1 one 42):
+**Cropping, scaling and tone mapping.** A UHD film made 1080p with its
+black bars found and cut off, or made SDR for a screen that shows HDR
+wrongly — see [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping):
 
 ```sh
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
-bdtools --input uhd.iso --output film.mkv --crop 280:280:0:0 --scale 1080p
+bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p --tonemap
 ```
-
-`--crop auto` looks at the film in twelve places before the conversion
-(a few seconds: the decoder decodes three pictures at each) and crops what
-is black in all of them that show anything, so a film whose shape changes
-(IMAX scenes) keeps its largest picture. The picture is cropped first, then fitted in the box with a Lanczos
-filter, never enlarged (3840x1600 becomes 1920x800). The subtitle tracks
-are cut with the picture, a line the disc put in a black bar moved up into
-it, and a Dolby Vision film's active area (its RPUs' level 5) follows. For
-2D conversions; not with `--dv-fel keep` or `reencode`, `--burn-subs` or a
-remux.
 
 **AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
 SVT-AV1 otherwise):
@@ -378,6 +368,7 @@ scheduler such as pipeliner retry it.
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
 | `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`; `auto` finds the black bars |
+| `--tonemap` | — | Make an HDR picture (HDR10, HLG, Dolby Vision, HDR10+) SDR, BT.709 — see [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping) |
 | `--scale` | `none` | Fit a 2D conversion's picture in a box, its shape kept and never enlarged: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
@@ -765,6 +756,42 @@ gave visibly fewer edge artefacts than centred, and down the two were
 alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
 made from ffmpeg's decodes of the two layers, and 28 dB from the base
 layer alone (that clip's enhancement layer brightens its credits).
+
+## Cropping, scaling and tone mapping
+
+A UHD film made 1080p, its black bars cut off
+(a 2.39:1 film on a 3840x2160 disc has 280 rows above and below; a
+1.85:1 one 42):
+
+```sh
+bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
+bdtools --input uhd.iso --output film.mkv --crop 280:280:0:0 --scale 1080p
+```
+
+`--crop auto` looks at the film in twelve places before the conversion
+(a few seconds: the decoder decodes three pictures at each) and crops what
+is black in all of them that show anything, so a film whose shape changes
+(IMAX scenes) keeps its largest picture. The picture is cropped first,
+then fitted in the box with a Lanczos filter, never enlarged (3840x1600 becomes 1920x800). The subtitle tracks
+are cut with the picture, a line the disc put in a black bar moved up into
+it, and a Dolby Vision film's active area (its RPUs' level 5) follows. For
+2D conversions; not with `--dv-fel keep` or `reencode`, `--burn-subs` or a
+remux.
+
+`--tonemap` makes an HDR film SDR (BT.709), for a screen or player that
+shows HDR wrongly or not at all:
+
+```sh
+bdtools --input uhd.iso --output film.mkv --tonemap --scale 1080p --crop auto
+```
+
+Each pixel's brightest component goes through BT.2390's curve, its colour
+kept: the midtones as they were, the highlights bent down to SDR's white
+(HDR's reference white, 203 cd/m²). The curve bends from the brightest the
+picture gets: shot by shot from a Dolby Vision film's metadata, scene by
+scene from HDR10+'s, else the film's MaxCLL or mastering peak. BT.2020's
+colours outside BT.709 move toward grey, their hue kept. HLG is taken at a
+1000 cd/m² display. The output states BT.709 and carries no HDR metadata.
 
 ## Choosing tracks
 

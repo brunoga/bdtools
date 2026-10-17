@@ -105,6 +105,7 @@ type picTransform struct {
 	cw, ch     int // cropped
 	outW, outH int // and scaled
 	sc         *scaler
+	tm         *toneMapper        // --tonemap, for an HDR source
 	flat       gpu.DecodedPicture // a stereo frame's base view as NV12
 }
 
@@ -132,7 +133,7 @@ func (t *picTransform) describe() string {
 	if t.sc != nil {
 		parts = append(parts, fmt.Sprintf("scaling %dx%d to %dx%d (Lanczos)", t.cw, t.ch, t.outW, t.outH))
 	}
-	if len(parts) == 0 {
+	if len(parts) == 0 && !t.box.IsZero() {
 		return "the picture fits --scale already: not scaled"
 	}
 	return strings.Join(parts, ", ")
@@ -162,10 +163,15 @@ func (t *picTransform) apply(p picture) (picture, error) {
 		out = t.sc.scale(&cropped)
 	}
 	q := p
-	q.gpu, q.stereo = out, nil
-	if p.rpu != nil {
+	if t.tm != nil {
+		// SDR: no HDR metadata goes on.
+		t.tm.pictureMeta(p)
+		out = t.tm.apply(out)
+		q.rpu, q.hdr10Plus = nil, nil
+	} else if p.rpu != nil {
 		q.rpu = t.reframeRPU(p.rpu)
 	}
+	q.gpu, q.stereo = out, nil
 	return q, nil
 }
 

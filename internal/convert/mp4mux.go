@@ -67,7 +67,7 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 	default:
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
-	if r.dovi != nil || r.Opts.DVFEL.layered() {
+	if (r.dovi != nil || r.Opts.DVFEL.layered()) && (r.xform == nil || r.xform.tm == nil) {
 		r.Report.Report("warning: an MP4 file here carries no Dolby Vision: the HDR10 base layer alone")
 	}
 	r.carryHDR(v)
