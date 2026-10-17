@@ -231,6 +231,9 @@ func TestEncodeRowsDeterministic(t *testing.T) {
 	o := EncoderOptions{Width: 264, Height: 200, BitDepth: 8, QIndex: 120, MiniGOP: 4}
 	p := testPicture(264, 200, 8, 3)
 	pics := []*Source{p, shifted(p, 2, 1), shifted(p, 4, 2), shifted(p, 6, 3), shifted(p, 8, 4)}
+	if raceOn {
+		pics = pics[:3] // a key frame, an anchor and a frame between
+	}
 	code := func(procs int) []byte {
 		defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(procs))
 		e, err := NewEncoder(o)

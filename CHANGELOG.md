@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder searches all seven references (LAST2, LAST3 and
+  ALTREF2 too) and six compound pairs: 0.9% smaller on the 120-picture
+  clips, +31.7% against SVT-AV1 preset 4, for a tenth more time.
 - More inter tools in the AV1 encoder: the compound modes with one NEW
   vector, switchable interpolation filters chosen per block by rate and
   distortion, and OBMC (overlapped block motion compensation): 1.3%

@@ -146,7 +146,10 @@ func floorDiv(a, b int) int {
 	return q
 }
 
-// tplCost costs a frame's blocks.
+// tplCost costs a frame's blocks, both ways by SATD: intra the best of
+// DC, vertical, horizontal and a bilinear smooth prediction from the
+// source's neighbouring samples; inter a motion search (to a quarter
+// sample) in each reference's source.
 func (e *Encoder) tplCost(tf *tplFrame, src func(int) *Source) {
 	j := tf.job
 	cur := j.src
@@ -168,36 +171,93 @@ func (e *Encoder) tplCost(tf *tplFrame, src func(int) *Source) {
 		}
 	}
 	var ms motionSearch
+	var pred [tplBlock * tplBlock]uint16
+	var above, left [tplBlock]int32
+	mid := int32(1) << (e.o.BitDepth - 1)
 	for by := range tf.rows {
 		for bx := range tf.cols {
 			i := by*tf.cols + bx
 			x0, y0 := bx*tplBlock, by*tplBlock
-			bw, bh := min(tplBlock, w-x0), min(tplBlock, h-y0)
-			var sum int64
-			for y := range bh {
-				for x := range bw {
-					sum += int64(cur.Y[(y0+y)*cur.StrideY+x0+x])
-				}
-			}
-			mean := int32(sum / int64(bw*bh))
-			var intra int64
-			for y := range bh {
-				for x := range bw {
-					intra += int64(abs32(int32(cur.Y[(y0+y)*cur.StrideY+x0+x]) - mean))
-				}
-			}
-			tf.intra[i] = float64(intra) + 1
-			tf.inter[i], tf.refDisp[i] = tf.intra[i], -1
-			if bw < 4 || bh < 4 {
+			bw, bh := min(tplBlock, w-x0)&^3, min(tplBlock, h-y0)&^3
+			tf.inter[i], tf.refDisp[i] = 1, -1
+			if bw == 0 || bh == 0 {
+				tf.intra[i] = 1
 				continue
 			}
+			at := func(x, y int) int32 { return int32(cur.Y[y*cur.StrideY+x]) }
+			for k := range bw {
+				above[k] = mid
+				if y0 > 0 {
+					above[k] = at(x0+k, y0-1)
+				}
+			}
+			for k := range bh {
+				left[k] = mid
+				if x0 > 0 {
+					left[k] = at(x0-1, y0+k)
+				}
+			}
+			var dc int32
+			switch {
+			case x0 > 0 && y0 > 0:
+				var s int32
+				for k := range bw {
+					s += above[k]
+				}
+				for k := range bh {
+					s += left[k]
+				}
+				dc = s / int32(bw+bh)
+			case y0 > 0:
+				var s int32
+				for k := range bw {
+					s += above[k]
+				}
+				dc = s / int32(bw)
+			case x0 > 0:
+				var s int32
+				for k := range bh {
+					s += left[k]
+				}
+				dc = s / int32(bh)
+			default:
+				dc = mid
+			}
+			corner := mid
+			if x0 > 0 && y0 > 0 {
+				corner = at(x0-1, y0-1)
+			}
+			blk := cur.Y[y0*cur.StrideY+x0:]
+			best := int64(math.MaxInt64)
+			for mode := range 4 {
+				for y := range bh {
+					for x := range bw {
+						var v int32
+						switch mode {
+						case 0:
+							v = dc
+						case 1:
+							v = above[x]
+						case 2:
+							v = left[y]
+						default: // the plane through the corner and both edges
+							v = above[x] + left[y] - corner
+							v = min(max(v, 0), 2*mid-1)
+						}
+						pred[y*tplBlock+x] = uint16(v)
+					}
+				}
+				best = min(best, satdBlock(blk, cur.StrideY, pred[:], tplBlock, bw, bh))
+			}
+			tf.intra[i] = float64(best) + 1
+			tf.inter[i] = tf.intra[i]
 			for k, r := range refs {
-				b := meBlock{ref: r, src: cur.Y, srcStride: cur.StrideY, x: x0, y: y0, w: bw &^ 3, h: bh &^ 3,
+				b := meBlock{ref: r, src: cur.Y, srcStride: cur.StrideY, x: x0, y: y0, w: bw, h: bh,
 					bitDepth: e.o.BitDepth, searchRange: 32, cost: func(mv) float64 { return 0 }}
-				m, c := ms.fullPel(&b, []mv{{}})
-				if c < tf.inter[i] {
-					tf.inter[i], tf.refDisp[i] = c, disps[k]
-					tf.mvx[i], tf.mvy[i] = int(m.col/8), int(m.row/8)
+				m, c := ms.search(&b, []mv{{}})
+				if c+1 < tf.inter[i] {
+					tf.inter[i], tf.refDisp[i] = c+1, disps[k]
+					tf.mvx[i], tf.mvy[i] = int(math.Round(float64(m.col)/8)), int(math.Round(float64(m.row)/8))
 				}
 			}
 		}
