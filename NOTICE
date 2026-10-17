@@ -6,3 +6,7 @@ licensed under the GNU Lesser General Public License, version 2.1 or later.
 Most of them are the tables of ETSI TS 102 114 (DTS Coherent Acoustics),
 Annex D; the ADPCM and high frequency VQ codebooks, which that
 specification does not print, come from FFmpeg alone.
+
+internal/aac/tables_gen.go holds the AAC code books and scale factor bands
+of ISO/IEC 14496-3, generated from FFmpeg's libavcodec/aactab.c (LGPL 2.1
+or later), which carries them.

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestPCMToAC3KeepsTheTimeline(t *testing.T) {
 	e := extra{path: path, track: Track{ID: 4352, Type: "LPCM", StreamID: "A_LPCM"},
 		sync: []mkv.SyncPoint{{Offset: head, At: 500 * time.Millisecond}, {Offset: head + rate*4, At: 1700 * time.Millisecond}}}
 	r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
-	out, sync, err := r.toAC3(context.Background(), e, mkv.WAV)
+	out, sync, _, err := r.transcodeAudio(context.Background(), e, mkv.WAV, "ac3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestDTSToAC3(t *testing.T) {
 	e := extra{path: path, track: Track{ID: 4353, Type: "DTS", StreamID: "A_DTS"},
 		sync: []mkv.SyncPoint{{Offset: 0, At: 300 * time.Millisecond}}}
 	r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
-	out, sync, err := r.toAC3(t.Context(), e, mkv.DTS)
+	out, sync, _, err := r.transcodeAudio(t.Context(), e, mkv.DTS, "ac3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,12 +158,17 @@ func TestPCM71At96kHz(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "71.ac3")
-	kbps, delay, err := pcmToAC3(path, out)
+	s, err := openPCM(path, mkv.WAV)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kbps != 640 || delay <= 256 {
-		t.Errorf("%d kb/s, delay %d", kbps, delay)
+	c, err := codeAudio(s, "ac3", out)
+	s.close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.kbps != 640 || c.delay <= 256 {
+		t.Errorf("%d kb/s, delay %d", c.kbps, c.delay)
 	}
 	pcm, err := exec.CommandContext(t.Context(), ff, "-v", "error", "-err_detect", "crccheck", "-i", out, "-f", "f64le", "-c:a", "pcm_f64le", "-").Output() //nolint:gosec // test
 	if err != nil {
@@ -207,7 +213,11 @@ func TestDTSFileToAC3(t *testing.T) {
 	}
 	out := filepath.Join(t.TempDir(), "x.ac3")
 	start := time.Now()
-	if _, _, err := dtsToAC3(path, out); err != nil {
+	ds, err := openPCM(path, mkv.DTS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := codeAudio(ds, "ac3", out); err != nil {
 		t.Fatal(err)
 	}
 	took := time.Since(start)
@@ -236,4 +246,74 @@ func TestDTSFileToAC3(t *testing.T) {
 		t.Logf("channel %d: SNR %.1f dB (signal RMS %.5f, error RMS %.5f)", c, 10*math.Log10(s/n), math.Sqrt(s/float64(len(ref[c]))), math.Sqrt(n/float64(len(ref[c]))))
 	}
 	t.Logf("%.1f s of audio in %v", float64(len(ref[0]))/48000, took)
+}
+
+// Coded as AAC, a PCM track keeps its timeline too: the sync points fall
+// on frame starts (ADTS headers), however long each frame is.
+func TestPCMToAACKeepsTheTimeline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "track.wav")
+	const rate, secs = 48000, 2
+	data := make([]byte, rate*secs*4)
+	for i := range rate * secs {
+		v := int16(8000 * math.Sin(2*math.Pi*440*float64(i)/rate))
+		binary.LittleEndian.PutUint16(data[4*i:], uint16(v))
+		binary.LittleEndian.PutUint16(data[4*i+2:], uint16(v))
+	}
+	hdr := wavHeader(2, rate, 16, wavMask(2, false), uint32(len(data))) //nolint:gosec // small
+	if err := os.WriteFile(path, append(hdr, data...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	head := int64(len(hdr))
+	e := extra{path: path, track: Track{ID: 4352, Type: "LPCM", StreamID: "A_LPCM"},
+		sync: []mkv.SyncPoint{{Offset: head, At: 500 * time.Millisecond}, {Offset: head + rate*4, At: 1700 * time.Millisecond}}}
+	r := NewRunner(CurrentGOOS, DefaultOptions(), nil)
+	out, sync, format, err := r.transcodeAudio(context.Background(), e, mkv.WAV, "aac")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != mkv.AAC || len(sync) != 2 {
+		t.Fatalf("format %v, sync %v", format, sync)
+	}
+	b, err := os.ReadFile(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range sync {
+		if sp.Offset+1 >= int64(len(b)) || b[sp.Offset] != 0xff || b[sp.Offset+1]&0xf6 != 0xf0 {
+			t.Errorf("sync point at %d is no frame start", sp.Offset)
+		}
+	}
+	if d := sync[0].At - (500*time.Millisecond - 1024*time.Second/48000); d < -time.Millisecond || d > time.Millisecond {
+		t.Errorf("first point at %v, want 500 ms less the encoder's delay", sync[0].At)
+	}
+}
+
+// --audio-transcode aac codes an MP4 output's PCM track as AAC.
+func TestRunnerTranscodesToAAC(t *testing.T) {
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to make the source")
+	}
+	work := t.TempDir()
+	src := filepath.Join(work, "Source.mov")
+	if out, err := exec.CommandContext(context.Background(), ff, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2", //nolint:gosec // test
+		"-f", "lavfi", "-i", "sine=f=440:r=48000:d=2", "-ac", "2", "-c:v", "libx264", "-c:a", "pcm_s16be", src).CombinedOutput(); err != nil {
+		t.Skipf("making the source: %v %s", err, out)
+	}
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = src, filepath.Join(work, "Out.mp4"), filepath.Join(work, "t")
+	o.Encoder, o.Codec, o.BitDepth, o.CRF, o.AudioTranscode = EncoderBuiltin, CodecH265, 8, 26, "aac"
+	if err := NewRunner(CurrentGOOS, o, nil).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := exec.CommandContext(context.Background(), "ffprobe", "-v", "error", "-select_streams", "a", //nolint:gosec // test
+		"-show_entries", "stream=codec_name,channels", "-of", "csv=p=0", o.Output).Output()
+	if err != nil || strings.TrimSpace(string(probe)) != "aac,2" {
+		t.Fatalf("audio %q (%v)", probe, err)
+	}
+	cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-i", o.Output, "-f", "null", "-") //nolint:gosec // test
+	if msg, err := cmd.CombinedOutput(); err != nil || len(msg) > 0 {
+		t.Errorf("ffmpeg: %v %s", err, msg)
+	}
 }

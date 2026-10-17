@@ -103,7 +103,7 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 			r.Report.Report("carrying the AC-3 core of the %s track %d (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
 		default:
 			// DTS (DTS-HD's whole) and PCM: AC-3, coded by ffmpeg.
-			path, sync, err := r.toAC3(ctx, e, format)
+			path, sync, coded, err := r.transcodeAudio(ctx, e, format, r.Opts.audioTranscode())
 			if err != nil {
 				r.Report.Report("leaving out %s track %d: an MV-HEVC file carries AC-3 and E-AC-3 here, and %v", e.track.Type, e.track.ID, err)
 				continue
@@ -111,7 +111,7 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 			if f, err = open(path); err != nil {
 				return err
 			}
-			format, e.sync = mkv.AC3, sync
+			format, e.sync = coded, sync
 		}
 		a, err := mkv.NewAudioSource(f, format, core, lang)
 		if err != nil {

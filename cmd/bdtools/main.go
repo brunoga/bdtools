@@ -87,6 +87,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
 		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc or software); or drop it (the HDR10 base layer as it is)")
 		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf plus 12)")
+		audioTx  = fs.String("audio-transcode", "ac3", "the codec an MP4 output's DTS and PCM tracks are coded in: ac3 (640 kb/s for 5.1) or aac (96 kb/s a channel)")
 		inLayout = fs.String("input-layout", "auto", "how a 2D-coded source's frame holds a 3D pair: auto (as a Matroska file says), 2d (one picture), full or half (side by side), ou or half-ou (over-under, the left eye on top)")
 		burnSubs = fs.Int("burn-subs", 0, "an MP4 or QuickTime output (which carries no subtitle track): draw this subtitle track (its id, as --list shows it) into both eyes at the disc's depth; an MV-HEVC file carries no subtitle track")
 		subs3D   = fs.String("subs-3d", "both", "off: subtitles as the disc has them, for a player that places them in 3D itself; on: drawn in both halves of the frame at the disc's depth, for players that show the frame as it is; both: the 3D track after each flat one")
@@ -212,6 +213,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 	o.Subs3D = convert.Subs3D(*subs3D)
 	o.BurnSubs = *burnSubs
+	o.AudioTranscode = *audioTx
 	switch l := convert.Layout(*inLayout); l {
 	case "2d":
 	case convert.InputAuto, convert.LayoutFullSBS, convert.LayoutHalfSBS, convert.LayoutFullOU, convert.LayoutHalfOU:
