@@ -235,10 +235,15 @@ func (t *tileEnc) codeRow(r int, sync *rowSync) {
 			t.w.lr(r, c) // read_lr, filled in at the pack
 			t.finalPartition(r, c, BLOCK_64X64, node)
 			if dbgCompare {
+				// the superblock only: the rows below code theirs at once
 				for p := range 3 {
-					for i, v := range keep[p] {
-						if t.f.rec[p][i] != v {
-							panic(fmt.Sprintf("SB %d,%d: plane %d (%d,%d): search %d final %d", r, c, p, i%t.f.stride[p], i/t.f.stride[p], v, t.f.rec[p][i]))
+					sh := min(p, 1)
+					st := t.f.stride[p]
+					for y := (r * 4) >> sh; y < min((r+16)*4>>sh, len(keep[p])/st); y++ {
+						for x := (c * 4) >> sh; x < min((c+16)*4>>sh, st); x++ {
+							if i := y*st + x; t.f.rec[p][i] != keep[p][i] {
+								panic(fmt.Sprintf("SB %d,%d: plane %d (%d,%d): search %d final %d", r, c, p, x, y, keep[p][i], t.f.rec[p][i]))
+							}
 						}
 					}
 				}

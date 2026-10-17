@@ -122,8 +122,17 @@ func (t *tileEnc) predictBlock() {
 	}
 }
 
-// interRefs are the references inter blocks try.
-var interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
+// interRefs are the references inter blocks try (a frame two of them
+// are tried once), compPairs the compound pairs.
+var (
+	interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF2_FRAME, ALTREF_FRAME, LAST2_FRAME, LAST3_FRAME, GOLDEN_FRAME}
+	compPairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF2_FRAME}, {LAST_FRAME, ALTREF_FRAME},
+		{LAST2_FRAME, BWDREF_FRAME}, {LAST2_FRAME, ALTREF2_FRAME}, {LAST2_FRAME, ALTREF_FRAME}}
+)
+
+// dbgFewRefs limits the search to the references and pairs it had first
+// (LAST, BWDREF, ALTREF, GOLDEN; LAST with BWDREF or ALTREF).
+var dbgFewRefs = false
 
 // interCand is an inter mode to try.
 type interCand struct {
@@ -147,11 +156,19 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	b.isInter, b.txSz = true, int(maxTxSizeRect[size])
 	var cands []interCand
 	seen := map[*refFrameState]bool{}
-	for _, ref := range interRefs {
+	refs, pairs := interRefs, compPairs
+	if dbgFewRefs {
+		refs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
+		pairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}}
+	}
+	// the reference tried for each frame
+	tried := map[*refFrameState]int{}
+	for _, ref := range refs {
 		if r := f.refs[ref]; r == nil || seen[r] {
 			continue
 		}
 		seen[f.refs[ref]] = true
+		tried[f.refs[ref]] = ref
 		cands = t.interCandsFor(ref, cands)
 	}
 	if len(cands) == 0 {
@@ -164,16 +181,18 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 				newOf[cd.ref] = cd.m
 			}
 		}
-		for _, pair := range [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}} {
+		pairSeen := map[[2]*refFrameState]bool{}
+		for _, pair := range pairs {
 			r0, r1 := f.refs[pair[0]], f.refs[pair[1]]
 			if r0 == nil || r1 == nil || !seen[r0] || !seen[r1] || r0.disp >= f.fp.orderHint || r1.disp <= f.fp.orderHint {
 				continue
 			}
-			if pair[1] == ALTREF_FRAME && f.refs[BWDREF_FRAME] == r1 {
-				continue // the same pair
+			if pairSeen[[2]*refFrameState{r0, r1}] {
+				continue // the same frames as a pair tried
 			}
+			pairSeen[[2]*refFrameState{r0, r1}] = true
 			first := len(cands)
-			cands = t.compoundCands(pair[0], pair[1], newOf[pair[0]], newOf[pair[1]], cands)
+			cands = t.compoundCands(pair[0], pair[1], newOf[tried[r0]], newOf[tried[r1]], cands)
 			t.estimate(cands[first:])
 		}
 		if dbgForceCompound {
