@@ -76,6 +76,143 @@ type picture struct {
 	// With an accelerator: the picture's surface, and its fields' POCs.
 	surface        int
 	topPOC, botPOC int32
+
+	// Interlaced coding. A frame keeps its fields (fld) as pictures of
+	// their own, made on first use: decoded into through a view of the
+	// frame's planes (every other row), predicted from through a copy of
+	// those rows with its own border. A field has its frame (parent) and
+	// parity (0 top, 1 bottom).
+	fld    [2]*picture
+	parent *picture
+	parity int
+	// refMask: a frame's fields marked for reference (bit 0 top, bit 1
+	// bottom); shortRef and longRef say which list the frame is in.
+	refMask uint8
+	// fieldsDone: a frame's fields decoded as field pictures (bits as
+	// refMask); asFields: the frame's pictures are fields.
+	fieldsDone    uint8
+	fieldsStarted uint8 // a frame's fields whose decoding started (decoder side)
+	asFields      bool
+	// asField: a field decoded as a field picture (set when its decoding
+	// starts); its copy (copyOK once it holds the field) and the copy's
+	// buffers, kept across reuse
+	asField    bool
+	copyMu     sync.Mutex
+	copyOK     bool
+	copyPlanes [3][]byte
+	copyStride [3]int
+	copyOrigin [3]int
+}
+
+// field returns the frame's field of the parity, made on first use.
+func (p *picture) field(parity int) *picture {
+	if f := p.fld[parity]; f != nil {
+		return f
+	}
+	f := &picture{mbW: p.mbW, mbH: p.mbH / 2, width: p.width, height: p.height / 2, surface: -1, parent: p, parity: parity}
+	n4 := f.mbW * 4 * f.mbH * 4
+	for l := 0; l < 2; l++ {
+		f.mvs[l] = make([]mv, n4)
+		f.refs[l] = make([]int8, n4)
+	}
+	f.mbSlice = make([]uint16, f.mbW*f.mbH)
+	f.cond = sync.NewCond(&f.mu)
+	p.fld[parity] = f
+	return f
+}
+
+// fieldRef returns the frame's field of the parity as a reference: its
+// identity, order count and frame number brought up to date with the
+// frame's.
+func (p *picture) fieldRef(parity int) *picture {
+	f := p.field(parity)
+	f.syncFromFrame()
+	return f
+}
+
+// syncFromFrame sets a field's identity and order count from its frame.
+func (p *picture) syncFromFrame() {
+	fr := p.parent
+	p.id = fieldID(fr.id, p.parity)
+	p.poc = fr.topPOC
+	if p.parity == 1 {
+		p.poc = fr.botPOC
+	}
+	p.frameNum = fr.frameNum
+	p.viewID, p.viewIdx = fr.viewID, fr.viewIdx
+	p.nonExisting = fr.nonExisting
+}
+
+// viewFrame points a field's planes at its rows of the frame's, for
+// decoding into.
+func (p *picture) viewFrame() {
+	fr := p.parent
+	for c := 0; c < 3; c++ {
+		p.planes[c] = fr.planes[c]
+		p.stride[c] = 2 * fr.stride[c]
+		p.origin[c] = fr.origin[c] + p.parity*fr.stride[c]
+	}
+}
+
+// makeCopy copies a field's rows of its frame into its own planes and
+// extends their borders: the field to predict from. The frame's rows must
+// be final.
+func (p *picture) makeCopy() {
+	fr := p.parent
+	for c := 0; c < 3; c++ {
+		w, h, pad := p.width, p.height, padY
+		if c > 0 {
+			w, h, pad = w/2, h/2, padC
+		}
+		if p.copyPlanes[c] == nil {
+			stride := (w + 2*pad + 63) &^ 63
+			p.copyStride[c] = stride
+			p.copyOrigin[c] = pad*stride + pad
+			p.copyPlanes[c] = make([]byte, stride*(h+2*pad))
+		}
+		src, ss := fr.planes[c], 2*fr.stride[c]
+		so := fr.origin[c] + p.parity*fr.stride[c]
+		dst, ds, do := p.copyPlanes[c], p.copyStride[c], p.copyOrigin[c]
+		for y := 0; y < h; y++ {
+			copy(dst[do+y*ds:do+y*ds+w], src[so+y*ss:so+y*ss+w])
+		}
+	}
+	p.planes, p.stride, p.origin = p.copyPlanes, p.copyStride, p.copyOrigin
+	p.extendRows(0, p.mbH)
+	p.copyOK = true
+}
+
+// ensureCopy makes the field ready to predict from: a field decoded as a
+// field picture has its copy made when it completes; one of a frame
+// decoded as a frame gets it once the frame is complete.
+func (p *picture) ensureCopy() {
+	if p.asField {
+		p.waitRows(p.mbH) // its decoding makes the copy, then signals
+		return
+	}
+	fr := p.parent
+	fr.waitRows(fr.mbH)
+	p.copyMu.Lock()
+	if !p.copyOK {
+		p.makeCopy()
+		p.setProgress(p.mbH)
+	}
+	p.copyMu.Unlock()
+}
+
+// resetFields prepares a frame's fields for a new picture.
+func (p *picture) resetFields() {
+	p.refMask, p.fieldsDone, p.fieldsStarted, p.asFields = 0, 0, 0, false
+	for _, f := range p.fld {
+		if f == nil {
+			continue
+		}
+		f.reset()
+		f.asField = false
+		f.copyMu.Lock()
+		f.copyOK = false
+		f.copyMu.Unlock()
+	}
 }
 
 // inUse reports whether the buffer is still needed (must hold poolMu).
@@ -248,4 +385,10 @@ func (p *picture) extendRows(r0, r1 int) {
 			}
 		}
 	}
+}
+
+// fieldID is the identity of a frame's field: positive (negative ids
+// mean no reference) and apart from frames'.
+func fieldID(frame int32, parity int) int32 {
+	return int32(1<<30 | (uint32(frame)*2+uint32(parity))&(1<<30-1)) //nolint:gosec // within 31 bits
 }

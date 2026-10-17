@@ -134,9 +134,21 @@ func mvDiff(a, b mv) bool {
 	return dx >= 4 || dx <= -4 || dy >= 4 || dy <= -4
 }
 
+// mvDiffField is mvDiff for field macroblocks, whose vertical components
+// count quarter field samples: four quarter frame samples are two.
+func mvDiffField(a, b mv) bool {
+	dx := int32(a.x) - int32(b.x)
+	dy := int32(a.y) - int32(b.y)
+	return dx >= 4 || dx <= -4 || dy >= 2 || dy <= -2
+}
+
 // motionBS returns 1 if the two inter 4x4 blocks have different motion.
 func (fc *frameCtx) motionBS(p, q int) uint8 {
 	pic := fc.pic
+	mvDiff := mvDiff
+	if fc.field {
+		mvDiff = mvDiffField
+	}
 	p0, p1 := fc.refIDs[0][p], fc.refIDs[1][p]
 	q0, q1 := fc.refIDs[0][q], fc.refIDs[1][q]
 	if p1 < 0 && q1 < 0 {
@@ -267,7 +279,7 @@ func (fc *frameCtx) deblockMB(mbX, mbY int) {
 		}
 	}
 
-	if fc.deblockMBFast(mbX, mbY, cur, sp, filterLeft, filterTop) {
+	if !fc.field && fc.deblockMBFast(mbX, mbY, cur, sp, filterLeft, filterTop) {
 		return
 	}
 
@@ -295,8 +307,10 @@ func (fc *frameCtx) deblockMB(mbX, mbY int) {
 				}
 			}
 			if curIntra || nb.flags&mbfIntra != 0 {
+				// a field's horizontal macroblock edges are filtered as
+				// internal ones
 				v := uint8(3)
-				if e == 0 {
+				if e == 0 && (dir == 0 || !fc.field) {
 					v = 4
 				}
 				bs[dir][e] = [4]uint8{v, v, v, v}

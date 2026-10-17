@@ -56,6 +56,7 @@ type frameCtx struct {
 	slices []sliceParams
 
 	dba           deblockArgs // arguments of the assembly deblocking control
+	field         bool        // the picture is a field
 	rowsDeblocked int         // MB rows deblocked
 	rowsFinal     int         // MB rows published as final
 	broken        bool
@@ -79,6 +80,7 @@ func newFrameCtx(mbW, mbH int) *frameCtx {
 func (fc *frameCtx) reset(pic *picture, s *sps) {
 	fc.pic = pic
 	fc.sps = s
+	fc.field = pic.parent != nil
 	clear(fc.mbs)
 	fc.slices = fc.slices[:0]
 	fc.rowsDeblocked = 0
@@ -174,10 +176,16 @@ type sliceDec struct {
 	mb                             mbData
 	availA, availB, availC, availD bool
 
-	dq4     *[6][6][16]int32
-	dq8     *[2][6][64]int32
-	dq4z    *[6][6][16]int32
-	dq8z    *[2][6][64]int32
+	dq4  *[6][6][16]int32
+	dq8  *[2][6][64]int32
+	dq4z *[6][6][16]int32 // scaling in the scan's order (zigzag, or field)
+	dq8z *[2][6][64]int32
+	dqt  *dqTables
+	// the macroblock's scan and CABAC significance contexts: a field
+	// macroblock's (field), or a frame one's
+	field   bool
+	scan    *scanSet
+	sigTab  *[8][64][2]uint16
 	refInfo *sliceRefInfo
 	curPOC  int32
 	deblock bool // the slice is deblocked (reference ids are needed)
@@ -189,6 +197,7 @@ type sliceDec struct {
 	// inter prediction state
 	implicitW  [maxRefsPerList][maxRefsPerList][2]int16 // implicit bi-pred weights
 	colPic     *picture
+	colMode    int           // colPic is: 0 the same structure, 1 a field of the frame's (field pair), 2 the field's frame
 	mapCol     map[int32]int // colocated ref picture id -> refIdxL0 (temporal direct)
 	distScale  [maxRefsPerList]int32
 	dsLongTerm [maxRefsPerList]bool
@@ -245,6 +254,11 @@ func (fc *frameCtx) publish(n int) {
 	if n <= fc.rowsFinal {
 		return
 	}
+	if fc.pic.parent != nil {
+		// a field: finishField publishes it whole
+		fc.rowsFinal = n
+		return
+	}
 	fc.pic.extendRows(fc.rowsFinal, n)
 	fc.rowsFinal = n
 	fc.pic.setProgress(n)
@@ -267,8 +281,10 @@ func (fc *frameCtx) finishRowsSafe() {
 			fc.broken = true
 			fc.rowsDeblocked = fc.mbH
 			fc.rowsFinal = 0
-			fc.pic.extendRows(0, fc.mbH)
-			fc.pic.setProgress(fc.mbH)
+			if fc.pic.parent == nil {
+				fc.pic.extendRows(0, fc.mbH)
+				fc.pic.setProgress(fc.mbH)
+			}
 		}
 	}()
 	fc.finishRows()
@@ -330,4 +346,25 @@ func (fc *frameCtx) conceal(ref *picture) {
 		fc.slices = append(fc.slices, sliceParams{disableDeblock: 1})
 		pic.setSliceRef(0, &sliceRefInfo{})
 	}
+}
+
+// setField selects the scan and contexts of field (or frame) macroblocks.
+func (s *sliceDec) setField(field bool) {
+	s.field = field
+	if field {
+		s.scan, s.sigTab = &fieldScan, &sigLastCtxField
+		s.dq4z, s.dq8z = &s.dqt.dq4f, &s.dqt.dq8f
+		return
+	}
+	s.scan, s.sigTab = &frameScan, &sigLastCtx
+	s.dq4z, s.dq8z = &s.dqt.dq4z, &s.dqt.dq8z
+}
+
+// sigs is the macroblock's significance contexts (a frame one's unless
+// setField says otherwise).
+func (s *sliceDec) sigs() *[8][64][2]uint16 {
+	if s.sigTab == nil {
+		return &sigLastCtx
+	}
+	return s.sigTab
 }

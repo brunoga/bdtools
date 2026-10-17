@@ -136,6 +136,9 @@ type dqTables struct {
 	// the same tables in zigzag scan order, for fused dequantization
 	dq4z [6][6][16]int32
 	dq8z [2][6][64]int32
+	// and in field scan order
+	dq4f [6][6][16]int32
+	dq8f [2][6][64]int32
 }
 
 // dequant returns the dequantization tables of p for SPS s.
@@ -653,6 +656,9 @@ func (p *pps) computeDequant(s *sps) *dqTables {
 				t.dq4[list][m][pos] = int32(l4[list][k]) * v
 				t.dq4z[list][m][k] = t.dq4[list][m][pos]
 			}
+			for k := 0; k < 16; k++ {
+				t.dq4f[list][m][k] = t.dq4[list][m][field4x4[k]]
+			}
 		}
 	}
 	for list := 0; list < 2; list++ {
@@ -677,6 +683,9 @@ func (p *pps) computeDequant(s *sps) *dqTables {
 				}
 				t.dq8[list][m][pos] = int32(l8[list][k]) * v
 				t.dq8z[list][m][k] = t.dq8[list][m][pos]
+			}
+			for k := 0; k < 64; k++ {
+				t.dq8f[list][m][k] = t.dq8[list][m][field8x8[k]]
 			}
 		}
 	}

@@ -507,14 +507,31 @@ var (
 )
 
 // sigLastCtx[cat][i] holds the absolute context indices of
-// significant_coeff_flag and last_significant_coeff_flag for levelListIdx i.
-var sigLastCtx [8][64][2]uint16
+// significant_coeff_flag and last_significant_coeff_flag for levelListIdx i;
+// sigLastCtxField those of field macroblocks (Table 9-34, 9-43).
+var sigLastCtx, sigLastCtxField [8][64][2]uint16
+
+var (
+	sigBaseField  = [6]int{277 + 0, 277 + 15, 277 + 29, 277 + 44, 277 + 47, 436}
+	lastBaseField = [6]int{338 + 0, 338 + 15, 338 + 29, 338 + 44, 338 + 47, 451}
+	sig8x8IncFld  = [63]uint8{
+		0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 7, 7, 8, 4, 5,
+		6, 9, 10, 10, 8, 11, 12, 11, 9, 9, 10, 10, 8, 11, 12, 11,
+		9, 9, 10, 10, 8, 11, 12, 11, 9, 9, 10, 10, 8, 13, 13, 9,
+		9, 10, 10, 8, 13, 13, 9, 9, 10, 10, 14, 14, 14, 14, 14,
+	}
+)
 
 func init() {
 	defer func() {
 		for c := 0; c < 6; c++ {
 			for i := 0; i < 64; i++ {
 				sigLastCtx[c][i] = [2]uint16{uint16(sigBaseTab[c] + int(sigIncTab[c][i])), uint16(lastBaseTab[c] + int(lastIncTab[c][i]))}
+				sig := sigIncTab[c][i]
+				if c == catLuma8x8 && i < 63 {
+					sig = sig8x8IncFld[i]
+				}
+				sigLastCtxField[c][i] = [2]uint16{uint16(sigBaseField[c] + int(sig)), uint16(lastBaseField[c] + int(lastIncTab[c][i]))}
 			}
 		}
 	}()
@@ -618,7 +635,7 @@ func (s *sliceDec) cabacBlockGo(cbfCtx int, cat int, maxNum int, cb *coeffBuf) b
 			return false
 		}
 	}
-	tab := &sigLastCtx[cat&7]
+	tab := &s.sigs()[cat&7]
 	n := 0
 	i := 0
 	end := maxNum - 1

@@ -30,7 +30,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from +41% to +8%; with Godzilla vs. Kong (fast action) added, the
   five's is +9%. It takes 4 times x264 medium's CPU.
 
+- Interlaced H.264 in the Go decoder, first part: field pictures (PAFF),
+  alone or mixed with frame pictures, CAVLC and CABAC, every slice type.
+  The 48 such JVT conformance streams decode as ffmpeg decodes them,
+  frame for frame; 8 of them are in the tests. MBAFF still goes to
+  ffmpeg (or the GPU) for now.
+
 ### Fixed
+
+- Monochrome (4:0:0) H.264 came out with black chroma planes; they are
+  grey now, as other decoders give it.
 
 - The Go H.264 encoder's output depended on how its concurrent pictures
   were scheduled (a coder's search starting points were the vectors of

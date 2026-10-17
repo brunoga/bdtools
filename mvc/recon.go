@@ -105,11 +105,11 @@ func (s *sliceDec) chromaACCBF(cur *mbInfo, c, bx, by int) int {
 // dequant4 scales the coefficients of a 4x4 block (8.5.12.1) into dst,
 // which starts at the block's first coefficient; pt maps zigzag indices to
 // offsets in dst.
-func dequant4(dst []int16, pt *[16]uint8, cb *coeffBuf, start int, ls *[16]int32, qp int) {
+func dequant4(dst []int16, sc *scanSet, pt *[16]uint8, cb *coeffBuf, start int, ls *[16]int32, qp int) {
 	qd := uint(qp / 6)
 	for k := 0; k < cb.n; k++ {
 		zi := (int(cb.idx[k]) + start) & 15
-		v := cb.level[k] * ls[zigzag4x4[zi]]
+		v := cb.level[k] * ls[sc.z4[zi]]
 		if qd >= 4 {
 			v <<= qd - 4
 		} else {
@@ -121,7 +121,7 @@ func dequant4(dst []int16, pt *[16]uint8, cb *coeffBuf, start int, ls *[16]int32
 
 // dequant8 scales the coefficients of an 8x8 block into dst (row stride
 // 16). interleave >= 0 selects the CAVLC 4x4 interleaving.
-func dequant8(dst []int16, cb *coeffBuf, interleave int, ls *[64]int32, qp int) {
+func dequant8(dst []int16, sc *scanSet, cb *coeffBuf, interleave int, ls *[64]int32, qp int) {
 	qd := uint(qp / 6)
 	for k := 0; k < cb.n; k++ {
 		si := int(cb.idx[k])
@@ -129,13 +129,13 @@ func dequant8(dst []int16, cb *coeffBuf, interleave int, ls *[64]int32, qp int) 
 			si = si*4 + interleave
 		}
 		si &= 63
-		v := cb.level[k] * ls[zigzag8x8[si]]
+		v := cb.level[k] * ls[sc.z8[si]]
 		if qd >= 6 {
 			v <<= qd - 6
 		} else {
 			v = (v + 1<<(5-qd)) >> (6 - qd)
 		}
-		dst[zz8Pos16[si]] = int16(v)
+		dst[sc.pos8x8[si]] = int16(v)
 	}
 }
 
@@ -205,7 +205,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 		if coded {
 			mb.dcY = [16]int32{}
 			for k := 0; k < cb.n; k++ {
-				mb.dcY[zigzag4x4[cb.idx[k]]] = cb.level[k]
+				mb.dcY[s.scan.z4[cb.idx[k]]] = cb.level[k]
 			}
 			lumaDCDequant(&mb.dcY, qp, s.dq4[listY][qp%6][0])
 			for r := 0; r < 16; r++ {
@@ -219,7 +219,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 			if useCabacAsm && s.cabacOn {
 				cbfA, cbfB := s.cbfMasks()
 				cur.cbf, nz, _ = s.cabacBlocks(&blockArgs{cat: catLumaAC, desc: lumaBlkDesc[:], cbp: 15,
-					cbfA: cbfA, cbfB: cbfB, dst: mb.coefY[:], scale: [2][]int32{lsz[1:]}, pos: zzPos16[1:],
+					cbfA: cbfA, cbfB: cbfB, dst: mb.coefY[:], scale: [2][]int32{lsz[1:]}, pos: s.scan.pos16[1:],
 					shifts: [2]int{sh4}}, cur.cbf)
 				mb.nzY |= uint16(nz)
 				mb.acY |= uint16(nz)
@@ -230,7 +230,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 					r := by*4 + bx
 					if s.cabacOn {
 						if !s.cabacBlockDQ(s.lumaCBF(cur, catLumaAC, bx, by), catLumaAC, 15, cb,
-							mb.coefY[blkOff16[r]:], lsz[1:], zzPos16[1:], sh4) {
+							mb.coefY[blkOff16[r]:], lsz[1:], s.scan.pos16[1:], sh4) {
 							continue
 						}
 						cur.cbf |= 1 << r
@@ -247,7 +247,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 					if n == 0 {
 						continue
 					}
-					dequant4(mb.coefY[blkOff16[r]:], &zzPos16, cb, 1, ls, qp)
+					dequant4(mb.coefY[blkOff16[r]:], s.scan, s.scan.pos16, cb, 1, ls, qp)
 					mb.nzY |= 1 << r
 					mb.acY |= 1 << r
 					cur.nzMask |= 1 << r
@@ -261,7 +261,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 		if useCabacAsm && s.cabacOn {
 			var nz8, ac8 uint32
 			cur.cbf, nz8, ac8 = s.cabacBlocks(&blockArgs{cat: catLuma8x8, desc: luma8x8Desc[:], cbp: int(mb.cbp & 15),
-				dst: mb.coefY[:], scale: [2][]int32{ls8z[:]}, pos: zz8Pos16[:], shifts: [2]int{sh8}}, cur.cbf)
+				dst: mb.coefY[:], scale: [2][]int32{ls8z[:]}, pos: s.scan.pos8x8[:], shifts: [2]int{sh8}}, cur.cbf)
 			mb.nz8 |= uint8(nz8)
 			mb.ac8 |= uint8(ac8)
 			for b8 := 0; b8 < 4; b8++ {
@@ -279,7 +279,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 				bx0, by0 := (b8&1)*2, (b8>>1)*2
 				mask := uint16(0x33) << (by0*4 + bx0)
 				if s.cabacOn {
-					s.cabacBlockDQ(-1, catLuma8x8, 64, cb, mb.coefY[b8>>1*128+b8&1*8:], ls8z[:], zz8Pos16[:], sh8)
+					s.cabacBlockDQ(-1, catLuma8x8, 64, cb, mb.coefY[b8>>1*128+b8&1*8:], ls8z[:], s.scan.pos8x8[:], sh8)
 					cur.cbf |= uint32(mask)
 					mb.nz8 |= 1 << b8
 					if cb.n != 1 || cb.idx[0] != 0 {
@@ -296,7 +296,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 						}
 						s.fc.nnz[s.idx4(bx, by)] = uint8(n)
 						total += n
-						dequant8(mb.coefY[b8>>1*128+b8&1*8:], cb, i4, ls8, qp)
+						dequant8(mb.coefY[b8>>1*128+b8&1*8:], s.scan, cb, i4, ls8, qp)
 					}
 					if total > 0 {
 						mb.nz8 |= 1 << b8
@@ -310,7 +310,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 		cbfA, cbfB := s.cbfMasks()
 		var ac uint32
 		cur.cbf, nz, ac = s.cabacBlocks(&blockArgs{cat: catLuma4x4, desc: lumaBlkDesc[:], cbp: int(mb.cbp & 15),
-			cbfA: cbfA, cbfB: cbfB, dst: mb.coefY[:], scale: [2][]int32{lsz[:]}, pos: zzPos16[:],
+			cbfA: cbfA, cbfB: cbfB, dst: mb.coefY[:], scale: [2][]int32{lsz[:]}, pos: s.scan.pos16[:],
 			shifts: [2]int{sh4}}, cur.cbf)
 		mb.nzY |= uint16(nz)
 		mb.acY |= uint16(ac)
@@ -324,7 +324,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 			r := by*4 + bx
 			if s.cabacOn {
 				if !s.cabacBlockDQ(s.lumaCBF(cur, catLuma4x4, bx, by), catLuma4x4, 16, cb,
-					mb.coefY[blkOff16[r]:], lsz[:], zzPos16[:], sh4) {
+					mb.coefY[blkOff16[r]:], lsz[:], s.scan.pos16[:], sh4) {
 					continue
 				}
 				cur.cbf |= 1 << r
@@ -343,7 +343,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 			if n == 0 {
 				continue
 			}
-			dequant4(mb.coefY[blkOff16[r]:], &zzPos16, cb, 0, ls, qp)
+			dequant4(mb.coefY[blkOff16[r]:], s.scan, s.scan.pos16, cb, 0, ls, qp)
 			mb.nzY |= 1 << r
 			if cb.n != 1 || cb.idx[0] != 0 {
 				mb.acY |= 1 << r
@@ -355,13 +355,14 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 	if s.h.sps.chromaFormatIdc == 0 || mb.cbp>>4 == 0 {
 		return nil
 	}
-	// chroma DC
-	if useCabacAsm && s.cabacOn {
+	// chroma DC (the fused assembly decoder has the frame contexts)
+	dcAsm := useCabacAsm && s.cabacOn && !s.field
+	if dcAsm {
 		cur.cbf, nz = s.chromaDCBlocks(cur.cbf, listCb)
 		mb.nzC[0] |= uint8(nz & 15)
 		mb.nzC[1] |= uint8(nz >> 4)
 	}
-	for c := 0; c < 2 && (!useCabacAsm || !s.cabacOn); c++ {
+	for c := 0; c < 2 && !dcAsm; c++ {
 		var coded bool
 		if s.cabacOn {
 			bit := uint32(cbfCbDC) << c
@@ -399,7 +400,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 		cbfA, cbfB := s.cbfMasks()
 		q0, q1 := s.qpc[0], s.qpc[1]
 		cur.cbf, nz, _ = s.cabacBlocks(&blockArgs{cat: catChromaAC, desc: chromaACDesc[:], cbp: 0xff,
-			cbfA: cbfA, cbfB: cbfB, dst: unsafe.Slice(&mb.coefC[0][0], 128), pos: zzPos8[1:],
+			cbfA: cbfA, cbfB: cbfB, dst: unsafe.Slice(&mb.coefC[0][0], 128), pos: s.scan.pos8[1:],
 			scale:  [2][]int32{s.dq4z[listCb][q0%6][1:], s.dq4z[listCb+1][q1%6][1:]},
 			shifts: [2]int{dqShifts(q0, false), dqShifts(q1, false)}}, cur.cbf)
 		mb.nzC[0] |= uint8(nz & 15)
@@ -415,7 +416,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 			bx, by := b&1, b>>1
 			if s.cabacOn {
 				if !s.cabacBlockDQ(s.chromaACCBF(cur, c, bx, by), catChromaAC, 15, cb,
-					mb.coefC[c][b>>1*32+b&1*4:], lscz[1:], zzPos8[1:], shc) {
+					mb.coefC[c][b>>1*32+b&1*4:], lscz[1:], s.scan.pos8[1:], shc) {
 					continue
 				}
 				cur.cbf |= 1 << (16 + c*4 + b)
@@ -432,7 +433,7 @@ func (s *sliceDec) parseResidual(cur *mbInfo) error {
 					continue
 				}
 			}
-			dequant4(mb.coefC[c][b>>1*32+b&1*4:], &zzPos8, cb, 1, lsc, qpc)
+			dequant4(mb.coefC[c][b>>1*32+b&1*4:], s.scan, s.scan.pos8, cb, 1, lsc, qpc)
 			mb.nzC[c] |= 1 << b
 		}
 	}

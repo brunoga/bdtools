@@ -154,11 +154,22 @@ func minPositive(a, b int8) int8 {
 // colocated returns refIdxCol, mvCol, the list used and the colocated
 // block index for 4x4 block (x,y) of the current macroblock.
 func (s *sliceDec) colocated(x, y int) (int8, mv, int, int) {
-	if s.h.sps.direct8x8Inference {
-		x = (x >> 1) * 3
-		y = (y >> 1) * 3
+	var i int
+	switch s.colMode {
+	case 1:
+		// a frame macroblock's half of the field macroblock (the
+		// corners; direct_8x8_inference holds in interlaced streams)
+		i = ((s.mbY>>1)*4+2*(s.mbY&1)+y>>1)*s.fc.mbW*4 + s.mbX*4 + (x>>1)*3
+	case 2:
+		// a field macroblock's frame macroblock pair
+		i = (s.mbY*8+(y>>1)*6)*s.fc.mbW*4 + s.mbX*4 + (x>>1)*3
+	default:
+		if s.h.sps.direct8x8Inference {
+			x = (x >> 1) * 3
+			y = (y >> 1) * 3
+		}
+		i = s.idx4(x, y)
 	}
-	i := s.idx4(x, y)
 	col := s.colPic
 	if r := col.refs[0][i]; r >= 0 {
 		return r, col.mvs[0][i], 0, i
@@ -172,7 +183,14 @@ func (s *sliceDec) colocated(x, y int) (int8, mv, int, int) {
 // directMotion derives motion for direct-predicted 8x8 blocks of the
 // current macroblock (mask bit i = 8x8 block i).
 func (s *sliceDec) directMotion(mask uint8) {
-	s.colPic.waitRows(s.mbY + 1)
+	switch s.colMode {
+	case 1:
+		s.colPic.waitRows(s.mbY>>1 + 1)
+	case 2:
+		s.colPic.waitRows(2*s.mbY + 2)
+	default:
+		s.colPic.waitRows(s.mbY + 1)
+	}
 	if s.h.directSpatial {
 		s.directSpatial(mask)
 	} else {
@@ -191,7 +209,7 @@ func (s *sliceDec) directSpatial(mask uint8) {
 		directZero = true
 	}
 	colShortTerm := s.colIsShortTerm()
-	if useCabacAsm {
+	if useCabacAsm && s.colMode == 0 {
 		s.directUniform = s.directFill(mask, ref, pm, colShortTerm && !directZero)
 		s.directUniformValid = true
 		return
@@ -259,6 +277,12 @@ func (s *sliceDec) directTemporal(mask uint8) {
 						r = 0
 					}
 					ref0 = int8(r)
+				}
+				switch s.colMode {
+				case 1:
+					mc.y *= 2 // field to frame vector
+				case 2:
+					mc.y /= 2
 				}
 				var m0, m1 mv
 				if s.dsLongTerm[ref0] {

@@ -127,7 +127,7 @@ func (s *sliceDec) cabacBlocksAsm(a *blockArgs, cbfCur uint32) (cbfOut, nz, ac u
 	if a.scale[1] != nil {
 		s1 = a.scale[1]
 	}
-	o, n, c := cabacBlocksAsm(&s.cab, &s.ctx[0], &sigLastCtx[a.cat&7][0], &s.cb, absBaseTab[a.cat], gt1, maxNum-1,
+	o, n, c := cabacBlocksAsm(&s.cab, &s.ctx[0], &s.sigs()[a.cat&7][0], &s.cb, absBaseTab[a.cat], gt1, maxNum-1,
 		85+cbfCatOffset[min(a.cat, 4)], &a.desc[0], len(a.desc), a.cbp, int(a.cbfA), int(a.cbfB), int(cbfCur),
 		&a.dst[0], &a.scale[0][0], &s1[0], &a.pos[0], a.shifts[0], a.shifts[1])
 	return uint32(o), uint32(n), uint32(c)
@@ -166,7 +166,7 @@ func (s *sliceDec) cabacBlockAsm(cbfCtx, cat, maxNum int, cb *coeffBuf, dst *int
 	if cat == catChromaDC {
 		gt1 = 3
 	}
-	return cabacResidAsm(&s.cab, &s.ctx[0], &sigLastCtx[cat&7][0], cb, cbfCtx, maxNum-1, absBaseTab[cat], gt1,
+	return cabacResidAsm(&s.cab, &s.ctx[0], &s.sigs()[cat&7][0], cb, cbfCtx, maxNum-1, absBaseTab[cat], gt1,
 		dst, scale, pos, shifts)
 }
 

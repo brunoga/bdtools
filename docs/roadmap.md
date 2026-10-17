@@ -27,7 +27,7 @@ worked on one at a time in the order below.
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
 | AV1 output | SVT-AV1 | An AV1 encoder in Go (the largest piece) |
 | Dolby Vision with the enhancement layer kept or re-encoded | NVENC or x265 | The two-layer form in the Go HEVC encoder |
-| Interlaced H.264 input | ffmpeg | Field and MBAFF decoding in the Go H.264 decoder |
+| Interlaced H.264 input | ffmpeg (MBAFF) | Field pictures decode in Go; MBAFF next |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |
 | GPU encoders and decoders | System libraries | None needed: optional speed-ups |
 
@@ -97,8 +97,9 @@ Measurement:
 
 | Piece | State |
 |---|---|
-| Builtin H.264 for every layout | Wired and tested; not yet competitive (see item 4) |
+| Builtin H.264 for every layout | Wired and tested; +9% BD-rate against x264 --tune psnr (see item 4) |
 | 1. SBS and OU | Done: `--layout ou`/`half-ou` out; side-by-side and over-under sources in (`--input-layout`, Matroska stereo mode) |
 | 2. MP4 and MOV | Done: MP4/MOV sources (MV-HEVC and st3d 3D included), MP4/MOV output for every layout but MVC, burn-in for any MP4 |
 | 3. Audio codecs in Go | Done: AC-3 encoder (coupling to do for 128 kb/s stereo), DTS core decoder (bit-exact), AAC passthrough and an AAC-LC encoder (short blocks to do) |
-| 4. H.264 encoder | In progress: trellis, B-pyramid, lookahead (macroblock tree, scene cuts); speed next |
+| 4. H.264 encoder | Done for now: +9% BD-rate against x264 --tune psnr (trellis, B-pyramid, lookahead); speed later |
+| 5. Interlaced H.264 | In progress: field pictures (PAFF) decode bit-exact; MBAFF, then the conversion routing, next |
