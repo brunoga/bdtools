@@ -62,6 +62,9 @@ type Encoder struct {
 	// lfFixed, when set, gives the loop filter levels and sharpness
 	// instead of searching them (for tests).
 	lfFixed *[5]int
+	// sbQHook, when set, gives a frame's superblocks' q indexes (for
+	// tests; n superblocks).
+	sbQHook func(n int) []int
 	// cdefFixed, when set, gives the CDEF parameters instead of
 	// searching them (for tests).
 	cdefFixed *cdefSettings
@@ -114,7 +117,13 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		fp.highPrecisionMV = fp.qIndex < 128
 		fp.interpFilter = EIGHTTAP
 	}
+	if e.sbQHook != nil && fp.qIndex > 0 {
+		fp.deltaQ = true
+	}
 	f := e.newFrame(fp, src)
+	if fp.deltaQ {
+		f.sbQ = e.sbQHook(((f.miCols + 15) >> 4) * ((f.miRows + 15) >> 4))
+	}
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {

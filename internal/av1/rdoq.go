@@ -17,7 +17,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	t.levels = append(t.levels, make([]int32, n)...)
 	q := t.levels[off:]
 	den := int64(dqDenom(txSz))
-	dcQ, acQ := int64(f.dcQ[plane]), int64(f.acQ[plane])
+	dcQ, acQ := int64(t.dcQ[plane]), int64(t.acQ[plane])
 	for i := range n {
 		qs := acQ
 		if i == 0 {
@@ -55,7 +55,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	lv := t.lv[:width*height]
 	clear(lv)
 	scale := float64(den*den) / 64
-	lambda := f.lambda
+	lambda := t.lambda
 	brCDF := &cdf.coeffBr[min(txSzCtx, TX_32X32)][ptype]
 	for c := eob - 1; c >= 0; c-- {
 		pos := int(scan[c])

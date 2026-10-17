@@ -244,10 +244,10 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 		t.writeSkip(&t.cost)
 		return t.cost.n
 	}
-	jSkip := float64(sse) + f.lambda*float64(modeBits+skipBits(true))/costScale
+	jSkip := float64(sse) + t.lambda*float64(modeBits+skipBits(true))/costScale
 	if dec.skipMode {
 		// skip_mode alone: no skip flag, no residual
-		jSkip = float64(sse) + f.lambda*float64(modeBits)/costScale
+		jSkip = float64(sse) + t.lambda*float64(modeBits)/costScale
 		b.skip = true
 		t.putPrediction(planes)
 		t.resetBlockContext()
@@ -257,7 +257,7 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 		t.putPrediction(planes)
 		return jSkip
 	}
-	j := f.lambda * float64(modeBits+skipBits(false)) / costScale
+	j := t.lambda * float64(modeBits+skipBits(false)) / costScale
 	if search {
 		dec.txTypes, dec.txSplit = dec.txTypes[:0], dec.txSplit[:0]
 	}
@@ -388,6 +388,7 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	b.skip = skip
 	if dec.skipMode {
 		t.writeSkipMode(t.w)
+		t.writeDeltaQ(t.w)
 		t.resetBlockContext()
 		t.setModes()
 		t.setInfo()
@@ -400,6 +401,7 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 		f.cdefIdx[i] = 0
 		t.cdefDone = true
 	}
+	t.writeDeltaQ(t.w)
 	t.writeInterModes(t.w)
 	if !b.skip {
 		txSz := b.txSz
@@ -428,7 +430,7 @@ func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
 	r, c, size := b.r, b.c, b.size
 	b.refFrame = ref
 	t.findMvStack(s, false, [2]int{ref, NONE})
-	sl := math.Sqrt(f.lambda)
+	sl := math.Sqrt(t.lambda)
 	first := len(cands)
 	cands = append(cands, interCand{ref: ref, mode: NEARESTMV, m: s.predMv(NEARESTMV, 0, 0)})
 	if lo, hi := s.refMvIdxRange(NEARMV); s.numMvFound > 1 {
@@ -483,7 +485,7 @@ func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
 func (t *tileEnc) estimate(cands []interCand) {
 	f, b := t.f, &t.b
 	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
-	sl := math.Sqrt(f.lambda)
+	sl := math.Sqrt(t.lambda)
 	for i := range cands {
 		cd := &cands[i]
 		b.refFrame, b.refFrame2 = cd.ref, cd.ref2
@@ -536,7 +538,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		if splits {
 			t.cost.n = 0
 			t.writeTxfmSplit(&t.cost, row, col, txSz, false)
-			j = f.lambda * float64(t.cost.n) / costScale
+			j = t.lambda * float64(t.cost.n) / costScale
 		}
 		tt := -1
 		if !search {
@@ -553,7 +555,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 	split := func() (float64, bool) {
 		t.cost.n = 0
 		t.writeTxfmSplit(&t.cost, row, col, txSz, true)
-		j := f.lambda * float64(t.cost.n) / costScale
+		j := t.lambda * float64(t.cost.n) / costScale
 		sub := int(splitTxSize[txSz])
 		sw, sh := int(txWidth[sub])>>2, int(txHeight[sub])>>2
 		zero := true

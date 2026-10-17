@@ -50,7 +50,10 @@ type frameEnc struct {
 	lfTx     [3][]uint8
 	dcQ, acQ [3]int
 	lossless bool
-	lambda   float64 // distortion per bit
+	lambda   float64 // distortion per bit (the frame's q's)
+	// sbQ is each superblock's target q index (nil: the frame's), with
+	// delta_q_present.
+	sbQ []int
 	// cdf0 is the CDFs every tile starts from: the defaults, or those a
 	// reference kept (load_cdfs) with primary_ref_frame; savedCDF what the
 	// frame keeps for later frames.
@@ -88,12 +91,20 @@ type tileEnc struct {
 	snaps                [10][8]*snapshot // by depth, a few each
 	sbStart              snapshot
 	cdefDone             bool
-	dctOnly              bool // luma transform types not searched
-	stack                mvStack
-	txX4, txY4           int // the transform block being coded, in 4x4s of its plane
-	ms                   motionSearch
-	is                   interScratch
-	interPred            [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
+	// The quantizers and lambda the tile codes with now (its
+	// CurrentQIndex's, a superblock's), and the delta_q to code on the
+	// superblock's first block.
+	dcQ, acQ   [3]int
+	lambda     float64
+	curQ, sbQ  int
+	readDeltas bool
+	sbDelta    int
+	dctOnly    bool // luma transform types not searched
+	stack      mvStack
+	txX4, txY4 int // the transform block being coded, in 4x4s of its plane
+	ms         motionSearch
+	is         interScratch
+	interPred  [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -163,6 +174,8 @@ func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) *tileEnc {
 	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: f.startCDF()}
 	t.w = &recorder{base: t.cdf}
 	t.live, t.sbCDF = t.cdf, new(cdfs)
+	t.curQ = f.fp.qIndex
+	t.setQ(t.curQ)
 	for p := range 3 {
 		sub := 0
 		if p > 0 {
@@ -188,6 +201,7 @@ func (t *tileEnc) code() {
 			clear(t.leftDc[p])
 		}
 		for c := t.colStart; c < t.colEnd; c += 16 {
+			t.startSB(r, c)
 			t.clearDecoded(r, c)
 			t.cdefDone = false
 			t.save(&t.sbStart, r, c, BLOCK_64X64, false)
@@ -212,6 +226,70 @@ func (t *tileEnc) code() {
 			}
 		}
 	}
+}
+
+// startSB sets the superblock's quantizer: the frame's, or with
+// delta_q_present its own (as near the target as the delta's steps get
+// from CurrentQIndex), its delta to code.
+func (t *tileEnc) startSB(r, c int) {
+	f := t.f
+	q := f.fp.qIndex
+	if f.fp.deltaQ {
+		target := q
+		if f.sbQ != nil {
+			target = f.sbQ[(r>>4)*((f.miCols+15)>>4)+c>>4]
+		}
+		step := 1 << deltaQRes
+		d := (target - t.curQ) / step
+		if r := (target - t.curQ) % step; 2*abs(r) >= step {
+			d += r / abs(r)
+		}
+		q = min(max(t.curQ+d*step, 1), 255)
+		t.sbDelta, t.sbQ, t.readDeltas = d, q, true
+	}
+	t.setQ(q)
+}
+
+// setQ sets the quantizers and lambda of a q index.
+func (t *tileEnc) setQ(q int) {
+	f := t.f
+	fp := f.fp
+	bd := (f.bitDepth - 8) >> 1
+	qi := func(v int) int { return min(max(v, 0), 255) }
+	t.dcQ = [3]int{int(dcQlookup[bd][qi(q+fp.deltaQYDc)]), int(dcQlookup[bd][qi(q+fp.deltaQUVDc)]), int(dcQlookup[bd][qi(q+fp.deltaQUVDc)])}
+	t.acQ = [3]int{int(acQlookup[bd][qi(q)]), int(acQlookup[bd][qi(q+fp.deltaQUVAc)]), int(acQlookup[bd][qi(q+fp.deltaQUVAc)])}
+	t.lambda = lambdaFor(t.dcQ[0])
+}
+
+// lambdaFor is libaom's lambda for a DC quantizer: 88/24 q^2 per bit,
+// its distortion 2048 times the sum of squared errors.
+func lambdaFor(dcQ int) float64 { return 88.0 / 24 * float64(dcQ) * float64(dcQ) / 2048 }
+
+// writeDeltaQ is read_delta_qindex, on a superblock's first block.
+func (t *tileEnc) writeDeltaQ(cd coder) {
+	b := &t.b
+	if !t.readDeltas {
+		return
+	}
+	t.readDeltas = false
+	if b.size == BLOCK_64X64 && b.skip {
+		return // CurrentQIndex as it was
+	}
+	d := t.sbDelta
+	a := abs(d)
+	cd.symbol(min(a, DELTA_Q_SMALL), t.cdf.deltaQ[:])
+	if a >= DELTA_Q_SMALL {
+		n := 0
+		for (a-1)>>uint(n+1) != 0 {
+			n++
+		}
+		cd.literal(uint32(n-1), 3)            //nolint:gosec // 0..7
+		cd.literal(uint32(a-1-1<<uint(n)), n) //nolint:gosec // n bits
+	}
+	if a != 0 {
+		cd.boolean(d < 0)
+	}
+	t.curQ = t.sbQ
 }
 
 // clearDecoded is clear_block_decoded_flags; decoded[p][y+1][x+1] is
@@ -547,7 +625,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		last = i
 		t.cost.n = 0
 		t.writePartition(&t.cost, r, c, bSize, part)
-		j := f.lambda * float64(t.cost.n) / costScale
+		j := t.lambda * float64(t.cost.n) / costScale
 		node := &partNode{part: part}
 		sub := int(partitionSubsize[part][bSize])
 		complete := true

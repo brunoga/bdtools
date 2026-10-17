@@ -39,6 +39,9 @@ func (s *seqParams) heightBits() int { return max(bits.Len(uint(s.height-1)), 1)
 
 const orderHintBits = 7
 
+// deltaQRes is delta_q_res: delta_q in steps of 4.
+const deltaQRes = 2
+
 // sequenceHeader is the sequence header OBU's payload.
 func (s *seqParams) sequenceHeader() []byte {
 	var w bitWriter
@@ -216,6 +219,9 @@ type frameParams struct {
 	lfLevel         [4]int
 	lfSharp         int
 	txSelect        bool
+	// deltaQ is delta_q_present: a q index a superblock, in steps of
+	// 1 << deltaQRes.
+	deltaQ bool
 	// CDEF (when the sequence enables it): cdef_damping_minus_3 + 3,
 	// cdef_bits, and each index's primary and secondary strengths (the
 	// secondary 0, 1, 2 or 4), luma's and chroma's.
@@ -288,7 +294,11 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	w.flag(false) // using_qmatrix
 	w.flag(false) // segmentation_enabled
 	if f.qIndex > 0 {
-		w.flag(false) // delta_q_present
+		w.flag(f.deltaQ) // delta_q_present
+		if f.deltaQ {
+			w.f(deltaQRes, 2)
+			w.flag(false) // delta_lf_present
+		}
 	}
 	if !f.lossless() {
 		// loop_filter_params
