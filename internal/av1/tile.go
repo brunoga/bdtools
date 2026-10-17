@@ -107,7 +107,8 @@ type blockState struct {
 	angleY, angleUV  int
 	txSz             int // the luma's
 	skip             bool
-	cflU, cflV       int // the CFL alphas
+	skipMode         bool // skip_mode: the frame's SkipModeFrame, nothing coded
+	cflU, cflV       int  // the CFL alphas
 	// An inter block's: its reference, its motion vector and RefMvIdx (its
 	// mode is yMode).
 	isInter  bool
@@ -145,6 +146,7 @@ type blockDec struct {
 	mv, mv2         mv
 	refMvIdx        int
 	skip            bool // an inter block coded without residual
+	skipMode        bool // coded as skip_mode
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order
 }
@@ -234,7 +236,7 @@ func (t *tileEnc) clearDecoded(r, c int) {
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [7][]uint8
+	mi         [8][]uint8
 	refs       [2][]int8
 	mvs        [2][]mv
 	above, aDc [3][16]uint8
@@ -311,9 +313,9 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	s.decoded = t.decoded
 }
 
-func (t *tileEnc) miArrays() [7][]uint8 {
+func (t *tileEnc) miArrays() [8][]uint8 {
 	f := t.f
-	return [7][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter}
+	return [8][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode}
 }
 
 // restore puts a snapshot back.

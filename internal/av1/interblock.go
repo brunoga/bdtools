@@ -21,6 +21,7 @@ var (
 	dbgInterModes    int
 	dbgForceInter    bool
 	dbgForceCompound bool
+	dbgForceSkipMode bool
 )
 
 // interStride is the stride of a plane's inter prediction.
@@ -169,6 +170,17 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 			t.save(best, r, c, size, true)
 		}
 	}
+	if f.fp.skipModePresent && !dbgNoSkipMode {
+		t.restore(start, true)
+		sm := f.fp.skipModeFrame
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: sm[0], refFrame2: sm[1], yMode: NEAREST_NEARESTMV, skipMode: true, skip: true}
+		t.findMvStack(&t.stack, true, [2]int{sm[0], sm[1]})
+		dec.mv, dec.mv2 = t.stack.predMv(NEAREST_NEARESTMV, 0, 0), t.stack.predMv(NEAREST_NEARESTMV, 0, 1)
+		if j := t.codeInter(dec, true); j < bestJ || dbgForceSkipMode {
+			bestJ, bestDec = j, dec
+			t.save(best, r, c, size, true)
+		}
+	}
 	t.restore(best, true)
 	t.setupBlock(r, c, size)
 	t.findMvStack(&t.stack, bestDec.refFrame2 > INTRA_FRAME, [2]int{bestDec.refFrame, bestDec.refFrame2})
@@ -183,6 +195,7 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b := &t.b
 	b.isInter, b.refFrame, b.yMode, b.refMvIdx, b.mv = true, dec.refFrame, dec.yMode, dec.refMvIdx, dec.mv
 	b.refFrame2, b.mv2 = dec.refFrame2, dec.mv2
+	b.skipMode = dec.skipMode
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
 	}
@@ -203,7 +216,11 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 		planes = 3
 	}
 	t.cost.n = 0
-	t.writeInterModes(&t.cost)
+	if dec.skipMode {
+		t.writeSkipMode(&t.cost)
+	} else {
+		t.writeInterModes(&t.cost)
+	}
 	modeBits := t.cost.n
 	// skip: the prediction alone
 	var sse int64
@@ -228,6 +245,14 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 		return t.cost.n
 	}
 	jSkip := float64(sse) + f.lambda*float64(modeBits+skipBits(true))/costScale
+	if dec.skipMode {
+		// skip_mode alone: no skip flag, no residual
+		jSkip = float64(sse) + f.lambda*float64(modeBits)/costScale
+		b.skip = true
+		t.putPrediction(planes)
+		t.resetBlockContext()
+		return jSkip
+	}
 	if !search && dec.skip {
 		t.putPrediction(planes)
 		return jSkip
@@ -380,6 +405,13 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	t.restore(&ctx, false)
 	t.cdf = t.live
 	b.skip = skip
+	if dec.skipMode {
+		t.writeSkipMode(t.w)
+		t.resetBlockContext()
+		t.setModes()
+		t.setInfo()
+		return
+	}
 	t.writeSkip(t.w)
 	if f.seq.cdef && !b.skip && !f.lossless && !t.cdefDone {
 		i := (b.r>>4)*((f.miCols+15)>>4) + b.c>>4

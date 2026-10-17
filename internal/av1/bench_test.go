@@ -111,6 +111,13 @@ func TestBenchSeq(t *testing.T) {
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "seq-*.yuv"))
 	const w, h = 1920, 1080
+	// $AV1DEPTHQ overrides the q offsets by depth (comma separated)
+	if s := os.Getenv("AV1DEPTHQ"); s != "" {
+		for i, f := range strings.Split(s, ",") {
+			depthQ[i], _ = strconv.Atoi(f)
+		}
+	}
+	mini, _ := strconv.Atoi(os.Getenv("AV1MINIGOP"))
 	for _, file := range files {
 		b, err := os.ReadFile(file) //nolint:gosec // a test
 		if err != nil {
@@ -118,7 +125,7 @@ func TestBenchSeq(t *testing.T) {
 		}
 		n := len(b) / (w * h * 3 / 2)
 		for _, q := range qs {
-			e, err := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1})
+			e, err := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1, MiniGOP: mini})
 			if err != nil {
 				t.Fatal(err)
 			}

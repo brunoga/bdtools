@@ -22,7 +22,12 @@ func TestProfSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 	const w, h = 1920, 1080
-	e, _ := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: 120})
+	q, _ := strconv.Atoi(os.Getenv("AV1PROF_Q"))
+	if q == 0 {
+		q = 120
+	}
+	e, _ := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1})
+	e.keepRecon = true
 	for k := range n {
 		p := b[k*w*h*3/2:]
 		src := &Source{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4), StrideY: w, StrideC: w / 2}
@@ -34,7 +39,11 @@ func TestProfSeq(t *testing.T) {
 		}
 		units, _ := e.Encode(src)
 		for _, u := range units {
-			t.Logf("picture %d: %d bytes", k, len(u.Data))
+			t.Logf("unit: %d bytes", len(u.Data))
 		}
+	}
+	units, _ := e.Flush()
+	for _, u := range units {
+		t.Logf("unit: %d bytes", len(u.Data))
 	}
 }

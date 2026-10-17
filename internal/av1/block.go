@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound bool
+var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -70,9 +70,10 @@ func (t *tileEnc) setInfo() {
 		for x := range b.bw4 {
 			if b.r+y < f.miRows && b.c+x < f.miCols {
 				i := f.mi(b.r+y, b.c+x)
-				f.skip[i] = uint8(b2i(b.skip)) //nolint:gosec // a flag
-				f.miSize[i] = uint8(b.size)    //nolint:gosec // a size
-				f.txSize[i] = uint8(b.txSz)    //nolint:gosec // a size
+				f.skip[i] = uint8(b2i(b.skip))         //nolint:gosec // a flag
+				f.skipMode[i] = uint8(b2i(b.skipMode)) //nolint:gosec // a flag
+				f.miSize[i] = uint8(b.size)            //nolint:gosec // a size
+				f.txSize[i] = uint8(b.txSz)            //nolint:gosec // a size
 			}
 		}
 	}
@@ -841,8 +842,25 @@ func dqDenom(txSz int) int {
 	return 1
 }
 
-// writeSkip is read_skip.
+// writeSkipMode is read_skip_mode.
+func (t *tileEnc) writeSkipMode(cd coder) {
+	f, b := t.f, &t.b
+	if !f.fp.skipModePresent || blockWidth[b.size] < 8 || blockHeight[b.size] < 8 {
+		return
+	}
+	ctx := 0
+	if b.availU {
+		ctx += int(f.skipMode[f.mi(b.r-1, b.c)])
+	}
+	if b.availL {
+		ctx += int(f.skipMode[f.mi(b.r, b.c-1)])
+	}
+	cd.symbol(b2i(b.skipMode), t.cdf.skipMode[ctx][:])
+}
+
+// writeSkip is read_skip_mode (no skip mode) and read_skip.
 func (t *tileEnc) writeSkip(cd coder) {
+	t.writeSkipMode(cd)
 	f, b := t.f, &t.b
 	ctx := 0
 	if b.availU {

@@ -50,6 +50,9 @@ type Encoder struct {
 	queue   []*frameJob
 	nIn     int
 	pending []byte
+	// tfPast is the sources of the pictures just before the queue's (back
+	// to the last key frame's), for the temporal filter's window.
+	tfPast []*Source
 	// keepRecon keeps each shown picture's reconstruction in its unit
 	// (tests).
 	keepRecon bool
@@ -132,6 +135,9 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			}
 		}
 		fi.setRefFrameSignBias()
+		if ok, frames := fp.skipModeAllowed(); fp.refSelect && ok && !dbgNoSkipMode {
+			fp.skipModePresent, fp.skipModeFrame = true, frames
+		}
 		f.inter = fi
 		f.filt = [2]int{fp.interpFilter, fp.interpFilter}
 	}

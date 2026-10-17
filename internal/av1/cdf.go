@@ -41,6 +41,7 @@ type cdfs struct {
 	drlMode      [DRL_MODE_CONTEXTS][3]uint16
 	singleRef    [REF_CONTEXTS][SINGLE_REFS - 1][3]uint16
 	txfmSplit    [TXFM_PARTITION_CONTEXTS][3]uint16
+	skipMode     [SKIP_MODE_CONTEXTS][3]uint16
 	compMode     [COMP_INTER_CONTEXTS][3]uint16
 	compRefType  [COMP_REF_TYPE_CONTEXTS][3]uint16
 	compRef      [REF_CONTEXTS][FWD_REFS - 1][3]uint16
@@ -108,7 +109,7 @@ func newCDFs(qIndex int) *cdfs {
 
 		yModeInter: defaultYModeCdf, isInter: defaultIsInterCdf, newMv: defaultNewMvCdf, zeroMv: defaultZeroMvCdf,
 		refMv: defaultRefMvCdf, drlMode: defaultDrlModeCdf, singleRef: defaultSingleRefCdf, txfmSplit: defaultTxfmSplitCdf,
-		compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
+		skipMode: defaultSkipModeCdf, compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
 		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf,
 		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
 	}

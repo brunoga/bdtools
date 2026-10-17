@@ -198,8 +198,11 @@ type frameParams struct {
 	// refSelect is reference_select (compound blocks allowed); refHints
 	// are the references' order hints (for skip_mode_present's
 	// condition).
-	refSelect       bool
-	refHints        [REFS_PER_FRAME]int
+	refSelect bool
+	refHints  [REFS_PER_FRAME]int
+	// skipModePresent is skip_mode_present; skipModeFrame SkipModeFrame.
+	skipModePresent bool
+	skipModeFrame   [2]int
 	primaryRef      int // primary_ref_frame (PRIMARY_REF_NONE, or a reference)
 	refIdx          [REFS_PER_FRAME]int
 	highPrecisionMV bool
@@ -322,8 +325,8 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	}
 	if !f.key {
 		w.flag(f.refSelect) // reference_select
-		if f.refSelect && f.skipModeAllowed() {
-			w.flag(false) // skip_mode_present
+		if ok, _ := f.skipModeAllowed(); f.refSelect && ok {
+			w.flag(f.skipModePresent)
 		}
 	}
 	w.flag(f.reducedTx)
@@ -343,8 +346,9 @@ func relativeDist(a, b int) int {
 }
 
 // skipModeAllowed is skip_mode_params' skipModeAllowed: a reference
-// before the frame and one after it (or a second before it).
-func (f *frameParams) skipModeAllowed() bool {
+// before the frame and one after it (or a second before it); with the
+// two, SkipModeFrame.
+func (f *frameParams) skipModeAllowed() (bool, [2]int) {
 	hint := f.orderHint & (1<<orderHintBits - 1)
 	fwd, bwd := -1, -1
 	var fwdHint, bwdHint int
@@ -361,18 +365,24 @@ func (f *frameParams) skipModeAllowed() bool {
 			}
 		}
 	}
+	frames := func(a, b int) [2]int { return [2]int{LAST_FRAME + min(a, b), LAST_FRAME + max(a, b)} }
 	switch {
 	case fwd < 0:
-		return false
+		return false, [2]int{}
 	case bwd >= 0:
-		return true
+		return true, frames(fwd, bwd)
 	}
+	second := -1
+	var secondHint int
 	for i := range REFS_PER_FRAME {
-		if h := f.refHints[i]; relativeDist(h, fwdHint) < 0 {
-			return true
+		if h := f.refHints[i]; relativeDist(h, fwdHint) < 0 && (second < 0 || relativeDist(h, secondHint) > 0) {
+			second, secondHint = i, h
 		}
 	}
-	return false
+	if second < 0 {
+		return false, [2]int{}
+	}
+	return true, frames(fwd, second)
 }
 
 // showExisting is the frame header OBU of a frame shown again

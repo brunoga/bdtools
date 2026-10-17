@@ -206,3 +206,20 @@ func TestDbgCompound(t *testing.T) {
 		})
 	}
 }
+
+func TestDbgSkipMode(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgForceSkipMode, dbgForceInter = false, false }()
+	for _, force := range []bool{true, false} {
+		dbgForceSkipMode, dbgForceInter = force, force
+		o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+		p := testPicture(96, 64, 8, 3)
+		var pics []*Source
+		for i := range 9 {
+			pics = append(pics, shifted(p, i, i/3))
+		}
+		checkDecodes(t, o, pics)
+	}
+}
