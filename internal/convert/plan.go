@@ -415,8 +415,6 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--encoder builtin codes H.264 and H.265: AV1 needs SVT-AV1 (--encoder software) or a GPU")
 		case o.Codec == CodecH264 && o.BitDepth == 10:
 			return fmt.Errorf("--encoder builtin codes H.264 in 8 bits: use --bit-depth 8, or --codec h265 for 10")
-		case o.DVFEL.layered():
-			return fmt.Errorf("--dv-fel %s needs NVENC or x265 (--encoder software)", o.DVFEL)
 		}
 	}
 	if !o.Codec.Valid() {
@@ -446,8 +444,8 @@ func (o Options) Validate(goos string) error {
 	switch o.DVFEL {
 	case FELCompose, "compose", FELDrop:
 	case FELKeep, FELReencode:
-		if !o.Remux && (o.Codec != CodecH265 || (o.Encoder != EncoderNVENC && o.Encoder != EncoderSoftware)) {
-			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc or software (x265)", o.DVFEL)
+		if !o.Remux && (o.Codec != CodecH265 || (o.Encoder != EncoderNVENC && o.Encoder != EncoderSoftware && o.Encoder != EncoderBuiltin)) {
+			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc, software (x265) or builtin", o.DVFEL)
 		}
 	default:
 		return fmt.Errorf("--dv-fel %q: want compose, keep, reencode or drop", o.DVFEL)

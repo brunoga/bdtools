@@ -483,47 +483,6 @@ scol:
 	VZEROUPPER
 	RET
 
-// func avgAVX2(dst *uint16, ds int, a *uint16, as int, b *uint16, bs int, w, h int)
-// The rounded average of two w x h blocks of words (w a multiple of 8).
-TEXT ·avgAVX2(SB), NOSPLIT, $0-64
-	MOVQ dst+0(FP), DI
-	MOVQ ds+8(FP), R8
-	MOVQ a+16(FP), SI
-	MOVQ as+24(FP), R9
-	MOVQ b+32(FP), DX
-	MOVQ bs+40(FP), R10
-	MOVQ w+48(FP), CX
-	MOVQ h+56(FP), R11
-	SHLQ $1, R8
-	SHLQ $1, R9
-	SHLQ $1, R10
-arow:
-	XORQ AX, AX
-	MOVQ CX, BX
-a16:
-	CMPQ BX, $16
-	JL a8
-	VMOVDQU (SI)(AX*1), Y0
-	VPAVGW (DX)(AX*1), Y0, Y0
-	VMOVDQU Y0, (DI)(AX*1)
-	ADDQ $32, AX
-	SUBQ $16, BX
-	JMP a16
-a8:
-	TESTQ BX, BX
-	JZ anext
-	VMOVDQU (SI)(AX*1), X0
-	VPAVGW (DX)(AX*1), X0, X0
-	VMOVDQU X0, (DI)(AX*1)
-anext:
-	ADDQ R8, DI
-	ADDQ R9, SI
-	ADDQ R10, DX
-	DECQ R11
-	JNZ arow
-	VZEROUPPER
-	RET
-
 // One edge category's statistics: where s (Y9) equals C, count (in the
 // words of N) and add up d (Y10, into the dwords of S). Uses Y8.
 #define SAOCAT(C, S, N) \

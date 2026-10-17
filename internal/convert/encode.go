@@ -167,7 +167,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 				// Dolby Vision's layers kept apart: profile 7 out.
 				if _, ok := sink.(*gpuSink); !ok {
 					return &encodeError{errors.New("--dv-fel " + string(r.Opts.DVFEL) +
-						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin) or x265 (--encoder software)")}
+						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin), x265 (--encoder software) or the encoder here (--encoder builtin)")}
 				}
 				r.felLayered = true
 			}

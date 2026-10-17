@@ -85,7 +85,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
-		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc or software); or drop it (the HDR10 base layer as it is)")
+		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc, software or builtin); or drop it (the HDR10 base layer as it is)")
 		dvELCRF  = fs.Int("dv-el-crf", 0, "the enhancement layer's quality when --dv-fel keeps it as a layer, 0-51 (default: --crf plus 12)")
 		audioTx  = fs.String("audio-transcode", "ac3", "the codec an MP4 output's DTS and PCM tracks are coded in: ac3 (640 kb/s for 5.1) or aac (96 kb/s a channel)")
 		inLayout = fs.String("input-layout", "auto", "how a 2D-coded source's frame holds a 3D pair: auto (as a Matroska file says), 2d (one picture), full or half (side by side), ou or half-ou (over-under, the left eye on top)")

@@ -154,21 +154,6 @@ func ssdBlock(a []uint16, as int, b []uint16, bs, w, h int) int64 {
 }
 
 //go:noescape
-func avgAVX2(dst *uint16, ds int, a *uint16, as int, b *uint16, bs int, w, h int)
-
-// avgBlock writes the rounded average of two w x h blocks.
-func avgBlock(dst []uint16, ds int, a []uint16, as int, b []uint16, bs, w, h int) {
-	if !useAVX2 || w&7 != 0 || h == 0 {
-		avgBlockGo(dst, ds, a, as, b, bs, w, h)
-		return
-	}
-	_ = dst[(h-1)*ds+w-1]
-	_ = a[(h-1)*as+w-1]
-	_ = b[(h-1)*bs+w-1]
-	avgAVX2(&dst[0], ds, &a[0], as, &b[0], bs, w, h)
-}
-
-//go:noescape
 func saoEOAVX2(rec *uint16, rs int, src *uint16, ss int, w, h, off0, off1 int, out *int32)
 
 // saoEO adds to sum and cnt the edge offset statistics of a w x h block

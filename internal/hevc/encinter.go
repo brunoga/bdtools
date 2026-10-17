@@ -78,31 +78,6 @@ func mergeBits(idx, n int) float64 {
 // moved by f into dst (stride w).
 func (c *picCoder) predictLuma(dst []uint16, x0, y0, w, h int, f *mvField) {
 	sd, s := &c.sd, c.s
-	if f.pred != 3 {
-		// One direction: the reference's planes hold it.
-		l := int(f.pred >> 1)
-		if r := int(f.refIdx[l]); l < len(c.planes) && r < len(c.planes[l]) {
-			planes := c.planes[l][r].init(sd.refList[l][r], s)
-			if pl, off, ok := planes.block(x0, y0, w, h, f.mv[l]); ok {
-				for y := range h {
-					copy(dst[y*w:y*w+w], pl[off+y*planes.stride:])
-				}
-				return
-			}
-		}
-	} else if len(c.planes) == 2 && int(f.refIdx[0]) < len(c.planes[0]) && int(f.refIdx[1]) < len(c.planes[1]) {
-		// Both: the rounded average of the planes' predictions, within a
-		// level of the standard's (which rounds once, from 14 bits); for
-		// ranking candidates, whose winner is then predicted exactly.
-		p0 := c.planes[0][f.refIdx[0]].init(sd.refList[0][f.refIdx[0]], s)
-		p1 := c.planes[1][f.refIdx[1]].init(sd.refList[1][f.refIdx[1]], s)
-		a, ao, ok0 := p0.block(x0, y0, w, h, f.mv[0])
-		b, bo, ok1 := p1.block(x0, y0, w, h, f.mv[1])
-		if ok0 && ok1 {
-			avgBlock(dst, w, a[ao:], p0.stride, b[bo:], p1.stride, w, h)
-			return
-		}
-	}
 	depth := s.bitDepth
 	for l := range 2 {
 		if f.pred&(1<<l) == 0 {
@@ -121,16 +96,6 @@ func (c *picCoder) predictLuma(dst []uint16, x0, y0, w, h int, f *mvField) {
 		putBlock(dst, w, l0, l0, w, w, h, 1, 0, 1<<(shift1-1), uint(shift1), 0, maxV)
 	default:
 		putBlock(dst, w, l1, l1, w, w, h, 1, 0, 1<<(shift1-1), uint(shift1), 0, maxV)
-	}
-}
-
-// avgBlockGo writes the rounded average of two w x h blocks.
-func avgBlockGo(dst []uint16, ds int, a []uint16, as int, b []uint16, bs, w, h int) {
-	for y := range h {
-		d, ra, rb := dst[y*ds:y*ds+w], a[y*as:y*as+w], b[y*bs:y*bs+w]
-		for x := range d {
-			d[x] = uint16((uint32(ra[x]) + uint32(rb[x]) + 1) >> 1)
-		}
 	}
 }
 
@@ -209,13 +174,15 @@ func (c *picCoder) mvCost(ms *mvSearch, v mv) (float64, int) {
 func (c *picCoder) intSearch(x0, y0, w, h, partIdx, l, refIdx int) mvSearch {
 	sd := &c.sd
 	ref := sd.refList[l][refIdx]
-	ref.waitLines(y0-searchRange-8, y0+h+searchRange+8)
 	ms := mvSearch{x0: x0, y0: y0, w: w, h: h, l: l, refIdx: refIdx, ref: ref,
 		preds: [2]mv{sd.amvp(x0, y0, w, h, partIdx, l, refIdx, 0), sd.amvp(x0, y0, w, h, partIdx, l, refIdx, 1)}}
 	// Within searchRange of the first predictor; tried marks the
 	// positions visited.
 	type pos struct{ x, y int }
 	origin := pos{int(ms.preds[0].x) >> 2, int(ms.preds[0].y) >> 2}
+	// The reference's rows the search reads, final (it may still be
+	// coding): around the predictor, which can be far from the block.
+	ref.waitLines(y0+origin.y-searchRange, y0+origin.y+searchRange+h-1)
 	best := origin
 	bestCost := math.Inf(1)
 	const span = 2*searchRange + 1
@@ -269,23 +236,14 @@ func (c *picCoder) intSearch(x0, y0, w, h, partIdx, l, refIdx int) mvSearch {
 }
 
 // subSearch refines a search to half and quarter samples, by the SATD
-// of the exact prediction (read from the reference's planes, made when
-// beyond them), returning the vector, its cost and its predictor's flag.
+// of the exact prediction, returning the vector, its cost and its
+// predictor's flag.
 func (c *picCoder) subSearch(ms *mvSearch) (mv, float64, int) {
 	x0, y0, w, h, l, refIdx := ms.x0, ms.y0, ms.w, ms.h, ms.l, ms.refIdx
 	src := c.src.Y[y0*c.src.StrideY+x0:]
 	pred := c.pred[:w*h]
-	var planes *refPlanes
-	if l < len(c.planes) && refIdx < len(c.planes[l]) {
-		planes = c.planes[l][refIdx].init(ms.ref, c.s)
-	}
 	at := func(v mv) float64 {
 		bits, _ := c.mvCost(ms, v)
-		if planes != nil {
-			if pl, off, ok := planes.block(x0, y0, w, h, v); ok {
-				return float64(satd(src, c.src.StrideY, pl[off:], planes.stride, w, h)) + bits
-			}
-		}
 		f := mvField{refIdx: [2]int8{-1, -1}, pred: 1 << l}
 		f.mv[l] = v
 		f.refIdx[l] = int8(refIdx) //nolint:gosec // a small index

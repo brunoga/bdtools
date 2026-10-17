@@ -39,7 +39,24 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (1080i discs) are decoded here and deinterlaced (yadif) when no GPU
   decoder takes them, instead of going to ffmpeg.
 
+- Dolby Vision profile 7 out with the Go HEVC encoder: `--dv-fel keep`
+  and `--dv-fel reencode` take `--encoder builtin`, both layers coded
+  here with the same picture structure, so a two-layer conversion needs
+  no NVENC and no x265. On a 20-second 4K clip of a FEL disc it took
+  0.7 times x265's time (`--dv-fel keep`, `--crf 16`).
+
 ### Fixed
+
+- The Go HEVC encoder's output could change from run to run at 4K: its
+  motion search waited for the reference's rows around the block, but
+  searched around the predicted vector, which can be further down, and
+  so read rows still being filtered. It now waits for the rows it
+  searches.
+- Less memory and CPU in the Go HEVC encoder: the fractional reference
+  planes (every reference's luma at sixteen phases) are gone. They held
+  280 MB a reference at 4K (37 GB at once, which ran a 4K Dolby Vision
+  conversion out of memory); without them 1080p codes 5-18% faster and
+  4K within 3%, the output within noise.
 
 - Monochrome (4:0:0) H.264 came out with black chroma planes; they are
   grey now, as other decoders give it.
