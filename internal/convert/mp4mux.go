@@ -90,7 +90,7 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		}
 		core := false
 		switch format {
-		case mkv.AC3:
+		case mkv.AC3, mkv.AAC:
 		case mkv.TrueHD:
 			if !mkv.HasCore(f, format) {
 				r.Report.Report("leaving out %s track %d: no AC-3 core to carry", e.track.Type, e.track.ID)

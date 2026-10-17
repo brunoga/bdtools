@@ -625,6 +625,9 @@ type esWriter struct {
 	// PES header), and the rest comes in the next packet.
 	supHeld        []byte
 	supPTS, supDTS int64
+	// aac is an AAC track's AudioSpecificConfig: its frames are written as
+	// ADTS.
+	aac []byte
 	// burn, when set, sees each PGS segment written, with its PTS: the
 	// track burned into the picture.
 	burn func(pts int64, seg []byte)
@@ -1261,6 +1264,8 @@ func createESWriter(tmp, srcName string, t Track) (*esWriter, error) {
 		ext = "dts"
 	case t.StreamID == "A_LPCM":
 		ext = "wav"
+	case t.StreamID == "A_AAC":
+		ext = "aac"
 	}
 	name := fmt.Sprintf("%s.track_%d", fileSafe(srcName), t.ID)
 	if l := fileSafe(t.Lang); l != "" {

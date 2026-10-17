@@ -485,8 +485,15 @@ func audioEntry(t *inTrack, e rbox) bool {
 	case "ec-3":
 		rt.CodecID = "A_EAC3"
 	case "mp4a":
-		rt.CodecID = "A_AAC"
-		rt.CodecPrivate = find(kids, "esds")
+		obj, asc := esdsConfig(find(kids, "esds"))
+		switch obj {
+		case 0x40, 0x66, 0x67, 0x68: // MPEG-4 audio, MPEG-2 AAC
+			rt.CodecID, rt.CodecPrivate = "A_AAC", asc
+		case 0x69, 0x6b:
+			rt.CodecID = "A_MPEG/L3"
+		default:
+			rt.CodecID = "A_FOURCC/mp4a"
+		}
 	case "sowt", "twos", "in24", "in32", "lpcm":
 		rt.CodecID = "A_PCM/INT/LIT"
 		switch e.typ {
@@ -707,4 +714,56 @@ func (r *Reader) Next() (mkv.Packet, error) {
 	}
 	at := scaled(s.dts+s.cts-t.shift, t.timescale) + t.delay
 	return mkv.Packet{Track: t.rt.Number, Time: at, Keyframe: s.key, Data: data}, nil
+}
+
+// esdsConfig reads an esds box: the object type and the decoder specific
+// information (an AAC track's AudioSpecificConfig).
+func esdsConfig(b []byte) (object byte, config []byte) {
+	if len(b) < 4 {
+		return 0, nil
+	}
+	b = b[4:] // version and flags
+	// desc reads a descriptor: its tag and body, and what follows it.
+	desc := func(b []byte) (byte, []byte, []byte) {
+		if len(b) < 2 {
+			return 0, nil, nil
+		}
+		tag, n, i := b[0], 0, 1
+		for ; i < len(b) && i < 5; i++ {
+			n = n<<7 | int(b[i]&0x7f)
+			if b[i]&0x80 == 0 {
+				i++
+				break
+			}
+		}
+		if i+n > len(b) {
+			n = len(b) - i
+		}
+		return tag, b[i : i+n], b[i+n:]
+	}
+	tag, es, _ := desc(b)
+	if tag != 0x03 || len(es) < 3 {
+		return 0, nil
+	}
+	flags := es[2]
+	es = es[3:]
+	if flags&0x80 != 0 && len(es) >= 2 { // dependsOn_ES_ID
+		es = es[2:]
+	}
+	if flags&0x40 != 0 && len(es) >= 1 { // URL
+		es = es[min(len(es), 1+int(es[0])):]
+	}
+	if flags&0x20 != 0 && len(es) >= 2 { // OCR_ES_Id
+		es = es[2:]
+	}
+	tag, dcd, _ := desc(es)
+	if tag != 0x04 || len(dcd) < 13 {
+		return 0, nil
+	}
+	object = dcd[0]
+	tag, dsi, _ := desc(dcd[13:])
+	if tag == 0x05 {
+		config = append([]byte(nil), dsi...)
+	}
+	return object, config
 }

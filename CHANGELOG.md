@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- AAC tracks are carried as they are: from MP4 and Matroska sources into
+  Matroska and MP4 outputs (they were left out).
 - An AC-3 encoder in Go (`internal/ac3`): mono to 5.1, every A/52 rate,
   rematrixing, the bits a frame has left spent on its channels. On a film
   soundtrack it measures 0.2 to 0.45 dB above ffmpeg's AC-3 encoder at
