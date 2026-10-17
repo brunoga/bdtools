@@ -274,7 +274,7 @@ var (
 	toolFFmpeg = Tool{
 		Name:        "ffmpeg",
 		Binaries:    []string{"ffmpeg"},
-		Purpose:     "encode the stacked frames with a hardware encoder; code DTS and PCM audio as AC-3 for an MV-HEVC .mp4",
+		Purpose:     "encode the stacked frames with a hardware encoder",
 		VersionArgs: []string{"-version"},
 		Install: map[string]string{
 			"linux":   "install ffmpeg",

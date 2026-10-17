@@ -1,0 +1,8 @@
+Third-party material
+
+internal/dts/tables_gen.go holds tables generated from FFmpeg's libavcodec
+(dcadata.c, dcahuff.c, dca_sample_rate_tab.h; https://ffmpeg.org), which are
+licensed under the GNU Lesser General Public License, version 2.1 or later.
+Most of them are the tables of ETSI TS 102 114 (DTS Coherent Acoustics),
+Annex D; the ADPCM and high frequency VQ codebooks, which that
+specification does not print, come from FFmpeg alone.
