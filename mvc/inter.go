@@ -209,13 +209,13 @@ var mcHook func(view, list, ref, px, py, pw, ph int, v mv, picW, picH int)
 // size (w,h) in 4x4 units, using the motion stored in the picture grid.
 func (s *sliceDec) mcPartition(x, y, w, h int) {
 	idx := s.idx4(x, y)
-	pic := s.pic
+	pic, sp := s.pic, s.spic // motion, samples
 	var r [2]int8
 	r[0], r[1] = pic.refs[0][idx], pic.refs[1][idx]
 	m := &s.mc
 	pw, ph := w*4, h*4
 	px := s.mbX*16 + x*4
-	py := s.mbY*16 + y*4
+	py := s.smbY*16 + y*4
 	if mcHook != nil {
 		for l := 0; l < 2; l++ {
 			if r[l] >= 0 {
@@ -223,11 +223,11 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 			}
 		}
 	}
-	yo := pic.origin[0] + py*pic.stride[0] + px
-	co := pic.origin[1] + (py/2)*pic.stride[1] + px/2
+	yo := s.yo + y*4*s.ys + x*4
+	co := s.co + y*2*s.cs + x*2
 	// the common case: list 0 only, unweighted
 	if r[1] < 0 && r[0] >= 0 && int(r[0]) < len(s.refList[0]) &&
-		(s.wpMode != wpExplicit || s.h.pw.identity[0][r[0]]) {
+		(s.wpMode != wpExplicit || s.h.pw.identity[0][r[0]>>s.wpShift]) {
 		if ref := s.refList[0][r[0]]; ref != nil {
 			v := pic.mvs[0][idx]
 			bot := py + int(v.y>>2) + ph + 3
@@ -238,8 +238,8 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 				bot = 0
 			}
 			ref.waitRows(bot/16 + 1)
-			lumaMC(m, pic.planes[0][yo:], pic.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
-			chromaMC2(pic.planes[1][co:], pic.planes[2][co:], pic.stride[1], ref, (px/2)*8+int(v.x), (py/2)*8+int(v.y)+parityOffset(pic, ref), pw/2, ph/2)
+			lumaMC(m, sp.planes[0][yo:], sp.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
+			chromaMC2(sp.planes[1][co:], sp.planes[2][co:], sp.stride[1], ref, (px/2)*8+int(v.x), (py/2)*8+int(v.y)+parityOffset(sp, ref), pw/2, ph/2)
 			return
 		}
 	}
@@ -279,11 +279,11 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 		// default weights give the unweighted prediction
 		switch n {
 		case 1:
-			if s.h.pw.identity[lists[0]][r[lists[0]]] {
+			if s.h.pw.identity[lists[0]][r[lists[0]]>>s.wpShift] {
 				mode = wpDefault
 			}
 		case 2:
-			if s.h.pw.identity[0][r[0]] && s.h.pw.identity[1][r[1]] {
+			if s.h.pw.identity[0][r[0]>>s.wpShift] && s.h.pw.identity[1][r[1]>>s.wpShift] {
 				mode = wpDefault
 			}
 		}
@@ -293,14 +293,14 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 		l := lists[0]
 		ref := refs[0]
 		v := pic.mvs[l][idx]
-		lumaMC(m, pic.planes[0][yo:], pic.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
+		lumaMC(m, sp.planes[0][yo:], sp.stride[0], ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
 		cx := (px/2)*8 + int(v.x)
-		cy := (py/2)*8 + int(v.y) + parityOffset(pic, ref)
-		chromaMC2(pic.planes[1][co:], pic.planes[2][co:], pic.stride[1], ref, cx, cy, pw/2, ph/2)
+		cy := (py/2)*8 + int(v.y) + parityOffset(sp, ref)
+		chromaMC2(sp.planes[1][co:], sp.planes[2][co:], sp.stride[1], ref, cx, cy, pw/2, ph/2)
 		return
 	}
 	if n == 1 {
-		if l := lists[0]; weightedFullPel(pic, refs[0], pic.mvs[l][idx], px, py, pw, ph, &s.h.pw, l, int(r[l]), yo, co) {
+		if l := lists[0]; weightedFullPel(sp, refs[0], pic.mvs[l][idx], px, py, pw, ph, &s.h.pw, l, int(r[l]>>s.wpShift), yo, co) {
 			return
 		}
 	}
@@ -310,14 +310,14 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 		v := pic.mvs[l][idx]
 		lumaMC(m, m.predY[l][:], 16, ref, px*4+int(v.x), py*4+int(v.y), pw, ph)
 		cx := (px/2)*8 + int(v.x)
-		cy := (py/2)*8 + int(v.y) + parityOffset(pic, ref)
+		cy := (py/2)*8 + int(v.y) + parityOffset(sp, ref)
 		chromaMC2(m.predC[l][0][:], m.predC[l][1][:], 8, ref, cx, cy, pw/2, ph/2)
 	}
 	switch {
 	case n == 2 && mode == wpDefault:
-		storeAvg(pic.planes[0][yo:], pic.stride[0], m.predY[0][:], m.predY[1][:], 16, pw, ph)
-		storeAvg(pic.planes[1][co:], pic.stride[1], m.predC[0][0][:], m.predC[1][0][:], 8, pw/2, ph/2)
-		storeAvg(pic.planes[2][co:], pic.stride[2], m.predC[0][1][:], m.predC[1][1][:], 8, pw/2, ph/2)
+		storeAvg(sp.planes[0][yo:], sp.stride[0], m.predY[0][:], m.predY[1][:], 16, pw, ph)
+		storeAvg(sp.planes[1][co:], sp.stride[1], m.predC[0][0][:], m.predC[1][0][:], 8, pw/2, ph/2)
+		storeAvg(sp.planes[2][co:], sp.stride[2], m.predC[0][1][:], m.predC[1][1][:], 8, pw/2, ph/2)
 	case n == 1: // explicit, single list
 		l := lists[0]
 		pw8 := &s.h.pw
@@ -326,12 +326,12 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 			if c > 0 {
 				logWD = pw8.chromaLog2
 			}
-			wt := int32(pw8.weight[l][r[l]][c])
-			of := int32(pw8.offset[l][r[l]][c])
+			wt := int32(pw8.weight[l][r[l]>>s.wpShift][c])
+			of := int32(pw8.offset[l][r[l]>>s.wpShift][c])
 			if c == 0 {
-				storeWeighted1(pic.planes[0][yo:], pic.stride[0], m.predY[l][:], 16, pw, ph, wt, of, uint(logWD))
+				storeWeighted1(sp.planes[0][yo:], sp.stride[0], m.predY[l][:], 16, pw, ph, wt, of, uint(logWD))
 			} else {
-				storeWeighted1(pic.planes[c][co:], pic.stride[c], m.predC[l][c-1][:], 8, pw/2, ph/2, wt, of, uint(logWD))
+				storeWeighted1(sp.planes[c][co:], sp.stride[c], m.predC[l][c-1][:], 8, pw/2, ph/2, wt, of, uint(logWD))
 			}
 		}
 	default: // bi-pred, explicit or implicit
@@ -344,19 +344,23 @@ func (s *sliceDec) mcPartition(x, y, w, h int) {
 				if c > 0 {
 					logWD = uint(pw8.chromaLog2)
 				}
-				w0 = int32(pw8.weight[0][r[0]][c])
-				w1 = int32(pw8.weight[1][r[1]][c])
-				o0 = int32(pw8.offset[0][r[0]][c])
-				o1 = int32(pw8.offset[1][r[1]][c])
+				w0 = int32(pw8.weight[0][r[0]>>s.wpShift][c])
+				w1 = int32(pw8.weight[1][r[1]>>s.wpShift][c])
+				o0 = int32(pw8.offset[0][r[0]>>s.wpShift][c])
+				o1 = int32(pw8.offset[1][r[1]>>s.wpShift][c])
 			} else {
 				logWD = 5
-				w0 = int32(s.implicitW[r[0]][r[1]][0])
-				w1 = int32(s.implicitW[r[0]][r[1]][1])
+				iw := s.iw
+				if iw == nil {
+					iw = &s.implicitW
+				}
+				w0 = int32(iw[r[0]][r[1]][0])
+				w1 = int32(iw[r[0]][r[1]][1])
 			}
 			if c == 0 {
-				storeWeighted2(pic.planes[0][yo:], pic.stride[0], m.predY[0][:], m.predY[1][:], 16, pw, ph, w0, w1, o0, o1, logWD)
+				storeWeighted2(sp.planes[0][yo:], sp.stride[0], m.predY[0][:], m.predY[1][:], 16, pw, ph, w0, w1, o0, o1, logWD)
 			} else {
-				storeWeighted2(pic.planes[c][co:], pic.stride[c], m.predC[0][c-1][:], m.predC[1][c-1][:], 8, pw/2, ph/2, w0, w1, o0, o1, logWD)
+				storeWeighted2(sp.planes[c][co:], sp.stride[c], m.predC[0][c-1][:], m.predC[1][c-1][:], 8, pw/2, ph/2, w0, w1, o0, o1, logWD)
 			}
 		}
 	}

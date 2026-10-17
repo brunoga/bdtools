@@ -133,6 +133,10 @@ func TestDumpYUV(t *testing.T) {
 	if os.Getenv("BDTOOLS_DUMP_SERIAL") != "" {
 		threads = 1
 	}
+	if os.Getenv("BDTOOLS_NODEBLOCK") != "" {
+		testNoDeblock = true
+		defer func() { testNoDeblock = false }()
+	}
 	d := NewDecoder(Options{Threads: threads})
 	drain := func() {
 		for {

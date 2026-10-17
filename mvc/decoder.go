@@ -5,6 +5,7 @@ package mvc
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"runtime"
 	"sync"
@@ -26,6 +27,9 @@ type Frame struct {
 	// cropping window at CropLeft, CropTop.
 	Surface           int
 	CropLeft, CropTop int
+	// Interlaced: coded as fields (field pictures or an MBAFF frame), its
+	// field shown first the top one when TopFieldFirst.
+	Interlaced, TopFieldFirst bool
 
 	pic *picture
 }
@@ -95,12 +99,16 @@ type curPic struct {
 
 // sliceJob carries everything a worker needs to decode one slice.
 type sliceJob struct {
-	h        sliceHeader
-	rbsp     []byte
-	rbspLen  int
-	bitPos   int
-	refList  [2][]*picture
-	info     sliceRefInfo
+	h       sliceHeader
+	rbsp    []byte
+	rbspLen int
+	bitPos  int
+	refList [2][]*picture
+	info    sliceRefInfo
+	// MBAFF: the field macroblocks' lists, by parity (8.4.2.1: each
+	// frame's field of the macroblock's parity, then the other)
+	fldList  [2][2][]*picture
+	fldInfo  [2]sliceRefInfo
 	sliceIdx int
 	curPOC   int32
 	dq       *dqTables
@@ -563,6 +571,7 @@ func (d *Decoder) startPicture(view int, h *sliceHeader) error {
 	d.nextID++
 	pic.id = d.nextID
 	pic.resetFields()
+	pic.mbaffFrame = h.mbaff
 	pic.poc, pic.topPOC, pic.botPOC = poc, top, bot
 	pic.frameNum = h.frameNum
 	pic.viewID = h.nal.viewID
@@ -726,7 +735,7 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 	cp := d.cur
 	pic := cp.target
 	v := &d.views[cp.view]
-	if h.firstMb >= pic.mbW*pic.mbH || cp.nslices >= maxSlices {
+	if mbs := pic.mbW * pic.mbH; h.mbaff && 2*h.firstMb >= mbs || h.firstMb >= mbs || cp.nslices >= maxSlices {
 		return errInvalid
 	}
 	dq := h.pps.dequant(h.sps)
@@ -823,6 +832,25 @@ func (d *Decoder) decodeSlice(br *bitReader, h *sliceHeader) error {
 		}
 	}
 	pic.setSliceRef(job.sliceIdx, info)
+	for par := range job.fldList {
+		for l := range job.fldList[par] {
+			job.fldList[par][l] = job.fldList[par][l][:0]
+		}
+	}
+	if h.mbaff {
+		for par := range job.fldList {
+			fi := &job.fldInfo[par]
+			*fi = sliceRefInfo{}
+			for l, list := range job.refList {
+				for k := 0; k < 2*len(list) && k < maxRefsPerList; k++ {
+					fr := list[k>>1]
+					f := fr.fieldRef(par ^ k&1)
+					job.fldList[par][l] = append(job.fldList[par][l], f)
+					fi.ids[l][k], fi.poc[l][k], fi.lt[l][k] = f.id, f.poc, fr.longRef
+				}
+			}
+		}
+	}
 	cp.nslices++
 	job.rbsp = append(job.rbsp[:0], br.buf...)
 	job.rbspLen = len(br.buf)
@@ -898,12 +926,25 @@ func (s *sliceDec) runJob(fc *frameCtx, job *sliceJob) {
 		fc.slices = append(fc.slices, sliceParams{})
 	}
 	fc.slices[job.sliceIdx] = sliceParams{
-		disableDeblock: h.disableDeblock,
+		disableDeblock: testDeblock(h.disableDeblock),
 		alphaOffset:    h.alphaOffset,
 		betaOffset:     h.betaOffset,
 		chromaQPOffset: h.pps.chromaQPOffset,
 	}
 	s.deblock = h.disableDeblock != 1
+	s.initMBAFF()
+	fc.mbaff = h.mbaff
+	if h.mbaff {
+		s.mbf.fldList, s.mbf.fldInfo = &job.fldList, &job.fldInfo
+		s.mbf.frmList, s.mbf.frmInfo = job.refList, &job.info
+		for par := range job.fldList {
+			for l := range job.fldList[par] {
+				for _, r := range job.fldList[par][l] {
+					r.ensureCopy()
+				}
+			}
+		}
+	}
 	if h.fieldPic {
 		for l := range s.refList {
 			for _, r := range s.refList[l] {
@@ -969,6 +1010,21 @@ func (s *sliceDec) setupInter() {
 			}
 		}
 	}
+	if s.mbf.on && s.wpMode == wpImplicit {
+		// field macroblocks weigh by their fields' order counts
+		for par := range s.mbf.iw {
+			fi := &s.mbf.fldInfo[par]
+			fcur := s.pic.topPOC
+			if par == 1 {
+				fcur = s.pic.botPOC
+			}
+			for i := range s.mbf.fldList[par][0] {
+				for j := range s.mbf.fldList[par][1] {
+					s.mbf.iw[par][i][j] = implicitWeights(fcur, fi.poc[0][i], fi.poc[1][j], fi.lt[0][i] || fi.lt[1][j])
+				}
+			}
+		}
+	}
 	if !h.directSpatial {
 		if s.mapCol == nil {
 			s.mapCol = make(map[int32]int)
@@ -983,11 +1039,13 @@ func (s *sliceDec) setupInter() {
 				s.mapCol[fieldID(id, 0)] = i
 				s.mapCol[fieldID(id, 1)] = i
 			case 2:
-				// the colocated frame's are frames: their fields of the
-				// current parity in list 0
+				// the colocated frame's are frames (their fields of the
+				// current parity in list 0) or, an MBAFF field
+				// macroblock's, fields
 				if p := s.refList[0][i]; p.parent != nil && p.parity == s.pic.parity {
 					s.mapCol[p.parent.id] = i
 				}
+				s.mapCol[id] = i
 			default:
 				s.mapCol[id] = i
 			}
@@ -1010,6 +1068,9 @@ func (s *sliceDec) setupInter() {
 }
 
 func (s *sliceDec) decodeSliceData() error {
+	if s.mbf.on {
+		return s.decodeSliceDataMBAFF()
+	}
 	h := s.h
 	total := s.fc.mbW * s.fc.mbH
 	addr := h.firstMb
@@ -1236,14 +1297,16 @@ func (p *picture) frame() *Frame {
 			ViewID: p.viewID, POC: p.poc, PTS: p.pts, Surface: p.surface, CropLeft: p.cropLeft, CropTop: p.cropTop, pic: p}
 	}
 	f := &Frame{
-		StrideY: p.stride[0],
-		StrideC: p.stride[1],
-		Width:   p.width - p.cropLeft - p.cropRight,
-		Height:  p.height - p.cropTop - p.cropBottom,
-		ViewID:  p.viewID,
-		POC:     p.poc,
-		PTS:     p.pts,
-		pic:     p,
+		StrideY:       p.stride[0],
+		StrideC:       p.stride[1],
+		Width:         p.width - p.cropLeft - p.cropRight,
+		Height:        p.height - p.cropTop - p.cropBottom,
+		ViewID:        p.viewID,
+		POC:           p.poc,
+		PTS:           p.pts,
+		Interlaced:    p.asFields || p.mbaffFrame,
+		TopFieldFirst: p.topPOC <= p.botPOC,
+		pic:           p,
 	}
 	yo := p.origin[0] + p.cropTop*p.stride[0] + p.cropLeft
 	f.Y = p.planes[0][yo : yo+(f.Height-1)*f.StrideY+f.Width]
@@ -1409,3 +1472,33 @@ func finishField(f *picture) {
 		p.setProgress(p.mbH)
 	}
 }
+
+// testNoDeblock, set by tests, decodes without the deblocking filter.
+var testNoDeblock bool
+
+func testDeblock(v int) int {
+	if testNoDeblock {
+		return 1
+	}
+	return v
+}
+
+// implicitWeights are the implicit bi-prediction weights (8.4.2.3.1) of
+// the picture (or field) at order count cur from pictures at p0 and p1.
+func implicitWeights(cur, p0, p1 int32, longTerm bool) [2]int16 {
+	td := clip3(-128, 127, p1-p0)
+	if longTerm || td == 0 {
+		return [2]int16{32, 32}
+	}
+	tb := clip3(-128, 127, cur-p0)
+	tx := (16384 + iabs(td/2)) / td
+	dsf := clip3(-1024, 1023, (tb*tx+32)>>6)
+	if dsf>>2 < -64 || dsf>>2 > 128 {
+		return [2]int16{32, 32}
+	}
+	return [2]int16{int16(64 - dsf>>2), int16(dsf >> 2)}
+}
+
+// IsUnsupported reports whether err says the stream uses a feature the
+// decoder does not decode.
+func IsUnsupported(err error) bool { return errors.Is(err, errUnsupported) }

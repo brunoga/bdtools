@@ -5,17 +5,23 @@ import "math/bits"
 // CABAC parsing of macroblock layer syntax elements (9.3).
 
 func (s *sliceDec) leftMB() *mbInfo {
-	if s.availA {
-		return &s.fc.mbs[s.mbAddr-1]
+	if !s.availA {
+		return nil
 	}
-	return nil
+	if s.mbf.on {
+		return &s.fc.mbs[s.mbf.mbA]
+	}
+	return &s.fc.mbs[s.mbAddr-1]
 }
 
 func (s *sliceDec) topMB() *mbInfo {
-	if s.availB {
-		return &s.fc.mbs[s.mbAddr-s.fc.mbW]
+	if !s.availB {
+		return nil
 	}
-	return nil
+	if s.mbf.on {
+		return &s.fc.mbs[s.mbf.mbB]
+	}
+	return &s.fc.mbs[s.mbAddr-s.fc.mbW]
 }
 
 func (s *sliceDec) cabacSkipFlag() bool {
@@ -216,6 +222,9 @@ func (s *sliceDec) cabacCBP() uint8 {
 	if b := s.topMB(); b != nil {
 		lumaB, chromaB = int(b.cbp&15), int(b.cbp>>4)
 	}
+	if s.mbf.on {
+		lumaA, lumaB = s.mbaffCBPNeighbours()
+	}
 	return s.cabacCBPWith(lumaA, lumaB, chromaA, chromaB, s.h.sps.chromaFormatIdc != 0)
 }
 
@@ -287,6 +296,9 @@ func (s *sliceDec) cabacQPDelta() int {
 // refIdxCond returns the ref_idx context condition for the neighbouring 4x4
 // block at (x,y) relative to the current macroblock (x,y may be -1).
 func (s *sliceDec) refIdxCond(l, x, y int) int {
+	if s.mbf.on {
+		return s.mbaffRefIdxCond(l, x, y)
+	}
 	var m *mbInfo
 	if x < 0 {
 		if !s.availA {
@@ -335,6 +347,9 @@ func (s *sliceDec) cabacRefIdx(l, x, y int) int {
 
 // absMvdN returns the stored absolute mvd component of the neighbour block.
 func (s *sliceDec) absMvdN(l, comp, x, y int) int {
+	if s.mbf.on {
+		return s.mbaffAbsMvd(l, comp, x, y)
+	}
 	if x < 0 && !s.availA || y < 0 && !s.availB {
 		return 0
 	}
@@ -440,12 +455,9 @@ func (s *sliceDec) cabacMvdGo(l, x, y, w, h int) (int16, int16) {
 	if ay < 0 {
 		ay = -ay
 	}
-	if ax > 64 {
-		ax = 64
-	}
-	if ay > 64 {
-		ay = 64
-	}
+	// kept to 255: the contexts compare the sums with 32, an MBAFF
+	// field macroblock after halving its frame neighbours'
+	ax, ay = min(ax, 255), min(ay, 255)
 	v := [2]uint8{uint8(ax), uint8(ay)}
 	g := s.fc.mvd[l]
 	st := s.fc.mbW * 4

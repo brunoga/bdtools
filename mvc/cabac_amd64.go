@@ -64,7 +64,7 @@ func (s *sliceDec) directFill(mask uint8, ref [2]int8, pmv [2]int, checkCol bool
 // (x,y) and size (w,h) in 4x4 units, storing absolute values for context
 // derivation.
 func (s *sliceDec) cabacMvd(l, x, y, w, h int) (int16, int16) {
-	if !useCabacAsm {
+	if !useCabacAsm || s.mbf.on {
 		return s.cabacMvdGo(l, x, y, w, h)
 	}
 	avail := 0
@@ -99,7 +99,7 @@ func (s *sliceDec) availBits() int {
 // predFill derives the motion vector of a partition from its predictor
 // and mvd and fills the partition's refs and mvs.
 func (s *sliceDec) predFill(l int, ref int8, x, y, w, h int, mvdx, mvdy int16) {
-	if !useCabacAsm {
+	if !useCabacAsm || s.mbf.on {
 		s.predFillGo(l, ref, x, y, w, h, mvdx, mvdy)
 		return
 	}
@@ -183,6 +183,10 @@ func (s *sliceDec) chromaDCBlocks(cbfCur uint32, listCb int) (uint32, uint32) {
 // pskipFill derives the P_Skip motion vector and fills the macroblock's
 // list 0 grid.
 func (s *sliceDec) pskipFill() {
+	if s.mbf.on {
+		s.fillMotion(0, 0, 0, 4, 4, 0, s.pskipMV())
+		return
+	}
 	base := s.idx4(0, 0)
 	mvPredFillAsm(&s.pic.refs[0][base], (*int32)(unsafe.Pointer(&s.pic.mvs[0][base])), s.fc.mbW*4, s.availBits(),
 		0, 0, 0, 4, 4, 0, 0, 3)
@@ -191,6 +195,16 @@ func (s *sliceDec) pskipFill() {
 // spatialPred returns the spatial direct reference index of list l and
 // the packed predictor for it (0 when the index is negative).
 func (s *sliceDec) spatialPred(l int) (int8, int) {
+	if s.mbf.on {
+		rA, _, _ := s.nb(l, -1, 0)
+		rB, _, _ := s.nb(l, 0, -1)
+		rC, _, _ := s.nbC(l, 0, 0, 4)
+		ref := minPositive(rA, minPositive(rB, rC))
+		if ref < 0 {
+			return ref, 0
+		}
+		return ref, packMV(s.mvPred(l, ref, 0, 0, 4, 4))
+	}
 	base := s.idx4(0, 0)
 	r := mvPredFillAsm(&s.pic.refs[l][base], (*int32)(unsafe.Pointer(&s.pic.mvs[l][base])), s.fc.mbW*4, s.availBits(),
 		-2, 0, 0, 4, 4, 0, 0, 0)

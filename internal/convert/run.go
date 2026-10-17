@@ -280,7 +280,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 // MVC decoder. A 2D picture goes to a GPU decoder when one decodes its codec
 // (NVDEC, VideoToolbox, VAAPI for HEVC, H.264 and MPEG-2); else to the
 // decoders here, with ffmpeg for what they do not decode (HEVC's format
-// range extensions, interlaced H.264).
+// range extensions).
 func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64, err error)) (pictureSource, error) {
 	if r.Opts.Encoder == EncoderCopy {
 		// the left eye's access units go to the sink as they are, as
@@ -315,9 +315,9 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	if !ok {
 		return nil, fmt.Errorf("no decoder for %s video", video.Type)
 	}
-	// Interlaced H.264 (field pictures, MBAFF: 1080i discs) the decoder
-	// here does not decode, nor VAAPI through it: the GPU's own parsers
-	// (NVDEC, VideoToolbox) or ffmpeg do.
+	// Interlaced H.264 (field pictures, MBAFF: 1080i discs) VAAPI does
+	// not decode through the decoder here: the GPU's own parsers (NVDEC,
+	// VideoToolbox) do, or the decoder here, deinterlacing.
 	interlaced := false
 	if codec == gpu.DecodeH264 {
 		var err error
@@ -352,15 +352,18 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 	switch codec {
 	case gpu.DecodeH264:
 		if interlaced {
+			r.Report.Report("decoding interlaced %s here, deinterlaced", video.Type)
 			return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
-				dec := toolFFmpeg
-				dec.Purpose = "decode interlaced H.264 video (the decoder here decodes progressive H.264)"
-				bin, err := r.resolve(dec)
-				if err != nil {
-					return nil, err
-				}
-				r.Report.Report("decoding interlaced %s with ffmpeg", video.Type)
-				return openFFDecoder(bin, cfg, picture)
+				return openGoH264(picture, func() (gpu.Decoder, error) {
+					dec := toolFFmpeg
+					dec.Purpose = "decode interlaced H.264 video of a feature not decoded here"
+					bin, err := r.resolve(dec)
+					if err != nil {
+						return nil, err
+					}
+					r.Report.Report("decoding %s with ffmpeg (a feature not decoded here)", video.Type)
+					return openFFDecoder(bin, cfg, picture)
+				}), nil
 			}), nil
 		}
 		return cpu(), nil

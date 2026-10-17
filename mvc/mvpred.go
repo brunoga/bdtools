@@ -8,6 +8,9 @@ var blkOrder = [16]uint8{0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15}
 // nb returns refIdx, mv and availability of the 4x4 block at (x,y)
 // relative to the current macroblock for list l.
 func (s *sliceDec) nb(l, x, y int) (int8, mv, bool) {
+	if s.mbf.on {
+		return s.mbaffMotion(l, x, y, false)
+	}
 	if y < 0 {
 		if x < 0 {
 			if !s.availD {
@@ -35,13 +38,22 @@ func (s *sliceDec) nb(l, x, y int) (int8, mv, bool) {
 func (s *sliceDec) nbC(l, x, y, w int) (int8, mv, bool) {
 	cx, cy := x+w, y-1
 	if cy >= 0 && (cx >= 4 || blkOrder[cy*4+cx] > blkOrder[y*4+x]) {
-		return s.nb(l, x-1, y-1)
+		return s.nbD(l, x-1, y-1)
 	}
 	r, m, a := s.nb(l, cx, cy)
 	if !a {
-		return s.nb(l, x-1, y-1)
+		return s.nbD(l, x-1, y-1)
 	}
 	return r, m, a
+}
+
+// nbD is nb for a partition's neighbour D, the block above and left of
+// it (in MBAFF frames the bottom right sample of that block decides).
+func (s *sliceDec) nbD(l, x, y int) (int8, mv, bool) {
+	if s.mbf.on {
+		return s.mbaffMotion(l, x, y, true)
+	}
+	return s.nb(l, x, y)
 }
 
 func median3(a, b, c int16) int16 {
@@ -154,7 +166,32 @@ func minPositive(a, b int8) int8 {
 // colocated returns refIdxCol, mvCol, the list used and the colocated
 // block index for 4x4 block (x,y) of the current macroblock.
 func (s *sliceDec) colocated(x, y int) (int8, mv, int, int) {
+	if s.mbf.on {
+		rc, mc, lc, _ := s.mbaffColocated(x, y)
+		return rc, mc, lc, 0
+	}
 	var i int
+	s.colPar = -1
+	W := s.fc.mbW
+	st4 := W * 4
+	col := s.colPic
+	switch {
+	case s.colMode == 0 && s.pic.parent == nil && col.fieldMB[2*(s.mbY>>1)*W+s.mbX]:
+		// a frame macroblock over an MBAFF field pair: the field nearer
+		// in order, the frame macroblock's half of it
+		par := 0
+		if iabs(col.topPOC-s.curPOC) >= iabs(col.botPOC-s.curPOC) {
+			par = 1
+		}
+		i = ((s.mbY&^1+par)*4+2*(s.mbY&1)+y>>1)*st4 + s.mbX*4 + (x>>1)*3
+		s.colPar = par
+		goto found
+	case s.colMode == 2 && col.fieldMB[2*s.mbY*W+s.mbX]:
+		// a field over an MBAFF field pair: the macroblock of its parity
+		i = ((2*s.mbY+s.pic.parity)*4+(y>>1)*3)*st4 + s.mbX*4 + (x>>1)*3
+		s.colPar = s.pic.parity
+		goto found
+	}
 	switch s.colMode {
 	case 1:
 		// a frame macroblock's half of the field macroblock (the
@@ -170,7 +207,7 @@ func (s *sliceDec) colocated(x, y int) (int8, mv, int, int) {
 		}
 		i = s.idx4(x, y)
 	}
-	col := s.colPic
+found:
 	if r := col.refs[0][i]; r >= 0 {
 		return r, col.mvs[0][i], 0, i
 	}
@@ -183,6 +220,15 @@ func (s *sliceDec) colocated(x, y int) (int8, mv, int, int) {
 // directMotion derives motion for direct-predicted 8x8 blocks of the
 // current macroblock (mask bit i = 8x8 block i).
 func (s *sliceDec) directMotion(mask uint8) {
+	if s.mbf.on {
+		s.mbf.frmList[1][0].waitRows(s.fc.mbH)
+		if s.h.directSpatial {
+			s.directSpatial(mask)
+		} else {
+			s.directTemporalMBAFF(mask)
+		}
+		return
+	}
 	switch s.colMode {
 	case 1:
 		s.colPic.waitRows(s.mbY>>1 + 1)
@@ -209,7 +255,7 @@ func (s *sliceDec) directSpatial(mask uint8) {
 		directZero = true
 	}
 	colShortTerm := s.colIsShortTerm()
-	if useCabacAsm && s.colMode == 0 {
+	if useCabacAsm && s.colMode == 0 && !s.mbf.on {
 		s.directUniform = s.directFill(mask, ref, pm, colShortTerm && !directZero)
 		s.directUniformValid = true
 		return
@@ -271,17 +317,29 @@ func (s *sliceDec) directTemporal(mask uint8) {
 				var ref0 int8
 				if rc >= 0 {
 					cmb := (ci/(s.fc.mbW*4))/4*s.fc.mbW + (ci%(s.fc.mbW*4))/4
-					id := col.sliceRef(int(col.mbSlice[cmb])).ids[lc][rc]
+					ids := &col.sliceRef(int(col.mbSlice[cmb])).ids[lc]
+					id := ids[rc&31]
+					if s.colPar >= 0 {
+						// an MBAFF field macroblock's index counts fields
+						id = ids[rc>>1]
+						if s.pic.parent != nil {
+							id = fieldID(id, s.colPar^int(rc&1))
+						} else {
+							mc.y *= 2
+						}
+					}
 					r, ok := s.mapCol[id]
 					if !ok {
 						r = 0
 					}
 					ref0 = int8(r)
 				}
-				switch s.colMode {
-				case 1:
+				switch {
+				case s.colPar >= 0:
+					// an MBAFF field macroblock: scaled above for a frame
+				case s.colMode == 1:
 					mc.y *= 2 // field to frame vector
-				case 2:
+				case s.colMode == 2:
 					mc.y /= 2
 				}
 				var m0, m1 mv
