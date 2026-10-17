@@ -77,6 +77,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		first := e.queue[0]
 		if first.disp%e.keyint() == 0 {
 			first.key, first.show, first.depth = true, true, 0
+			e.tfPast = []*Source{first.src}
 			e.code(first, &out)
 			e.queue = e.queue[1:]
 			continue
@@ -94,6 +95,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		a := first.disp - 1
 		byDisp := func(d int) *frameJob { return gop[d-first.disp] }
 		last := byDisp(a + n)
+		e.filterAnchor(gop)
 		if n == 1 {
 			last.show, last.depth = true, 1
 			e.code(last, &out)

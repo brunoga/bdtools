@@ -118,6 +118,10 @@ func TestBenchSeq(t *testing.T) {
 		}
 	}
 	mini, _ := strconv.Atoi(os.Getenv("AV1MINIGOP"))
+	if os.Getenv("AV1NOTF") != "" {
+		dbgNoTF = true
+		defer func() { dbgNoTF = false }()
+	}
 	for _, file := range files {
 		b, err := os.ReadFile(file) //nolint:gosec // a test
 		if err != nil {
