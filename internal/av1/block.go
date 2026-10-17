@@ -11,8 +11,9 @@ import (
 )
 
 // Debugging switches.
-var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare bool
+var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
+var dbgNo4x4 bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -83,7 +84,7 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	f := t.f
 	t.setupBlock(r, c, size)
 	b := &t.b
-	d := 4 + depthOf(min(size, BLOCK_64X64))
+	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
 	t.save(start, r, c, size, true)
 	dec := &blockDec{r: r, c: c, size: size}
@@ -164,6 +165,8 @@ func (t *tileEnc) finalBlock(dec *blockDec) {
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
+	// decided as the search decided, with its rates
+	t.cdf = t.sbCDF
 	_, zero := t.codeLuma(dec, false)
 	b.uvMode, b.angleUV, b.cflU, b.cflV = dec.uvMode, dec.angleUV, dec.cflU, dec.cflV
 	if b.hasChroma {
@@ -173,7 +176,15 @@ func (t *tileEnc) finalBlock(dec *blockDec) {
 	b.skip = zero
 	ctx.decoded = t.decoded // the block's, which a decoder has after it too
 	t.restore(&ctx, false)
+	t.cdf = t.live
 	t.writeSkip(t.w)
+	if f := t.f; f.seq.cdef && !b.skip && !f.lossless && !t.cdefDone {
+		// read_cdef: the superblock's first block with coefficients
+		i := (b.r>>4)*((f.miCols+15)>>4) + b.c>>4
+		t.w.cdef(i)
+		f.cdefIdx[i] = 0
+		t.cdefDone = true
+	}
 	t.writeModes(t.w, dec.txDepth)
 	if b.skip {
 		t.resetBlockContext()
@@ -624,6 +635,25 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 			t.levels = t.levels[:tc.off]
 		}
 	}
+	if best.eob > 0 {
+		// all zero: the prediction alone
+		var sse int64
+		for y := range vh {
+			for x := range vw {
+				d := int64(src[y*stride+x]) - int64(t.pred[y*w+x])
+				sse += d * d
+			}
+		}
+		zero := txCoded{plane: plane, x4: tc.x4, y4: tc.y4, txSz: txSz, txType: DCT_DCT, off: len(t.levels)}
+		t.cost.n = 0
+		t.writeCoeffs(&t.cost, &zero, false)
+		if j := float64(sse) + f.lambda*float64(t.cost.n)/costScale; j < bestJ {
+			t.levels = t.levels[:bestOff]
+			bestJ, best = j, zero
+			best.off = bestOff
+			copy(t.best[:w*h], t.pred[:w*h])
+		}
+	}
 	rec := f.rec[plane][startY*stride+startX:]
 	for y := range h {
 		copy(rec[y*stride:y*stride+w], t.best[y*w:(y+1)*w])
@@ -705,45 +735,6 @@ func dqDenom(txSz int) int {
 		return 4
 	}
 	return 1
-}
-
-// quantize quantizes t.coef (the spec's layout, min(32, w) wide) into
-// levels appended to t.levels, giving the end of block (in scan order).
-func (t *tileEnc) quantize(plane, txSz, txType int) int {
-	f := t.f
-	tw, th := min(32, int(txWidth[txSz])), min(32, int(txHeight[txSz]))
-	n := tw * th
-	off := len(t.levels)
-	t.levels = append(t.levels, make([]int32, n)...)
-	q := t.levels[off:]
-	den := int64(dqDenom(txSz))
-	for i := range n {
-		qs := int64(f.acQ[plane])
-		rnd := qs * 3 / 8
-		if i == 0 {
-			qs = int64(f.dcQ[plane])
-			rnd = qs / 2
-		}
-		c := int64(t.coef[i])
-		neg := c < 0
-		if neg {
-			c = -c
-		}
-		l := (c*den + rnd) / qs
-		l = min(l, 1<<18)
-		if neg {
-			l = -l
-		}
-		q[i] = int32(l) //nolint:gosec // clamped
-	}
-	scan := scanFor(txSz, txType)
-	eob := 0
-	for k, pos := range scan[:n] {
-		if q[pos] != 0 {
-			eob = k + 1
-		}
-	}
-	return eob
 }
 
 // writeSkip is read_skip.

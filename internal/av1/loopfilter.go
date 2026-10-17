@@ -48,9 +48,9 @@ func newLoopFilter(f *frameEnc, level [4]int, sharp int) *loopFilter {
 		} else {
 			limit = max(1, limit)
 		}
-		lf.limit[lvl] = int32(limit) << bd           //nolint:gosec // small
+		lf.limit[lvl] = int32(limit) << bd            //nolint:gosec // small
 		lf.blimit[lvl] = int32(2*(lvl+2)+limit) << bd //nolint:gosec // small
-		lf.thresh[lvl] = int32(lvl>>4) << bd         //nolint:gosec // small
+		lf.thresh[lvl] = int32(lvl>>4) << bd          //nolint:gosec // small
 	}
 	return lf
 }
@@ -250,7 +250,7 @@ func (lf *loopFilter) sample(buf []uint16, pos, step, plane, size int, limit, bl
 	buf[pos-step] = uint16(c(ps0+filter2) + off) //nolint:gosec // a sample
 	if !hev {
 		filter = (filter1 + 1) >> 1
-		buf[pos+step] = uint16(c(qs1-filter) + off)    //nolint:gosec // a sample
+		buf[pos+step] = uint16(c(qs1-filter) + off)   //nolint:gosec // a sample
 		buf[pos-2*step] = uint16(c(ps1+filter) + off) //nolint:gosec // a sample
 	}
 }
@@ -338,31 +338,25 @@ func (f *frameEnc) deblock(fixed *[5]int) {
 }
 
 // pickLevels searches the levels: luma's two together, then each on its
-// own, then each chroma plane's (when luma filters at all).
+// own from there, then each chroma plane's (when luma filters at all).
 func (f *frameEnc) pickLevels(sharp int) [4]int {
 	var level [4]int
 	tmp := make([]uint16, len(f.rec[0]))
 	try := func(p int, l [4]int) int64 {
-		copy(tmp[:len(f.rec[p])], f.rec[p])
-		newLoopFilter(f, l, sharp).filterPlane(p, tmp[:len(f.rec[p])])
-		return f.planeSSE(p, tmp[:len(f.rec[p])])
+		buf := tmp[:len(f.rec[p])]
+		copy(buf, f.rec[p])
+		newLoopFilter(f, l, sharp).filterPlane(p, buf)
+		return f.planeSSE(p, buf)
 	}
-	// libaom's guess from q, a key frame's 4 lower
-	q := f.acQ[0]
-	guess := (q*20723 + 1015158 + 1<<17) >> 18
-	if f.bitDepth == 10 {
-		guess = (q*20723 + 4060632 + 1<<19) >> 20
-	}
-	guess = min(max(guess-4, 0), MAX_LOOP_FILTER)
-	both := searchLevel(guess, func(v int) int64 { return try(0, [4]int{v, v}) })
+	both := scanLevel(func(v int) int64 { return try(0, [4]int{v, v}) })
 	level[0], level[1] = both, both
-	level[0] = searchLevel(both, func(v int) int64 { return try(0, [4]int{v, level[1]}) })
-	level[1] = searchLevel(both, func(v int) int64 { return try(0, [4]int{level[0], v}) })
+	level[0] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{v, level[1]}) })
+	level[1] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{level[0], v}) })
 	if level[0] == 0 && level[1] == 0 {
 		return level
 	}
 	for p := 1; p <= 2; p++ {
-		level[1+p] = searchLevel(guess, func(v int) int64 {
+		level[1+p] = scanLevel(func(v int) int64 {
 			l := level
 			l[1+p] = v
 			return try(p, l)
@@ -371,10 +365,33 @@ func (f *frameEnc) pickLevels(sharp int) [4]int {
 	return level
 }
 
-// searchLevel is libaom's search_filter_level: from start, steps of a
-// quarter of the level (4 below 16) halving each time no neighbour does
-// better, going on in the direction that did.
-func searchLevel(start int, errAt func(int) int64) int {
+// scanLevel is the level of least error: the best of every eighth, then
+// searched from there. (The error is far from convex in the level, flat
+// over ranges where the masks stop changing, so a search from a guess
+// alone, as libaom's from q, can stall.)
+func scanLevel(errAt func(int) int64) int {
+	var errs [MAX_LOOP_FILTER + 1]int64
+	var done [MAX_LOOP_FILTER + 1]bool
+	get := func(v int) int64 {
+		if !done[v] {
+			errs[v], done[v] = errAt(v), true
+		}
+		return errs[v]
+	}
+	best, bestErr := 0, get(0)
+	for v := 8; v <= MAX_LOOP_FILTER+7; v += 8 {
+		v = min(v, MAX_LOOP_FILTER)
+		if e := get(v); e < bestErr {
+			best, bestErr = v, e
+		}
+	}
+	return searchLevel(best, 4, get)
+}
+
+// searchLevel is libaom's search_filter_level: from start, steps of step
+// halving each time neither neighbour does better, going on in the
+// direction that did. A tie goes to the lower level.
+func searchLevel(start, step int, errAt func(int) int64) int {
 	var errs [MAX_LOOP_FILTER + 1]int64
 	var done [MAX_LOOP_FILTER + 1]bool
 	get := func(v int) int64 {
@@ -384,17 +401,13 @@ func searchLevel(start int, errAt func(int) int64) int {
 		return errs[v]
 	}
 	mid := start
-	step := 4
-	if mid >= 16 {
-		step = mid / 4
-	}
 	best := get(mid)
 	dir := 0
 	for step > 0 {
 		hi, lo := min(mid+step, MAX_LOOP_FILTER), max(mid-step, 0)
 		bestL := mid
 		if dir <= 0 && lo != mid {
-			if e := get(lo); e < best {
+			if e := get(lo); e <= best {
 				best, bestL = e, lo
 			}
 		}

@@ -200,8 +200,15 @@ type frameParams struct {
 	lfLevel    [4]int
 	lfSharp    int
 	txSelect   bool
-	reducedTx  bool
-	tiles      tiling
+	// CDEF (when the sequence enables it): cdef_damping_minus_3 + 3,
+	// cdef_bits, and each index's primary and secondary strengths (the
+	// secondary 0, 1, 2 or 4), luma's and chroma's.
+	cdefDamping int
+	cdefBits    int
+	cdefY       [8][2]int
+	cdefUV      [8][2]int
+	reducedTx   bool
+	tiles       tiling
 }
 
 // lossless reports whether the frame is coded losslessly.
@@ -253,7 +260,20 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 		w.f(uint32(f.lfSharp), 3) //nolint:gosec // small
 		w.flag(false)             // loop_filter_delta_enabled
 		if s.cdef {
-			panic("av1: cdef_params")
+			w.f(uint32(f.cdefDamping-3), 2) //nolint:gosec // 3..6
+			w.f(uint32(f.cdefBits), 2)      //nolint:gosec // 0..3
+			sec := func(v int) uint32 {
+				if v == 4 {
+					return 3
+				}
+				return uint32(v) //nolint:gosec // 0..2
+			}
+			for i := range 1 << uint(f.cdefBits) {
+				w.f(uint32(f.cdefY[i][0]), 4) //nolint:gosec // 0..15
+				w.f(sec(f.cdefY[i][1]), 2)
+				w.f(uint32(f.cdefUV[i][0]), 4) //nolint:gosec // 0..15
+				w.f(sec(f.cdefUV[i][1]), 2)
+			}
 		}
 	}
 	if s.restoration && !f.lossless() {

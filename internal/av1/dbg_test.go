@@ -102,3 +102,9 @@ func TestDbgEdgeReads(t *testing.T) {
 		}
 	}
 }
+
+// CDEF signalled, every strength zero.
+func TestDbgCdefSignal(t *testing.T) {
+	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+	checkDecodesWith(t, o, []*Source{testPicture(200, 136, 8, 1)}, func(e *Encoder) { e.seq.cdef = true })
+}

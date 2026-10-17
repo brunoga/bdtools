@@ -67,21 +67,24 @@ func (e *Encoder) SequenceHeader() []byte {
 
 // Encode codes a picture, giving its temporal unit.
 func (e *Encoder) Encode(src *Source) ([]byte, error) {
-	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true}
+	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true, cdefDamping: 3}
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	fp.tiles = newTiling(miCols, miRows, 0, 0)
 	f := e.newFrame(fp, src)
-	var tiles [][]byte
+	var recs [][]symOp
 	for tr := range fp.tiles.rows() {
 		for tc := range fp.tiles.cols() {
-			w := newSymbolWriter(fp.adapt)
 			t := newTileEnc(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
-				fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols), w)
+				fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols))
 			t.code()
-			tiles = append(tiles, w.finish())
+			recs = append(recs, t.w.ops)
 		}
 	}
 	f.deblock(e.lfFixed)
+	var tiles [][]byte
+	for _, ops := range recs {
+		tiles = append(tiles, pack(ops, fp.qIndex, fp.adapt, f.cdefIdx, fp.cdefBits))
+	}
 	e.frame = f
 	e.n++
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
@@ -124,6 +127,10 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	for p := range 3 {
 		sub := min(p, 1)
 		f.lfTx[p] = make([]uint8, (miCols>>sub)*(miRows>>sub))
+	}
+	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
+	for i := range f.cdefIdx {
+		f.cdefIdx[i] = -1
 	}
 	f.lossless = fp.lossless()
 	bd := (o.BitDepth - 8) >> 1

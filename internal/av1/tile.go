@@ -32,6 +32,9 @@ type frameEnc struct {
 	// Per 4x4 luma block (the mi grid, miCols wide).
 	miSize, yMode, uvMode, skip, txSize []uint8
 	txType                              []uint8 // TxTypes
+	// cdefIdx is each 64x64's cdef_idx: -1 where none is coded (all its
+	// blocks skipped), else what the frame's CDEF search chose.
+	cdefIdx []int8
 	// lfTx is LoopfilterTxSizes: each plane's transform size by 4x4 block
 	// of the plane, (miCols >> sub) wide.
 	lfTx     [3][]uint8
@@ -48,7 +51,8 @@ type tileEnc struct {
 	rowStart, rowEnd     int // in mi
 	colStart, colEnd     int
 	cdf                  *cdfs
-	w                    *symbolWriter
+	live, sbCDF          *cdfs // the coded CDFs, and a copy as the superblock starts
+	w                    *recorder
 	cost                 costCoder
 	aboveLevel, aboveDc  [3][]uint8 // by x4 of the plane
 	leftLevel, leftDc    [3][]uint8 // by y4 of the plane
@@ -61,8 +65,9 @@ type tileEnc struct {
 	levels               []int32
 	lv                   [32 * 32]uint8
 	cflL                 [32 * 32]int32
-	snaps                [8][4]*snapshot // by depth, a few each
+	snaps                [10][4]*snapshot // by depth, a few each
 	sbStart              snapshot
+	cdefDone             bool // the superblock's cdef_idx is coded
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -109,8 +114,10 @@ type partNode struct {
 	kids   [4]*partNode
 }
 
-func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int, w *symbolWriter) *tileEnc {
-	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: newCDFs(f.fp.qIndex), w: w}
+func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) *tileEnc {
+	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: newCDFs(f.fp.qIndex)}
+	t.w = &recorder{base: t.cdf}
+	t.live, t.sbCDF = t.cdf, new(cdfs)
 	for p := range 3 {
 		sub := 0
 		if p > 0 {
@@ -137,7 +144,9 @@ func (t *tileEnc) code() {
 		}
 		for c := t.colStart; c < t.colEnd; c += 16 {
 			t.clearDecoded(r, c)
+			t.cdefDone = false
 			t.save(&t.sbStart, r, c, BLOCK_64X64, false)
+			*t.sbCDF = *t.live
 			_, node := t.searchPartition(r, c, BLOCK_64X64, 0)
 			t.restore(&t.sbStart, false)
 			var keep [3][]uint16
@@ -316,10 +325,14 @@ func (t *tileEnc) writePartition(cd coder, r, c, bSize, part int) {
 	switch {
 	case hasRows && hasCols:
 		cd.symbol(part, cdf)
-	case hasCols:
-		cd.encode(b2i(part == PARTITION_SPLIT), splitOrHorz(cdf, bSize), 2)
-	case hasRows:
-		cd.encode(b2i(part == PARTITION_SPLIT), splitOrVert(cdf, bSize), 2)
+	case hasCols || hasRows:
+		if r, ok := cd.(*recorder); ok {
+			r.split(part == PARTITION_SPLIT, cdf, bSize, hasCols)
+		} else if hasCols {
+			cd.encode(b2i(part == PARTITION_SPLIT), splitOrHorz(cdf, bSize), 2)
+		} else {
+			cd.encode(b2i(part == PARTITION_SPLIT), splitOrVert(cdf, bSize), 2)
+		}
 	}
 }
 
@@ -332,8 +345,10 @@ func depthOf(bSize int) int {
 		return 1
 	case BLOCK_16X16:
 		return 2
+	case BLOCK_8X8:
+		return 3
 	}
-	return 3
+	return 4
 }
 
 // searchPartition decides the partition at (r, c) by rate and distortion,
@@ -347,7 +362,9 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	hasRows, hasCols := r+half < f.miRows, c+half < f.miCols
 	var cands []int
 	switch {
-	case bSize == BLOCK_8X8:
+	case bSize < BLOCK_8X8:
+		cands = []int{PARTITION_NONE}
+	case bSize == BLOCK_8X8 && dbgNo4x4:
 		cands = []int{PARTITION_NONE}
 	case dbgFixed > 0 && bSize > dbgFixed:
 		if hasRows && hasCols {

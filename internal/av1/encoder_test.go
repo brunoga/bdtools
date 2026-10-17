@@ -36,9 +36,19 @@ func testPicture(w, h, depth int, seed uint64) *Source {
 // encoder's reconstructions.
 func checkDecodes(t *testing.T, o EncoderOptions, pics []*Source) {
 	t.Helper()
+	checkDecodesWith(t, o, pics, nil)
+}
+
+// checkDecodesWith is checkDecodes with the encoder set up by setup (when
+// not nil), giving the bytes and the first picture's luma PSNR.
+func checkDecodesWith(t *testing.T, o EncoderOptions, pics []*Source, setup func(*Encoder)) (int, float64) {
+	t.Helper()
 	e, err := NewEncoder(o)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if setup != nil {
+		setup(e)
 	}
 	var units [][]byte
 	var recons [][3][]uint16
@@ -87,8 +97,10 @@ func checkDecodes(t *testing.T, o EncoderOptions, pics []*Source) {
 		}
 	}
 	peak := float64(int(1)<<uint(o.BitDepth) - 1)
-	t.Logf("%dx%d %d bits q %d: %d bytes, luma PSNR %.2f dB", o.Width, o.Height, o.BitDepth, o.QIndex, total,
-		10*math.Log10(peak*peak/(se/float64(o.Width*o.Height))))
+	psnr := 10 * math.Log10(peak*peak/(se/float64(o.Width*o.Height)))
+	t.Logf("%dx%d %d bits q %d: %d bytes, luma PSNR %.2f dB, loop filter %v sharpness %d", o.Width, o.Height, o.BitDepth, o.QIndex, total,
+		psnr, e.frame.fp.lfLevel, e.frame.fp.lfSharp)
+	return total, psnr
 }
 
 func TestEncodeDecodes(t *testing.T) {
