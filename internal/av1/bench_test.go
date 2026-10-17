@@ -118,6 +118,17 @@ func TestBenchSeq(t *testing.T) {
 		}
 	}
 	mini, _ := strconv.Atoi(os.Getenv("AV1MINIGOP"))
+	for env, v := range map[string]*int{"AV1INTERCANDS": &interCands, "AV1LUMACANDS": &lumaCands, "AV1CHROMACANDS": &chromaCands} {
+		if n, err := strconv.Atoi(os.Getenv(env)); err == nil && n > 0 {
+			old := *v
+			*v = n
+			defer func() { *v = old }()
+		}
+	}
+	if os.Getenv("AV1TPL") != "" {
+		dbgNoTPL = false
+		defer func() { dbgNoTPL = true }()
+	}
 	if os.Getenv("AV1TF") != "" {
 		dbgNoTF = false
 		defer func() { dbgNoTF = true }()

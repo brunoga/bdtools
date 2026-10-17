@@ -40,6 +40,8 @@ type frameJob struct {
 	frame *frameEnc
 	obu   []byte
 	recon *[3][]uint16
+	// sbQ is the superblocks' q indexes (the temporal model's), or nil
+	sbQ []int
 }
 
 // step is a planned step of the stream: a frame coded, or one shown from
@@ -49,6 +51,14 @@ type step struct {
 	showSlot int // with job nil
 	disp     int
 }
+
+// recentSources is how many source pictures are kept (for the temporal
+// model: a mini-GOP and the anchors before it).
+const recentSources = 40
+
+// dbgNoTPL codes every superblock at its frame's q. The temporal model
+// is off: on two 1080p disc clips it cost 1.5% BD-rate.
+var dbgNoTPL = true
 
 // dbgNoOverlay shows a filtered anchor itself.
 var dbgNoOverlay bool
@@ -87,6 +97,8 @@ func (e *Encoder) Encode(src *Source) ([]Unit, error) {
 		copy(c.Cr[y*cw:(y+1)*cw], src.Cr[y*src.StrideC:])
 	}
 	e.queue = append(e.queue, &frameJob{disp: e.nIn, src: c})
+	e.recent[e.nIn] = c
+	delete(e.recent, e.nIn-recentSources)
 	e.nIn++
 	return e.drain(false), nil
 }
@@ -128,6 +140,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		last.depth = 1
 		steps := []step{e.plan(last)}
 		e.pyramid(a, a+n, 2, byDisp, &steps)
+		e.tpl(steps)
 		e.run(steps, &out)
 	}
 	return out
