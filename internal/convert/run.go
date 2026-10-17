@@ -75,6 +75,8 @@ type Runner struct {
 	sink encoderSink
 	// flat is set for a 2D conversion: one picture, not a stereo pair.
 	flat bool
+	// sizeFeed samples the video for --video-size.
+	sizeFeed func() (sampleFeed, func(), error)
 	// xform crops and scales the pictures (--crop, --scale), once the
 	// first gives their size.
 	xform *picTransform
@@ -271,6 +273,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 			return err
 		}
 	}
+	r.sizeFeed = func() (sampleFeed, func(), error) { return r.discFeed(src, sel) }
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {
 		return err

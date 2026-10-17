@@ -118,6 +118,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 			"More: https://github.com/brunoga/bdtools/tree/main/cmd/bdtools#common-tasks\n\nflags:\n")
 		fs.PrintDefaults()
 	}
+	vsize := fs.String("video-size", "", "the video's size to aim at (4.5G, 700M, 3GiB): the CRF is found for it by encoding a few seconds at several places first")
 	startF := fs.String("start", "", "convert from this time of the title or file on: [[H:]M:]S, or 1h2m3s")
 	endF := fs.String("end", "", "convert up to this time (the end not included): as --start")
 	durF := fs.String("duration", "", "convert this long, from --start: as --start")
@@ -275,6 +276,14 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	o.ToneMap = *toneMap
+	if *vsize != "" {
+		n, err := convert.ParseSize(*vsize)
+		if err != nil {
+			fmt.Fprintln(stderr, "bdtools: --video-size", err)
+			return 2
+		}
+		o.VideoSize = n
+	}
 	for _, t := range []struct {
 		name string
 		v    *string

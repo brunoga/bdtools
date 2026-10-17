@@ -379,6 +379,7 @@ scheduler such as pipeliner retry it.
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--video-size` | — | The video's size to aim at (`4.5G`, `700M`, `3GiB`): the CRF is found for it first — see [A target size](#a-target-size) |
 | `--for` | — | A player's settings where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro` — see [Device presets](#device-presets) |
 | `--start`, `--end`, `--duration` | — | Convert part of the title or file: from `--start`, up to `--end` or for `--duration` (`[[H:]M:]S`, or `1h2m3s`); the sound, subtitles and chapters cut with the picture |
 | `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`; `auto` finds the black bars |
@@ -770,6 +771,22 @@ gave visibly fewer edge artefacts than centred, and down the two were
 alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
 made from ffmpeg's decodes of the two layers, and 28 dB from the base
 layer alone (that clip's enhancement layer brightens its credits).
+
+## A target size
+
+`--video-size` finds the CRF that brings the video to about a size, by
+encoding two seconds at ten places of the film with the conversion's own
+encoder and settings at a few CRFs before it starts (a minute or so on a
+GPU), and counting a GOP's IDR picture apart from the others as the film
+has them. The CRF is the next whole one that the places put at or under
+the size; the film comes within about a tenth of it, often under:
+
+```sh
+bdtools --input disc.iso --output film.mkv --video-size 8G
+```
+
+The sound and subtitles come on top. Not with `--codec av1` or
+`--dv-fel keep` yet.
 
 ## Device presets
 

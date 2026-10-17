@@ -244,8 +244,9 @@ func (r *Runner) resumeKey() (string, error) {
 		Scale     Scale `json:",omitempty"`
 		ToneMap   bool  `json:",omitempty"`
 		Trim      Trim  `json:",omitempty"`
+		VideoSize int64 `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ(), o.Crop, o.Scale, o.ToneMap, o.Trim}) // as resolved: a default may change
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ(), o.Crop, o.Scale, o.ToneMap, o.Trim, o.VideoSize}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}

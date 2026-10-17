@@ -911,6 +911,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 			return err
 		}
 	}
+	r.sizeFeed = func() (sampleFeed, func(), error) { return r.matroskaFeed(src, sel) }
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {
 		_ = g.f.Close()
