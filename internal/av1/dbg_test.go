@@ -132,9 +132,8 @@ func TestDbgWriteInter(t *testing.T) {
 	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
 	e, _ := NewEncoder(o)
 	var units [][]byte
-	for i := range 2 {
-		u, _ := e.Encode(testPicture(200, 136, 8, uint64(i+1)))
-		units = append(units, u)
+	for _, u := range encodeAll(t, e, []*Source{testPicture(200, 136, 8, 1), testPicture(200, 136, 8, 2)}) {
+		units = append(units, u.Data)
 	}
 	_ = os.WriteFile(os.Getenv("DBGOUT"), ivf(200, 136, 25, 1, units), 0o600)
 }

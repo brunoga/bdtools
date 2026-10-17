@@ -34,14 +34,26 @@ type EncoderOptions struct {
 	// Keyint is the key frame interval; 0 picks 250, 1 codes key frames
 	// only.
 	Keyint int
+	// MiniGOP is how many pictures a mini-GOP has (coded as a pyramid,
+	// the last first); 0 picks 8, 1 codes each picture from the one
+	// before.
+	MiniGOP int
 }
 
 // Encoder codes pictures.
 type Encoder struct {
 	o     EncoderOptions
 	seq   seqParams
-	n     int
 	frame *frameEnc
+	// queue is the pictures not coded yet; nIn counts the pictures in;
+	// pending is the coded OBUs of the temporal unit being made.
+	queue   []*frameJob
+	nIn     int
+	pending []byte
+	// keepRecon keeps each shown picture's reconstruction in its unit
+	// (tests).
+	keepRecon bool
+	recons    map[int]*[3][]uint16
 	// slots are the reference frame slots (the spec's eight).
 	slots [NUM_REF_FRAMES]*refFrameState
 	// lfFixed, when set, gives the loop filter levels and sharpness
@@ -63,7 +75,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.QIndex < 0 || o.QIndex > 255 {
 		return nil, errors.New("av1: q index 0..255")
 	}
-	e := &Encoder{o: o}
+	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
 		edgeFilter: true, filterIntra: true, cdef: true,
@@ -79,14 +91,13 @@ func (e *Encoder) SequenceHeader() []byte {
 	return appendOBU(nil, obuSequenceHeader, e.seq.sequenceHeader())
 }
 
-// Encode codes a picture, giving its temporal unit.
-func (e *Encoder) Encode(src *Source) ([]byte, error) {
-	keyint := e.o.Keyint
-	if keyint <= 0 {
-		keyint = 250
-	}
-	key := e.n%keyint == 0
-	fp := &frameParams{key: key, refresh: 1, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true, cdefDamping: 3}
+// codeFrame codes a frame (a key frame or an inter frame, shown or not,
+// as the job says), giving its frame OBU.
+func (e *Encoder) codeFrame(j *frameJob) []byte {
+	key := j.key
+	fp := &frameParams{key: key, show: j.show, refresh: j.refresh, refIdx: j.refIdx, orderHint: j.disp, adapt: true,
+		qIndex: j.q, txSelect: true, cdefDamping: 3}
+	src := j.src
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
 	if cl < 0 {
@@ -148,20 +159,17 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 	}
 	f.savedCDF = saved
 	e.frame = f
-	e.keep(f)
-	e.n++
+	e.keep(f, j.disp)
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
-	tu := appendOBU(nil, obuTemporalDelimiter, nil)
-	tu = appendOBU(tu, obuSequenceHeader, e.seq.sequenceHeader())
-	return appendOBU(tu, obuFrame, payload), nil
+	return appendOBU(nil, obuFrame, payload)
 }
 
 // dbgNoCDFCarry starts every frame from the default CDFs.
 var dbgNoCDFCarry bool
 
 // keep puts a coded frame in the reference slots it refreshes.
-func (e *Encoder) keep(f *frameEnc) {
-	ref := &refFrameState{cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
+func (e *Encoder) keep(f *frameEnc, disp int) {
+	ref := &refFrameState{disp: disp, cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
 	refresh := f.fp.refresh
 	if f.fp.key {
 		ref.frameType, refresh = KEY_FRAME, 0xff

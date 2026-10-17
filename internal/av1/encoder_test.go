@@ -50,18 +50,14 @@ func checkDecodesWith(t *testing.T, o EncoderOptions, pics []*Source, setup func
 	if setup != nil {
 		setup(e)
 	}
+	e.keepRecon = true
 	var units [][]byte
 	var recons [][3][]uint16
 	total := 0
-	for _, p := range pics {
-		u, err := e.Encode(p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		units = append(units, u)
-		total += len(u)
-		y, cb, cr := e.Recon()
-		recons = append(recons, [3][]uint16{y, cb, cr})
+	for _, u := range encodeAll(t, e, pics) {
+		units = append(units, u.Data)
+		total += len(u.Data)
+		recons = append(recons, *u.recon)
 	}
 	dec := dav1dDecode(t, ivf(o.Width, o.Height, 25, 1, units), o.Width, o.Height, o.BitDepth)
 	if len(dec) != len(pics) {
@@ -148,4 +144,36 @@ func shifted(p *Source, dx, dy int) *Source {
 		}
 	}
 	return q
+}
+
+// encodeAll codes pictures, the encoder flushed at the end.
+func encodeAll(t *testing.T, e *Encoder, pics []*Source) []Unit {
+	t.Helper()
+	var out []Unit
+	for _, p := range pics {
+		u, err := e.Encode(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, u...)
+	}
+	u, err := e.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(out, u...)
+}
+
+// A longer run: mini-GOPs cut by key frames, the last one short, the
+// slots reused.
+func TestEncodeGOPs(t *testing.T) {
+	for _, c := range []struct{ mini, keyint, n int }{{8, 12, 20}, {4, 0, 11}, {1, 5, 7}, {3, 0, 10}} {
+		o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: c.mini, Keyint: c.keyint}
+		p := testPicture(96, 64, 8, 3)
+		var pics []*Source
+		for i := range c.n {
+			pics = append(pics, shifted(p, i, i/3))
+		}
+		checkDecodes(t, o, pics)
+	}
 }

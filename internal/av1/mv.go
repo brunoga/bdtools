@@ -17,6 +17,7 @@ type refFrameState struct {
 	orderHint      int
 	miCols, miRows int
 	frameType      int
+	disp           int // its place in display order
 	// cdf is the frame's CDFs as kept for later frames (save_cdfs).
 	cdf *cdfs
 }

@@ -190,7 +190,8 @@ func (t *tiling) write(w *bitWriter, miCols, miRows int) {
 
 // frameParams is a frame header's settings.
 type frameParams struct {
-	key bool
+	key  bool
+	show bool // shown (else showable later, by show_existing_frame)
 	// Inter frames: the slots refreshed, the slot each of the seven
 	// references is, mv precision and the frame's interpolation filter.
 	refresh         uint8
@@ -235,7 +236,10 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	} else {
 		w.f(INTER_FRAME, 2)
 	}
-	w.flag(true) // show_frame
+	w.flag(f.show || f.key) // show_frame
+	if !f.show && !f.key {
+		w.flag(true) // showable_frame
+	}
 	if !f.key {
 		w.flag(false) // error_resilient_mode
 	}
@@ -321,6 +325,16 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 		}
 	}
 	return w.buf
+}
+
+// showExisting is the frame header OBU of a frame shown again
+// (show_existing_frame) from a slot.
+func showExisting(slot int) []byte {
+	var w bitWriter
+	w.flag(true)         // show_existing_frame
+	w.f(uint32(slot), 3) //nolint:gosec // frame_to_show_map_idx
+	w.trailing()
+	return appendOBU(nil, obuFrameHeader, w.buf)
 }
 
 // tileGroup is a frame OBU's tile group: its tiles, all but the last

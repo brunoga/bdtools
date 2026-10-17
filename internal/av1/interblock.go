@@ -81,8 +81,12 @@ func (t *tileEnc) predictBlock() {
 	}
 }
 
+// interRefs are the references inter blocks try.
+var interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
+
 // interCand is an inter mode to try.
 type interCand struct {
+	ref       int
 	mode, idx int
 	m         mv
 	est       float64
@@ -96,73 +100,19 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		return math.Inf(1), nil
 	}
 	t.setupBlock(r, c, size)
-	b, s := &t.b, &t.stack
-	b.isInter, b.refFrame, b.txSz = true, LAST_FRAME, int(maxTxSizeRect[size])
-	t.findMvStack(s, false, [2]int{LAST_FRAME, NONE})
-	sl := math.Sqrt(f.lambda)
+	b := &t.b
+	b.isInter, b.txSz = true, int(maxTxSizeRect[size])
 	var cands []interCand
-	cands = append(cands, interCand{mode: NEARESTMV, m: s.predMv(NEARESTMV, 0, 0)})
-	if lo, hi := s.refMvIdxRange(NEARMV); s.numMvFound > 1 {
-		for idx := lo; idx <= hi; idx++ {
-			cands = append(cands, interCand{mode: NEARMV, idx: idx, m: s.predMv(NEARMV, idx, 0)})
+	seen := map[*refFrameState]bool{}
+	for _, ref := range interRefs {
+		if r := f.refs[ref]; r == nil || seen[r] {
+			continue
 		}
+		seen[f.refs[ref]] = true
+		cands = t.interCandsFor(ref, cands)
 	}
-	cands = append(cands, interCand{mode: GLOBALMV, m: s.predMv(GLOBALMV, 0, 0)})
-	// NEWMV: a motion search, the vector's rate from RefMvIdx 0's
-	// prediction, then the RefMvIdx that codes it cheapest.
-	pred0 := s.predMv(NEWMV, 0, 0)
-	me := meBlock{ref: f.refs[LAST_FRAME], src: f.src[0], srcStride: f.stride[0], x: c * 4, y: r * 4,
-		w: int(blockWidth[size]), h: int(blockHeight[size]), bitDepth: f.bitDepth, filt: f.filt,
-		allowHP: f.fp.highPrecisionMV, cost: func(m mv) float64 {
-			t.cost.n = 0
-			t.writeMvDiff(&t.cost, mv{m.row - pred0.row, m.col - pred0.col})
-			return sl * float64(t.cost.n) / costScale
-		}}
-	starts := []mv{{}}
-	for i := range min(s.numMvFound, 4) {
-		starts = append(starts, s.refStackMv[i][0])
-	}
-	if m, _ := t.ms.search(&me, starts); true {
-		lo, hi := s.refMvIdxRange(NEWMV)
-		best, bestBits := lo, int64(math.MaxInt64)
-		for idx := lo; idx <= hi; idx++ {
-			b.yMode, b.refMvIdx, b.mv = NEWMV, idx, m
-			t.cost.n = 0
-			ctx, val, n := s.drlModes(NEWMV, idx)
-			for k := range n {
-				t.cost.symbol(val[k], t.cdf.drlMode[ctx[k]][:])
-			}
-			p := s.predMv(NEWMV, idx, 0)
-			t.writeMvDiff(&t.cost, mv{m.row - p.row, m.col - p.col})
-			if t.cost.n < bestBits {
-				best, bestBits = idx, t.cost.n
-			}
-		}
-		cands = append(cands, interCand{mode: NEWMV, idx: best, m: m})
-	}
-	if dbgInterModes != 0 {
-		var keep []interCand
-		for _, c := range cands {
-			if dbgInterModes>>uint(c.mode-NEARESTMV)&1 != 0 {
-				keep = append(keep, c)
-			}
-		}
-		cands = keep
-		if len(cands) == 0 {
-			return math.Inf(1), nil
-		}
-	}
-	// estimates
-	w, h := int(blockWidth[size]), int(blockHeight[size])
-	for i := range cands {
-		cd := &cands[i]
-		b.yMode, b.refMvIdx, b.mv = cd.mode, cd.idx, cd.m
-		t.setModes()
-		f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
-		satd := t.satd(0, c*4, r*4, w, h, t.interPred[0][:])
-		t.cost.n = 0
-		t.writeInterModes(&t.cost)
-		cd.est = float64(satd) + sl*float64(t.cost.n)/costScale
+	if len(cands) == 0 {
+		return math.Inf(1), nil
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
 	d := 5 + depthOf(min(size, BLOCK_64X64))
@@ -174,7 +124,8 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: LAST_FRAME, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m}
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m}
+		t.findMvStack(&t.stack, false, [2]int{cd.ref, NONE})
 		j := t.codeInter(dec, true)
 		if j < bestJ {
 			bestJ, bestDec = j, dec
@@ -183,6 +134,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	}
 	t.restore(best, true)
 	t.setupBlock(r, c, size)
+	t.findMvStack(&t.stack, false, [2]int{bestDec.refFrame, NONE})
 	t.setInterState(bestDec)
 	t.setModes()
 	t.setInfo()
@@ -411,4 +363,73 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	}
 	t.setModes()
 	t.setInfo()
+}
+
+// interCandsFor adds a reference's candidates, with their estimates:
+// NEARESTMV, NEARMV with each RefMvIdx, GLOBALMV, and NEWMV from a motion
+// search (its RefMvIdx the one that codes its vector cheapest).
+func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
+	f, b, s := t.f, &t.b, &t.stack
+	r, c, size := b.r, b.c, b.size
+	b.refFrame = ref
+	t.findMvStack(s, false, [2]int{ref, NONE})
+	sl := math.Sqrt(f.lambda)
+	first := len(cands)
+	cands = append(cands, interCand{ref: ref, mode: NEARESTMV, m: s.predMv(NEARESTMV, 0, 0)})
+	if lo, hi := s.refMvIdxRange(NEARMV); s.numMvFound > 1 {
+		for idx := lo; idx <= hi; idx++ {
+			cands = append(cands, interCand{ref: ref, mode: NEARMV, idx: idx, m: s.predMv(NEARMV, idx, 0)})
+		}
+	}
+	cands = append(cands, interCand{ref: ref, mode: GLOBALMV, m: s.predMv(GLOBALMV, 0, 0)})
+	pred0 := s.predMv(NEWMV, 0, 0)
+	me := meBlock{ref: f.refs[ref], src: f.src[0], srcStride: f.stride[0], x: c * 4, y: r * 4,
+		w: int(blockWidth[size]), h: int(blockHeight[size]), bitDepth: f.bitDepth, filt: f.filt,
+		allowHP: f.fp.highPrecisionMV, cost: func(m mv) float64 {
+			t.cost.n = 0
+			t.writeMvDiff(&t.cost, mv{m.row - pred0.row, m.col - pred0.col})
+			return sl * float64(t.cost.n) / costScale
+		}}
+	starts := []mv{{}}
+	for i := range min(s.numMvFound, 4) {
+		starts = append(starts, s.refStackMv[i][0])
+	}
+	m, _ := t.ms.search(&me, starts)
+	lo, hi := s.refMvIdxRange(NEWMV)
+	best, bestBits := lo, int64(math.MaxInt64)
+	for idx := lo; idx <= hi; idx++ {
+		t.cost.n = 0
+		ctx, val, n := s.drlModes(NEWMV, idx)
+		for k := range n {
+			t.cost.symbol(val[k], t.cdf.drlMode[ctx[k]][:])
+		}
+		p := s.predMv(NEWMV, idx, 0)
+		t.writeMvDiff(&t.cost, mv{m.row - p.row, m.col - p.col})
+		if t.cost.n < bestBits {
+			best, bestBits = idx, t.cost.n
+		}
+	}
+	cands = append(cands, interCand{ref: ref, mode: NEWMV, idx: best, m: m})
+	if dbgInterModes != 0 {
+		keep := cands[:first]
+		for _, cd := range cands[first:] {
+			if dbgInterModes>>uint(cd.mode-NEARESTMV)&1 != 0 {
+				keep = append(keep, cd)
+			}
+		}
+		cands = keep
+	}
+	// estimates
+	w, h := int(blockWidth[size]), int(blockHeight[size])
+	for i := first; i < len(cands); i++ {
+		cd := &cands[i]
+		b.yMode, b.refMvIdx, b.mv = cd.mode, cd.idx, cd.m
+		t.setModes()
+		f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
+		satd := t.satd(0, c*4, r*4, w, h, t.interPred[0][:])
+		t.cost.n = 0
+		t.writeInterModes(&t.cost)
+		cd.est = float64(satd) + sl*float64(t.cost.n)/costScale
+	}
+	return cands
 }

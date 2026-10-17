@@ -32,7 +32,9 @@ func TestProfSeq(t *testing.T) {
 		for i := range src.Cb {
 			src.Cb[i], src.Cr[i] = uint16(p[w*h+i]), uint16(p[w*h*5/4+i])
 		}
-		u, _ := e.Encode(src)
-		t.Logf("picture %d: %d bytes", k, len(u))
+		units, _ := e.Encode(src)
+		for _, u := range units {
+			t.Logf("picture %d: %d bytes", k, len(u.Data))
+		}
 	}
 }

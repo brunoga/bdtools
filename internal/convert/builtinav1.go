@@ -60,13 +60,33 @@ func (b *builtinAV1) Encode(fill func(*gpu.Picture)) error {
 	ys := w * h * bps
 	fill(&gpu.Picture{Y: b.pic[:ys], UV: b.pic[ys:], Pitch: w * bps, Depth: depth})
 	unpackNV(&b.nv, b.pic, w, h, bps)
-	tu, err := b.enc.Encode(&b.src)
+	units, err := b.enc.Encode(&b.src)
 	if err == nil {
-		_, err = b.w.Write(tu)
+		err = b.write(units)
 	}
 	b.err = err
 	return err
 }
 
-// Close finishes the stream: every picture is coded as it comes.
-func (b *builtinAV1) Close() error { return b.err }
+func (b *builtinAV1) write(units []av1.Unit) error {
+	for _, u := range units {
+		if _, err := b.w.Write(u.Data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Close finishes the stream: the pictures held back (a mini-GOP is coded
+// once its pictures are in) coded.
+func (b *builtinAV1) Close() error {
+	if b.err != nil {
+		return b.err
+	}
+	units, err := b.enc.Flush()
+	if err == nil {
+		err = b.write(units)
+	}
+	b.err = err
+	return err
+}

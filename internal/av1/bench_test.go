@@ -80,13 +80,11 @@ func benchOne(t *testing.T, file string, q, w, h int) string {
 		return ""
 	}
 	start := time.Now()
-	u, err := e.Encode(src)
-	if err != nil {
-		t.Error(err)
-		return ""
-	}
+	e.keepRecon = true
+	units := encodeAll(t, e, []*Source{src})
 	el := time.Since(start)
-	y, _, _ := e.Recon()
+	u := units[0].Data
+	y := units[0].recon[0]
 	var se float64
 	for i, v := range y {
 		d := float64(v) - float64(src.Y[i])
@@ -126,6 +124,8 @@ func TestBenchSeq(t *testing.T) {
 			}
 			start := time.Now()
 			total, seAll := 0, 0.0
+			e.keepRecon = true
+			var pics []*Source
 			for k := range n {
 				p := b[k*w*h*3/2:]
 				src := &Source{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4), StrideY: w, StrideC: w / 2}
@@ -135,15 +135,13 @@ func TestBenchSeq(t *testing.T) {
 				for i := range src.Cb {
 					src.Cb[i], src.Cr[i] = uint16(p[w*h+i]), uint16(p[w*h*5/4+i])
 				}
-				u, err := e.Encode(src)
-				if err != nil {
-					t.Fatal(err)
-				}
-				total += len(u)
-				y, _, _ := e.Recon()
+				pics = append(pics, src)
+			}
+			for k, u := range encodeAll(t, e, pics) {
+				total += len(u.Data)
 				var se float64
-				for i, v := range y {
-					d := float64(v) - float64(src.Y[i])
+				for i, v := range u.recon[0] {
+					d := float64(v) - float64(pics[k].Y[i])
 					se += d * d
 				}
 				seAll += se
