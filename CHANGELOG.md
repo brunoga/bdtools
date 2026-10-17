@@ -93,6 +93,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (codec, depth, Dolby Vision form, 3D layout, subtitles as text), each
   only where the command line gives none.
 
+- `--video-size 8G`: the CRF found for a video size before the conversion,
+  from two seconds encoded at ten places with the conversion's own
+  encoder at a few CRFs (a GOP's IDR picture counted apart): within about
+  a tenth of the size on a disc's film, usually under.
+
 ### Fixed
 
 - A resumed conversion now starts over when `--crop`, `--scale`,

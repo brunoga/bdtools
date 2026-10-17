@@ -42,7 +42,10 @@ func (e *encodeError) Unwrap() error { return e.err }
 // frames never touch the disk: for a feature film that is hundreds of
 // gigabytes. keep, when set, decides by timestamp which decoded pictures
 // are output. It returns the segments, in order.
-func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep func(int64) bool) ([]string, error) {
+// newSink opens the encoder the options ask for, with the verb the
+// progress reports its pictures by (keep: which pictures a copied left
+// eye keeps).
+func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSink, string, error) {
 	var (
 		sink encoderSink
 		verb = "decoded"
@@ -64,7 +67,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		case EncoderSoftware:
 			bin, err := r.resolve(toolX264)
 			if err != nil {
-				return nil, err
+				return nil, "", err
 			}
 			s.bin = bin
 		case EncoderBuiltin:
@@ -102,7 +105,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		// set up alike for both layers.
 		bin, err := r.resolve(toolX265)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", errNoX265, err)
+			return nil, "", fmt.Errorf("%w: %w", errNoX265, err)
 		}
 		preset := r.Opts.Preset
 		sink = &gpuSink{r: r, open: func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) {
@@ -113,10 +116,18 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	default:
 		bin, err := r.resolve(encoderTool(r.Opts.Encoder, r.Opts.Codec, r.Opts.EncodesViaFFmpeg()))
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		sink = &programSink{r: r, ctx: ctx, bin: bin}
 		r.Report.Report("decoding and encoding (%s, %s)", r.Opts.Codec, r.Opts.Encoder)
+	}
+	return sink, verb, nil
+}
+
+func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep func(int64) bool) ([]string, error) {
+	sink, verb, err := r.newSink(ctx, keep)
+	if err != nil {
+		return nil, err
 	}
 	key, err := r.resumeKey()
 	if err != nil {
@@ -233,6 +244,32 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			r.burnFrameDur = time.Duration(int64(time.Second) * int64(den) / int64(num))
 			r.fpsNum, r.fpsDen = num, den
 			prog.begin(num, den, skip)
+			if r.Opts.VideoSize > 0 && r.sizeFeed != nil {
+				feed, closeFeed, err := r.sizeFeed()
+				if err != nil {
+					return fmt.Errorf("--video-size: %w", err)
+				}
+				// The places within the part converted.
+				length, lo, hi := r.length, 0.0, 1.0
+				if !r.Opts.Trim.IsZero() && r.length > 0 {
+					end := r.Opts.Trim.End
+					if end == 0 || end > r.length {
+						end = r.length
+					}
+					length = end - r.Opts.Trim.Start
+					lo, hi = r.Opts.Trim.Start.Seconds()/r.length.Seconds(), end.Seconds()/r.length.Seconds()
+				}
+				within := func(frac float64) (func() ([]byte, []byte, int64, error), func(), error) {
+					return feed(lo + (hi-lo)*frac)
+				}
+				pictures := length.Seconds() * float64(num) / float64(den)
+				crf, err := r.estimateCRF(ctx, r.Selected.Base, within, pictures, num, den)
+				closeFeed()
+				if err != nil {
+					return fmt.Errorf("--video-size: %w", err)
+				}
+				r.Opts.CRF = crf
+			}
 		}
 		n++
 		if sf.hdr10Plus != nil {

@@ -124,6 +124,9 @@ type Options struct {
 	// ToneMap makes an HDR picture SDR (BT.709), after any crop and
 	// scaling: see tonemap.go.
 	ToneMap bool
+	// VideoSize, when set, is the video's size to aim at, in bytes: the
+	// CRF is found for it (see videosize.go).
+	VideoSize int64
 	// Trim converts part of the source (--start, --end): see trim.go.
 	Trim Trim
 	// SubsOCR reads each PGS subtitle track's pictures as text: a text
@@ -335,6 +338,16 @@ func (o Options) Validate(goos string) error {
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
 			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+	}
+	if o.VideoSize > 0 {
+		switch {
+		case o.Remux || o.Encoder == EncoderCopy:
+			return fmt.Errorf("--video-size encodes the video to a size: a remux or a copy keeps it as it is")
+		case o.Codec == CodecAV1:
+			return fmt.Errorf("--video-size with --codec av1: not yet")
+		case o.DVFEL.layered():
+			return fmt.Errorf("--video-size with --dv-fel %s: not yet (the enhancement layer is a stream of its own)", o.DVFEL)
+		}
 	}
 	if !o.Trim.IsZero() {
 		switch {
