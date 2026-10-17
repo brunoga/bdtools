@@ -13,7 +13,7 @@ import (
 )
 
 // interCands is how many inter candidates are coded in full.
-var interCands = 2
+var interCands = 4
 
 // Debugging: dbgInterModes keeps the inter modes of its bits (1 <<
 // (mode - NEARESTMV)); dbgForceInter prefers any inter coding to intra.

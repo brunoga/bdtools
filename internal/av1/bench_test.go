@@ -125,6 +125,10 @@ func TestBenchSeq(t *testing.T) {
 			defer func() { *v = old }()
 		}
 	}
+	if os.Getenv("AV1NOPRUNE") != "" {
+		dbgNoPrune = true
+		defer func() { dbgNoPrune = false }()
+	}
 	if os.Getenv("AV1TPL") != "" {
 		dbgNoTPL = false
 		defer func() { dbgNoTPL = true }()
