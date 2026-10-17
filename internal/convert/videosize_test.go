@@ -89,3 +89,27 @@ func TestRunnerVideoSize(t *testing.T) {
 		t.Errorf("asked for %d bytes, got %d (%.2f)\n%s", plain/2, got, r, strings.Join(lines, "\n"))
 	}
 }
+
+// --compare: a conversion measured against its source; the source against
+// itself is perfect.
+func TestCompare(t *testing.T) {
+	work := t.TempDir()
+	src := filepath.Join(work, "src.mkv")
+	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2",
+		"-c:v", "libx264", "-crf", "12", src); err != nil {
+		t.Skipf("could not build the source: %v", err)
+	}
+	o := DefaultOptions()
+	o.Decoder, o.TempDir = DecoderCPU, t.TempDir()
+	same, err := Compare(context.Background(), CurrentGOOS, o, src, src, 0, 1, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.Pictures != 48 || same.PSNR.Min < 60 || same.SSIM.Min < 0.9999 || same.VMAF.Mean < 97 {
+		t.Errorf("the source against itself: %d pictures, PSNR %v, SSIM %v, VMAF %v", same.Pictures, same.PSNR, same.SSIM, same.VMAF)
+	}
+	every, err := Compare(context.Background(), CurrentGOOS, o, src, src, 0, 4, func(string, ...any) {})
+	if err != nil || every.Pictures != 12 {
+		t.Errorf("every 4th: %d pictures, %v", every.Pictures, err)
+	}
+}

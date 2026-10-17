@@ -102,6 +102,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--output` a directory, under the same paths, noting what is done;
   `--watch` goes on converting what arrives.
 
+- `--compare OUTPUT` (with `--input` the source): PSNR, SSIM and VMAF
+  measured here, picture by picture (internal/vmaf: libvmaf's integer VIF,
+  ADM and motion extractors and its v0.6.1 models ported to Go, and its
+  float SSIM), the same numbers its `vmaf` tool gives, to the digit; both
+  videos decoded by the conversion's own decoders. Means, harmonic means,
+  1st percentiles and worst pictures, or every picture to a CSV.
+
 ### Fixed
 
 - A resumed conversion now starts over when `--crop`, `--scale`,

@@ -122,6 +122,10 @@ func run(argv []string, stdout, stderr *os.File) int {
 	startF := fs.String("start", "", "convert from this time of the title or file on: [[H:]M:]S, or 1h2m3s")
 	endF := fs.String("end", "", "convert up to this time (the end not included): as --start")
 	durF := fs.String("duration", "", "convert this long, from --start: as --start")
+	compareF := fs.String("compare", "", "compare this file (an output) with --input (its source), and stop: PSNR, SSIM and VMAF, measured here as libvmaf measures them")
+	compareSkip := fs.Int("compare-skip", 0, "with --compare: source pictures before the output's first")
+	compareEvery := fs.Int("compare-every", 1, "with --compare: measure one picture in this many")
+	compareCSV := fs.String("compare-csv", "", "with --compare: each picture's measures to this CSV file")
 	watch := fs.Bool("watch", false, "with --input a directory: go on converting the sources that arrive in it")
 	batchExt := fs.String("ext", "", "with --input a directory: the outputs' kind (mkv, mp4, mov; default mkv, or the --for device's)")
 	forDev := fs.String("for", "", "a player's settings, where the command line gives none: "+convert.DeviceNames())
@@ -133,6 +137,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	})
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if *compareF != "" {
+		return runCompare(*input, *compareF, *compareSkip, *compareEvery, *compareCSV, *tempDir, *quiet, stdout, stderr)
 	}
 	if *input != "" && isBatch(*input) {
 		ext := ".mkv"
