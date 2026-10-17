@@ -379,6 +379,7 @@ scheduler such as pipeliner retry it.
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--compare` | — | Compare this output with `--input`, its source, and stop: PSNR, SSIM and VMAF measured here — see [Measuring a conversion](#measuring-a-conversion); `--compare-skip`, `--compare-every`, `--compare-csv` |
 | `--watch`, `--ext` | — | With `--input` a directory (a batch): go on converting what arrives in it; the outputs' kind (`mkv`, `mp4`, `mov`) — see [Batches](#batches) |
 | `--video-size` | — | The video's size to aim at (`4.5G`, `700M`, `3GiB`): the CRF is found for it first — see [A target size](#a-target-size) |
 | `--for` | — | A player's settings where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro` — see [Device presets](#device-presets) |
@@ -772,6 +773,26 @@ gave visibly fewer edge artefacts than centred, and down the two were
 alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
 made from ffmpeg's decodes of the two layers, and 28 dB from the base
 layer alone (that clip's enhancement layer brightens its credits).
+
+## Measuring a conversion
+
+`--compare` measures an output against its source, picture by picture,
+with no other tool: both decoded by the decoders a conversion uses (a
+Dolby Vision film's layers composed), the luma at the deeper of the two
+depths, the output scaled up to the source's size if it is smaller, and
+measured as Netflix's libvmaf measures: VMAF (its v0.6.1 model, the 4K one
+above 1080 lines), PSNR and SSIM, the same numbers its `vmaf` tool prints.
+
+```sh
+bdtools --input disc.iso --compare film.mkv
+bdtools --input disc.iso --compare film.mkv --compare-every 10 --compare-csv film.csv
+```
+
+It prints each measure's mean, harmonic mean (VMAF's usual single
+number), 1st percentile and worst picture; `--compare-csv` writes every
+picture's. The pictures are compared from the start; `--compare-skip`
+drops source pictures before the output's first (an output trimmed with
+`--start`).
 
 ## Batches
 
