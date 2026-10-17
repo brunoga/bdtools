@@ -120,7 +120,10 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	fp.tiles = newTiling(miCols, miRows, cl, rl)
 	if !key {
 		fp.highPrecisionMV = fp.qIndex < 128
-		fp.interpFilter = EIGHTTAP
+		fp.interpFilter = SWITCHABLE
+		if dbgNoSwitchable {
+			fp.interpFilter = EIGHTTAP
+		}
 	}
 	if (e.sbQHook != nil || j.sbQ != nil) && fp.qIndex > 0 {
 		fp.deltaQ = true
@@ -156,7 +159,10 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			fp.skipModePresent, fp.skipModeFrame = true, frames
 		}
 		f.inter = fi
-		f.filt = [2]int{fp.interpFilter, fp.interpFilter}
+		f.filt = [2]int{EIGHTTAP, EIGHTTAP} // the motion search's
+		if fp.interpFilter != SWITCHABLE {
+			f.filt = [2]int{fp.interpFilter, fp.interpFilter}
+		}
 	}
 	recs := make([][]symOp, fp.tiles.rows()*fp.tiles.cols())
 	var wg sync.WaitGroup
@@ -243,7 +249,7 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	for i := range f.refFrames[0] {
 		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
 	}
-	f.isInter, f.skipMode = make([]uint8, n), make([]uint8, n)
+	f.isInter, f.skipMode, f.interp = make([]uint8, n), make([]uint8, n), make([]uint8, n)
 	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
 	for i := range f.cdefIdx {
 		f.cdefIdx[i] = -1

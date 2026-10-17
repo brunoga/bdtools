@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra bool
+var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra, dbgNoSwitchable bool
 var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode, dbgNoVarTx bool
 
 // lumaCands is how many luma modes are coded in full.
@@ -55,6 +55,7 @@ func (t *tileEnc) setModes() {
 				if b.isInter {
 					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), int8(b.refFrame2) //nolint:gosec // references
 					f.mvs[0][i], f.mvs[1][i], f.isInter[i] = b.mv, b.mv2, 1
+					f.interp[i] = uint8(b.interp) //nolint:gosec // a filter
 				} else {
 					f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
 					f.mvs[0][i], f.isInter[i] = mv{}, 0

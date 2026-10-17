@@ -300,9 +300,11 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	w.flag(false) // render_and_frame_size_different
 	if !f.key {
 		w.flag(f.highPrecisionMV)
-		w.flag(false)                  // is_filter_switchable
-		w.f(uint32(f.interpFilter), 2) //nolint:gosec // a filter
-		w.flag(false)                  // is_motion_mode_switchable
+		w.flag(f.interpFilter == SWITCHABLE) // is_filter_switchable
+		if f.interpFilter != SWITCHABLE {
+			w.f(uint32(f.interpFilter), 2) //nolint:gosec // a filter
+		}
+		w.flag(false) // is_motion_mode_switchable
 	}
 	if f.adapt {
 		w.flag(false) // disable_frame_end_update_cdf

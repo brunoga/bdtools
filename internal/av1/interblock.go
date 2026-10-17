@@ -55,8 +55,10 @@ func (t *tileEnc) writeInterModes(cd coder) {
 	t.writeRefFrames(cd)
 	if t.isCompound() {
 		t.writeCompoundModes(cd)
+		t.writeInterpFilter(cd)
 		return
 	}
+	defer t.writeInterpFilter(cd)
 	c := t.cdf
 	cd.symbol(b2i(b.yMode != NEWMV), c.newMv[s.newMvContext][:])
 	if b.yMode != NEWMV {
@@ -92,6 +94,7 @@ var interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
 
 // interCand is an inter mode to try.
 type interCand struct {
+	interp    int // the interpolation filter
 	ref, ref2 int // ref2 NONE for a single reference
 	m2        mv
 	mode, idx int
@@ -162,7 +165,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2}
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
 		j := t.codeInter(dec, true)
 		if j < bestJ {
@@ -196,6 +199,7 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b.isInter, b.refFrame, b.yMode, b.refMvIdx, b.mv = true, dec.refFrame, dec.yMode, dec.refMvIdx, dec.mv
 	b.refFrame2, b.mv2 = dec.refFrame2, dec.mv2
 	b.skipMode = dec.skipMode
+	b.interp = dec.interp
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
 	}
@@ -493,12 +497,23 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.refFrame2 = NONE
 		}
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
-		t.setModes()
-		f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
-		satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
-		t.cost.n = 0
-		t.writeInterModes(&t.cost)
-		cd.est = float64(satd) + sl*float64(t.cost.n)/costScale
+		b.interp = EIGHTTAP
+		filters := []int{EIGHTTAP}
+		if t.needsInterpFilter() && !dbgNoSwitchable {
+			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}
+		}
+		cd.est, cd.interp = math.Inf(1), EIGHTTAP
+		for _, fl := range filters {
+			b.interp = fl
+			t.setModes()
+			f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
+			satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
+			t.cost.n = 0
+			t.writeInterModes(&t.cost)
+			if e := float64(satd) + sl*float64(t.cost.n)/costScale; e < cd.est {
+				cd.est, cd.interp = e, fl
+			}
+		}
 	}
 }
 
@@ -645,4 +660,47 @@ func (t *tileEnc) writeVarTx(cd coder, dec *blockDec, row, col, txSz, depth int,
 			t.writeVarTx(cd, dec, row+i, col+k, sub, depth+1, cur)
 		}
 	}
+}
+
+// needsInterpFilter is needs_interp_filter (global motion IDENTITY).
+func (t *tileEnc) needsInterpFilter() bool {
+	b := &t.b
+	if b.skipMode || t.f.fp.interpFilter != SWITCHABLE {
+		return false
+	}
+	large := min(blockWidth[b.size], blockHeight[b.size]) >= 8
+	return !large || (b.yMode != GLOBALMV && b.yMode != GLOBAL_GLOBALMV)
+}
+
+// writeInterpFilter is interp_filter (one: no dual filter).
+func (t *tileEnc) writeInterpFilter(cd coder) {
+	f, b := t.f, &t.b
+	if !t.needsInterpFilter() {
+		return
+	}
+	ctx := b2i(t.isCompound()) * 4
+	lt, at := 3, 3
+	if b.availL {
+		i := f.mi(b.r, b.c-1)
+		if int(f.refFrames[0][i]) == b.refFrame || int(f.refFrames[1][i]) == b.refFrame {
+			lt = int(f.interp[i])
+		}
+	}
+	if b.availU {
+		i := f.mi(b.r-1, b.c)
+		if int(f.refFrames[0][i]) == b.refFrame || int(f.refFrames[1][i]) == b.refFrame {
+			at = int(f.interp[i])
+		}
+	}
+	switch {
+	case lt == at:
+		ctx += lt
+	case lt == 3:
+		ctx += at
+	case at == 3:
+		ctx += lt
+	default:
+		ctx += 3
+	}
+	cd.symbol(b.interp, t.cdf.interpFilter[ctx][:])
 }

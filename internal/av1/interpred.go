@@ -330,6 +330,10 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 		c := 0
 		for x := 0; x < num4x4W*4; x += predW {
 			i := f.mi(candRow+r, candCol+c)
+			filt := filt
+			if f.fp.interpFilter == SWITCHABLE {
+				filt = [2]int{int(f.interp[i]), int(f.interp[i])}
+			}
 			if f.refFrames[1][i] > INTRA_FRAME {
 				predictCompound(refs, plane, baseX+x, baseY+y, predW, predH, [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])},
 					[2]mv{f.mvs[0][i], f.mvs[1][i]}, filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)

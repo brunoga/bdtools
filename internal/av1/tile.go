@@ -39,6 +39,7 @@ type frameEnc struct {
 	refFrames [2][]int8
 	mvs       [2][]mv
 	isInter   []uint8
+	interp    []uint8 // InterpFilters (both directions: no dual filter)
 	skipMode  []uint8
 	inter     *interFrameInfo                      // inter frames' header values (nil for key frames)
 	refs      [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
@@ -131,6 +132,7 @@ type blockState struct {
 	// and its motion vector
 	refFrame2  int
 	mv2        mv
+	interp     int // its interpolation filter
 	filterMode int // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
@@ -154,8 +156,9 @@ type blockDec struct {
 	filterMode      int
 	isInter         bool
 	refFrame        int
-	refFrame2       int
+	interp          int
 	mv, mv2         mv
+	refFrame2       int
 	refMvIdx        int
 	skip            bool   // an inter block coded without residual
 	skipMode        bool   // coded as skip_mode
@@ -434,7 +437,7 @@ func (t *tileEnc) clearDecoded(r, c int) {
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [8][]uint8
+	mi         [9][]uint8
 	refs       [2][]int8
 	mvs        [2][]mv
 	above, aDc [3][16]uint8
@@ -511,9 +514,9 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	s.decoded = t.decoded
 }
 
-func (t *tileEnc) miArrays() [8][]uint8 {
+func (t *tileEnc) miArrays() [9][]uint8 {
 	f := t.f
-	return [8][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode}
+	return [9][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp}
 }
 
 // restore puts a snapshot back.
