@@ -120,6 +120,9 @@ type Options struct {
 	// transform.go.
 	Crop  Crop
 	Scale Scale
+	// ToneMap makes an HDR picture SDR (BT.709), after any crop and
+	// scaling: see tonemap.go.
+	ToneMap bool
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
 	// on its own. A source with no MVC dependent view is converted so in
@@ -323,6 +326,16 @@ func (o Options) Validate(goos string) error {
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
 			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+	}
+	if o.ToneMap {
+		switch {
+		case o.Remux:
+			return fmt.Errorf("--tonemap changes the picture: a remux keeps it as it is")
+		case o.Encoder == EncoderCopy:
+			return fmt.Errorf("--tonemap changes the picture: --encoder copy keeps it as it is")
+		case o.DVFEL.layered():
+			return fmt.Errorf("--tonemap with --dv-fel %s: an SDR picture has no Dolby Vision layers; compose the enhancement layer (the default) or drop it", o.DVFEL)
+		}
 	}
 	if !o.Crop.IsZero() || !o.Scale.IsZero() {
 		switch {

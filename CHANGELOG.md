@@ -60,6 +60,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   anything is cropped (a fade does not count; a film whose shape changes
   keeps its largest picture). A few seconds for a disc: 138 rows above and
   below on Godzilla vs. Kong's 2.39:1, 15 columns at the sides of Hugo.
+- `--tonemap`: an HDR picture (HDR10, HLG, Dolby Vision composed, HDR10+)
+  made SDR, BT.709 with BT.1886's gamma. BT.2390's EETF on each pixel's
+  max(R,G,B) in the PQ domain (hue and saturation kept), SDR white at
+  HDR's reference white (203 cd/m²), bending from each shot's peak where
+  the source gives one (Dolby Vision level 1, HDR10+'s MaxSCL), else
+  MaxCLL or the mastering peak; out-of-gamut colours desaturated toward
+  their luminance, hue kept; chroma resited to 4:2:0. No HDR metadata,
+  RPU or enhancement layer is carried. A 4K Dolby Vision film cropped,
+  scaled to 1080p and tone mapped converts at 16.6 fps with the encoder
+  here.
 
 ### Fixed
 

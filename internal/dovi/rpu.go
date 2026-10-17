@@ -692,3 +692,22 @@ func (u *RPU) SetActiveArea(l, r, t, b int) {
 		}
 	}
 }
+
+// Brightness is the shot's brightness as the RPU's level 1 metadata gives
+// it: its darkest, brightest and average pixels' max(R,G,B), as 12-bit PQ
+// codes. ok is false when the RPU has none.
+func (u *RPU) Brightness() (minPQ, maxPQ, avgPQ int, ok bool) {
+	if u.DM == nil {
+		return 0, 0, 0, false
+	}
+	for _, blocks := range [2][]ExtBlock{u.DM.CMv29, u.DM.CMv40} {
+		for _, e := range blocks {
+			if e.Level == 1 && len(e.Payload) >= 5 {
+				p := e.Payload
+				v := uint64(p[0])<<32 | uint64(p[1])<<24 | uint64(p[2])<<16 | uint64(p[3])<<8 | uint64(p[4])
+				return int(v >> 28 & 0xfff), int(v >> 16 & 0xfff), int(v >> 4 & 0xfff), true
+			}
+		}
+	}
+	return 0, 0, 0, false
+}

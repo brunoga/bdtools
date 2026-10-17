@@ -302,3 +302,58 @@ func av1MetadataOBU(typ byte, payload []byte) []byte {
 	}
 	return append(out, body...)
 }
+
+// HDR10PlusPeak is the brightest a scene's pixels are, in cd/m², as its
+// HDR10+ metadata (a T.35 payload, SMPTE ST 2094-40) gives it: the first
+// window's largest maxscl. ok is false when the payload says nothing.
+func HDR10PlusPeak(t35 []byte) (nits float64, ok bool) {
+	if !IsHDR10Plus(t35) {
+		return 0, false
+	}
+	r := &bitReader{b: t35[len(hdr10PlusPrefix):]}
+	r.u(8) // application_version
+	windows := int(r.u(2))
+	for range windows - 1 {
+		// window_upper_left_corner_x, y, lower_right x, y (16 each), centre
+		// x, y (16), rotation angle (8), semimajor, semiminor (16), axes
+		// (16), overlap process option (1).
+		r.u(16 * 4)
+		r.u(16 * 2)
+		r.u(8)
+		r.u(16 * 3)
+		r.u(1)
+	}
+	r.u(27)          // targeted_system_display_maximum_luminance
+	if r.u(1) == 1 { // targeted_system_display_actual_peak_luminance_flag
+		rows, cols := int(r.u(5)), int(r.u(5))
+		r.u(4 * rows * cols)
+	}
+	var peak uint64
+	for range 3 {
+		peak = max(peak, r.u(17))
+	}
+	if r.err || peak == 0 {
+		return 0, false
+	}
+	return float64(peak) / 10, true
+}
+
+// bitReader reads bits, most significant first.
+type bitReader struct {
+	b   []byte
+	pos int
+	err bool
+}
+
+func (r *bitReader) u(n int) uint64 {
+	var v uint64
+	for range n {
+		if r.pos >= 8*len(r.b) {
+			r.err = true
+			return 0
+		}
+		v = v<<1 | uint64(r.b[r.pos>>3]>>(7-r.pos&7)&1)
+		r.pos++
+	}
+	return v
+}

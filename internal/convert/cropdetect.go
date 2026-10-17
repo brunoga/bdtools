@@ -314,4 +314,3 @@ func (r *Runner) resolveCrop(video Track, feed sampleFeed, done func(), err erro
 	r.Opts.Crop = c
 	return nil
 }
-

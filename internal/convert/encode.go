@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -163,14 +164,21 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
 			r.Opts.Crop = Crop{}
 		}
-		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero()) {
+		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
 			w, h, _ := sf.size()
 			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
 			if err != nil {
 				return err
 			}
+			if r.Opts.ToneMap {
+				if err := r.setupToneMap(t, sf, src); err != nil {
+					return err
+				}
+			}
 			r.xform = t
-			r.Report.Report("%s", t.describe())
+			if d := t.describe(); d != "" {
+				r.Report.Report("%s", d)
+			}
 		}
 		if r.xform != nil {
 			var err error
@@ -281,6 +289,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	}
 	decodeErrs := src.errors()
 	r.hdrStatic = src.hdrStatic()
+	if r.xform != nil && r.xform.tm != nil {
+		r.hdrStatic = hdr.Static{} // SDR now
+	}
 	switch {
 	case n == 0:
 		return nil, fmt.Errorf("the video decoded to no frames")

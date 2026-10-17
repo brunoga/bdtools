@@ -62,6 +62,9 @@ func (r *Runner) keepRPU(n int64, nal []byte) {
 // carryDolbyVision gives the video track the Dolby Vision configuration
 // record players look for, and a conversion's frames their RPUs.
 func (r *Runner) carryDolbyVision(v *mkv.VideoSource, num, den int) error {
+	if r.xform != nil && r.xform.tm != nil {
+		return nil // tone mapped: SDR
+	}
 	cfg := r.dovi
 	if cfg == nil && r.felLayered {
 		c, err := r.carryLayers(v, num, den)

@@ -131,7 +131,7 @@ func TestParseCropAndScale(t *testing.T) {
 		t.Error("ParseScale took big")
 	}
 	for _, c := range []struct {
-		box        Scale
+		box          Scale
 		w, h, ow, oh int
 	}{
 		{Scale{1920, 1080}, 3840, 2160, 1920, 1080},
