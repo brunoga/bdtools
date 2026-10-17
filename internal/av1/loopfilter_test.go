@@ -38,8 +38,9 @@ func TestLoopFilterDecodes(t *testing.T) {
 	} {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 		for _, pic := range []*Source{testPicture(c.w, c.h, c.depth, 1), smoothPicture(c.w, c.h, c.depth)} {
-			n, psnr := checkDecodesWith(t, o, []*Source{pic}, nil)
-			n0, psnr0 := checkDecodesWith(t, o, []*Source{pic}, func(e *Encoder) { e.lfFixed = &[5]int{} })
+			// CDEF off, its choice not to blur the comparison
+			n, psnr := checkDecodesWith(t, o, []*Source{pic}, func(e *Encoder) { e.seq.cdef = false })
+			n0, psnr0 := checkDecodesWith(t, o, []*Source{pic}, func(e *Encoder) { e.seq.cdef, e.lfFixed = false, &[5]int{} })
 			t.Logf("  filter: %+.2f dB, %+d bytes", psnr-psnr0, n-n0)
 			if psnr < psnr0-1e-9 {
 				t.Errorf("%v: the filter lost %.3f dB", c, psnr0-psnr)

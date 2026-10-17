@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4, dbgNoExt bool
+var dbgNo4x4, dbgNoExt, dbgNoInter bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -48,8 +48,15 @@ func (t *tileEnc) setModes() {
 			if b.r+y < f.miRows && b.c+x < f.miCols {
 				i := f.mi(b.r+y, b.c+x)
 				f.yMode[i] = uint8(b.yMode) //nolint:gosec // a mode
-				if b.hasChroma {
+				if b.hasChroma && !b.isInter {
 					f.uvMode[i] = uint8(b.uvMode) //nolint:gosec // a mode
+				}
+				if b.isInter {
+					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), NONE //nolint:gosec // a reference
+					f.mvs[0][i], f.isInter[i] = b.mv, 1
+				} else {
+					f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
+					f.mvs[0][i], f.isInter[i] = mv{}, 0
 				}
 			}
 		}
@@ -78,9 +85,28 @@ type modeCand struct {
 	filterMode  int
 }
 
-// searchBlock decides a block at (r, c), leaving the state as coding it
-// leaves it.
+// searchBlock decides a block at (r, c), intra or (in inter frames)
+// inter, leaving the state as coding it leaves it.
 func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
+	if t.f.fp.key || dbgNoInter {
+		return t.searchIntraBlock(r, c, size)
+	}
+	d := 5 + depthOf(min(size, BLOCK_64X64))
+	start, intra := t.snap(d, 2), t.snap(d, 3)
+	t.save(start, r, c, size, true)
+	ji, di := t.searchIntraBlock(r, c, size)
+	t.save(intra, r, c, size, true)
+	t.restore(start, true)
+	jn, dn := t.searchInterBlock(r, c, size)
+	if dn != nil && (jn < ji || dbgForceInter) {
+		return jn, dn
+	}
+	t.restore(intra, true)
+	return ji, di
+}
+
+// searchIntraBlock decides an intra block at (r, c).
+func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	f := t.f
 	t.setupBlock(r, c, size)
 	b := &t.b
@@ -183,6 +209,10 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 // finalBlock codes a decided block for real: its transform blocks again
 // (as decided), then its mode info and coefficients written.
 func (t *tileEnc) finalBlock(dec *blockDec) {
+	if dec.isInter {
+		t.finalInterBlock(dec)
+		return
+	}
 	t.setupBlock(dec.r, dec.c, dec.size)
 	b := &t.b
 	var ctx snapshot
@@ -255,6 +285,7 @@ func (t *tileEnc) codeLuma(dec *blockDec, search bool) (float64, bool) {
 	b.txSz = t.lumaTxSize(dec.txDepth)
 	t.setModes()
 	t.cost.n = 0
+	t.writeIsInter(&t.cost, false)
 	t.writeYMode(&t.cost)
 	t.writeFilterIntra(&t.cost)
 	t.writeTxDepth(&t.cost, dec.txDepth)
@@ -419,6 +450,9 @@ func (t *tileEnc) filterType(plane int) bool {
 
 func (t *tileEnc) smoothAt(r, c, plane int) bool {
 	i := t.f.mi(min(r, t.f.miRows-1), min(c, t.f.miCols-1))
+	if plane > 0 && t.f.refFrames[0][i] > INTRA_FRAME {
+		return false
+	}
 	if plane == 0 {
 		return isSmooth(int(t.f.yMode[i]))
 	}
@@ -615,11 +649,20 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	row, col := (startY<<uint(sub))>>2, (startX<<uint(sub))>>2
 	sbRow, sbCol := row&15, col&15
 	stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-	ib := t.intraBlockFor(plane, startX, startY, txSz)
 	w, h := int(txWidth[txSz]), int(txHeight[txSz])
 	stride := f.stride[plane]
-	t.edges.predictIntra(&ib, f.rec[plane], stride, t.pred[:])
-	if plane > 0 && t.b.uvMode == UV_CFL_PRED {
+	if t.b.isInter {
+		// the block's prediction, made beforehand
+		pw := t.interStride(plane)
+		ox, oy := startX-(t.b.c>>uint(sub))*4, startY-(t.b.r>>uint(sub))*4
+		for y := range h {
+			copy(t.pred[y*w:(y+1)*w], t.interPred[plane][(oy+y)*pw+ox:])
+		}
+	} else {
+		ib := t.intraBlockFor(plane, startX, startY, txSz)
+		t.edges.predictIntra(&ib, f.rec[plane], stride, t.pred[:])
+	}
+	if plane > 0 && !t.b.isInter && t.b.uvMode == UV_CFL_PRED {
 		alpha := t.b.cflU
 		if plane == 2 {
 			alpha = t.b.cflV
@@ -642,6 +685,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		pw, ph = (pw+1)>>1, (ph+1)>>1
 	}
 	vw, vh = min(vw, pw-startX), min(vh, ph-startY)
+	t.txX4, t.txY4 = startX>>2, startY>>2
 	types := []int{txType}
 	if txType < 0 {
 		types = t.txTypes(plane, txSz)
@@ -750,6 +794,9 @@ func (t *tileEnc) txTypes(plane, txSz int) []int {
 	if t.f.lossless || int(txSizeSqrUp[txSz]) > TX_32X32 {
 		return []int{DCT_DCT}
 	}
+	if t.b.isInter {
+		return t.interTxTypesFor(plane, txSz)
+	}
 	set := t.txSet(txSz)
 	if plane == 0 {
 		switch {
@@ -813,7 +860,11 @@ func (t *tileEnc) writeYMode(cd coder) {
 	if b.availL {
 		lm = int(f.yMode[f.mi(b.r, b.c-1)])
 	}
-	cd.symbol(b.yMode, t.cdf.yMode[intraModeContext[am]][intraModeContext[lm]][:])
+	if f.fp.key {
+		cd.symbol(b.yMode, t.cdf.yMode[intraModeContext[am]][intraModeContext[lm]][:])
+	} else {
+		cd.symbol(b.yMode, t.cdf.yModeInter[sizeGroup[b.size]][:])
+	}
 	if b.size >= BLOCK_8X8 && isDirectional(b.yMode) {
 		cd.symbol(b.angleY+MAX_ANGLE_DELTA, t.cdf.angleDelta[b.yMode-V_PRED][:])
 	}
@@ -835,9 +886,35 @@ func (t *tileEnc) writeUVMode(cd coder) {
 	}
 }
 
-// writeModes writes the rest of intra_frame_mode_info and the transform
-// size, after the skip flag.
+// writeIsInter is read_is_inter (in inter frames).
+func (t *tileEnc) writeIsInter(cd coder, inter bool) {
+	f, b := t.f, &t.b
+	if f.fp.key {
+		return
+	}
+	intra := func(r, c int) bool { return f.refFrames[0][f.mi(r, c)] <= INTRA_FRAME }
+	ctx := 0
+	switch {
+	case b.availU && b.availL:
+		au, al := intra(b.r-1, b.c), intra(b.r, b.c-1)
+		switch {
+		case au && al:
+			ctx = 3
+		case au || al:
+			ctx = 1
+		}
+	case b.availU:
+		ctx = 2 * b2i(intra(b.r-1, b.c))
+	case b.availL:
+		ctx = 2 * b2i(intra(b.r, b.c-1))
+	}
+	cd.symbol(b2i(inter), t.cdf.isInter[ctx][:])
+}
+
+// writeModes writes the rest of an intra block's mode info and the
+// transform size, after the skip flag (and cdef_idx).
 func (t *tileEnc) writeModes(cd coder, depth int) {
+	t.writeIsInter(cd, false)
 	t.writeYMode(cd)
 	if t.b.hasChroma {
 		t.writeUVMode(cd)
@@ -875,10 +952,18 @@ func (t *tileEnc) writeTxDepth(cd coder, depth int) {
 	maxW, maxH := int(txWidth[maxRect]), int(txHeight[maxRect])
 	aboveW, leftH := 0, 0
 	if b.availU {
-		aboveW = int(txWidth[f.txSize[f.mi(b.r-1, b.c)]])
+		if i := f.mi(b.r-1, b.c); f.isInter[i] != 0 {
+			aboveW = int(blockWidth[f.miSize[i]])
+		} else {
+			aboveW = t.aboveTxWidth(b.r, b.c)
+		}
 	}
 	if b.availL {
-		leftH = int(txHeight[f.txSize[f.mi(b.r, b.c-1)]])
+		if i := f.mi(b.r, b.c-1); f.isInter[i] != 0 {
+			leftH = int(blockHeight[f.miSize[i]])
+		} else {
+			leftH = t.leftTxHeight(b.r, b.c)
+		}
 	}
 	ctx := b2i(aboveW >= maxW) + b2i(leftH >= maxH)
 	switch maxTxDepth[b.size] {

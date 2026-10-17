@@ -1,8 +1,15 @@
 package av1
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"testing"
+)
 
 func TestDbgIsolate(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
 	type sw struct {
 		name string
 		v    *bool
@@ -27,6 +34,9 @@ func TestDbgIsolate(t *testing.T) {
 }
 
 func TestDbgFixed(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
 	dbgDCTOnly, dbgNoAngles, dbgNoDepth = true, true, true
 	defer func() { dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgFixed = false, false, false, 0 }()
 	for _, s := range []int{BLOCK_8X8, BLOCK_16X16, BLOCK_32X32, BLOCK_64X64} {
@@ -39,6 +49,9 @@ func TestDbgFixed(t *testing.T) {
 }
 
 func TestDbgCands(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
 	dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgFixed = true, true, true, BLOCK_16X16
 	defer func() {
 		dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgFixed, lumaCands, chromaCands = false, false, false, 0, 3, 2
@@ -53,6 +66,9 @@ func TestDbgCands(t *testing.T) {
 }
 
 func TestDbgCompare(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
 	dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgFixed, dbgCompare = true, true, true, BLOCK_16X16, true
 	lumaCands, chromaCands = 1, 1
 	defer func() {
@@ -107,4 +123,48 @@ func TestDbgEdgeReads(t *testing.T) {
 func TestDbgCdefSignal(t *testing.T) {
 	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
 	checkDecodesWith(t, o, []*Source{testPicture(200, 136, 8, 1)}, func(e *Encoder) { e.seq.cdef = true })
+}
+
+func TestDbgWriteInter(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+	e, _ := NewEncoder(o)
+	var units [][]byte
+	for i := range 2 {
+		u, _ := e.Encode(testPicture(200, 136, 8, uint64(i+1)))
+		units = append(units, u)
+	}
+	_ = os.WriteFile(os.Getenv("DBGOUT"), ivf(200, 136, 25, 1, units), 0o600)
+}
+
+func TestDbgInterModes(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgInterModes, dbgForceInter = 0, false }()
+	dbgForceInter = true
+	for _, m := range []int{1 << 2, 1 << 0, 1 << 1, 1 << 3, 15} {
+		dbgInterModes = m
+		t.Run(fmt.Sprint(m), func(t *testing.T) {
+			o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+			p := testPicture(200, 136, 8, 1)
+			checkDecodes(t, o, []*Source{p, shifted(p, 3, 2), shifted(p, 5, -1)})
+		})
+	}
+}
+
+func TestDbgInterMixed(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgInterModes = 0 }()
+	for _, m := range []int{1 << 2, 1 << 0, 1 << 1, 1 << 3} {
+		dbgInterModes = m
+		t.Run(fmt.Sprint(m), func(t *testing.T) {
+			o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+			checkDecodes(t, o, []*Source{testPicture(200, 136, 8, 1), testPicture(200, 136, 8, 2)})
+		})
+	}
 }

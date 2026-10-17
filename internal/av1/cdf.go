@@ -28,6 +28,28 @@ type cdfs struct {
 	cflSign         [CFL_JOINT_SIGNS + 1]uint16
 	cflAlpha        [CFL_ALPHA_CONTEXTS][CFL_ALPHABET_SIZE + 1]uint16
 
+	// inter frames'
+	yModeInter  [BLOCK_SIZE_GROUPS][INTRA_MODES + 1]uint16
+	isInter     [IS_INTER_CONTEXTS][3]uint16
+	newMv       [NEW_MV_CONTEXTS][3]uint16
+	zeroMv      [ZERO_MV_CONTEXTS][3]uint16
+	refMv       [REF_MV_CONTEXTS][3]uint16
+	drlMode     [DRL_MODE_CONTEXTS][3]uint16
+	singleRef   [REF_CONTEXTS][SINGLE_REFS - 1][3]uint16
+	txfmSplit   [TXFM_PARTITION_CONTEXTS][3]uint16
+	interTxSet1 [2][17]uint16
+	interTxSet2 [13]uint16
+	interTxSet3 [4][3]uint16
+	mvJoint     [MV_CONTEXTS][MV_JOINTS + 1]uint16
+	mvClass     [MV_CONTEXTS][2][MV_CLASSES + 1]uint16
+	mvClass0Bit [MV_CONTEXTS][2][3]uint16
+	mvFr        [MV_CONTEXTS][2][MV_JOINTS + 1]uint16
+	mvClass0Fr  [MV_CONTEXTS][2][CLASS0_SIZE][MV_JOINTS + 1]uint16
+	mvClass0Hp  [MV_CONTEXTS][2][3]uint16
+	mvSign      [MV_CONTEXTS][2][3]uint16
+	mvBit       [MV_CONTEXTS][2][MV_OFFSET_BITS][3]uint16
+	mvHp        [MV_CONTEXTS][2][3]uint16
+
 	txbSkip      [TX_SIZES][TXB_SKIP_CONTEXTS][3]uint16
 	eobPt16      [PLANE_TYPES][2][6]uint16
 	eobPt32      [PLANE_TYPES][2][7]uint16
@@ -59,7 +81,7 @@ func coeffCDFIndex(qIndex int) int {
 // newCDFs gives a frame's starting CDFs.
 func newCDFs(qIndex int) *cdfs {
 	q := coeffCDFIndex(qIndex)
-	return &cdfs{
+	c := &cdfs{
 		yMode: defaultIntraFrameYModeCdf, uvCfl: defaultUvModeCflAllowedCdf, uvNoCfl: defaultUvModeCflNotAllowedCdf,
 		angleDelta: defaultAngleDeltaCdf,
 		partW8:     defaultPartitionW8Cdf, partW16: defaultPartitionW16Cdf, partW32: defaultPartitionW32Cdf,
@@ -74,7 +96,25 @@ func newCDFs(qIndex int) *cdfs {
 		eobPt512: defaultEobPt512Cdf[q], eobPt1024: defaultEobPt1024Cdf[q], eobExtra: defaultEobExtraCdf[q],
 		dcSign: defaultDcSignCdf[q], coeffBaseEob: defaultCoeffBaseEobCdf[q], coeffBase: defaultCoeffBaseCdf[q],
 		coeffBr: defaultCoeffBrCdf[q],
+
+		yModeInter: defaultYModeCdf, isInter: defaultIsInterCdf, newMv: defaultNewMvCdf, zeroMv: defaultZeroMvCdf,
+		refMv: defaultRefMvCdf, drlMode: defaultDrlModeCdf, singleRef: defaultSingleRefCdf, txfmSplit: defaultTxfmSplitCdf,
+		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
 	}
+	for i := range MV_CONTEXTS {
+		c.mvJoint[i] = defaultMvJointCdf
+		c.mvClass[i] = defaultMvClassCdf
+		c.mvFr[i] = defaultMvFrCdf
+		c.mvClass0Fr[i] = defaultMvClass0FrCdf
+		for comp := range 2 {
+			c.mvClass0Bit[i][comp] = defaultMvClass0BitCdf
+			c.mvClass0Hp[i][comp] = defaultMvClass0HpCdf
+			c.mvSign[i][comp] = defaultMvSignCdf
+			c.mvBit[i][comp] = defaultMvBitCdf
+			c.mvHp[i][comp] = defaultMvHpCdf
+		}
+	}
+	return c
 }
 
 // Rates are in 1/costScale bits.

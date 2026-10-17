@@ -32,6 +32,16 @@ type frameEnc struct {
 	// Per 4x4 luma block (the mi grid, miCols wide).
 	miSize, yMode, uvMode, skip, txSize []uint8
 	txType                              []uint8 // TxTypes
+	// Inter state per mi: the reference frames (RefFrames: INTRA_FRAME
+	// and NONE for intra blocks), the motion vectors (Mvs), whether a block
+	// is inter (IsInters) and skip_mode (SkipModes).
+	refFrames [2][]int8
+	mvs       [2][]mv
+	isInter   []uint8
+	skipMode  []uint8
+	inter     *interFrameInfo                      // inter frames' header values (nil for key frames)
+	refs      [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
+	filt      [2]int                               // the frame's interpolation filter
 	// cdefIdx is each 64x64's cdef_idx: -1 where none is coded (all its
 	// blocks skipped), else what the frame's CDEF search chose.
 	cdefIdx []int8
@@ -68,7 +78,12 @@ type tileEnc struct {
 	snaps                [10][4]*snapshot // by depth, a few each
 	sbStart              snapshot
 	cdefDone             bool
-	dctOnly              bool // luma transform types not searched // the superblock's cdef_idx is coded
+	dctOnly              bool // luma transform types not searched
+	stack                mvStack
+	txX4, txY4           int // the transform block being coded, in 4x4s of its plane
+	ms                   motionSearch
+	is                   interScratch
+	interPred            [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -83,7 +98,13 @@ type blockState struct {
 	txSz             int // the luma's
 	skip             bool
 	cflU, cflV       int // the CFL alphas
-	filterMode       int // filter_intra_mode, or -1
+	// An inter block's: its reference, its motion vector and RefMvIdx (its
+	// mode is yMode).
+	isInter    bool
+	refFrame   int
+	mv         mv
+	refMvIdx   int
+	filterMode int // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
 	maxLumaW, maxLumaH int
@@ -104,6 +125,11 @@ type blockDec struct {
 	angleY, angleUV int
 	cflU, cflV      int
 	filterMode      int
+	isInter         bool
+	refFrame        int
+	mv              mv
+	refMvIdx        int
+	skip            bool // an inter block coded without residual
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order
 }
@@ -193,7 +219,9 @@ func (t *tileEnc) clearDecoded(r, c int) {
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [6][]uint8
+	mi         [7][]uint8
+	refs       [2][]int8
+	mvs        []mv
 	above, aDc [3][16]uint8
 	left, lDc  [3][16]uint8
 	decoded    [3][18][18]bool
@@ -246,13 +274,29 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 				copy(s.mi[k][y*cols:(y+1)*cols], a[f.mi(r+y, c):])
 			}
 		}
+		for k := range 2 {
+			if cap(s.refs[k]) < 256 {
+				s.refs[k] = make([]int8, 256)
+			}
+			s.refs[k] = s.refs[k][:cols*rows]
+			for y := range rows {
+				copy(s.refs[k][y*cols:(y+1)*cols], f.refFrames[k][f.mi(r+y, c):])
+			}
+		}
+		if cap(s.mvs) < 256 {
+			s.mvs = make([]mv, 256)
+		}
+		s.mvs = s.mvs[:cols*rows]
+		for y := range rows {
+			copy(s.mvs[y*cols:(y+1)*cols], f.mvs[0][f.mi(r+y, c):])
+		}
 	}
 	s.decoded = t.decoded
 }
 
-func (t *tileEnc) miArrays() [6][]uint8 {
+func (t *tileEnc) miArrays() [7][]uint8 {
 	f := t.f
-	return [6][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType}
+	return [7][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter}
 }
 
 // restore puts a snapshot back.
@@ -285,6 +329,14 @@ func (t *tileEnc) restore(s *snapshot, pixels bool) {
 			for y := range rows {
 				copy(a[f.mi(r+y, c):f.mi(r+y, c)+cols], s.mi[k][y*cols:(y+1)*cols])
 			}
+		}
+		for k := range 2 {
+			for y := range rows {
+				copy(f.refFrames[k][f.mi(r+y, c):f.mi(r+y, c)+cols], s.refs[k][y*cols:(y+1)*cols])
+			}
+		}
+		for y := range rows {
+			copy(f.mvs[0][f.mi(r+y, c):f.mi(r+y, c)+cols], s.mvs[y*cols:(y+1)*cols])
 		}
 	}
 	t.decoded = s.decoded

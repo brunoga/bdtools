@@ -31,6 +31,9 @@ type EncoderOptions struct {
 	// (as the limits allow), coded at once: -1 picks by the picture
 	// size, about one tile a 512x512 area, at most 8x8.
 	TileColsLog2, TileRowsLog2 int
+	// Keyint is the key frame interval; 0 picks 250, 1 codes key frames
+	// only.
+	Keyint int
 }
 
 // Encoder codes pictures.
@@ -39,9 +42,14 @@ type Encoder struct {
 	seq   seqParams
 	n     int
 	frame *frameEnc
+	// slots are the reference frame slots (the spec's eight).
+	slots [NUM_REF_FRAMES]*refFrameState
 	// lfFixed, when set, gives the loop filter levels and sharpness
 	// instead of searching them (for tests).
 	lfFixed *[5]int
+	// cdefFixed, when set, gives the CDEF parameters instead of
+	// searching them (for tests).
+	cdefFixed *cdefSettings
 }
 
 // NewEncoder makes an encoder.
@@ -58,7 +66,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true,
+		edgeFilter: true, filterIntra: true, cdef: true,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -73,7 +81,12 @@ func (e *Encoder) SequenceHeader() []byte {
 
 // Encode codes a picture, giving its temporal unit.
 func (e *Encoder) Encode(src *Source) ([]byte, error) {
-	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true, cdefDamping: 3}
+	keyint := e.o.Keyint
+	if keyint <= 0 {
+		keyint = 250
+	}
+	key := e.n%keyint == 0
+	fp := &frameParams{key: key, refresh: 1, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true, cdefDamping: 3}
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
 	if cl < 0 {
@@ -83,7 +96,24 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 		rl = min(bits.Len(uint(max(e.o.Height/512, 1)))-1, 3)
 	}
 	fp.tiles = newTiling(miCols, miRows, cl, rl)
+	if !key {
+		fp.highPrecisionMV = fp.qIndex < 128
+		fp.interpFilter = EIGHTTAP
+	}
 	f := e.newFrame(fp, src)
+	if !key {
+		fi := newInterFrameInfo()
+		fi.allowHighPrecisionMv = fp.highPrecisionMV
+		fi.enableOrderHint, fi.orderHintBits, fi.orderHint = true, orderHintBits, fp.orderHint&(1<<orderHintBits-1)
+		for ref := LAST_FRAME; ref <= ALTREF_FRAME; ref++ {
+			r := e.slots[fp.refIdx[ref-LAST_FRAME]]
+			f.refs[ref] = r
+			fi.orderHints[ref] = r.orderHint & (1<<orderHintBits - 1)
+		}
+		fi.setRefFrameSignBias()
+		f.inter = fi
+		f.filt = [2]int{fp.interpFilter, fp.interpFilter}
+	}
 	recs := make([][]symOp, fp.tiles.rows()*fp.tiles.cols())
 	var wg sync.WaitGroup
 	for tr := range fp.tiles.rows() {
@@ -100,16 +130,32 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 	}
 	wg.Wait()
 	f.deblock(e.lfFixed)
+	f.cdef(e.cdefFixed)
 	var tiles [][]byte
 	for _, ops := range recs {
 		tiles = append(tiles, pack(ops, fp.qIndex, fp.adapt, f.cdefIdx, fp.cdefBits))
 	}
 	e.frame = f
+	e.keep(f)
 	e.n++
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
 	tu := appendOBU(nil, obuTemporalDelimiter, nil)
 	tu = appendOBU(tu, obuSequenceHeader, e.seq.sequenceHeader())
 	return appendOBU(tu, obuFrame, payload), nil
+}
+
+// keep puts a coded frame in the reference slots it refreshes.
+func (e *Encoder) keep(f *frameEnc) {
+	ref := &refFrameState{rec: f.rec, stride: f.stride, orderHint: f.fp.orderHint, miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME}
+	refresh := f.fp.refresh
+	if f.fp.key {
+		ref.frameType, refresh = KEY_FRAME, 0xff
+	}
+	for i := range NUM_REF_FRAMES {
+		if refresh>>uint(i)&1 != 0 {
+			e.slots[i] = ref
+		}
+	}
 }
 
 // newFrame sets a frame up: its source padded to whole superblocks.
@@ -147,6 +193,14 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 		sub := min(p, 1)
 		f.lfTx[p] = make([]uint8, (miCols>>sub)*(miRows>>sub))
 	}
+	for k := range 2 {
+		f.refFrames[k] = make([]int8, n)
+		f.mvs[k] = make([]mv, n)
+	}
+	for i := range f.refFrames[0] {
+		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
+	}
+	f.isInter, f.skipMode = make([]uint8, n), make([]uint8, n)
 	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
 	for i := range f.cdefIdx {
 		f.cdefIdx[i] = -1

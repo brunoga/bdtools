@@ -152,7 +152,7 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 			if !isTxEdge {
 				continue
 			}
-			isIntra := true // RefFrames[row][col][0] <= INTRA_FRAME
+			isIntra := f.refFrames[0][mi] <= INTRA_FRAME
 			if !isBlockEdge && f.skip[mi] != 0 && !isIntra {
 				continue
 			}

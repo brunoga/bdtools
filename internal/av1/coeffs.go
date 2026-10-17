@@ -123,7 +123,11 @@ func (t *tileEnc) writeTxType(cd coder, txSz, txType int) {
 func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, int) {
 	txSz, txType, eob := tc.txSz, tc.txType, tc.eob
 	if tc.plane == 0 {
-		t.writeTxType(cd, txSz, txType)
+		if t.b.isInter {
+			t.writeInterTxType(cd, txSz, txType)
+		} else {
+			t.writeTxType(cd, txSz, txType)
+		}
 	}
 	cdf := t.cdf
 	quant := t.levels[tc.off:]

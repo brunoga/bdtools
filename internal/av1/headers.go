@@ -190,16 +190,22 @@ func (t *tiling) write(w *bitWriter, miCols, miRows int) {
 
 // frameParams is a frame header's settings.
 type frameParams struct {
-	key        bool
-	orderHint  int
-	adapt      bool // the CDFs adapt (disable_cdf_update 0)
-	qIndex     int
-	deltaQYDc  int
-	deltaQUVDc int
-	deltaQUVAc int
-	lfLevel    [4]int
-	lfSharp    int
-	txSelect   bool
+	key bool
+	// Inter frames: the slots refreshed, the slot each of the seven
+	// references is, mv precision and the frame's interpolation filter.
+	refresh         uint8
+	refIdx          [REFS_PER_FRAME]int
+	highPrecisionMV bool
+	interpFilter    int
+	orderHint       int
+	adapt           bool // the CDFs adapt (disable_cdf_update 0)
+	qIndex          int
+	deltaQYDc       int
+	deltaQUVDc      int
+	deltaQUVAc      int
+	lfLevel         [4]int
+	lfSharp         int
+	txSelect        bool
 	// CDEF (when the sequence enables it): cdef_damping_minus_3 + 3,
 	// cdef_bits, and each index's primary and secondary strengths (the
 	// secondary 0, 1, 2 or 4), luma's and chroma's.
@@ -216,19 +222,41 @@ func (f *frameParams) lossless() bool {
 	return f.qIndex == 0 && f.deltaQYDc == 0 && f.deltaQUVDc == 0 && f.deltaQUVAc == 0
 }
 
-// frameHeader writes a shown key frame's uncompressed header (for an
-// OBU_FRAME: the tile group follows from the next byte).
+// frameHeader writes a shown frame's uncompressed header, a key frame's
+// or an inter frame's (for an OBU_FRAME: the tile group follows from the
+// next byte).
 func (s *seqParams) frameHeader(f *frameParams) []byte {
 	var w bitWriter
 	miCols, miRows := 2*((s.width+7)>>3), 2*((s.height+7)>>3)
-	w.flag(false)                                                // show_existing_frame
-	w.f(0, 2)                                                    // frame_type: KEY_FRAME
-	w.flag(true)                                                 // show_frame
+	w.flag(false) // show_existing_frame
+	if f.key {
+		w.f(KEY_FRAME, 2)
+	} else {
+		w.f(INTER_FRAME, 2)
+	}
+	w.flag(true) // show_frame
+	if !f.key {
+		w.flag(false) // error_resilient_mode
+	}
 	w.flag(!f.adapt)                                             // disable_cdf_update
 	w.flag(false)                                                // frame_size_override_flag
 	w.f(uint32(f.orderHint)&(1<<orderHintBits-1), orderHintBits) //nolint:gosec // its bits
+	if !f.key {
+		w.f(PRIMARY_REF_NONE, 3) // primary_ref_frame
+		w.f(uint32(f.refresh), 8)
+		w.flag(false) // frame_refs_short_signaling
+		for _, i := range f.refIdx {
+			w.f(uint32(i), 3) //nolint:gosec // a slot
+		}
+	}
 	// frame_size: the sequence's; render_size the same
 	w.flag(false) // render_and_frame_size_different
+	if !f.key {
+		w.flag(f.highPrecisionMV)
+		w.flag(false)                  // is_filter_switchable
+		w.f(uint32(f.interpFilter), 2) //nolint:gosec // a filter
+		w.flag(false)                  // is_motion_mode_switchable
+	}
 	if f.adapt {
 		w.flag(false) // disable_frame_end_update_cdf
 	}
@@ -282,7 +310,15 @@ func (s *seqParams) frameHeader(f *frameParams) []byte {
 	if !f.lossless() {
 		w.flag(f.txSelect)
 	}
+	if !f.key {
+		w.flag(false) // reference_select
+	}
 	w.flag(f.reducedTx)
+	if !f.key {
+		for range REFS_PER_FRAME {
+			w.flag(false) // is_global
+		}
+	}
 	return w.buf
 }
 

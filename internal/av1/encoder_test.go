@@ -118,3 +118,34 @@ func TestEncodeTiles(t *testing.T) {
 		checkDecodes(t, o, []*Source{testPicture(c.w, c.h, 8, 2)})
 	}
 }
+
+// Inter frames (of intra blocks, for now) after a key frame.
+func TestEncodeInterFrames(t *testing.T) {
+	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
+	p := testPicture(200, 136, 8, 1)
+	checkDecodes(t, o, []*Source{p, shifted(p, 3, 2), shifted(p, 5, -1), testPicture(200, 136, 8, 2)})
+	o.BitDepth = 10
+	p = testPicture(136, 72, 10, 1)
+	o.Width, o.Height = 136, 72
+	checkDecodes(t, o, []*Source{p, shifted(p, -2, 1), shifted(p, -7, 3)})
+}
+
+// shifted is a picture moved by (dx, dy), its edges extended.
+func shifted(p *Source, dx, dy int) *Source {
+	w, h := p.StrideY, len(p.Y)/p.StrideY
+	cw, ch := p.StrideC, len(p.Cb)/p.StrideC
+	q := &Source{Y: make([]uint16, len(p.Y)), Cb: make([]uint16, len(p.Cb)), Cr: make([]uint16, len(p.Cr)), StrideY: w, StrideC: cw}
+	cl := func(v, n int) int { return min(max(v, 0), n-1) }
+	for y := range h {
+		for x := range w {
+			q.Y[y*w+x] = p.Y[cl(y-dy, h)*w+cl(x-dx, w)]
+		}
+	}
+	for y := range ch {
+		for x := range cw {
+			q.Cb[y*cw+x] = p.Cb[cl(y-dy/2, ch)*cw+cl(x-dx/2, cw)]
+			q.Cr[y*cw+x] = p.Cr[cl(y-dy/2, ch)*cw+cl(x-dx/2, cw)]
+		}
+	}
+	return q
+}

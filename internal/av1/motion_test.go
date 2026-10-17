@@ -1,0 +1,103 @@
+package av1
+
+import (
+	"math"
+	"testing"
+)
+
+// mePicture is an 8-bit test picture: a broad cone (so a search from far
+// away descends towards the shift) with smoothed noise on it, or the
+// noise alone with cone 0.
+func mePicture(w, h int, cone float64) []uint16 {
+	rs := uint32(7)
+	n := make([]float64, w*h)
+	for i := range n {
+		n[i] = float64(xorshift(&rs) & 255)
+	}
+	p := make([]uint16, w*h)
+	for y := range h {
+		for x := range w {
+			var s float64
+			for i := -2; i <= 2; i++ {
+				for j := -2; j <= 2; j++ {
+					s += n[min(max(y+i, 0), h-1)*w+min(max(x+j, 0), w-1)]
+				}
+			}
+			dx, dy := float64(x-w*7/24), float64(y-h*3/10)
+			v := cone*math.Sqrt(dx*dx+dy*dy) + (s/25-128)*0.3 + 40
+			p[y*w+x] = uint16(min(max(v, 0), 255))
+		}
+	}
+	return p
+}
+
+// TestMotionSearchShift checks the search finds known shifts of a
+// picture: a whole sample one, and a subpel one whose source is the
+// exact prediction (so its SATD is 0 there).
+func TestMotionSearchShift(t *testing.T) {
+	const W, H = 192, 160
+	ref := &refFrameState{width: W, height: H}
+	ref.rec[0], ref.stride[0] = mePicture(W, H, 1.2), W
+	filt := [2]int{EIGHTTAP, EIGHTTAP}
+	var ms motionSearch
+	for _, tc := range []struct {
+		want    mv
+		allowHP bool
+	}{
+		{mv{row: -7 * 8, col: 13 * 8}, true},
+		{mv{row: -53, col: 27}, true},
+		{mv{row: 38, col: -90}, false},
+		{mv{row: 2 * 8, col: -21 * 8}, false},
+		{mv{row: 0, col: 0}, true},
+	} {
+		src := make([]uint16, W*H)
+		predictInter(ref, 0, 0, 0, 128, 128, tc.want, filt, 8, src, W, &ms.s)
+		predictInter(ref, 0, 128, 0, 64, 128, tc.want, filt, 8, src[128:], W, &ms.s)
+		b := &meBlock{ref: ref, src: src, srcStride: W, x: 40, y: 32, w: 32, h: 32, bitDepth: 8, filt: filt, allowHP: tc.allowHP,
+			cost: func(m mv) float64 { return 0.01 * float64(abs(int(m.row))+abs(int(m.col))) }}
+		got, cost := ms.search(b, []mv{{}})
+		if got != tc.want {
+			t.Errorf("found %+v (cost %.2f), want %+v", got, cost, tc.want)
+		}
+	}
+
+	// Noise alone, a far shift, found from a start point near it (as a
+	// neighbour's vector would be).
+	const NW, NH = 320, 240
+	noise := &refFrameState{width: NW, height: NH}
+	noise.rec[0], noise.stride[0] = mePicture(NW, NH, 0), NW
+	want := mv{row: 8*30 + 3, col: -8*95 - 5}
+	src := make([]uint16, NW*NH)
+	predictInter(noise, 0, 100, 0, 128, 128, want, filt, 8, src[100:], NW, &ms.s)
+	b := &meBlock{ref: noise, src: src, srcStride: NW, x: 120, y: 20, w: 64, h: 32, bitDepth: 8, filt: filt, allowHP: true,
+		cost: func(m mv) float64 { return 0 }}
+	if got, cost := ms.search(b, []mv{{}, {row: want.row - 13, col: want.col + 22}}); got != want {
+		t.Errorf("noise: found %+v (cost %.2f), want %+v", got, cost, want)
+	}
+}
+
+func BenchmarkMotionSearch(b *testing.B) {
+	const W, H = 192, 160
+	ref := &refFrameState{width: W, height: H}
+	ref.rec[0], ref.stride[0] = mePicture(W, H, 1.2), W
+	filt := [2]int{EIGHTTAP, EIGHTTAP}
+	var ms motionSearch
+	src := make([]uint16, W*H)
+	predictInter(ref, 0, 0, 0, 128, 128, mv{-53, 27}, filt, 8, src, W, &ms.s)
+	blk := &meBlock{ref: ref, src: src, srcStride: W, x: 64, y: 48, w: 16, h: 16, bitDepth: 8, filt: filt, allowHP: true,
+		cost: func(m mv) float64 { return 0 }}
+	for b.Loop() {
+		ms.search(blk, []mv{{}})
+	}
+}
+
+func BenchmarkPredictInter(b *testing.B) {
+	const W, H = 192, 160
+	ref := &refFrameState{width: W, height: H}
+	ref.rec[0], ref.stride[0] = mePicture(W, H, 1.2), W
+	var s interScratch
+	dst := make([]uint16, 64*64)
+	for b.Loop() {
+		predictInter(ref, 0, 40, 40, 64, 64, mv{-53, 27}, [2]int{EIGHTTAP, EIGHTTAP}, 8, dst, 64, &s)
+	}
+}
