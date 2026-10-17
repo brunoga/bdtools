@@ -33,6 +33,9 @@ type Encoder struct {
 	seq   seqParams
 	n     int
 	frame *frameEnc
+	// lfFixed, when set, gives the loop filter levels and sharpness
+	// instead of searching them (for tests).
+	lfFixed *[5]int
 }
 
 // NewEncoder makes an encoder.
@@ -49,6 +52,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
+		edgeFilter: true, filterIntra: true,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -63,7 +67,7 @@ func (e *Encoder) SequenceHeader() []byte {
 
 // Encode codes a picture, giving its temporal unit.
 func (e *Encoder) Encode(src *Source) ([]byte, error) {
-	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex}
+	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true}
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	fp.tiles = newTiling(miCols, miRows, 0, 0)
 	f := e.newFrame(fp, src)
@@ -77,6 +81,7 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 			tiles = append(tiles, w.finish())
 		}
 	}
+	f.deblock(e.lfFixed)
 	e.frame = f
 	e.n++
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
@@ -89,7 +94,7 @@ func (e *Encoder) Encode(src *Source) ([]byte, error) {
 func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	o := e.o
 	miCols, miRows := 2*((o.Width+7)>>3), 2*((o.Height+7)>>3)
-	f := &frameEnc{seq: &e.seq, fp: fp, bitDepth: o.BitDepth, miCols: miCols, miRows: miRows}
+	f := &frameEnc{seq: &e.seq, fp: fp, bitDepth: o.BitDepth, miCols: miCols, miRows: miRows, width: o.Width, height: o.Height}
 	pw, ph := (miCols+15)/16*64, (miRows+15)/16*64
 	for p := range 3 {
 		w, h, sw, sh := pw, ph, o.Width, o.Height
@@ -116,11 +121,18 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	n := miCols * miRows
 	f.miSize, f.yMode, f.uvMode = make([]uint8, n), make([]uint8, n), make([]uint8, n)
 	f.skip, f.txSize, f.txType = make([]uint8, n), make([]uint8, n), make([]uint8, n)
+	for p := range 3 {
+		sub := min(p, 1)
+		f.lfTx[p] = make([]uint8, (miCols>>sub)*(miRows>>sub))
+	}
 	f.lossless = fp.lossless()
 	bd := (o.BitDepth - 8) >> 1
 	qi := func(v int) int { return min(max(v, 0), 255) }
 	f.dcQ = [3]int{int(dcQlookup[bd][qi(fp.qIndex+fp.deltaQYDc)]), int(dcQlookup[bd][qi(fp.qIndex+fp.deltaQUVDc)]), int(dcQlookup[bd][qi(fp.qIndex+fp.deltaQUVDc)])}
 	f.acQ = [3]int{int(acQlookup[bd][qi(fp.qIndex)]), int(acQlookup[bd][qi(fp.qIndex+fp.deltaQUVAc)]), int(acQlookup[bd][qi(fp.qIndex+fp.deltaQUVAc)])}
+	// libaom's: 88/24 q^2 per bit, its distortion 2048 times the sum of
+	// squared errors
+	f.lambda = 88.0 / 24 * float64(f.dcQ[0]) * float64(f.dcQ[0]) / 2048
 	return f
 }
 

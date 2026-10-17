@@ -10,7 +10,7 @@ import "math/bits"
 
 // writeCoeffs writes a transform block's coefficients, updating the
 // level and dc contexts as a decoder does.
-func (t *tileEnc) writeCoeffs(tc *txCoded) {
+func (t *tileEnc) writeCoeffs(cd coder, tc *txCoded, update bool) {
 	f, b := t.f, &t.b
 	plane, txSz := tc.plane, tc.txSz
 	x4, y4 := tc.x4, tc.y4
@@ -71,10 +71,13 @@ func (t *tileEnc) writeCoeffs(tc *txCoded) {
 			ctx += 3
 		}
 	}
-	t.w.symbol(b2i(tc.eob == 0), t.cdf.txbSkip[txSzCtx][ctx][:])
+	cd.symbol(b2i(tc.eob == 0), t.cdf.txbSkip[txSzCtx][ctx][:])
 	culLevel, dcCategory := 0, 0
 	if tc.eob > 0 {
-		culLevel, dcCategory = t.writeLevels(tc, txSzCtx, ptype)
+		culLevel, dcCategory = t.writeLevels(cd, tc, txSzCtx, ptype)
+	}
+	if !update {
+		return
 	}
 	for i := range w4 {
 		t.aboveLevel[plane][x4+i] = uint8(culLevel) //nolint:gosec // at most 63
@@ -87,24 +90,27 @@ func (t *tileEnc) writeCoeffs(tc *txCoded) {
 }
 
 // writeTxType is transform_type for an intra luma block.
-func (t *tileEnc) writeTxType(txSz, txType int) {
+func (t *tileEnc) writeTxType(cd coder, txSz, txType int) {
 	set := t.txSet(txSz)
 	if set == TX_SET_DCTONLY || t.f.fp.qIndex == 0 {
 		return
 	}
 	dir := t.b.yMode
+	if t.b.filterMode >= 0 {
+		dir = int(filterIntraModeToIntraDir[t.b.filterMode])
+	}
 	sq := txSizeSqr[txSz]
 	if set == TX_SET_INTRA_1 {
 		for i, tt := range txTypeIntraInvSet1 {
 			if int(tt) == txType {
-				t.w.symbol(i, t.cdf.intraTxSet1[sq][dir][:])
+				cd.symbol(i, t.cdf.intraTxSet1[sq][dir][:])
 				return
 			}
 		}
 	} else {
 		for i, tt := range txTypeIntraInvSet2 {
 			if int(tt) == txType {
-				t.w.symbol(i, t.cdf.intraTxSet2[sq][dir][:])
+				cd.symbol(i, t.cdf.intraTxSet2[sq][dir][:])
 				return
 			}
 		}
@@ -114,10 +120,10 @@ func (t *tileEnc) writeTxType(txSz, txType int) {
 
 // writeLevels writes a block with coefficients, from its transform
 // type on, giving its culLevel and dcCategory.
-func (t *tileEnc) writeLevels(tc *txCoded, txSzCtx, ptype int) (int, int) {
+func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, int) {
 	txSz, txType, eob := tc.txSz, tc.txType, tc.eob
 	if tc.plane == 0 {
-		t.writeTxType(txSz, txType)
+		t.writeTxType(cd, txSz, txType)
 	}
 	cdf := t.cdf
 	quant := t.levels[tc.off:]
@@ -131,26 +137,26 @@ func (t *tileEnc) writeLevels(tc *txCoded, txSzCtx, ptype int) (int, int) {
 	ectx := b2i(cls != TX_CLASS_2D)
 	switch min(int(txWidthLog2[txSz]), 5) + min(int(txHeightLog2[txSz]), 5) - 4 {
 	case 0:
-		t.w.symbol(eobPt-1, cdf.eobPt16[ptype][ectx][:])
+		cd.symbol(eobPt-1, cdf.eobPt16[ptype][ectx][:])
 	case 1:
-		t.w.symbol(eobPt-1, cdf.eobPt32[ptype][ectx][:])
+		cd.symbol(eobPt-1, cdf.eobPt32[ptype][ectx][:])
 	case 2:
-		t.w.symbol(eobPt-1, cdf.eobPt64[ptype][ectx][:])
+		cd.symbol(eobPt-1, cdf.eobPt64[ptype][ectx][:])
 	case 3:
-		t.w.symbol(eobPt-1, cdf.eobPt128[ptype][ectx][:])
+		cd.symbol(eobPt-1, cdf.eobPt128[ptype][ectx][:])
 	case 4:
-		t.w.symbol(eobPt-1, cdf.eobPt256[ptype][ectx][:])
+		cd.symbol(eobPt-1, cdf.eobPt256[ptype][ectx][:])
 	case 5:
-		t.w.symbol(eobPt-1, cdf.eobPt512[ptype][:])
+		cd.symbol(eobPt-1, cdf.eobPt512[ptype][:])
 	default:
-		t.w.symbol(eobPt-1, cdf.eobPt1024[ptype][:])
+		cd.symbol(eobPt-1, cdf.eobPt1024[ptype][:])
 	}
 	if eobPt >= 3 {
 		rem := eob - (1<<uint(eobPt-2) + 1)
 		shift := eobPt - 3
-		t.w.symbol(rem>>uint(shift)&1, cdf.eobExtra[txSzCtx][ptype][eobPt-3][:])
+		cd.symbol(rem>>uint(shift)&1, cdf.eobExtra[txSzCtx][ptype][eobPt-3][:])
 		for i := 1; i < eobPt-2; i++ {
-			t.w.boolean(rem>>uint(eobPt-3-i)&1 != 0)
+			cd.boolean(rem>>uint(eobPt-3-i)&1 != 0)
 		}
 	}
 	// levels, last first
@@ -174,16 +180,16 @@ func (t *tileEnc) writeLevels(tc *txCoded, txSzCtx, ptype int) (int, int) {
 			default:
 				ctx = 3
 			}
-			t.w.symbol(min(level, 3)-1, cdf.coeffBaseEob[txSzCtx][ptype][ctx][:])
+			cd.symbol(min(level, 3)-1, cdf.coeffBaseEob[txSzCtx][ptype][ctx][:])
 		} else {
-			t.w.symbol(min(level, 3), cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:])
+			cd.symbol(min(level, 3), cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:])
 		}
 		if level > NUM_BASE_LEVELS {
 			bctx := brCtx(lv, cls, bwl, width, height, pos)
 			rem := level - (NUM_BASE_LEVELS + 1)
 			for range COEFF_BASE_RANGE / (BR_CDF_SIZE - 1) {
 				k := min(rem, BR_CDF_SIZE-1)
-				t.w.symbol(k, cdf.coeffBr[min(txSzCtx, TX_32X32)][ptype][bctx][:])
+				cd.symbol(k, cdf.coeffBr[min(txSzCtx, TX_32X32)][ptype][bctx][:])
 				rem -= k
 				if k < BR_CDF_SIZE-1 {
 					break
@@ -201,19 +207,19 @@ func (t *tileEnc) writeLevels(tc *txCoded, txSzCtx, ptype int) (int, int) {
 			continue
 		}
 		if c == 0 {
-			t.w.symbol(b2i(v < 0), cdf.dcSign[ptype][t.dcSignCtx(tc)][:])
+			cd.symbol(b2i(v < 0), cdf.dcSign[ptype][t.dcSignCtx(tc)][:])
 		} else {
-			t.w.boolean(v < 0)
+			cd.boolean(v < 0)
 		}
 		level := int(abs32(v))
 		if level > NUM_BASE_LEVELS+COEFF_BASE_RANGE {
 			x := uint32(level - (NUM_BASE_LEVELS + COEFF_BASE_RANGE)) //nolint:gosec // positive
 			n := bits.Len32(x)
 			for range n - 1 {
-				t.w.boolean(false)
+				cd.boolean(false)
 			}
-			t.w.boolean(true)
-			t.w.literal(x, n-1)
+			cd.boolean(true)
+			cd.literal(x, n-1)
 		}
 		if pos == 0 {
 			dcCat = 2

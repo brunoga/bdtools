@@ -202,7 +202,7 @@ func (e *intraEdges) smooth(b *intraBlock, w, h int, pred []uint16) {
 func clip(v, maxV int32) int32 { return min(max(v, 0), maxV) }
 
 func (e *intraEdges) recursive(b *intraBlock, w, h int, maxV int32, pred []uint16) {
-	above, left := e.above[edgeOff:], e.left[edgeOff:]
+	left := e.left[edgeOff:]
 	taps := &intraFilterTaps[b.filterIntra]
 	var p [7]int32
 	for i2 := range h >> 1 {
@@ -211,7 +211,7 @@ func (e *intraEdges) recursive(b *intraBlock, w, h int, maxV int32, pred []uint1
 				if i < 5 {
 					switch {
 					case i2 == 0:
-						p[i] = above[(j4<<2)+i-1]
+						p[i] = e.above[edgeOff+(j4<<2)+i-1]
 					case j4 == 0 && i == 0:
 						p[i] = left[(i2<<1)-1]
 					default:

@@ -4,6 +4,19 @@ package av1
 // block's intra mode info and its transform blocks' coefficients, as
 // decode_tile reads them (spec 5.11), with the contexts it derives; the
 // reconstruction follows, exactly as a decoder makes it.
+//
+// Each superblock is decided first, by rate and distortion (the rates
+// from the CDFs as the superblock starts, a costCoder adding them up),
+// every alternative tried from the same state (snapshots of what coding
+// a block changes); then the decisions are coded for real, from the
+// superblock's starting state, and the CDFs adapt.
+
+import (
+	"fmt"
+	"math"
+)
+
+var dbgCompare bool
 
 // frameEnc is the frame being coded, shared by its tiles.
 type frameEnc struct {
@@ -11,6 +24,7 @@ type frameEnc struct {
 	fp             *frameParams
 	bitDepth       int
 	miCols, miRows int
+	width, height  int
 	// The source and the reconstruction, padded to whole superblocks
 	// (the source by its edges).
 	src, rec [3][]uint16
@@ -18,8 +32,12 @@ type frameEnc struct {
 	// Per 4x4 luma block (the mi grid, miCols wide).
 	miSize, yMode, uvMode, skip, txSize []uint8
 	txType                              []uint8 // TxTypes
-	dcQ, acQ                            [3]int
-	lossless                            bool
+	// lfTx is LoopfilterTxSizes: each plane's transform size by 4x4 block
+	// of the plane, (miCols >> sub) wide.
+	lfTx     [3][]uint8
+	dcQ, acQ [3]int
+	lossless bool
+	lambda   float64 // distortion per bit
 }
 
 func (f *frameEnc) mi(r, c int) int { return r*f.miCols + c }
@@ -31,16 +49,20 @@ type tileEnc struct {
 	colStart, colEnd     int
 	cdf                  *cdfs
 	w                    *symbolWriter
+	cost                 costCoder
 	aboveLevel, aboveDc  [3][]uint8 // by x4 of the plane
 	leftLevel, leftDc    [3][]uint8 // by y4 of the plane
 	decoded              [3][18][18]bool
 	edges                intraEdges
 	b                    blockState
-	pred                 [64 * 64]uint16
+	pred, trial, best    [64 * 64]uint16
 	resid, coef, dq, inv [64 * 64]int32
 	txs                  []txCoded
-	lv                   [32 * 32]uint8
 	levels               []int32
+	lv                   [32 * 32]uint8
+	cflL                 [32 * 32]int32
+	snaps                [8][4]*snapshot // by depth, a few each
+	sbStart              snapshot
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -52,7 +74,13 @@ type blockState struct {
 	availUC, availLC bool
 	yMode, uvMode    int
 	angleY, angleUV  int
+	txSz             int // the luma's
 	skip             bool
+	cflU, cflV       int // the CFL alphas
+	filterMode       int // filter_intra_mode, or -1
+	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
+	// luma transform block coded ends.
+	maxLumaW, maxLumaH int
 }
 
 // txCoded is a transform block's coefficients, kept for writing.
@@ -61,6 +89,24 @@ type txCoded struct {
 	txSz, txType  int
 	eob           int
 	off           int // into levels
+}
+
+// blockDec is a block's decisions.
+type blockDec struct {
+	r, c, size      int
+	yMode, uvMode   int
+	angleY, angleUV int
+	cflU, cflV      int
+	filterMode      int
+	txDepth         int
+	txTypes         []uint8 // the luma transform blocks', in order
+}
+
+// partNode is a partition's decisions.
+type partNode struct {
+	part   int
+	blocks []*blockDec
+	kids   [4]*partNode
 }
 
 func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int, w *symbolWriter) *tileEnc {
@@ -91,7 +137,25 @@ func (t *tileEnc) code() {
 		}
 		for c := t.colStart; c < t.colEnd; c += 16 {
 			t.clearDecoded(r, c)
-			t.partition(r, c, BLOCK_64X64)
+			t.save(&t.sbStart, r, c, BLOCK_64X64, false)
+			_, node := t.searchPartition(r, c, BLOCK_64X64, 0)
+			t.restore(&t.sbStart, false)
+			var keep [3][]uint16
+			if dbgCompare {
+				for p := range 3 {
+					keep[p] = append([]uint16(nil), t.f.rec[p]...)
+				}
+			}
+			t.finalPartition(r, c, BLOCK_64X64, node)
+			if dbgCompare {
+				for p := range 3 {
+					for i, v := range keep[p] {
+						if t.f.rec[p][i] != v {
+							panic(fmt.Sprintf("SB %d,%d: plane %d (%d,%d): search %d final %d", r, c, p, i%t.f.stride[p], i/t.f.stride[p], v, t.f.rec[p][i]))
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -114,66 +178,275 @@ func (t *tileEnc) clearDecoded(r, c int) {
 	}
 }
 
-// targetSize is the block size the first encoder codes with.
-const targetSize = 6 // BLOCK_16X16
+// snapshot is what coding a block changes: its reconstruction, its mi
+// grid, the contexts along its edges and the decoded flags.
+type snapshot struct {
+	r, c, size int
+	rec        [3][]uint16
+	mi         [6][]uint8
+	above, aDc [3][16]uint8
+	left, lDc  [3][16]uint8
+	decoded    [3][18][18]bool
+}
 
-// partition is decode_partition: a partition decided, written, and its
-// blocks coded.
-func (t *tileEnc) partition(r, c, bSize int) {
+func (t *tileEnc) snap(depth, i int) *snapshot {
+	if t.snaps[depth][i] == nil {
+		t.snaps[depth][i] = &snapshot{}
+	}
+	return t.snaps[depth][i]
+}
+
+// save saves what coding a block at (r, c) changes; with pixels, its
+// reconstruction and mi grid too (else only the contexts).
+func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
+	f := t.f
+	s.r, s.c, s.size = r, c, size
+	bw4, bh4 := int(num4x4BlocksWide[size]), int(num4x4BlocksHigh[size])
+	for p := range 3 {
+		sub := 0
+		if p > 0 {
+			sub = 1
+		}
+		x0, y0 := c>>sub, r>>sub
+		w4, h4 := max(bw4>>sub, 1), max(bh4>>sub, 1)
+		copy(s.above[p][:w4], t.aboveLevel[p][x0:])
+		copy(s.aDc[p][:w4], t.aboveDc[p][x0:])
+		copy(s.left[p][:h4], t.leftLevel[p][y0:])
+		copy(s.lDc[p][:h4], t.leftDc[p][y0:])
+		if pixels {
+			w, h := w4*4, h4*4
+			st := f.stride[p]
+			if cap(s.rec[p]) < w*h {
+				s.rec[p] = make([]uint16, 64*64)
+			}
+			s.rec[p] = s.rec[p][:w*h]
+			for y := range h {
+				copy(s.rec[p][y*w:(y+1)*w], f.rec[p][(y0*4+y)*st+x0*4:])
+			}
+		}
+	}
+	if pixels {
+		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
+		for k, a := range t.miArrays() {
+			if cap(s.mi[k]) < 256 {
+				s.mi[k] = make([]uint8, 256)
+			}
+			s.mi[k] = s.mi[k][:cols*rows]
+			for y := range rows {
+				copy(s.mi[k][y*cols:(y+1)*cols], a[f.mi(r+y, c):])
+			}
+		}
+	}
+	s.decoded = t.decoded
+}
+
+func (t *tileEnc) miArrays() [6][]uint8 {
+	f := t.f
+	return [6][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType}
+}
+
+// restore puts a snapshot back.
+func (t *tileEnc) restore(s *snapshot, pixels bool) {
+	f := t.f
+	r, c := s.r, s.c
+	bw4, bh4 := int(num4x4BlocksWide[s.size]), int(num4x4BlocksHigh[s.size])
+	for p := range 3 {
+		sub := 0
+		if p > 0 {
+			sub = 1
+		}
+		x0, y0 := c>>sub, r>>sub
+		w4, h4 := max(bw4>>sub, 1), max(bh4>>sub, 1)
+		copy(t.aboveLevel[p][x0:x0+w4], s.above[p][:w4])
+		copy(t.aboveDc[p][x0:x0+w4], s.aDc[p][:w4])
+		copy(t.leftLevel[p][y0:y0+h4], s.left[p][:h4])
+		copy(t.leftDc[p][y0:y0+h4], s.lDc[p][:h4])
+		if pixels {
+			w, h := w4*4, h4*4
+			st := f.stride[p]
+			for y := range h {
+				copy(f.rec[p][(y0*4+y)*st+x0*4:(y0*4+y)*st+x0*4+w], s.rec[p][y*w:(y+1)*w])
+			}
+		}
+	}
+	if pixels {
+		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
+		for k, a := range t.miArrays() {
+			for y := range rows {
+				copy(a[f.mi(r+y, c):f.mi(r+y, c)+cols], s.mi[k][y*cols:(y+1)*cols])
+			}
+		}
+	}
+	t.decoded = s.decoded
+}
+
+// partitionCDF is the partition's CDF at (r, c).
+func (t *tileEnc) partitionCDF(r, c, bSize int) []uint16 {
+	f := t.f
+	bsl := int(miWidthLog2[bSize])
+	ctx := 0
+	if t.inside(r-1, c) && int(miWidthLog2[f.miSize[f.mi(r-1, c)]]) < bsl {
+		ctx++
+	}
+	if t.inside(r, c-1) && int(miHeightLog2[f.miSize[f.mi(r, c-1)]]) < bsl {
+		ctx += 2
+	}
+	switch bsl {
+	case 1:
+		return t.cdf.partW8[ctx][:]
+	case 2:
+		return t.cdf.partW16[ctx][:]
+	case 3:
+		return t.cdf.partW32[ctx][:]
+	case 4:
+		return t.cdf.partW64[ctx][:]
+	}
+	return t.cdf.partW128[ctx][:]
+}
+
+// writePartition codes a partition (or what of it is coded at the
+// frame's edges).
+func (t *tileEnc) writePartition(cd coder, r, c, bSize, part int) {
+	if bSize < BLOCK_8X8 {
+		return
+	}
+	half := int(num4x4BlocksWide[bSize]) >> 1
+	hasRows, hasCols := r+half < t.f.miRows, c+half < t.f.miCols
+	cdf := t.partitionCDF(r, c, bSize)
+	switch {
+	case hasRows && hasCols:
+		cd.symbol(part, cdf)
+	case hasCols:
+		cd.encode(b2i(part == PARTITION_SPLIT), splitOrHorz(cdf, bSize), 2)
+	case hasRows:
+		cd.encode(b2i(part == PARTITION_SPLIT), splitOrVert(cdf, bSize), 2)
+	}
+}
+
+// depthOf is a square size's depth below the superblock.
+func depthOf(bSize int) int {
+	switch bSize {
+	case BLOCK_64X64:
+		return 0
+	case BLOCK_32X32:
+		return 1
+	case BLOCK_16X16:
+		return 2
+	}
+	return 3
+}
+
+// searchPartition decides the partition at (r, c) by rate and distortion,
+// leaving the state as the best leaves it.
+func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
+	f := t.f
+	if r >= f.miRows || c >= f.miCols {
+		return 0, nil
+	}
+	half := int(num4x4BlocksWide[bSize]) >> 1
+	hasRows, hasCols := r+half < f.miRows, c+half < f.miCols
+	var cands []int
+	switch {
+	case bSize == BLOCK_8X8:
+		cands = []int{PARTITION_NONE}
+	case dbgFixed > 0 && bSize > dbgFixed:
+		if hasRows && hasCols {
+			cands = []int{PARTITION_SPLIT}
+		} else if hasCols {
+			cands = []int{PARTITION_SPLIT}
+		} else {
+			cands = []int{PARTITION_SPLIT}
+		}
+	case dbgFixed > 0 && hasRows && hasCols:
+		cands = []int{PARTITION_NONE}
+	case hasRows && hasCols && dbgSquare:
+		cands = []int{PARTITION_NONE, PARTITION_SPLIT}
+	case hasRows && hasCols:
+		cands = []int{PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT, PARTITION_SPLIT}
+	case hasCols:
+		cands = []int{PARTITION_HORZ, PARTITION_SPLIT}
+	case hasRows:
+		cands = []int{PARTITION_VERT, PARTITION_SPLIT}
+	default:
+		cands = []int{PARTITION_SPLIT}
+	}
+	d := depthOf(bSize)
+	start, best := t.snap(d, 0), t.snap(d, 1)
+	if len(cands) > 1 {
+		t.save(start, r, c, bSize, true)
+	}
+	bestJ := math.Inf(1)
+	var bestNode *partNode
+	bestLast := false
+	for i, part := range cands {
+		if i > 0 {
+			t.restore(start, true)
+		}
+		t.cost.n = 0
+		t.writePartition(&t.cost, r, c, bSize, part)
+		j := f.lambda * float64(t.cost.n) / costScale
+		node := &partNode{part: part}
+		sub := int(partitionSubsize[part][bSize])
+		switch part {
+		case PARTITION_NONE:
+			bj, bd := t.searchBlock(r, c, sub)
+			j += bj
+			node.blocks = []*blockDec{bd}
+		case PARTITION_HORZ, PARTITION_VERT:
+			r2, c2, has := r+half, c, hasRows
+			if part == PARTITION_VERT {
+				r2, c2, has = r, c+half, hasCols
+			}
+			bj, bd := t.searchBlock(r, c, sub)
+			j += bj
+			node.blocks = []*blockDec{bd}
+			if has && j < bestJ {
+				bj, bd = t.searchBlock(r2, c2, sub)
+				j += bj
+				node.blocks = append(node.blocks, bd)
+			}
+		case PARTITION_SPLIT:
+			for k, o := range [4][2]int{{0, 0}, {0, half}, {half, 0}, {half, half}} {
+				if j >= bestJ {
+					break
+				}
+				kj, kn := t.searchPartition(r+o[0], c+o[1], sub, 0)
+				j += kj
+				node.kids[k] = kn
+			}
+		}
+		if j < bestJ {
+			bestJ, bestNode = j, node
+			bestLast = i == len(cands)-1
+			if !bestLast {
+				t.save(best, r, c, bSize, true)
+			}
+		}
+	}
+	if !bestLast {
+		t.restore(best, true)
+	}
+	return bestJ, bestNode
+}
+
+// finalPartition codes a superblock's decisions for real.
+func (t *tileEnc) finalPartition(r, c, bSize int, node *partNode) {
 	f := t.f
 	if r >= f.miRows || c >= f.miCols {
 		return
 	}
-	availU, availL := t.inside(r-1, c), t.inside(r, c-1)
 	half := int(num4x4BlocksWide[bSize]) >> 1
-	hasRows, hasCols := r+half < f.miRows, c+half < f.miCols
-	part := PARTITION_NONE
-	if bSize > targetSize || !hasRows || !hasCols {
-		part = PARTITION_SPLIT
-	}
-	if bSize == BLOCK_8X8 && hasRows && hasCols {
-		part = PARTITION_NONE
-	}
-	if bSize >= BLOCK_8X8 {
-		bsl := int(miWidthLog2[bSize])
-		ctx := 0
-		if availU && int(miWidthLog2[f.miSize[f.mi(r-1, c)]]) < bsl {
-			ctx++
+	t.writePartition(t.w, r, c, bSize, node.part)
+	sub := int(partitionSubsize[node.part][bSize])
+	switch node.part {
+	case PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT:
+		for _, bd := range node.blocks {
+			t.finalBlock(bd)
 		}
-		if availL && int(miHeightLog2[f.miSize[f.mi(r, c-1)]]) < bsl {
-			ctx += 2
-		}
-		var cdf []uint16
-		switch bsl {
-		case 1:
-			cdf = t.cdf.partW8[ctx][:]
-		case 2:
-			cdf = t.cdf.partW16[ctx][:]
-		case 3:
-			cdf = t.cdf.partW32[ctx][:]
-		case 4:
-			cdf = t.cdf.partW64[ctx][:]
-		default:
-			cdf = t.cdf.partW128[ctx][:]
-		}
-		switch {
-		case hasRows && hasCols:
-			t.w.symbol(part, cdf)
-		case hasCols:
-			t.w.encode(b2i(part == PARTITION_SPLIT), splitOrHorz(cdf, bSize), 2)
-		case hasRows:
-			t.w.encode(b2i(part == PARTITION_SPLIT), splitOrVert(cdf, bSize), 2)
-		}
-	}
-	sub := int(partitionSubsize[part][bSize])
-	switch part {
-	case PARTITION_NONE:
-		t.block(r, c, sub)
 	case PARTITION_SPLIT:
-		t.partition(r, c, sub)
-		t.partition(r, c+half, sub)
-		t.partition(r+half, c, sub)
-		t.partition(r+half, c+half, sub)
+		for k, o := range [4][2]int{{0, 0}, {0, half}, {half, 0}, {half, half}} {
+			t.finalPartition(r+o[0], c+o[1], sub, node.kids[k])
+		}
 	}
 }
 
@@ -210,458 +483,4 @@ func splitOrVert(cdf []uint16, bSize int) []uint16 {
 		psum += pdf(cdf, PARTITION_HORZ_4)
 	}
 	return []uint16{uint16(1<<15 - psum), 1 << 15, 0} //nolint:gosec // a probability
-}
-
-// block is decode_block for an intra block: its modes decided, its
-// transform blocks predicted, transformed, quantized and reconstructed,
-// then everything written.
-func (t *tileEnc) block(r, c, size int) {
-	f := t.f
-	b := &t.b
-	*b = blockState{r: r, c: c, size: size, bw4: int(num4x4BlocksWide[size]), bh4: int(num4x4BlocksHigh[size])}
-	b.hasChroma = !(b.bh4 == 1 && r&1 == 0) && !(b.bw4 == 1 && c&1 == 0)
-	b.availU, b.availL = t.inside(r-1, c), t.inside(r, c-1)
-	b.availUC, b.availLC = b.availU, b.availL
-	if b.hasChroma {
-		if b.bh4 == 1 {
-			b.availUC = t.inside(r-2, c)
-		}
-		if b.bw4 == 1 {
-			b.availLC = t.inside(r, c-2)
-		}
-	} else {
-		b.availUC, b.availLC = false, false
-	}
-	b.yMode = t.chooseMode(0)
-	b.uvMode = DC_PRED
-	if b.hasChroma {
-		b.uvMode = t.chooseMode(1)
-	}
-	// The block's modes, before its residual (neighbours read them).
-	for y := range b.bh4 {
-		for x := range b.bw4 {
-			if r+y < f.miRows && c+x < f.miCols {
-				i := f.mi(r+y, c+x)
-				f.yMode[i] = uint8(b.yMode) //nolint:gosec // a mode
-				if b.hasChroma {
-					f.uvMode[i] = uint8(b.uvMode) //nolint:gosec // a mode
-				}
-			}
-		}
-	}
-	t.txs = t.txs[:0]
-	t.levels = t.levels[:0]
-	t.residual()
-	b.skip = true
-	for _, tx := range t.txs {
-		b.skip = b.skip && tx.eob == 0
-	}
-	t.writeModeInfo()
-	if b.skip {
-		t.resetBlockContext()
-	} else {
-		for i := range t.txs {
-			t.writeCoeffs(&t.txs[i])
-		}
-	}
-	txSz := t.txSizeFor()
-	for y := range b.bh4 {
-		for x := range b.bw4 {
-			if r+y < f.miRows && c+x < f.miCols {
-				i := f.mi(r+y, c+x)
-				f.skip[i] = uint8(b2i(b.skip)) //nolint:gosec // a flag
-				f.miSize[i] = uint8(size)      //nolint:gosec // a size
-				f.txSize[i] = uint8(txSz)      //nolint:gosec // a size
-			}
-		}
-	}
-}
-
-// txSizeFor is the block's luma transform size (read_tx_size, the
-// largest).
-func (t *tileEnc) txSizeFor() int {
-	if t.f.lossless {
-		return TX_4X4
-	}
-	return int(maxTxSizeRect[t.b.size])
-}
-
-// planeTxSize is get_tx_size.
-func (t *tileEnc) planeTxSize(plane int) int {
-	tx := t.txSizeFor()
-	if plane == 0 || t.f.lossless {
-		return tx
-	}
-	uv := int(maxTxSizeRect[subsampledSize[t.b.size][1][1]])
-	if txWidth[uv] == 64 || txHeight[uv] == 64 {
-		switch {
-		case txWidth[uv] == 16:
-			return TX_16X32
-		case txHeight[uv] == 16:
-			return TX_32X16
-		}
-		return TX_32X32
-	}
-	return uv
-}
-
-// chooseMode picks a block's luma (plane 0) or chroma mode, by the sum of
-// absolute differences of its prediction (a whole-block prediction, from
-// the neighbours as they are).
-func (t *tileEnc) chooseMode(plane int) int {
-	f, b := t.f, &t.b
-	best, bestCost := DC_PRED, int64(-1)
-	sub := 0
-	if plane > 0 {
-		sub = 1
-	}
-	planeSz := int(subsampledSize[b.size][sub][sub])
-	w, h := int(blockWidth[planeSz]), int(blockHeight[planeSz])
-	if w > 64 || h > 64 {
-		return DC_PRED
-	}
-	x0, y0 := (b.c*4)>>sub, (b.r*4)>>sub
-	ib := t.intraBlockFor(plane, x0, y0, b.size, int(maxTxSizeRect[planeSz]), true)
-	ib.log2W, ib.log2H = log2(w), log2(h)
-	planes := []int{plane}
-	if plane > 0 {
-		planes = []int{1, 2}
-	}
-	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
-		ib.mode = mode
-		var cost int64
-		for _, p := range planes {
-			ib.plane = p
-			t.edges.predictIntra(&ib, f.rec[p], f.stride[p], t.pred[:])
-			src := f.src[p]
-			for y := range h {
-				row := src[(y0+y)*f.stride[p]+x0:]
-				for x := range w {
-					d := int64(row[x]) - int64(t.pred[y*w+x])
-					if d < 0 {
-						d = -d
-					}
-					cost += d
-				}
-			}
-		}
-		if bestCost < 0 || cost < bestCost {
-			best, bestCost = mode, cost
-		}
-	}
-	return best
-}
-
-func log2(v int) int {
-	n := 0
-	for 1<<uint(n) < v {
-		n++
-	}
-	return n
-}
-
-// intraBlockFor describes the prediction of a transform block of a plane
-// at (x, y) (plane samples), its size txSz, the block's first if first.
-func (t *tileEnc) intraBlockFor(plane, x, y, size, txSz int, first bool) intraBlock {
-	f, b := t.f, &t.b
-	sub := 0
-	if plane > 0 {
-		sub = 1
-	}
-	row, col := (y<<uint(sub))>>2, (x<<uint(sub))>>2
-	sbRow, sbCol := row&15, col&15
-	stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-	availL, availU := b.availL, b.availU
-	if plane > 0 {
-		availL, availU = b.availLC, b.availUC
-	}
-	bx, by := (b.c>>uint(sub))*4, (b.r>>uint(sub))*4
-	ib := intraBlock{
-		plane: plane, x: x, y: y,
-		log2W: int(txWidthLog2[txSz]), log2H: int(txHeightLog2[txSz]),
-		haveLeft:       availL || x > bx,
-		haveAbove:      availU || y > by,
-		haveAboveRight: t.decoded[plane][(sbRow>>uint(sub))-1+1][(sbCol>>uint(sub))+stepX+1],
-		haveBelow:      t.decoded[plane][(sbRow>>uint(sub))+stepY+1][(sbCol>>uint(sub))-1+1],
-		maxX:           ((f.miCols * 4) >> uint(sub)) - 1,
-		maxY:           ((f.miRows * 4) >> uint(sub)) - 1,
-		angleDelta:     0,
-		filterIntra:    -1,
-		edgeFilter:     f.seq.edgeFilter,
-		bitDepth:       f.bitDepth,
-	}
-	_ = first
-	if plane == 0 {
-		ib.mode, ib.angleDelta = b.yMode, b.angleY
-	} else {
-		ib.mode, ib.angleDelta = b.uvMode, b.angleUV
-	}
-	if ib.edgeFilter {
-		ib.smoothNeighbour = t.filterType(plane)
-	}
-	return ib
-}
-
-func isSmooth(m int) bool { return m == SMOOTH_PRED || m == SMOOTH_V_PRED || m == SMOOTH_H_PRED }
-
-// filterType is get_filter_type.
-func (t *tileEnc) filterType(plane int) bool {
-	f, b := t.f, &t.b
-	above, left := false, false
-	au, al := b.availU, b.availL
-	if plane > 0 {
-		au, al = b.availUC, b.availLC
-	}
-	if au {
-		r, c := b.r-1, b.c
-		if plane > 0 {
-			if c&1 == 0 {
-				c++
-			}
-			if b.r&1 == 1 {
-				r--
-			}
-		}
-		above = t.smoothAt(r, c, plane)
-	}
-	if al {
-		r, c := b.r, b.c-1
-		if plane > 0 {
-			if b.c&1 == 1 {
-				c--
-			}
-			if r&1 == 0 {
-				r++
-			}
-		}
-		left = t.smoothAt(r, c, plane)
-	}
-	_ = f
-	return above || left
-}
-
-func (t *tileEnc) smoothAt(r, c, plane int) bool {
-	i := t.f.mi(min(r, t.f.miRows-1), min(c, t.f.miCols-1))
-	if plane == 0 {
-		return isSmooth(int(t.f.yMode[i]))
-	}
-	return isSmooth(int(t.f.uvMode[i]))
-}
-
-// residual is residual() for an intra block of at most 64x64: each
-// plane's transform blocks in raster order, predicted, coded and
-// reconstructed.
-func (t *tileEnc) residual() {
-	b := &t.b
-	planes := 1
-	if b.hasChroma {
-		planes = 3
-	}
-	for plane := range planes {
-		txSz := t.planeTxSize(plane)
-		stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-		sub := 0
-		if plane > 0 {
-			sub = 1
-		}
-		planeSz := int(subsampledSize[b.size][sub][sub])
-		n4w, n4h := int(num4x4BlocksWide[planeSz]), int(num4x4BlocksHigh[planeSz])
-		baseX, baseY := (b.c>>uint(sub))*4, (b.r>>uint(sub))*4
-		for y := 0; y < n4h; y += stepY {
-			for x := 0; x < n4w; x += stepX {
-				t.transformBlock(plane, baseX+4*x, baseY+4*y, txSz)
-			}
-		}
-	}
-}
-
-// transformBlock is transform_block: a transform block predicted, its
-// residual transformed and quantized, and reconstructed.
-func (t *tileEnc) transformBlock(plane, startX, startY, txSz int) {
-	f := t.f
-	sub := 0
-	if plane > 0 {
-		sub = 1
-	}
-	maxX, maxY := (f.miCols*4)>>uint(sub), (f.miRows*4)>>uint(sub)
-	if startX >= maxX || startY >= maxY {
-		return
-	}
-	row, col := (startY<<uint(sub))>>2, (startX<<uint(sub))>>2
-	sbRow, sbCol := row&15, col&15
-	stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-	ib := t.intraBlockFor(plane, startX, startY, t.b.size, txSz, false)
-	w, h := int(txWidth[txSz]), int(txHeight[txSz])
-	stride := f.stride[plane]
-	t.edges.predictIntra(&ib, f.rec[plane], stride, t.pred[:])
-	rec := f.rec[plane][startY*stride+startX:]
-	src := f.src[plane][startY*stride+startX:]
-	for y := range h {
-		copy(rec[y*stride:y*stride+w], t.pred[y*w:(y+1)*w])
-		for x := range w {
-			t.resid[y*w+x] = int32(src[y*stride+x]) - int32(t.pred[y*w+x])
-		}
-	}
-	txType := t.chooseTxType(plane, txSz)
-	tc := txCoded{plane: plane, x4: startX >> 2, y4: startY >> 2, txSz: txSz, txType: txType, off: len(t.levels)}
-	forwardTransform(t.resid[:w*h], txSz, txType, f.bitDepth, f.lossless, t.coef[:])
-	tc.eob = t.quantize(plane, txSz, txType)
-	if tc.eob > 0 {
-		q := t.levels[tc.off:]
-		dequantize(q, txSz, f.dcQ[plane], f.acQ[plane], f.bitDepth, t.dq[:])
-		inverseTransform(t.dq[:], txSz, txType, f.bitDepth, f.lossless, t.inv[:])
-		reconstructAdd(rec, stride, t.inv[:], txSz, txType, f.bitDepth)
-	}
-	if plane == 0 {
-		tt := uint8(txType) //nolint:gosec // a type
-		if tc.eob == 0 {
-			tt = DCT_DCT
-		}
-		for y := range stepY {
-			for x := range stepX {
-				if row+y < f.miRows && col+x < f.miCols {
-					f.txType[f.mi(row+y, col+x)] = tt
-				}
-			}
-		}
-	}
-	t.txs = append(t.txs, tc)
-	for i := range stepY {
-		for j := range stepX {
-			t.decoded[plane][(sbRow>>uint(sub))+i+1][(sbCol>>uint(sub))+j+1] = true
-		}
-	}
-}
-
-// txSet is get_tx_set for an intra block.
-func (t *tileEnc) txSet(txSz int) int {
-	sq, up := int(txSizeSqr[txSz]), int(txSizeSqrUp[txSz])
-	switch {
-	case up > TX_32X32 || up == TX_32X32:
-		return TX_SET_DCTONLY
-	case t.f.fp.reducedTx || sq == TX_16X16:
-		return TX_SET_INTRA_2
-	}
-	return TX_SET_INTRA_1
-}
-
-// chooseTxType is the transform type: the luma's chosen (DCT for now),
-// the chroma's compute_tx_type's.
-func (t *tileEnc) chooseTxType(plane, txSz int) int {
-	if t.f.lossless || int(txSizeSqrUp[txSz]) > TX_32X32 {
-		return DCT_DCT
-	}
-	if plane == 0 {
-		return DCT_DCT
-	}
-	tt := int(modeToTxfm[t.b.uvMode])
-	if txTypeInSetIntra[t.txSet(txSz)][tt] == 0 {
-		return DCT_DCT
-	}
-	return tt
-}
-
-// dqDenom is the dequantization's divisor by transform size.
-func dqDenom(txSz int) int {
-	switch txSz {
-	case TX_32X32, TX_16X32, TX_32X16, TX_16X64, TX_64X16:
-		return 2
-	case TX_64X64, TX_32X64, TX_64X32:
-		return 4
-	}
-	return 1
-}
-
-// quantize quantizes t.coef (the spec's layout, min(32, w) wide) into
-// levels appended to t.levels, giving the end of block (in scan order).
-func (t *tileEnc) quantize(plane, txSz, txType int) int {
-	f := t.f
-	tw, th := min(32, int(txWidth[txSz])), min(32, int(txHeight[txSz]))
-	n := tw * th
-	off := len(t.levels)
-	t.levels = append(t.levels, make([]int32, n)...)
-	q := t.levels[off:]
-	den := int64(dqDenom(txSz))
-	for i := range n {
-		qs := int64(f.acQ[plane])
-		rnd := qs * 3 / 8
-		if i == 0 {
-			qs = int64(f.dcQ[plane])
-			rnd = qs / 2
-		}
-		c := int64(t.coef[i])
-		neg := c < 0
-		if neg {
-			c = -c
-		}
-		l := (c*den + rnd) / qs
-		l = min(l, 1<<18)
-		if neg {
-			l = -l
-		}
-		q[i] = int32(l) //nolint:gosec // clamped
-	}
-	scan := scanFor(txSz, txType)
-	eob := 0
-	for k, pos := range scan[:n] {
-		if q[pos] != 0 {
-			eob = k + 1
-		}
-	}
-	return eob
-}
-
-// writeModeInfo is intra_frame_mode_info.
-func (t *tileEnc) writeModeInfo() {
-	f, b := t.f, &t.b
-	ctx := 0
-	if b.availU {
-		ctx += int(f.skip[f.mi(b.r-1, b.c)])
-	}
-	if b.availL {
-		ctx += int(f.skip[f.mi(b.r, b.c-1)])
-	}
-	t.w.symbol(b2i(b.skip), t.cdf.skip[ctx][:])
-	am, lm := DC_PRED, DC_PRED
-	if b.availU {
-		am = int(f.yMode[f.mi(b.r-1, b.c)])
-	}
-	if b.availL {
-		lm = int(f.yMode[f.mi(b.r, b.c-1)])
-	}
-	t.w.symbol(b.yMode, t.cdf.yMode[intraModeContext[am]][intraModeContext[lm]][:])
-	if b.size >= BLOCK_8X8 && isDirectional(b.yMode) {
-		t.w.symbol(b.angleY+MAX_ANGLE_DELTA, t.cdf.angleDelta[b.yMode-V_PRED][:])
-	}
-	if b.hasChroma {
-		if !f.lossless && max(blockWidth[b.size], blockHeight[b.size]) <= 32 {
-			t.w.symbol(b.uvMode, t.cdf.uvCfl[b.yMode][:])
-		} else {
-			t.w.symbol(b.uvMode, t.cdf.uvNoCfl[b.yMode][:])
-		}
-		if b.size >= BLOCK_8X8 && isDirectional(b.uvMode) {
-			t.w.symbol(b.angleUV+MAX_ANGLE_DELTA, t.cdf.angleDelta[b.uvMode-V_PRED][:])
-		}
-	}
-}
-
-// resetBlockContext is reset_block_context.
-func (t *tileEnc) resetBlockContext() {
-	b := &t.b
-	planes := 1
-	if b.hasChroma {
-		planes = 3
-	}
-	for p := range planes {
-		sub := 0
-		if p > 0 {
-			sub = 1
-		}
-		for i := b.c >> uint(sub); i < (b.c+b.bw4)>>uint(sub); i++ {
-			t.aboveLevel[p][i], t.aboveDc[p][i] = 0, 0
-		}
-		for i := b.r >> uint(sub); i < (b.r+b.bh4)>>uint(sub); i++ {
-			t.leftLevel[p][i], t.leftDc[p][i] = 0, 0
-		}
-	}
 }
