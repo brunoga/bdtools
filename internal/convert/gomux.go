@@ -260,6 +260,8 @@ func audioFormat(e extra) mkv.AudioFormat {
 		return mkv.TrueHD
 	case e.track.StreamID == "A_DTS" || strings.Contains(ext, "dts"):
 		return mkv.DTS
+	case e.track.StreamID == "A_AAC" || ext == ".aac":
+		return mkv.AAC
 	}
 	return mkv.AC3
 }

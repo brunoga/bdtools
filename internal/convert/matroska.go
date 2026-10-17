@@ -237,6 +237,16 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		case "A_TRUEHD":
 			a, _ := esinfo.ParseTrueHD(b)
 			tr.StreamID, tr.Type, tr.Info = "A_AC3", a.Codec, a.Describe()
+		case "A_AAC", "A_AAC/MPEG4/LC", "A_AAC/MPEG2/LC":
+			if len(t.CodecPrivate) < 2 {
+				continue // a configuration to build ADTS headers from is needed
+			}
+			profile := map[byte]string{1: "AAC Main", 2: "AAC LC", 3: "AAC SSR", 5: "HE-AAC", 29: "HE-AAC v2"}[t.CodecPrivate[0]>>3]
+			if profile == "" {
+				profile = "AAC"
+			}
+			tr.StreamID, tr.Type = "A_AAC", "AAC"
+			tr.Info = fmt.Sprintf("%s %d channels %d Hz", profile, t.Channels, int(t.SampleRate))
 		case "A_DTS":
 			hd := ""
 			if bytes.Contains(b, []byte{0x64, 0x58, 0x20, 0x25}) { // DTS-HD substream
@@ -563,6 +573,11 @@ func (g *mkvDemux) start() error {
 				return err
 			}
 		}
+		if t.StreamID == "A_AAC" {
+			if rt := r.Track(uint64(t.ID)); rt != nil { //nolint:gosec // a track number
+				w.aac = rt.CodecPrivate
+			}
+		}
 		g.writers[uint64(t.ID)] = w //nolint:gosec // a track number
 	}
 	return nil
@@ -689,6 +704,14 @@ func (g *mkvDemux) write(p mkv.Packet) error {
 	case w.wav != nil:
 		err = w.wav.write(p.Data)
 		w.n += int64(len(p.Data))
+	case w.aac != nil:
+		// AAC: as ADTS, each frame behind a header from the configuration.
+		w.mark(p.Time-g.t0, p.Data)
+		hdr := mkv.ADTSHeader(w.aac, len(p.Data))
+		if _, err = w.w.Write(hdr); err == nil {
+			_, err = w.w.Write(p.Data)
+		}
+		w.n += int64(len(hdr) + len(p.Data))
 	default:
 		w.mark(p.Time-g.t0, p.Data)
 		_, err = w.w.Write(p.Data)

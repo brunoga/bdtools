@@ -433,6 +433,9 @@ func (m *muxer) audioDelta(tr *track, i int) int64 {
 	if i > 0 {
 		return tr.samples[i].dts - tr.samples[i-1].dts
 	}
+	if tr.t.CodecID == "A_AAC" {
+		return 1024
+	}
 	return 1536
 }
 
@@ -527,6 +530,8 @@ func (m *muxer) sampleEntry(tr *track) ([]byte, error) {
 		return m.ac3(tr, false)
 	case "A_EAC3":
 		return m.ac3(tr, true)
+	case "A_AAC":
+		return m.mp4a(tr)
 	}
 	return nil, fmt.Errorf("mp4: audio %s is not written (AC-3 and E-AC-3 are)", tr.t.CodecID)
 }
@@ -770,4 +775,30 @@ func avcSample(data []byte) ([]byte, error) {
 		out = append(out, nal...)
 	}
 	return out, nil
+}
+
+// mp4a writes an AAC sample entry: its AudioSpecificConfig in an ES
+// descriptor (ISO/IEC 14496-1 and -14).
+func (m *muxer) mp4a(tr *track) ([]byte, error) {
+	asc := tr.t.CodecPrivate
+	if len(asc) < 2 {
+		return nil, errors.New("mp4: an AAC track without its configuration")
+	}
+	desc := func(tag byte, body ...[]byte) []byte {
+		b := bytes.Join(body, nil)
+		n := len(b)
+		return append([]byte{tag, 0x80 | byte(n>>21), 0x80 | byte(n>>14), 0x80 | byte(n>>7), byte(n & 0x7f)}, b...)
+	}
+	dsi := desc(0x05, asc)
+	dcd := desc(0x04, []byte{0x40, 0x15, 0, 0, 0}, u32(0), u32(0), dsi) // MPEG-4 audio, audio stream
+	sl := desc(0x06, []byte{0x02})
+	es := desc(0x03, u16(0), []byte{0}, dcd, sl)
+	entry := bytes.Join([][]byte{
+		make([]byte, 6), u16(1), // reserved, data_reference_index
+		make([]byte, 8), // reserved
+		u16(tr.t.Channels), u16(16), u16(0), u16(0),
+		u32(int64(tr.t.SampleRate) << 16),
+		fullBox("esds", 0, 0, es),
+	}, nil)
+	return box("mp4a", entry), nil
 }

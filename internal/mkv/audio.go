@@ -17,6 +17,7 @@ const (
 	TrueHD                    // TrueHD access units, possibly with an AC-3 core interleaved
 	DTS                       // DTS, or DTS-HD: a core frame then its extension substream
 	WAV                       // PCM in a WAV file
+	AAC                       // AAC in ADTS frames (given raw, the configuration in the codec private data)
 )
 
 // AudioSource reads a demuxed audio file frame by frame. A Blu-ray stream
@@ -139,6 +140,15 @@ func (a *AudioSource) pos() int64 { return a.cr.n - int64(a.r.Buffered()) }
 
 func (a *AudioSource) describe(head []byte) error {
 	switch a.format {
+	case AAC:
+		h, ok := adtsHeader(head)
+		if !ok {
+			return errors.New("mkv: no ADTS frame")
+		}
+		a.rate = h.rate
+		a.track.SampleRate, a.track.Channels = h.rate, h.channels
+		a.track.CodecID = "A_AAC"
+		a.track.CodecPrivate = h.config()
 	case AC3:
 		h, ok := ac3Header(head)
 		if !ok {
@@ -188,6 +198,8 @@ func (a *AudioSource) Next() (Frame, error) {
 	switch a.format {
 	case WAV:
 		return a.nextWAV()
+	case AAC:
+		return a.nextAAC()
 	case TrueHD:
 		return a.nextTrueHD()
 	case DTS:
@@ -665,4 +677,84 @@ func (a *AudioSource) nextWAV() (Frame, error) {
 	}
 	a.wavLeft -= int64(m)
 	return a.emit(b[:m], m/a.wavFrame, start), nil
+}
+
+// --- AAC (ADTS) --------------------------------------------------------------------
+
+// adtsInfo is an ADTS frame header's content.
+type adtsInfo struct {
+	size, header      int
+	object, rateIndex int // audio object type, sampling frequency index
+	rate, channels    int
+	chanConfig        int
+}
+
+var aacRates = [16]int{96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350}
+
+func adtsHeader(b []byte) (adtsInfo, bool) {
+	if len(b) < 7 || b[0] != 0xff || b[1]&0xf6 != 0xf0 {
+		return adtsInfo{}, false
+	}
+	h := adtsInfo{header: 7}
+	if b[1]&1 == 0 {
+		h.header = 9 // with a CRC
+	}
+	h.object = int(b[2]>>6) + 1
+	h.rateIndex = int(b[2]>>2) & 15
+	h.chanConfig = int(b[2]&1)<<2 | int(b[3]>>6)
+	h.size = int(b[3]&3)<<11 | int(b[4])<<3 | int(b[5]>>5)
+	if h.rateIndex > 12 || h.size < h.header {
+		return adtsInfo{}, false
+	}
+	h.rate = aacRates[h.rateIndex]
+	h.channels = [8]int{0, 1, 2, 3, 4, 5, 6, 8}[h.chanConfig]
+	return h, true
+}
+
+// config is the frame's AudioSpecificConfig.
+func (h adtsInfo) config() []byte {
+	return []byte{byte(h.object<<3 | h.rateIndex>>1), byte(h.rateIndex&1<<7 | h.chanConfig<<3)}
+}
+
+// ADTSHeader makes an ADTS header for a raw AAC frame of n bytes with the
+// AudioSpecificConfig asc (object type, rate index, channels from its
+// first 13 bits).
+func ADTSHeader(asc []byte, n int) []byte {
+	if len(asc) < 2 {
+		return nil
+	}
+	object := int(asc[0] >> 3)
+	rateIndex := int(asc[0]&7)<<1 | int(asc[1]>>7)
+	chans := int(asc[1]>>3) & 15
+	size := n + 7
+	return []byte{
+		0xff, 0xf1,
+		byte((object-1)<<6 | rateIndex<<2 | chans>>2),
+		byte(chans&3<<6 | size>>11),
+		byte(size >> 3),
+		byte(size&7<<5 | 0x1f),
+		0xfc,
+	}
+}
+
+func (a *AudioSource) nextAAC() (Frame, error) {
+	for {
+		head, err := a.r.Peek(9)
+		if err != nil && len(head) < 7 {
+			return Frame{}, io.EOF
+		}
+		h, ok := adtsHeader(head)
+		if !ok {
+			if _, err := a.r.Discard(1); err != nil {
+				return Frame{}, io.EOF
+			}
+			continue
+		}
+		start := a.pos()
+		data, err := a.read(h.size)
+		if err != nil {
+			return Frame{}, err
+		}
+		return a.emit(data[h.header:], 1024, start), nil
+	}
 }

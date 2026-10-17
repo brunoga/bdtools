@@ -1689,3 +1689,37 @@ func TestRunnerWritesMP4(t *testing.T) {
 		})
 	}
 }
+
+// AAC is carried as it is, from an MP4 source into Matroska and MP4.
+func TestRunnerCarriesAAC(t *testing.T) {
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg to make the source")
+	}
+	work := t.TempDir()
+	src := filepath.Join(work, "Source.mp4")
+	if out, err := exec.CommandContext(context.Background(), ff, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2", //nolint:gosec // test
+		"-f", "lavfi", "-i", "sine=f=440:r=48000:d=2", "-ac", "2", "-c:v", "libx264", "-c:a", "aac", "-b:a", "128k", src).CombinedOutput(); err != nil {
+		t.Skipf("making the source: %v %s", err, out)
+	}
+	for _, out := range []string{"Out.mkv", "Out.mp4"} {
+		t.Run(out, func(t *testing.T) {
+			o := DefaultOptions()
+			o.Input, o.Output, o.TempDir = src, filepath.Join(work, out), filepath.Join(work, "t"+out)
+			o.Encoder, o.Codec, o.BitDepth, o.CRF = EncoderBuiltin, CodecH265, 8, 26
+			var lines []string
+			if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+				t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+			}
+			probe, err := exec.CommandContext(context.Background(), "ffprobe", "-v", "error", "-select_streams", "a", //nolint:gosec // test
+				"-show_entries", "stream=codec_name,channels,sample_rate", "-of", "csv=p=0", o.Output).Output()
+			if err != nil || strings.TrimSpace(string(probe)) != "aac,48000,2" {
+				t.Fatalf("audio %q (%v)\n%s", probe, err, strings.Join(lines, "\n"))
+			}
+			cmd := exec.CommandContext(context.Background(), ff, "-v", "error", "-i", o.Output, "-f", "null", "-") //nolint:gosec // test
+			if msg, err := cmd.CombinedOutput(); err != nil || len(msg) > 0 {
+				t.Errorf("ffmpeg: %v %s", err, msg)
+			}
+		})
+	}
+}

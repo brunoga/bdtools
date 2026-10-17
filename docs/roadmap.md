@@ -62,8 +62,8 @@ Picture:
 
 Audio:
 - Transcoding with downmix to AAC, AC-3 and Opus, in Go, from any input.
-  Matroska sources' AAC and FLAC tracks (and text subtitles) are dropped
-  today, as the outputs carry only disc codecs.
+  AAC tracks are carried as they are; FLAC and Opus tracks (and text
+  subtitles) are still dropped.
 - Loudness normalisation.
 
 Subtitles:
