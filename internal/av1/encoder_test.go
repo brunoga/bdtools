@@ -112,6 +112,7 @@ func TestEncodeDecodes(t *testing.T) {
 }
 
 func TestEncodeTiles(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ w, h, cl, rl int }{{200, 136, 1, 1}, {520, 264, 2, 1}, {136, 72, 1, 0}} {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: 8, QIndex: 90, FPSNum: 25, FPSDen: 1, TileColsLog2: c.cl, TileRowsLog2: c.rl}
 		checkDecodes(t, o, []*Source{testPicture(c.w, c.h, 8, 2)})
@@ -120,6 +121,7 @@ func TestEncodeTiles(t *testing.T) {
 
 // Inter frames (of intra blocks, for now) after a key frame.
 func TestEncodeInterFrames(t *testing.T) {
+	t.Parallel()
 	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
 	p := testPicture(200, 136, 8, 1)
 	checkDecodes(t, o, []*Source{p, shifted(p, 3, 2), shifted(p, 5, -1), testPicture(200, 136, 8, 2)})
@@ -170,6 +172,7 @@ func encodeAll(t *testing.T, e *Encoder, pics []*Source) []Unit {
 // A longer run: mini-GOPs cut by key frames, the last one short, the
 // slots reused.
 func TestEncodeGOPs(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ mini, keyint, n int }{{8, 12, 20}, {4, 0, 11}, {1, 5, 7}, {3, 0, 10}} {
 		o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: c.mini, Keyint: c.keyint}
 		p := testPicture(96, 64, 8, 3)
@@ -243,4 +246,12 @@ func TestEncodeRowsDeterministic(t *testing.T) {
 	if a, b := code(1), code(8); !bytes.Equal(a, b) {
 		t.Fatalf("one CPU %d bytes, eight %d: different", len(a), len(b))
 	}
+}
+
+// raceCut is s, or its first element with the race detector in.
+func raceCut[T any](s []T) []T {
+	if raceOn {
+		return s[:1]
+	}
+	return s
 }

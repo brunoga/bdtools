@@ -28,6 +28,7 @@ func halfFlatPicture(w, h, depth int, seed uint64) *Source {
 // 64x64s' indexes in turn, both bit depths, sizes not whole superblocks
 // and pictures with skipped superblocks.
 func TestCdefFixed(t *testing.T) {
+	t.Parallel()
 	sets := []cdefSettings{
 		{damping: 3, y: [8][2]int{{5, 0}}, uv: [8][2]int{{3, 0}}},   // primary only
 		{damping: 4, y: [8][2]int{{0, 2}}, uv: [8][2]int{{0, 4}}},   // secondary only
@@ -38,12 +39,12 @@ func TestCdefFixed(t *testing.T) {
 		{damping: 4, bits: 3, y: [8][2]int{{0, 0}, {1, 1}, {2, 2}, {3, 4}, {4, 0}, {8, 1}, {13, 2}, {15, 4}},
 			uv: [8][2]int{{15, 4}, {13, 2}, {8, 1}, {4, 0}, {3, 4}, {2, 2}, {1, 1}, {0, 0}}},
 	}
-	for _, c := range []struct {
+	for _, c := range raceCut([]struct {
 		w, h, depth, q int
 		flat           bool
 	}{
 		{200, 136, 8, 120, false}, {90, 70, 10, 160, false}, {200, 136, 8, 230, true}, {136, 72, 10, 250, true},
-	} {
+	}) {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 		pic := testPicture(c.w, c.h, c.depth, 3)
 		if c.flat {
@@ -72,9 +73,10 @@ func TestCdefFixed(t *testing.T) {
 // TestCdefSearch codes pictures with the parameters searched, at low to
 // high q, and compares them with CDEF off.
 func TestCdefSearch(t *testing.T) {
-	for _, c := range []struct{ w, h, depth, q int }{
+	t.Parallel()
+	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 60}, {200, 136, 8, 160}, {200, 136, 8, 240}, {136, 72, 10, 120}, {90, 70, 10, 220},
-	} {
+	}) {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: c.q, FPSNum: 25, FPSDen: 1}
 		for _, pic := range []*Source{testPicture(c.w, c.h, c.depth, 4), halfFlatPicture(c.w, c.h, c.depth, 4)} {
 			var e *Encoder
