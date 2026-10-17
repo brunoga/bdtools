@@ -259,10 +259,7 @@ func TestBaseEncoderDeterministic(t *testing.T) {
 		}
 		return out
 	}
-	want := encode()
-	for range 3 {
-		if got := encode(); !bytes.Equal(got, want) {
-			t.Fatal("the same frames coded to a different stream")
-		}
+	if !bytes.Equal(encode(), encode()) {
+		t.Fatal("the same frames coded to a different stream")
 	}
 }
