@@ -259,36 +259,17 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 	}
 	j := f.lambda * float64(modeBits+skipBits(false)) / costScale
 	if search {
-		dec.txTypes = dec.txTypes[:0]
+		dec.txTypes, dec.txSplit = dec.txTypes[:0], dec.txSplit[:0]
 	}
 	txSz := b.txSz
 	stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-	k := 0
+	cur := &varTxCursor{}
 	zero := true
 	for y := 0; y < b.bh4; y += stepY {
 		for x := 0; x < b.bw4; x += stepX {
-			if b.r+y >= f.miRows || b.c+x >= f.miCols {
-				continue
-			}
-			if f.fp.txSelect && b.size > BLOCK_4X4 && txSz != TX_4X4 {
-				t.cost.n = 0
-				t.writeTxfmSplit(&t.cost, b.r+y, b.c+x, txSz, false)
-				j += f.lambda * float64(t.cost.n) / costScale
-			}
-			tt := -1
-			if !search && k < len(dec.txTypes) {
-				tt = int(dec.txTypes[k])
-			}
-			jj, eob, chosen, done := t.transformBlock(0, b.c*4+4*x, b.r*4+4*y, txSz, tt)
-			if !done {
-				continue
-			}
-			k++
-			if search {
-				dec.txTypes = append(dec.txTypes, uint8(chosen)) //nolint:gosec // a type
-			}
+			jj, z := t.varTx(dec, b.r+y, b.c+x, txSz, 0, search, cur)
 			j += jj
-			zero = zero && eob == 0
+			zero = zero && z
 		}
 	}
 	if b.hasChroma {
@@ -423,13 +404,10 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	if !b.skip {
 		txSz := b.txSz
 		stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-		if f.fp.txSelect && b.size > BLOCK_4X4 && txSz != TX_4X4 {
-			for y := 0; y < b.bh4; y += stepY {
-				for x := 0; x < b.bw4; x += stepX {
-					if b.r+y < f.miRows && b.c+x < f.miCols {
-						t.writeTxfmSplit(t.w, b.r+y, b.c+x, txSz, false)
-					}
-				}
+		cur := &varTxCursor{}
+		for y := 0; y < b.bh4; y += stepY {
+			for x := 0; x < b.bw4; x += stepX {
+				t.writeVarTx(t.w, dec, b.r+y, b.c+x, txSz, 0, cur)
 			}
 		}
 		for i := range t.txs {
@@ -519,5 +497,150 @@ func (t *tileEnc) estimate(cands []interCand) {
 		t.cost.n = 0
 		t.writeInterModes(&t.cost)
 		cd.est = float64(satd) + sl*float64(t.cost.n)/costScale
+	}
+}
+
+// varTxCursor is where a decided transform tree is read from.
+type varTxCursor struct{ split, typ int }
+
+// txBlockSize is the block size of a transform size's dimensions.
+var txBlockSize = func() (m [TX_SIZES_ALL]int) {
+	for tx := range TX_SIZES_ALL {
+		for bs := range BLOCK_SIZES {
+			if blockWidth[bs] == txWidth[tx] && blockHeight[bs] == txHeight[tx] {
+				m[tx] = bs
+			}
+		}
+	}
+	return m
+}()
+
+// varTxSplits reports whether a node of an inter block's transform tree
+// codes txfm_split.
+func (t *tileEnc) varTxSplits(txSz, depth int) bool {
+	return t.f.fp.txSelect && t.b.size > BLOCK_4X4 && txSz != TX_4X4 && depth < MAX_VARTX_DEPTH
+}
+
+// varTx codes a node of an inter block's luma transform tree at mi (row,
+// col) (read_var_tx_size's order): whole, or split, as the search finds
+// cheaper (search) or dec says. It gives the cost and whether every
+// coefficient is zero; the leaves set InterTxSizes.
+func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, cur *varTxCursor) (float64, bool) {
+	f := t.f
+	if row >= f.miRows || col >= f.miCols {
+		return 0, true
+	}
+	splits := t.varTxSplits(txSz, depth)
+	leaf := func() (float64, bool) {
+		j := 0.0
+		if splits {
+			t.cost.n = 0
+			t.writeTxfmSplit(&t.cost, row, col, txSz, false)
+			j = f.lambda * float64(t.cost.n) / costScale
+		}
+		tt := -1
+		if !search {
+			tt = int(dec.txTypes[cur.typ])
+			cur.typ++
+		}
+		jj, eob, chosen, _ := t.transformBlock(0, col*4, row*4, txSz, tt)
+		if search {
+			dec.txTypes = append(dec.txTypes, uint8(chosen)) //nolint:gosec // a type
+		}
+		t.setTxSize(row, col, txSz)
+		return j + jj, eob == 0
+	}
+	split := func() (float64, bool) {
+		t.cost.n = 0
+		t.writeTxfmSplit(&t.cost, row, col, txSz, true)
+		j := f.lambda * float64(t.cost.n) / costScale
+		sub := int(splitTxSize[txSz])
+		sw, sh := int(txWidth[sub])>>2, int(txHeight[sub])>>2
+		zero := true
+		for i := 0; i < int(txHeight[txSz])>>2; i += sh {
+			for k := 0; k < int(txWidth[txSz])>>2; k += sw {
+				jj, z := t.varTx(dec, row+i, col+k, sub, depth+1, search, cur)
+				j += jj
+				zero = zero && z
+			}
+		}
+		return j, zero
+	}
+	if !splits {
+		return leaf()
+	}
+	if !search {
+		s := dec.txSplit[cur.split]
+		cur.split++
+		if s {
+			return split()
+		}
+		return leaf()
+	}
+	// search: whole, then split, the better kept
+	if dbgNoVarTx {
+		dec.txSplit = append(dec.txSplit, false)
+		return leaf()
+	}
+	bs := txBlockSize[txSz]
+	// the tree's own slots, by its depth (the block search holds the
+	// others)
+	start, whole := t.snap(0, 4+2*depth), t.snap(0, 5+2*depth)
+	t.save(start, row, col, bs, true)
+	at := len(dec.txSplit)
+	dec.txSplit = append(dec.txSplit, false)
+	nTypes := len(dec.txTypes)
+	j0, z0 := leaf()
+	t0 := dec.txTypes[nTypes:]
+	t0 = append([]uint8(nil), t0...)
+	t.save(whole, row, col, bs, true)
+	t.restore(start, true)
+	dec.txTypes = dec.txTypes[:nTypes]
+	dec.txSplit[at] = true
+	j1, z1 := split()
+	if j1 < j0 {
+		return j1, z1
+	}
+	dec.txSplit = append(dec.txSplit[:at], false)
+	dec.txTypes = append(dec.txTypes[:nTypes], t0...)
+	t.restore(whole, true)
+	return j0, z0
+}
+
+// setTxSize sets InterTxSizes for a transform's mi.
+func (t *tileEnc) setTxSize(row, col, txSz int) {
+	f := t.f
+	for i := range int(txHeight[txSz]) >> 2 {
+		for k := range int(txWidth[txSz]) >> 2 {
+			if row+i < f.miRows && col+k < f.miCols {
+				f.txSize[f.mi(row+i, col+k)] = uint8(txSz) //nolint:gosec // a size
+			}
+		}
+	}
+}
+
+// writeVarTx writes an inter block's transform tree's txfm_split
+// symbols, setting InterTxSizes as a decoder does.
+func (t *tileEnc) writeVarTx(cd coder, dec *blockDec, row, col, txSz, depth int, cur *varTxCursor) {
+	f := t.f
+	if row >= f.miRows || col >= f.miCols {
+		return
+	}
+	split := false
+	if t.varTxSplits(txSz, depth) {
+		split = dec.txSplit[cur.split]
+		cur.split++
+		t.writeTxfmSplit(cd, row, col, txSz, split)
+	}
+	if !split {
+		t.setTxSize(row, col, txSz)
+		return
+	}
+	sub := int(splitTxSize[txSz])
+	sw, sh := int(txWidth[sub])>>2, int(txHeight[sub])>>2
+	for i := 0; i < int(txHeight[txSz])>>2; i += sh {
+		for k := 0; k < int(txWidth[txSz])>>2; k += sw {
+			t.writeVarTx(cd, dec, row+i, col+k, sub, depth+1, cur)
+		}
 	}
 }

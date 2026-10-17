@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode bool
+var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode, dbgNoVarTx bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -73,7 +73,9 @@ func (t *tileEnc) setInfo() {
 				f.skip[i] = uint8(b2i(b.skip))         //nolint:gosec // a flag
 				f.skipMode[i] = uint8(b2i(b.skipMode)) //nolint:gosec // a flag
 				f.miSize[i] = uint8(b.size)            //nolint:gosec // a size
-				f.txSize[i] = uint8(b.txSz)            //nolint:gosec // a size
+				if !b.isInter || b.skip {
+					f.txSize[i] = uint8(b.txSz) //nolint:gosec // a size (else the transform tree's)
+				}
 			}
 		}
 	}

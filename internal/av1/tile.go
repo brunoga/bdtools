@@ -85,7 +85,7 @@ type tileEnc struct {
 	levels               []int32
 	lv                   [32 * 32]uint8
 	cflL                 [32 * 32]int32
-	snaps                [10][4]*snapshot // by depth, a few each
+	snaps                [10][8]*snapshot // by depth, a few each
 	sbStart              snapshot
 	cdefDone             bool
 	dctOnly              bool // luma transform types not searched
@@ -145,8 +145,9 @@ type blockDec struct {
 	refFrame2       int
 	mv, mv2         mv
 	refMvIdx        int
-	skip            bool // an inter block coded without residual
-	skipMode        bool // coded as skip_mode
+	skip            bool   // an inter block coded without residual
+	skipMode        bool   // coded as skip_mode
+	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order
 }
