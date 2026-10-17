@@ -15,6 +15,14 @@ import (
 // interCands is how many inter candidates are coded in full.
 var interCands = 4
 
+// filterRD chooses the best candidate's interpolation filter by coding it
+// with each (else the estimates' SATD alone chooses).
+var filterRD = true
+
+// obmcCands is how many of them (single reference ones) are also coded
+// with OBMC.
+var obmcCands = 2
+
 // Debugging: dbgInterModes keeps the inter modes of its bits (1 <<
 // (mode - NEARESTMV)); dbgForceInter prefers any inter coding to intra.
 var (
@@ -22,6 +30,9 @@ var (
 	dbgForceInter    bool
 	dbgForceCompound bool
 	dbgForceSkipMode bool
+	// dbgForceObmc codes OBMC wherever it may be; dbgNoObmc never (and
+	// the frames not motion mode switchable)
+	dbgForceObmc, dbgNoObmc bool
 )
 
 // interStride is the stride of a plane's inter prediction.
@@ -75,6 +86,25 @@ func (t *tileEnc) writeInterModes(cd coder) {
 		p := s.predMv(NEWMV, b.refMvIdx, 0)
 		t.writeMvDiff(cd, mv{b.mv.row - p.row, b.mv.col - p.col})
 	}
+	if t.readsUseObmc() {
+		cd.symbol(b2i(b.obmc), c.useObmc[b.size][:])
+	}
+}
+
+// readsUseObmc reports whether read_motion_mode reads use_obmc for the
+// block (warped motion off, so use_obmc is its motion_mode): a single
+// reference block of 8 by 8 or more, not skip_mode, with an overlappable
+// neighbour.
+func (t *tileEnc) readsUseObmc() bool {
+	f, b := t.f, &t.b
+	if b.skipMode || !f.fp.motionModeSwitchable || min(blockWidth[b.size], blockHeight[b.size]) < 8 {
+		return false
+	}
+	fi := f.inter
+	if !fi.forceIntegerMv && (b.yMode == GLOBALMV || b.yMode == GLOBAL_GLOBALMV) && fi.gmType[b.refFrame] > TRANSLATION {
+		return false
+	}
+	return !t.isCompound() && t.hasOverlappableCandidates()
 }
 
 // predictBlock makes an inter block's prediction of every plane.
@@ -86,6 +116,9 @@ func (t *tileEnc) predictBlock() {
 	}
 	for p := range planes {
 		f.predictInterBlock(&f.refs, b, p, f.filt, t.interPred[p][:], t.interStride(p), &t.is)
+		if b.obmc {
+			f.overlapPredict(&f.refs, b, p, f.filt, t.interPred[p][:], t.interStride(p), &t.is)
+		}
 	}
 }
 
@@ -167,10 +200,52 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
-		j := t.codeInter(dec, true)
-		if j < bestJ {
-			bestJ, bestDec = j, dec
-			t.save(best, r, c, size, true)
+		t.setInterState(dec)
+		// OBMC tried for the best two single reference candidates, with
+		// their vector and filter (all of them when forced, without the
+		// simple prediction)
+		obmc := (i < obmcCands || dbgForceObmc) && !dbgNoObmc && t.readsUseObmc()
+		if obmc && !dbgForceObmc {
+			obmc = t.obmcPredictsBetter()
+		}
+		if !obmc || !dbgForceObmc {
+			if j := t.codeInter(dec, true); j < bestJ {
+				bestJ, bestDec = j, dec
+				t.save(best, r, c, size, true)
+			}
+		}
+		if obmc {
+			t.restore(start, true)
+			do := *dec
+			do.obmc, do.skip, do.txSplit, do.txTypes = true, false, nil, nil
+			if j := t.codeInter(&do, true); j < bestJ || dbgForceObmc {
+				bestJ, bestDec = j, &do
+				t.save(best, r, c, size, true)
+			}
+		}
+	}
+	// the filter of the best, by rate and distortion
+	if filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE && !dbgNoSwitchable {
+		b.refFrame, b.refFrame2, b.yMode = bestDec.refFrame, bestDec.refFrame2, bestDec.yMode
+		if b.refFrame2 <= INTRA_FRAME {
+			b.refFrame2 = NONE
+		}
+		b.skipMode = false
+		if t.needsInterpFilter() {
+			base := *bestDec
+			for _, fl := range []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP} {
+				if fl == base.interp {
+					continue
+				}
+				t.restore(start, true)
+				dec := base
+				dec.interp, dec.txTypes, dec.txSplit = fl, nil, nil
+				t.findMvStack(&t.stack, dec.refFrame2 > INTRA_FRAME, [2]int{dec.refFrame, dec.refFrame2})
+				if j := t.codeInter(&dec, true); j < bestJ {
+					bestJ, bestDec = j, &dec
+					t.save(best, r, c, size, true)
+				}
+			}
 		}
 	}
 	if f.fp.skipModePresent && !dbgNoSkipMode {
@@ -193,6 +268,20 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	return bestJ, bestDec
 }
 
+// obmcPredictsBetter reports whether the block's luma prediction (the
+// state's) has a lower SATD with OBMC than without: OBMC is coded in full
+// only then.
+func (t *tileEnc) obmcPredictsBetter() bool {
+	f, b := t.f, &t.b
+	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
+	t.setModes()
+	pred := t.interPred[0][:]
+	f.predictInterBlock(&f.refs, b, 0, f.filt, pred, w, &t.is)
+	simple := t.satd(0, b.c*4, b.r*4, w, h, pred)
+	f.overlapPredict(&f.refs, b, 0, f.filt, pred, w, &t.is)
+	return t.satd(0, b.c*4, b.r*4, w, h, pred) < simple
+}
+
 // setInterState puts an inter block's decisions in t.b.
 func (t *tileEnc) setInterState(dec *blockDec) {
 	b := &t.b
@@ -200,6 +289,7 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b.refFrame2, b.mv2 = dec.refFrame2, dec.mv2
 	b.skipMode = dec.skipMode
 	b.interp = dec.interp
+	b.obmc = dec.obmc
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
 	}
@@ -379,6 +469,9 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	if comp && getMode(dec.yMode, 1) != NEWMV {
 		dec.mv2 = t.stack.predMv(dec.yMode, dec.refMvIdx, 1)
 	}
+	if !t.readsUseObmc() {
+		dec.obmc = false // as the search found it (so never)
+	}
 	t.setInterState(dec)
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)
@@ -497,7 +590,7 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.refFrame2 = NONE
 		}
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
-		b.interp = EIGHTTAP
+		b.interp, b.obmc = EIGHTTAP, false
 		filters := []int{EIGHTTAP}
 		if t.needsInterpFilter() && !dbgNoSwitchable {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}

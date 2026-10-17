@@ -1,7 +1,7 @@
 package av1
 
 // Inter prediction (spec 7.11.3), exactly as a decoder predicts, for what
-// the encoder codes: translation only (no warps, no OBMC), references the
+// the encoder codes: translation only (no warps), references the
 // size of the frame, the 8-tap subpel filters (their 4-tap variants for
 // blocks 4 wide or high) in each direction, reference samples fetched
 // clamped to the reference picture's real extent. The rounding variables
@@ -59,6 +59,8 @@ type interScratch struct {
 	mid  [(128 + 7) * 128]int32
 	// comp holds a compound block's two predictions (preds[])
 	comp [2][]int32
+	// obmc is an overlapped prediction's obmcPred
+	obmc [64 * 64]uint16
 }
 
 // subpelTaps is, by filter and position, the range of a Subpel_Filters
@@ -344,5 +346,95 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 			c++
 		}
 		r++
+	}
+}
+
+// obmcMask is get_obmc_mask.
+func obmcMask(n int) []uint8 {
+	switch n {
+	case 2:
+		return obmcMask2[:]
+	case 4:
+		return obmcMask4[:]
+	case 8:
+		return obmcMask8[:]
+	case 16:
+		return obmcMask16[:]
+	}
+	return obmcMask32[:]
+}
+
+// overlapPredict is the overlapped motion compensation process
+// (7.11.3.9) for a plane of block b, whose prediction (the plane's whole
+// block: an OBMC block is 8 by 8 or larger) is in dst (stride
+// dstStride): strips along its top and left edges predicted by the
+// overlappable above and left neighbours' first reference and motion
+// vector, with their interpolation filter, blended in by the masks. The
+// neighbours' RefFrames, Mvs, InterpFilters and MiSizes must be stored.
+func (f *frameEnc) overlapPredict(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, b *blockState, plane int, filt [2]int, dst []uint16, dstStride int, s *interScratch) {
+	sub := uint(min(plane, 1))
+	planeSz := b.size
+	if plane > 0 {
+		planeSz = int(subsampledSize[b.size][1][1])
+	}
+	w, h := int(blockWidth[b.size])>>sub, int(blockHeight[b.size])>>sub
+	baseX, baseY := (b.c>>sub)*MI_SIZE, (b.r>>sub)*MI_SIZE
+	// overlap predicts the strip at (predX, predY) of a neighbour's (mi
+	// i) motion and blends it in (pass 0 from above, 1 from the left).
+	// The rows (columns) whose mask is 64 keep the block's prediction, so
+	// they are not predicted; the filters are those of the whole strip
+	// (4 or less predicted only when the strip is 4 or less).
+	overlap := func(i, predX, predY, predW, predH, pass int) {
+		mask := obmcMask(predH)
+		pw, ph := predW, predH-predH/4
+		if pass == 1 {
+			mask = obmcMask(predW)
+			pw, ph = predW-predW/4, predH
+		}
+		fl := filt
+		if f.fp.interpFilter == SWITCHABLE {
+			fl = [2]int{int(f.interp[i]), int(f.interp[i])}
+		}
+		op := s.obmc[:pw*ph]
+		predictInter(refs[f.refFrames[0][i]], plane, predX, predY, pw, ph, f.mvs[0][i], fl, f.bitDepth, op, pw, s)
+		d := dst[(predY-baseY)*dstStride+predX-baseX:]
+		for y := range ph {
+			row, o := d[y*dstStride:y*dstStride+pw], op[y*pw:(y+1)*pw]
+			if pass == 0 {
+				m := uint32(mask[y])
+				for x := range row {
+					row[x] = uint16((m*uint32(row[x]) + (64-m)*uint32(o[x]) + 32) >> 6) //nolint:gosec // a blend of samples
+				}
+				continue
+			}
+			for x := range row {
+				m := uint32(mask[x])
+				row[x] = uint16((m*uint32(row[x]) + (64-m)*uint32(o[x]) + 32) >> 6) //nolint:gosec // a blend of samples
+			}
+		}
+	}
+	if b.availU && planeSz >= BLOCK_8X8 {
+		n, limit := 0, min(4, int(miWidthLog2[b.size]))
+		for x4 := b.c; n < limit && x4 < min(f.miCols, b.c+b.bw4); {
+			i := f.mi(b.r-1, x4|1)
+			step4 := min(max(int(num4x4BlocksWide[f.miSize[i]]), 2), 16)
+			if f.refFrames[0][i] > INTRA_FRAME {
+				n++
+				overlap(i, (x4*4)>>sub, baseY, min(w, (step4*MI_SIZE)>>sub), min(h>>1, 32>>sub), 0)
+			}
+			x4 += step4
+		}
+	}
+	if b.availL {
+		n, limit := 0, min(4, int(miHeightLog2[b.size]))
+		for y4 := b.r; n < limit && y4 < min(f.miRows, b.r+b.bh4); {
+			i := f.mi(y4|1, b.c-1)
+			step4 := min(max(int(num4x4BlocksHigh[f.miSize[i]]), 2), 16)
+			if f.refFrames[0][i] > INTRA_FRAME {
+				n++
+				overlap(i, baseX, (y4*4)>>sub, min(w>>1, 32>>sub), min(h, (step4*MI_SIZE)>>sub), 1)
+			}
+			y4 += step4
+		}
 	}
 }

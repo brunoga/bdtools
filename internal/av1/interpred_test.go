@@ -194,7 +194,7 @@ func TestInterPredSpec(t *testing.T) {
 // one intra, one 4x4 by the bottom right block's.
 func TestPredictInterBlockChroma(t *testing.T) {
 	const W, H = 64, 64
-	f := &frameEnc{bitDepth: 8, miCols: W / 4, miRows: H / 4, width: W, height: H}
+	f := &frameEnc{bitDepth: 8, miCols: W / 4, miRows: H / 4, width: W, height: H, fp: &frameParams{interpFilter: EIGHTTAP}}
 	n := f.miCols * f.miRows
 	for k := range 2 {
 		f.refFrames[k] = make([]int8, n)

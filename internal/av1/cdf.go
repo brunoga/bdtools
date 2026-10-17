@@ -43,6 +43,7 @@ type cdfs struct {
 	txfmSplit    [TXFM_PARTITION_CONTEXTS][3]uint16
 	skipMode     [SKIP_MODE_CONTEXTS][3]uint16
 	interpFilter [INTERP_FILTER_CONTEXTS][INTERP_FILTERS + 1]uint16
+	useObmc      [BLOCK_SIZES][3]uint16
 	deltaQ       [DELTA_Q_SMALL + 2]uint16
 	compMode     [COMP_INTER_CONTEXTS][3]uint16
 	compRefType  [COMP_REF_TYPE_CONTEXTS][3]uint16
@@ -116,7 +117,7 @@ func newCDFs(qIndex int) *cdfs {
 
 		yModeInter: defaultYModeCdf, isInter: defaultIsInterCdf, newMv: defaultNewMvCdf, zeroMv: defaultZeroMvCdf,
 		refMv: defaultRefMvCdf, drlMode: defaultDrlModeCdf, singleRef: defaultSingleRefCdf, txfmSplit: defaultTxfmSplitCdf,
-		skipMode: defaultSkipModeCdf, interpFilter: defaultInterpFilterCdf, deltaQ: defaultDeltaQCdf, compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
+		skipMode: defaultSkipModeCdf, interpFilter: defaultInterpFilterCdf, useObmc: defaultUseObmcCdf, deltaQ: defaultDeltaQCdf, compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
 		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf,
 		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
 

@@ -132,8 +132,9 @@ type blockState struct {
 	// and its motion vector
 	refFrame2  int
 	mv2        mv
-	interp     int // its interpolation filter
-	filterMode int // filter_intra_mode, or -1
+	interp     int  // its interpolation filter
+	obmc       bool // motion_mode OBMC (else SIMPLE)
+	filterMode int  // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
 	maxLumaW, maxLumaH int
@@ -162,6 +163,7 @@ type blockDec struct {
 	refMvIdx        int
 	skip            bool   // an inter block coded without residual
 	skipMode        bool   // coded as skip_mode
+	obmc            bool   // motion_mode OBMC
 	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order

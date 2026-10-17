@@ -2,9 +2,11 @@ package av1
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestDbgIsolate(t *testing.T) {
@@ -243,4 +245,84 @@ func TestDeltaQ(t *testing.T) {
 			return q
 		}
 	})
+}
+
+// bands is a picture whose bands of rows move differently: (dx, dy)
+// scaled by -1, 0 and 1 in turn, 20 rows a band.
+func bands(p *Source, dx, dy int) *Source {
+	w, h := p.StrideY, len(p.Y)/p.StrideY
+	cw := p.StrideC
+	q := &Source{Y: make([]uint16, len(p.Y)), Cb: make([]uint16, len(p.Cb)), Cr: make([]uint16, len(p.Cr)), StrideY: w, StrideC: cw}
+	for k := -1; k <= 1; k++ {
+		m := shifted(p, k*dx, k*dy)
+		for y := range h {
+			if (y/20)%3 != k+1 {
+				continue
+			}
+			copy(q.Y[y*w:(y+1)*w], m.Y[y*w:(y+1)*w])
+			if y%2 == 0 {
+				c := y / 2
+				copy(q.Cb[c*cw:(c+1)*cw], m.Cb[c*cw:(c+1)*cw])
+				copy(q.Cr[c*cw:(c+1)*cw], m.Cr[c*cw:(c+1)*cw])
+			}
+		}
+	}
+	return q
+}
+
+// seqPSNR is the luma PSNR of every picture of a sequence coded as o
+// says, with the bytes.
+func seqPSNR(t *testing.T, o EncoderOptions, pics []*Source) (int, float64) {
+	t.Helper()
+	e, err := NewEncoder(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.keepRecon = true
+	n, se := 0, 0.0
+	for i, u := range encodeAll(t, e, pics) {
+		n += len(u.Data)
+		src, rec := pics[i], u.recon[0]
+		for y := range o.Height {
+			for x := range o.Width {
+				d := float64(src.Y[y*src.StrideY+x]) - float64(rec[y*o.Width+x])
+				se += d * d
+			}
+		}
+	}
+	peak := float64(int(1)<<uint(o.BitDepth) - 1)
+	return n, 10 * math.Log10(peak*peak/(se/float64(o.Width*o.Height*len(pics))))
+}
+
+// OBMC wherever it may be: moving pictures (bands of rows moving apart),
+// compound blocks around the OBMC ones (mini-GOPs), tiles, frame edges
+// inside the last blocks, 8 and 10 bits; then OBMC off and chosen, the
+// bytes and PSNR logged.
+func TestDbgObmc(t *testing.T) {
+	if os.Getenv("AV1DBG") == "" {
+		t.Skip("AV1DBG unset")
+	}
+	defer func() { dbgForceObmc, dbgForceInter, dbgNoObmc = false, false, false }()
+	for _, c := range []struct{ w, h, depth, mini, cl int }{
+		{96, 64, 8, 4, 0}, {200, 136, 8, 1, 0}, {200, 136, 10, 4, 1}, {96, 64, 10, 1, 0}, {196, 130, 8, 4, 1},
+	} {
+		p := testPicture(c.w, c.h, c.depth, 3)
+		var pics []*Source
+		for i := range 6 {
+			pics = append(pics, bands(p, i*3/2, -i/2))
+		}
+		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: c.mini, TileColsLog2: c.cl}
+		for _, force := range []bool{true, false} {
+			dbgForceObmc, dbgForceInter = force, force
+			t.Run(fmt.Sprintf("%dx%d-%d-%v", c.w, c.h, c.depth, force), func(t *testing.T) { checkDecodes(t, o, pics) })
+		}
+		dbgForceObmc, dbgForceInter = false, false
+		for _, off := range []bool{true, false} {
+			dbgNoObmc = off
+			start := time.Now()
+			n, psnr := seqPSNR(t, o, pics)
+			t.Logf("%dx%d %d bits mini-GOP %d, OBMC off %v: %d bytes, %.3f dB, %v", c.w, c.h, c.depth, c.mini, off, n, psnr, time.Since(start).Round(time.Millisecond))
+		}
+		dbgNoObmc = false
+	}
 }

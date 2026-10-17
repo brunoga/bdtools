@@ -158,6 +158,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		if ok, frames := fp.skipModeAllowed(); fp.refSelect && ok && !dbgNoSkipMode {
 			fp.skipModePresent, fp.skipModeFrame = true, frames
 		}
+		fp.motionModeSwitchable = !dbgNoObmc
 		f.inter = fi
 		f.filt = [2]int{EIGHTTAP, EIGHTTAP} // the motion search's
 		if fp.interpFilter != SWITCHABLE {
