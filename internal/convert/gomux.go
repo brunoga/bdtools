@@ -136,9 +136,12 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 					p.SetDefault(true)
 					firstSubs = false
 				}
-				if r.flat {
+				switch {
+				case r.flat && r.xform != nil && !r.xform.crop.IsZero():
+					sources = append(sources, newPGSCrop(p, r.xform.crop, r.xform.inW, r.xform.inH))
+				case r.flat:
 					sources = append(sources, p)
-				} else {
+				default:
 					// Kodi playing a 3D film cuts flat subtitles wider than
 					// half its plane: they go in pieces it leaves whole.
 					sources = append(sources, KodiPGS(p))

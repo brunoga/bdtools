@@ -45,6 +45,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   no NVENC and no x265. On a 20-second 4K clip of a FEL disc it took
   0.7 times x265's time (`--dv-fel keep`, `--crf 16`).
 
+- `--crop TOP:BOTTOM:LEFT:RIGHT` and `--scale 1080p` (or 2160p, 1440p,
+  720p, 576p, 480p, WIDTHxHEIGHT) for 2D conversions: the picture cropped,
+  then fitted in the box keeping its shape (never enlarged) by a Lanczos-3
+  filter here, chroma kept at 4:2:0's siting. Every encoder takes the
+  result. The PGS subtitle tracks are cut with the picture (a line in a
+  black bar moved up into it), and a Dolby Vision film's RPUs say the
+  active area they now have (level 5). A 4K FEL film cropped and scaled to
+  1080p converts at 21 fps with the encoder here.
+
 ### Fixed
 
 - The Go HEVC encoder's output could change from run to run at 4K: its

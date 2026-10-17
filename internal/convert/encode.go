@@ -159,6 +159,21 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			skipped++ // a copied left eye starts at its first IDR picture
 			return nil
 		}
+		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero()) {
+			w, h, _ := sf.size()
+			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
+			if err != nil {
+				return err
+			}
+			r.xform = t
+			r.Report.Report("%s", t.describe())
+		}
+		if r.xform != nil {
+			var err error
+			if sf, err = r.xform.apply(sf); err != nil {
+				return err
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

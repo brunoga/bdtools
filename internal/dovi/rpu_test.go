@@ -83,3 +83,47 @@ func TestRPUSamples(t *testing.T) {
 		t.Run(filepath.Base(f), func(t *testing.T) { checkRPUs(t, f) })
 	}
 }
+
+// The level 5 active area reads, and rewritten reads back with the rest
+// of the RPU as it was.
+func TestActiveArea(t *testing.T) {
+	files, _ := filepath.Glob(filepath.Join("testdata", "*[^2].bin"))
+	found := 0
+	for _, f := range files {
+		b, err := os.ReadFile(f) //nolint:gosec // test data
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range splitRPUs(b) {
+			u, err := ParseNAL(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, r, top, bot, ok := u.ActiveArea()
+			if !ok {
+				continue
+			}
+			found++
+			if found == 1 {
+				t.Logf("%s: L5 %d %d %d %d", filepath.Base(f), l, r, top, bot)
+			}
+			before := u.Bytes()
+			u.SetActiveArea(l, r, top, bot)
+			if !bytes.Equal(u.Bytes(), before) {
+				t.Fatalf("%s: the same area rewritten changed the RPU", f)
+			}
+			u.SetActiveArea(10, 20, 30, 8191)
+			v, err := Parse(u.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l, r, top, bot, _ := v.ActiveArea(); l != 10 || r != 20 || top != 30 || bot != 8191 {
+				t.Fatalf("%s: read back %d %d %d %d", f, l, r, top, bot)
+			}
+		}
+	}
+	if found == 0 {
+		t.Skip("no fixture RPU has level 5 metadata")
+	}
+	t.Logf("%d RPUs with level 5", found)
+}

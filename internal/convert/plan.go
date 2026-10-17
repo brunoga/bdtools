@@ -115,6 +115,11 @@ type Options struct {
 	// DVELCRF is the enhancement layer's quality when it is kept as a layer
 	// (0: CRF plus 12).
 	DVELCRF int
+	// Crop takes rows and columns off the picture's edges, and Scale fits
+	// what is left in a box (never larger), for a 2D conversion: see
+	// transform.go.
+	Crop  Crop
+	Scale Scale
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
 	// on its own. A source with no MVC dependent view is converted so in
@@ -318,6 +323,18 @@ func (o Options) Validate(goos string) error {
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
 			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+	}
+	if !o.Crop.IsZero() || !o.Scale.IsZero() {
+		switch {
+		case o.Remux:
+			return fmt.Errorf("--crop and --scale change the picture: a remux keeps it as it is")
+		case o.Encoder == EncoderCopy:
+			return fmt.Errorf("--crop and --scale change the picture: --encoder copy keeps it as it is")
+		case o.DVFEL.layered():
+			return fmt.Errorf("--crop and --scale with --dv-fel %s: the enhancement layer is half the base layer's size, and would have to change with it; compose it (the default) or drop it", o.DVFEL)
+		case o.BurnSubs != 0:
+			return fmt.Errorf("--crop and --scale with --burn-subs: not yet; carry the subtitle track instead")
+		}
 	}
 	if o.Remux {
 		// MVC has no home in Matroska that players agree on, so a 3D remux

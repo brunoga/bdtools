@@ -115,13 +115,28 @@ bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"
 
 **Dolby Vision.** A conversion makes profile 8.1, the full enhancement layer
 composed into the picture; or keep profile 7's layers for a player that
-composes them (NVENC or x265); or leave Dolby Vision out:
+composes them (NVENC, x265 or the encoder here); or leave Dolby Vision out:
 
 ```sh
 bdtools --input uhd.iso --output film.mkv                          # profile 8.1
 bdtools --input uhd.iso --output film.mkv --dv-fel keep --encoder nvenc
 bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only
 ```
+
+**Cropping and scaling.** A UHD film made 1080p, its black bars cut off
+(a 2.39:1 film on a 3840x2160 disc has 280 rows above and below; a
+1.85:1 one 42):
+
+```sh
+bdtools --input uhd.iso --output film.mkv --crop 280:280:0:0 --scale 1080p
+```
+
+The picture is cropped first, then fitted in the box with a Lanczos
+filter, never enlarged (3840x1600 becomes 1920x800). The subtitle tracks
+are cut with the picture, a line the disc put in a black bar moved up into
+it, and a Dolby Vision film's active area (its RPUs' level 5) follows. For
+2D conversions; not with `--dv-fel keep` or `reencode`, `--burn-subs` or a
+remux.
 
 **AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
 SVT-AV1 otherwise):
@@ -356,8 +371,10 @@ scheduler such as pipeliner retry it.
 | `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
-| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc` or `software`); or `drop` it (the HDR10 base layer as it is) |
+| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale` |
+| `--scale` | `none` | Fit a 2D conversion's picture in a box, its shape kept and never enlarged: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
 | `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
