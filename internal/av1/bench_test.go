@@ -38,7 +38,8 @@ func TestBenchIntra(t *testing.T) {
 	jobs := make(chan job)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for range runtime.GOMAXPROCS(0) {
+	// half the CPUs: each picture's tiles are coded at once too
+	for range max(runtime.GOMAXPROCS(0)/2, 1) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
