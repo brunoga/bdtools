@@ -22,4 +22,9 @@ type refFrameState struct {
 	done chan struct{}
 	// cdf is the frame's CDFs as kept for later frames (save_cdfs).
 	cdf *cdfs
+	// refHints are SavedOrderHints (by reference); mfRef and mfMv the
+	// saved motion field (SavedRefFrames, SavedMvs) on the 8x8 grid.
+	refHints [TOTAL_REFS_PER_FRAME]int
+	mfRef    []int8
+	mfMv     []mv
 }

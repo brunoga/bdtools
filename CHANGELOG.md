@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Temporal motion vectors in the AV1 encoder (use_ref_frame_mvs: the
+  references' motion projected to give candidates): 1.7% smaller on the
+  120-picture clips, +29.5% against SVT-AV1 preset 4. Distance weighted
+  compound is there too, off (it gained nothing).
 - The AV1 encoder searches all seven references (LAST2, LAST3 and
   ALTREF2 too) and six compound pairs: 0.9% smaller on the 120-picture
   clips, +31.7% against SVT-AV1 preset 4, for a tenth more time.

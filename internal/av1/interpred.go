@@ -269,7 +269,7 @@ func predictInter(ref *refFrameState, plane, x, y, w, h int, m mv, filt [2]int, 
 
 // predictCompound is a compound block's prediction (COMPOUND_AVERAGE):
 // each reference's at the compound rounding, averaged.
-func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w, h int, ref [2]int, m [2]mv, filt [2]int, bitDepth int, dst []uint16, dstStride int, s *interScratch) {
+func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w, h int, ref [2]int, m [2]mv, filt [2]int, bitDepth int, wt [2]int32, dst []uint16, dstStride int, s *interScratch) {
 	rnd := interRoundingFor(bitDepth, true)
 	for k := range 2 {
 		if cap(s.comp[k]) < 128*128 {
@@ -282,6 +282,17 @@ func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w,
 	sh := uint(1 + rnd.post)
 	maxV := int32(1)<<uint(bitDepth) - 1
 	p0, p1 := s.comp[0], s.comp[1]
+	if wt[0] != 0 { // COMPOUND_DISTANCE
+		sh = uint(4 + rnd.post)
+		for i := range h {
+			row := dst[i*dstStride : i*dstStride+w]
+			for j := range row {
+				v := (wt[0]*p0[i*w+j] + wt[1]*p1[i*w+j] + 1<<(sh-1)) >> sh
+				row[j] = uint16(clip(v, maxV)) //nolint:gosec // clipped
+			}
+		}
+		return
+	}
 	for i := range h {
 		row := dst[i*dstStride : i*dstStride+w]
 		for j := range row {
@@ -337,8 +348,13 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 				filt = [2]int{int(f.interp[i]), int(f.interp[i])}
 			}
 			if f.refFrames[1][i] > INTRA_FRAME {
-				predictCompound(refs, plane, baseX+x, baseY+y, predW, predH, [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])},
-					[2]mv{f.mvs[0][i], f.mvs[1][i]}, filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)
+				ref := [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])}
+				var wt [2]int32 // COMPOUND_AVERAGE
+				if f.compIdx[i] == 0 {
+					wt = f.fp.distWeights(ref)
+				}
+				predictCompound(refs, plane, baseX+x, baseY+y, predW, predH, ref,
+					[2]mv{f.mvs[0][i], f.mvs[1][i]}, filt, f.bitDepth, wt, dst[y*dstStride+x:], dstStride, s)
 				c++
 				continue
 			}

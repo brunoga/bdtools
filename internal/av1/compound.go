@@ -226,3 +226,65 @@ func (t *tileEnc) compoundCands(r0, r1 int, new0, new1 mv, cands []interCand) []
 	}
 	return cands
 }
+
+// dbgNoJntComp turns distance weighted compound (enable_jnt_comp) off:
+// off by default, as it gained nothing (+0.1% on the 120-picture clips,
+// 5% more time); dbgForceCompDist weights every compound block's
+// predictions by distance (for tests).
+var dbgNoJntComp, dbgForceCompDist = true, false
+
+// writeCompoundIdx writes a compound block's compound_idx (read_compound_type
+// with masked compound off).
+func (t *tileEnc) writeCompoundIdx(cd coder) {
+	f, b := t.f, &t.b
+	if !f.seq.jntComp || b.skipMode {
+		return
+	}
+	fwd := abs(relativeDist(f.fp.refHints[b.refFrame-LAST_FRAME], f.fp.orderHint))
+	bck := abs(relativeDist(f.fp.refHints[b.refFrame2-LAST_FRAME], f.fp.orderHint))
+	ctx := 0
+	if fwd == bck {
+		ctx = 3
+	}
+	for _, n := range [2]struct {
+		avail bool
+		r, c  int
+	}{{b.availU, b.r - 1, b.c}, {b.availL, b.r, b.c - 1}} {
+		if !n.avail {
+			continue
+		}
+		i := f.mi(n.r, n.c)
+		if f.refFrames[1][i] > INTRA_FRAME {
+			ctx += int(f.compIdx[i])
+		} else if f.refFrames[0][i] == ALTREF_FRAME {
+			ctx++
+		}
+	}
+	cd.symbol(b2i(!b.compDist), t.cdf.compoundIdx[ctx][:])
+}
+
+// distWeights are the distance weights process's FwdWeight and BckWeight
+// for a compound block's references.
+func (fp *frameParams) distWeights(ref [2]int) [2]int32 {
+	var dist [2]int
+	for k := range 2 {
+		dist[k] = min(abs(relativeDist(fp.refHints[ref[k]-LAST_FRAME], fp.orderHint)), MAX_FRAME_DISTANCE)
+	}
+	d0, d1 := dist[1], dist[0]
+	order := b2i(d0 <= d1)
+	if d0 == 0 || d1 == 0 {
+		return [2]int32{int32(quantDistLookup[3][order]), int32(quantDistLookup[3][1-order])}
+	}
+	i := 0
+	for ; i < 3; i++ {
+		c0, c1 := int(quantDistWeight[i][order]), int(quantDistWeight[i][1-order])
+		if order == 1 {
+			if d0*c0 > d1*c1 {
+				break
+			}
+		} else if d0*c0 < d1*c1 {
+			break
+		}
+	}
+	return [2]int32{int32(quantDistLookup[i][order]), int32(quantDistLookup[i][1-order])}
+}
