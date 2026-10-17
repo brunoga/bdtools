@@ -654,3 +654,41 @@ func escape(b []byte) []byte {
 	}
 	return out
 }
+
+// ActiveArea is the picture's active area as the RPU's level 5 metadata
+// gives it: the black bars' sizes in samples, left, right, top and bottom.
+// ok is false when the RPU has none.
+func (u *RPU) ActiveArea() (l, r, t, b int, ok bool) {
+	if u.DM == nil {
+		return 0, 0, 0, 0, false
+	}
+	for _, blocks := range [2][]ExtBlock{u.DM.CMv29, u.DM.CMv40} {
+		for _, e := range blocks {
+			if e.Level == 5 && len(e.Payload) >= 7 {
+				p := e.Payload
+				v := uint64(p[0])<<48 | uint64(p[1])<<40 | uint64(p[2])<<32 | uint64(p[3])<<24 | uint64(p[4])<<16 | uint64(p[5])<<8 | uint64(p[6])
+				return int(v >> 43 & 0x1fff), int(v >> 30 & 0x1fff), int(v >> 17 & 0x1fff), int(v >> 4 & 0x1fff), true
+			}
+		}
+	}
+	return 0, 0, 0, 0, false
+}
+
+// SetActiveArea rewrites the RPU's level 5 metadata (where it has any)
+// with the bars given, in samples (0 to 8191).
+func (u *RPU) SetActiveArea(l, r, t, b int) {
+	if u.DM == nil {
+		return
+	}
+	c := func(v int) uint64 { return uint64(min(max(v, 0), 0x1fff)) } //nolint:gosec // clamped
+	v := c(l)<<43 | c(r)<<30 | c(t)<<17 | c(b)<<4
+	for _, blocks := range [2][]ExtBlock{u.DM.CMv29, u.DM.CMv40} {
+		for i := range blocks {
+			if e := &blocks[i]; e.Level == 5 && len(e.Payload) >= 7 {
+				for k := range 7 {
+					e.Payload[k] = byte(v >> (48 - 8*k))
+				}
+			}
+		}
+	}
+}

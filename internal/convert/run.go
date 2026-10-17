@@ -75,6 +75,9 @@ type Runner struct {
 	sink encoderSink
 	// flat is set for a 2D conversion: one picture, not a stereo pair.
 	flat bool
+	// xform crops and scales the pictures (--crop, --scale), once the
+	// first gives their size.
+	xform *picTransform
 	// rateNum and rateDen are the frame rate the container states, for a
 	// stream that does not.
 	rateNum, rateDen int
@@ -221,6 +224,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if r.Opts.Remux && !r.flat {
 		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
 			"remux to .m2ts, or add --2d for its base view alone")
+	}
+	if (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero()) && !r.flat {
+		return fmt.Errorf("--crop and --scale convert a 2D picture for now: add --2d for a 3D source's base view")
 	}
 	switch {
 	case r.framedIn != "" && !r.flat:

@@ -104,3 +104,4 @@ Measurement:
 | 4. H.264 encoder | Done for now: +9% BD-rate against x264 --tune psnr (trellis, B-pyramid, lookahead); speed later |
 | 5. Interlaced H.264 | Done: PAFF and MBAFF bit-exact on 79 of 80 JVT streams; 1080i sources decoded and deinterlaced in Go |
 | 6. Dolby Vision two layers | Done: `--dv-fel keep`/`reencode` with `--encoder builtin` (profile 7 out, no NVENC or x265) |
+| 7. Scaling, cropping, tone mapping | `--crop` and `--scale` done (2D, Lanczos, subtitles and DV L5 follow); next: black bars found automatically, then tone mapping |

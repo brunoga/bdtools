@@ -1723,3 +1723,87 @@ func TestRunnerCarriesAAC(t *testing.T) {
 		})
 	}
 }
+
+// --crop and --scale: a 2D conversion's picture cropped, then fitted in the
+// box (the 640x480 base view less 40 rows top and bottom is 640x400; in
+// 320x240 that is 320x200), and the stream decodes.
+func TestRunnerCropsAndScales(t *testing.T) {
+	source := mvcMatroska(t)
+	work := t.TempDir()
+	out := filepath.Join(work, "out.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = source, out, work
+	o.Encoder, o.Codec, o.TwoD, o.BitDepth = EncoderBuiltin, CodecH265, true, 10
+	o.Crop, o.Scale = Crop{Top: 40, Bottom: 40}, Scale{W: 320, H: 240}
+	o.CRF = 28
+	var lines []string
+	if err := NewRunner(CurrentGOOS, o, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }).Run(context.Background()); err != nil {
+		t.Fatalf("conversion failed: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if !slices.Contains(lines, "cropping 640x480 to 640x400 (top 40, bottom 40, left 0, right 0), scaling 640x400 to 320x200 (Lanczos)") {
+		t.Errorf("no report of the transform:\n%s", strings.Join(lines, "\n"))
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := rd.Tracks[0]
+	if v.Width != 320 || v.Height != 200 {
+		t.Fatalf("video track %dx%d, want 320x200", v.Width, v.Height)
+	}
+	var stream []byte
+	frames := 0
+	for {
+		p, err := rd.Next()
+		if err != nil {
+			break
+		}
+		if p.Track == v.Number {
+			frames++
+			stream = append(stream, avccToAnnexB(t, p.Data)...)
+		}
+	}
+	d := hevc.New()
+	pics := 0
+	count := func(p *hevc.Picture) error {
+		pics++
+		if p.Width != 320 || p.Height != 200 {
+			t.Errorf("picture %dx%d", p.Width, p.Height)
+		}
+		return nil
+	}
+	if err := d.Decode(append(hvccParameterSets(t, v.CodecPrivate), stream...), 0, count); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Flush(count); err != nil {
+		t.Fatal(err)
+	}
+	if frames == 0 || pics != frames || d.Errors() != 0 {
+		t.Errorf("%d frames, %d decoded, %d errors", frames, pics, d.Errors())
+	}
+}
+
+// --crop and --scale are refused where they cannot apply.
+func TestCropAndScaleRefused(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(*Options)
+	}{
+		{"remux", func(o *Options) { o.Remux = true }},
+		{"layered", func(o *Options) { o.Codec, o.Encoder, o.DVFEL = CodecH265, EncoderBuiltin, FELKeep }},
+		{"burn", func(o *Options) { o.Layout, o.Codec, o.BurnSubs = LayoutMVHEVC, CodecH265, 3 }},
+	} {
+		o := DefaultOptions()
+		o.Input, o.Output = "in.mkv", "out.mkv"
+		o.Crop = Crop{Top: 2}
+		c.set(&o)
+		if err := o.Validate(CurrentGOOS); err == nil || !strings.Contains(err.Error(), "--crop") {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+}
