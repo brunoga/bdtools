@@ -7,6 +7,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder faster and smaller: a tile's superblock rows coded at
+  once (a wavefront: each row decides from the CDFs of the row above, the
+  stream still exact and the same however scheduled), the HEVC encoder's
+  AVX2 SAD and SATD, four inter candidates coded in full; about twice as
+  fast, and +26.4% against SVT-AV1 preset 4 on the two clips (was +28%).
+  A q index a superblock (delta_q) is supported; a temporal dependency
+  model to set it is there but off (it cost 1.5% here).
 - An AV1 encoder in Go (internal/av1): `--encoder builtin --codec av1`,
   the fallback when there is no GPU encoder and no SVT-AV1. Every stream
   the tests code is decoded by libdav1d to the encoder's own
