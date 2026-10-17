@@ -7,6 +7,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- An AAC-LC encoder in Go (`internal/aac`): mono to 5.1, mid/side
+  stereo, a psychoacoustic model (Bark spreading, the threshold of
+  hearing), a rate loop with a bit reservoir. By a noise-to-mask measure
+  independent of its model it is 2 to 3.5 dB ahead of FFmpeg's AAC
+  encoder at 96 to 448 kb/s on a film soundtrack (its SNR is lower: the
+  noise goes under the masking threshold). `--audio-transcode aac` codes
+  an MP4 output's DTS and PCM tracks with it (96 kb/s a channel) instead
+  of AC-3. Its tables come from FFmpeg (LGPL); see NOTICE.
 - AAC tracks are carried as they are: from MP4 and Matroska sources into
   Matroska and MP4 outputs (they were left out).
 - An AC-3 encoder in Go (`internal/ac3`): mono to 5.1, every A/52 rate,

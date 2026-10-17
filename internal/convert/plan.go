@@ -137,6 +137,9 @@ type Options struct {
 	InputLayout Layout
 	// InputSwap says the framed source's right eye comes first.
 	InputSwap bool
+	// AudioTranscode is the codec a track an MP4 output cannot carry as it
+	// is (DTS, PCM) is coded in: "ac3" (the default) or "aac".
+	AudioTranscode string
 	// BitDepth is the output's: 8 (or 0), or 10 for HEVC (Main 10) and AV1.
 	// The source is 8-bit either way; at 10 the encoder predicts and
 	// quantises at finer precision, which shows as less banding in smooth
@@ -397,6 +400,9 @@ func (o Options) Validate(goos string) error {
 	default:
 		return fmt.Errorf("unknown layout %q (want %q, %q, %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU, LayoutMVC, LayoutMVHEVC)
 	}
+	if a := o.AudioTranscode; a != "" && a != "ac3" && a != "aac" {
+		return fmt.Errorf("--audio-transcode %q: want ac3 or aac", a)
+	}
 	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) && !isMP4Output(o.Output) {
 		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture (--layout mvhevc): the other outputs carry subtitle tracks")
 	}
@@ -468,6 +474,14 @@ func (o Options) Validate(goos string) error {
 
 // tenBit reports whether the output is 10-bit.
 func (o Options) tenBit() bool { return o.BitDepth == 10 }
+
+// audioTranscode is the codec tracks are coded in when they must be.
+func (o Options) audioTranscode() string {
+	if o.AudioTranscode == "aac" {
+		return "aac"
+	}
+	return "ac3"
+}
 
 // NeedsFilters reports whether the output requires a filter on the stacked
 // frame, which is squeezing it to half width. (Exchanging the eyes is done
