@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/brunoga/bdtools/internal/convert"
 )
 
 // capture runs the command with argv, returning stdout, stderr and the code.
@@ -238,5 +240,24 @@ func TestHelpHasABanner(t *testing.T) {
 	_, errOut, _ := capture(t, "-h")
 	if !strings.HasPrefix(errOut, "bdtools ") || !strings.Contains(strings.SplitN(errOut, "\n", 2)[0], "3D or 2D") {
 		t.Errorf("help starts %q", strings.SplitN(errOut, "\n", 2)[0])
+	}
+}
+
+// Every device preset is settings the command takes, and the command line
+// wins over a preset.
+func TestDevicePresets(t *testing.T) {
+	for _, name := range strings.Split(convert.DeviceNames(), ", ") {
+		d, _ := convert.DeviceFor(name)
+		_, errs, code := capture(t, "--dry-run", "--for", name, "--input", "/in/a.iso", "--output", "/out/a"+d.Ext, "--temp", "/tmp/w")
+		if code != 0 {
+			t.Errorf("--for %s: exit %d\n%s", name, code, errs)
+		}
+	}
+	out, _, code := capture(t, "--dry-run", "--for", "plex", "--layout", "full", "--input", "/in/a.iso", "--output", "/out/a.mkv", "--temp", "/tmp/w")
+	if code != 0 || strings.Contains(out, "half-SBS") {
+		t.Errorf("--layout full lost to the preset (exit %d):\n%s", code, out)
+	}
+	if _, _, code := capture(t, "--dry-run", "--for", "toaster", "--input", "/in/a.iso", "--output", "/out/a.mkv"); code != 2 {
+		t.Errorf("an unknown device: exit %d", code)
 	}
 }

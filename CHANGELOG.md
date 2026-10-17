@@ -84,7 +84,20 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   seven discs' tracks against their films' SRTs, 1.2% of characters
   differ, much of it the SRTs' own.
 
+- `--start`, `--end` and `--duration`: part of a title or file converted,
+  the sound (within half an audio frame), subtitles and chapters cut with
+  the picture. A disc title is windowed as its playlist windows its clips,
+  the clips outside not read; reading stops past the end.
+
+- `--for appletv|coreelec|kodi|plex|quest|visionpro`: a player's settings
+  (codec, depth, Dolby Vision form, 3D layout, subtitles as text), each
+  only where the command line gives none.
+
 ### Fixed
+
+- A resumed conversion now starts over when `--crop`, `--scale`,
+  `--tonemap` or the trim changed, instead of joining segments made with
+  other settings.
 
 - A 2D Matroska source no longer warns that its pictures had no
   dependent view.

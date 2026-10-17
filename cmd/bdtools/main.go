@@ -34,6 +34,7 @@ import (
 	"runtime/pprof"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/convert"
 	pversion "github.com/brunoga/bdtools/internal/version"
@@ -117,6 +118,10 @@ func run(argv []string, stdout, stderr *os.File) int {
 			"More: https://github.com/brunoga/bdtools/tree/main/cmd/bdtools#common-tasks\n\nflags:\n")
 		fs.PrintDefaults()
 	}
+	startF := fs.String("start", "", "convert from this time of the title or file on: [[H:]M:]S, or 1h2m3s")
+	endF := fs.String("end", "", "convert up to this time (the end not included): as --start")
+	durF := fs.String("duration", "", "convert this long, from --start: as --start")
+	forDev := fs.String("for", "", "a player's settings, where the command line gives none: "+convert.DeviceNames())
 	subsOCR := fs.Bool("subs-ocr", false, "read each PGS subtitle track's pictures as text: an SRT track beside it in Matroska, the only one in MP4 (tx3g); Latin-script languages")
 	var subsFiles []string
 	fs.Func("subs-file", "add a subtitle file (SRT, ASS, SSA, WebVTT) as a track, LANG:PATH or PATH (the language then from its name: film.en.srt, film.eng.forced.srt); repeat for more", func(v string) error {
@@ -129,6 +134,28 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if *showVer {
 		fmt.Fprintf(stdout, "bdtools %s\n", pversion.Resolve(version))
 		return 0
+	}
+
+	// A device preset: its settings where the command line has none.
+	if *forDev != "" {
+		d, err := convert.DeviceFor(*forDev)
+		if err != nil {
+			fmt.Fprintln(stderr, "bdtools:", err)
+			return 2
+		}
+		set := map[string]bool{}
+		fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		for name, v := range d.Flags {
+			if !set[name] {
+				if err := fs.Set(name, v); err != nil {
+					fmt.Fprintln(stderr, "bdtools:", err)
+					return 2
+				}
+			}
+		}
+		if d.Ext != "" && *output != "" && !strings.EqualFold(filepath.Ext(*output), d.Ext) {
+			fmt.Fprintf(stderr, "bdtools: warning: --for %s plays %s files best, not %s\n", *forDev, d.Ext, filepath.Ext(*output))
+		}
 	}
 
 	// The options given, as opposed to left at their defaults: what the
@@ -248,6 +275,29 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	o.ToneMap = *toneMap
+	for _, t := range []struct {
+		name string
+		v    *string
+		to   *time.Duration
+	}{{"start", startF, &o.Trim.Start}, {"end", endF, &o.Trim.End}} {
+		if *t.v == "" {
+			continue
+		}
+		d, err := convert.ParseClock(*t.v)
+		if err != nil {
+			fmt.Fprintf(stderr, "bdtools: --%s %v\n", t.name, err)
+			return 2
+		}
+		*t.to = d
+	}
+	if *durF != "" {
+		d, err := convert.ParseClock(*durF)
+		if err != nil || d <= 0 || *endF != "" {
+			fmt.Fprintln(stderr, "bdtools: --duration wants a length, and no --end beside it")
+			return 2
+		}
+		o.Trim.End = o.Trim.Start + d
+	}
 	o.SubsOCR = *subsOCR
 	for _, f := range subsFiles {
 		o.SubsFiles = append(o.SubsFiles, convert.ParseSubsFile(f))

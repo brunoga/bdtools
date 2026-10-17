@@ -124,6 +124,8 @@ type Options struct {
 	// ToneMap makes an HDR picture SDR (BT.709), after any crop and
 	// scaling: see tonemap.go.
 	ToneMap bool
+	// Trim converts part of the source (--start, --end): see trim.go.
+	Trim Trim
 	// SubsOCR reads each PGS subtitle track's pictures as text: a text
 	// track beside it (SRT in Matroska, tx3g in MP4).
 	SubsOCR bool
@@ -333,6 +335,16 @@ func (o Options) Validate(goos string) error {
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
 			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+	}
+	if !o.Trim.IsZero() {
+		switch {
+		case o.Trim.End > 0 && o.Trim.End <= o.Trim.Start:
+			return fmt.Errorf("--end %s is not after --start %s", clock(o.Trim.End), clock(o.Trim.Start))
+		case o.Remux:
+			return fmt.Errorf("--start and --end with --remux: not yet (a copy can only be cut at keyframes); convert instead")
+		case o.Encoder == EncoderCopy:
+			return fmt.Errorf("--start and --end with --encoder copy: not yet; encode both eyes instead")
+		}
 	}
 	for _, f := range o.SubsFiles {
 		switch strings.ToLower(filepath.Ext(f.Path)) {

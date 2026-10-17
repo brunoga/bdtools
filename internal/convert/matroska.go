@@ -503,6 +503,7 @@ func hasNAL(b []byte, typ byte) bool {
 type mkvDemux struct {
 	src     *mkvSource
 	sel     Selection
+	trim    Trim // the part of the file converted (--start, --end)
 	report  Reporter
 	tmp     string
 	f       *os.File
@@ -599,8 +600,12 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 		}
 		if !g.t0Known {
 			// The output starts with the file's first block, whichever track
-			// it belongs to; a track that starts later starts later.
-			g.t0, g.t0Known = p.Time, true
+			// it belongs to; a track that starts later starts later. A trim
+			// moves the start.
+			g.t0, g.t0Known = p.Time+g.trim.Start, true
+		}
+		if g.trim.End > 0 && p.Time-g.t0 > g.trim.End-g.trim.Start+ticks90k(trimMargin) {
+			return nil, nil, 0, io.EOF // past the trim's end: the rest is not converted
 		}
 		switch {
 		case p.Track == g.video && g.raw:
@@ -656,6 +661,18 @@ func (g *mkvDemux) Next() (base, dep []byte, pts int64, err error) {
 	}
 }
 
+// keep reports whether a decoded picture is inside the trim (nil without
+// one).
+func (g *mkvDemux) keep() func(int64) bool {
+	if g.trim.IsZero() {
+		return nil
+	}
+	return func(pts int64) bool {
+		t := ticks90k(pts) - g.t0
+		return t >= 0 && (g.trim.End == 0 || t < g.trim.End-g.trim.Start)
+	}
+}
+
 // noteDepth records the offset metadata an access unit at t carries. The
 // metadata's own timestamp is the GOP's first frame on the disc's clock;
 // the access unit carrying it, its first in decoding order, shows at t on
@@ -694,6 +711,10 @@ func (g *mkvDemux) tapSubtitles(id int, fn func(pts int64, seg []byte)) bool {
 func (g *mkvDemux) write(p mkv.Packet) error {
 	w := g.writers[p.Track]
 	if w == nil || w.err != nil {
+		return nil
+	}
+	if g.trim.End > 0 && p.Time-g.t0 >= g.trim.End-g.trim.Start {
+		g.dropped[p.Track] += int64(len(p.Data))
 		return nil
 	}
 	if p.Time < g.t0 {
@@ -859,6 +880,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.rateNum, src.rateDen
 	g := newMkvDemux(src, sel, tmp, r.Report)
+	g.trim = r.Opts.Trim
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
 	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat {
 		r.depth = &depthMap{}
@@ -897,7 +919,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if r.framedIn != "" {
 		pics = r.framedSource(pics)
 	}
-	video, decErr := r.decodeAndEncode(ctx, pics, nil)
+	video, decErr := r.decodeAndEncode(ctx, pics, g.keep())
 	extras, finErr := g.finish()
 	if decErr != nil {
 		return decErr
@@ -905,7 +927,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if finErr != nil {
 		return finErr
 	}
-	return r.mux(ctx, video, extras, src.chapters)
+	return r.mux(ctx, video, extras, trimChapters(src.chapters, r.Opts.Trim))
 }
 
 // withFallbacks adds, for each kept lossless track without a lossy core

@@ -237,11 +237,15 @@ func (r *Runner) resumeKey() (string, error) {
 		SwapLR    bool
 		BitDepth  int
 		Segment   int
-		DVFEL     FEL `json:",omitempty"`
-		DVELCRF   int `json:",omitempty"`
-		NVENCCQ   int `json:",omitempty"`
+		DVFEL     FEL   `json:",omitempty"`
+		DVELCRF   int   `json:",omitempty"`
+		NVENCCQ   int   `json:",omitempty"`
+		Crop      Crop  `json:",omitempty"`
+		Scale     Scale `json:",omitempty"`
+		ToneMap   bool  `json:",omitempty"`
+		Trim      Trim  `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
-		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ()}) // as resolved: a default may change
+		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ(), o.Crop, o.Scale, o.ToneMap, o.Trim}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}

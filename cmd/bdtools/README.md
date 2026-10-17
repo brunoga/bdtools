@@ -132,6 +132,16 @@ bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p --tonemap
 ```
 
+**Part of a film**, a scene to try settings on or to keep:
+
+```sh
+bdtools --input disc.iso --output scene.mkv --start 1:02:30 --duration 2m
+```
+
+The picture is decoded from the keyframe before the start and kept from
+it, the sound and subtitles are cut at the start and the end (within half
+an audio frame), and the chapters move with them. Not with `--remux` yet.
+
 **AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
 SVT-AV1 otherwise):
 
@@ -369,6 +379,8 @@ scheduler such as pipeliner retry it.
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--for` | — | A player's settings where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro` — see [Device presets](#device-presets) |
+| `--start`, `--end`, `--duration` | — | Convert part of the title or file: from `--start`, up to `--end` or for `--duration` (`[[H:]M:]S`, or `1h2m3s`); the sound, subtitles and chapters cut with the picture |
 | `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`; `auto` finds the black bars |
 | `--tonemap` | — | Make an HDR picture (HDR10, HLG, Dolby Vision, HDR10+) SDR, BT.709 — see [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping) |
 | `--scale` | `none` | Fit a 2D conversion's picture in a box, its shape kept and never enlarged: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
@@ -758,6 +770,25 @@ gave visibly fewer edge artefacts than centred, and down the two were
 alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
 made from ffmpeg's decodes of the two layers, and 28 dB from the base
 layer alone (that clip's enhancement layer brightens its credits).
+
+## Device presets
+
+`--for` gives a player's settings, each only where the command line does
+not give its own:
+
+| `--for` | File | Settings |
+|---|---|---|
+| `coreelec` | .mkv | HEVC 10-bit, Dolby Vision profile 7 with the full enhancement layer kept (`--dv-fel keep`), 3D side by side; `--layout mvc` for MVC |
+| `kodi` | .mkv | HEVC 10-bit, Dolby Vision 8.1 (the layer composed in), 3D side by side |
+| `plex` | .mkv | HEVC 10-bit, Dolby Vision 8.1, PGS read as text (`--subs-ocr`: clients transcode PGS), 3D half side by side |
+| `appletv` | .mp4 | HEVC 10-bit, the sound AC-3 where MP4 cannot carry the source's, subtitles as text |
+| `visionpro` | .mov | MV-HEVC, subtitles as text |
+| `quest` | .mp4 | MV-HEVC (burn subtitles in with `--burn-subs`) |
+
+```sh
+bdtools --for plex --input disc.iso --output film.mkv
+bdtools --for appletv --crf 20 --input disc.iso --output film.mp4   # its CRF, the preset's rest
+```
 
 ## Cropping, scaling and tone mapping
 
