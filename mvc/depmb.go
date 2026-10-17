@@ -60,6 +60,8 @@ const (
 
 // depCoder codes the macroblocks of one dependent view picture.
 type depCoder struct {
+	trellis  bool         // trellis quantisation of the residual
+	tc       trellisCosts // its costs and scratch
 	mbW, mbH int
 	qp, qpc  int
 	mfT      [4][8]int32 // the luma quantiser's multipliers, for fdctQuantLuma
@@ -196,10 +198,11 @@ func init() {
 			scale8[q][i] = 16 * v8[q][k]
 		}
 	}
+	initTrellis()
 }
 
 func newDepCoder(mbW, mbH, qp int) *depCoder {
-	c := &depCoder{mbW: mbW, mbH: mbH}
+	c := &depCoder{mbW: mbW, mbH: mbH, trellis: true}
 	c.planQP(qp)
 	c.cur = make([]depMB, mbW*mbH)
 	for k := range c.prev {
@@ -923,6 +926,9 @@ func (c *depCoder) transformQuant(mbX, mbY int, res *residual) {
 	qbits := uint(15 + c.qp/6)
 	f := int32(1<<qbits) / 6
 	mask, nz4 := fdctQuantLuma(c.src.Y, mbY*16*c.src.StrideY+mbX*16, c.src.StrideY, &c.pred, &quantMF[c.qp%6], &c.mfT, qbits, f, &res.luma)
+	if c.trellising() && mask != 0 {
+		mask, nz4 = c.trellisLuma4(mbX, mbY, mask, qbits, res)
+	}
 	// the coded block pattern: an 8x8 quadrant has a level in one of its
 	// four blocks
 	var cbp4 uint8
@@ -946,6 +952,7 @@ func (c *depCoder) transformQuant8(mbX, mbY int, res *residual) bool {
 	qbits8 := uint(16 + c.qp/6)
 	f8 := int32(1<<qbits8) / 6
 	mf8 := &quant8MF[c.qp%6]
+	var t8 *trellisCosts
 	for b8 := 0; b8 < 4; b8++ {
 		bx, by := (b8&1)*8, (b8>>1)*8
 		var d [64]int32
@@ -963,6 +970,19 @@ func (c *depCoder) transformQuant8(mbX, mbY int, res *residual) bool {
 			res.luma8[b8][k] = l
 			if l != 0 {
 				cbp8 |= 1 << b8
+			}
+		}
+		if c.trellising() && cbp8>>b8&1 != 0 {
+			if t8 == nil {
+				t8 = &c.tc
+				t8.load(c.e.contexts(), catLuma8x8, 64)
+			}
+			if !trellisBlock(t8, d[:], zigzag8x8[:], mf8[:], qbits8, trellisW8[c.qp][:], c.lambda2, 0, 0, res.luma8[b8][:]) {
+				cbp8 &^= 1 << b8
+			}
+		}
+		for _, l := range res.luma8[b8] {
+			if l != 0 {
 				nz8++
 			}
 		}
@@ -1081,49 +1101,53 @@ func wavefrontWorkers() int {
 
 // wavefront is a slice's decisions as the workers make them.
 type wavefront struct {
-	chosen  []cand         // per macroblock of the picture, by index
-	done    []atomic.Int32 // per row: macroblocks decided
-	rowCtx  [][512]uint8   // per row: the model's context states after its second macroblock
-	waiters atomic.Int32   // workers asleep in wait
-	mu      sync.Mutex
-	cond    *sync.Cond
+	chosen []cand       // per macroblock of the picture, by index
+	rows   []wfRow      // per row: progress
+	rowCtx [][512]uint8 // per row: the model's context states after its second macroblock
 }
 
-// wait blocks until row y has decided at least n macroblocks: a short
-// spin first, since the row above is usually a macroblock or two from
-// it, then sleeps.
+// wfRow is a row's progress: the macroblocks decided, and who sleeps for
+// more (each row its own, so an advance wakes only the row below).
+type wfRow struct {
+	done    atomic.Int32
+	waiters atomic.Int32
+	mu      sync.Mutex
+	cond    sync.Cond
+}
+
+// wait blocks until row y has decided at least n macroblocks. (Spinning
+// first, yielding, gained nothing and cost the scheduler's lock.)
 func (wf *wavefront) wait(y, n int) {
-	for i := 0; i < 64; i++ {
-		if int(wf.done[y].Load()) >= n {
-			return
-		}
-		runtime.Gosched()
+	r := &wf.rows[y]
+	if int(r.done.Load()) >= n {
+		return
 	}
-	wf.waiters.Add(1)
-	wf.mu.Lock()
-	for int(wf.done[y].Load()) < n {
-		wf.cond.Wait()
+	r.waiters.Add(1)
+	r.mu.Lock()
+	for int(r.done.Load()) < n {
+		r.cond.Wait()
 	}
-	wf.mu.Unlock()
-	wf.waiters.Add(-1)
+	r.mu.Unlock()
+	r.waiters.Add(-1)
 }
 
 // advance records that row y has decided n macroblocks, waking anyone
 // asleep for it.
 func (wf *wavefront) advance(y, n int) {
-	if wf.waiters.Load() == 0 {
-		wf.done[y].Store(int32(n))
+	r := &wf.rows[y]
+	if r.waiters.Load() == 0 {
+		r.done.Store(int32(n))
 		// a waiter that arrived between the check and the store sees
 		// the store before it sleeps or finds it after; the lock orders
 		// the two
-		if wf.waiters.Load() == 0 {
+		if r.waiters.Load() == 0 {
 			return
 		}
 	}
-	wf.mu.Lock()
-	wf.done[y].Store(int32(n))
-	wf.mu.Unlock()
-	wf.cond.Broadcast()
+	r.mu.Lock()
+	r.done.Store(int32(n))
+	r.mu.Unlock()
+	r.cond.Broadcast()
 }
 
 // wavefrontBuf gives the coder's wavefront buffers, made on the first
@@ -1131,9 +1155,11 @@ func (wf *wavefront) advance(y, n int) {
 // original makes them.
 func (c *depCoder) wavefrontBuf() *wavefront {
 	wf := c.wfBuf
-	if wf == nil || len(wf.chosen) < c.mbW*c.mbH || len(wf.done) < c.mbH {
-		wf = &wavefront{chosen: make([]cand, c.mbW*c.mbH), done: make([]atomic.Int32, c.mbH), rowCtx: make([][512]uint8, c.mbH)}
-		wf.cond = sync.NewCond(&wf.mu)
+	if wf == nil || len(wf.chosen) < c.mbW*c.mbH || len(wf.rows) < c.mbH {
+		wf = &wavefront{chosen: make([]cand, c.mbW*c.mbH), rows: make([]wfRow, c.mbH), rowCtx: make([][512]uint8, c.mbH)}
+		for i := range wf.rows {
+			wf.rows[i].cond.L = &wf.rows[i].mu
+		}
 		c.wfBuf = wf
 	}
 	if len(c.wcur) < c.mbW*c.mbH {
@@ -1147,7 +1173,7 @@ func (c *depCoder) codeSliceWavefront(e *cabacEncoder, workers int) {
 	mbW, rows := c.mbW, c.rowEnd-c.rowStart
 	wf := c.wavefrontBuf()
 	for y := c.rowStart; y < c.rowEnd; y++ {
-		wf.done[y].Store(0)
+		wf.rows[y].done.Store(0)
 	}
 	workers = min(workers, rows)
 	var next atomic.Int32

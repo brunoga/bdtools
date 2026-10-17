@@ -7,6 +7,21 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Trellis quantisation in the Go H.264 encoder: every residual block's
+  levels (luma 4x4 and 8x8, inter and intra, chroma AC) chosen for the
+  least error plus lambda times their CABAC bits. On 240 film pictures it
+  goes from +5.4% to +0.4% BD-rate against x264 medium.
+
+### Fixed
+
+- The Go H.264 encoder's output depended on how its concurrent pictures
+  were scheduled (a coder's search starting points were the vectors of
+  whatever picture it coded last); they now come from the reference
+  pictures, and the same frames always code to the same stream.
+- Less CPU in the encoder's wavefront: a worker waiting for the row
+  above sleeps on that row instead of yielding to the scheduler, which
+  cost a fifth of the CPU in its lock.
+
 - An AAC-LC encoder in Go (`internal/aac`): mono to 5.1, mid/side
   stereo, a psychoacoustic model (Bark spreading, the threshold of
   hearing), a rate loop with a bit reservoir. By a noise-to-mask measure

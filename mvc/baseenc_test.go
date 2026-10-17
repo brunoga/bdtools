@@ -230,3 +230,36 @@ func countDiff(a, b []byte) int {
 	}
 	return n
 }
+
+// The base view encoder codes the same frames to the same stream however
+// its concurrent pictures are scheduled.
+func TestBaseEncoderDeterministic(t *testing.T) {
+	frames, w, h := baseTestFrames(t)
+	encode := func() []byte {
+		e, err := NewBaseEncoder(BaseOptions{Width: w, Height: h, QP: 26, Keyint: 8, BFrames: 2, Slices: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []byte
+		for i, f := range frames {
+			aus, err := e.Encode(f, int64(i))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, au := range aus {
+				out = append(out, au...)
+			}
+		}
+		aus, err := e.Flush()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, au := range aus {
+			out = append(out, au...)
+		}
+		return out
+	}
+	if !bytes.Equal(encode(), encode()) {
+		t.Fatal("the same frames coded to a different stream")
+	}
+}

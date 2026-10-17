@@ -30,9 +30,11 @@ jobs:
       - name: Test
         # The end-to-end conversion tests skip when x264 is not installed,
         # which it is not here; the GPU encoder tests skip without a GPU.
+        # The race detector slows the Go encoders' conversions several
+        # times over, and the packages share the runner's cores.
         env:
           MVC_MF_HEADERS: /usr/share/mingw-w64/include:/usr/x86_64-w64-mingw32/include
-        run: go test -race -timeout 300s ./...
+        run: go test -race -timeout 600s ./...
 
       - name: Test the pure-Go decoder
         # Every assembly kernel has a Go fallback selected by this tag (and

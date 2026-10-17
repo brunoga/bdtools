@@ -26,6 +26,10 @@ type picture struct {
 	width    int // luma width (multiple of 16)
 	height   int
 
+	// the encoder's list 0 vectors per macroblock when it coded the
+	// picture: search starting points for the pictures predicting from it
+	encMV []mv
+
 	// the luma's half-sample planes, for an encoder (halfPel)
 	hpel   [3][]byte
 	hpelOK bool
