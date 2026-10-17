@@ -265,10 +265,10 @@ func (t *tileEnc) writeCompoundIdx(cd coder) {
 
 // distWeights are the distance weights process's FwdWeight and BckWeight
 // for a compound block's references.
-func (fp *frameParams) distWeights(ref [2]int) [2]int32 {
+func (f *frameParams) distWeights(ref [2]int) [2]int32 {
 	var dist [2]int
 	for k := range 2 {
-		dist[k] = min(abs(relativeDist(fp.refHints[ref[k]-LAST_FRAME], fp.orderHint)), MAX_FRAME_DISTANCE)
+		dist[k] = min(abs(relativeDist(f.refHints[ref[k]-LAST_FRAME], f.orderHint)), MAX_FRAME_DISTANCE)
 	}
 	d0, d1 := dist[1], dist[0]
 	order := b2i(d0 <= d1)

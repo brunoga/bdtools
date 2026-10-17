@@ -64,8 +64,9 @@ jobs:
         # fall back to Apple's software encoder and decoders: the same API
         # and code. They fail now and then (an IOKit error, -536870212),
         # more often with sessions of several packages at once: one
-        # package at a time.
-        run: go test -p 1 -timeout 400s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
+        # package at a time. The runners' speed varies by a third
+        # (internal/convert 290 to 400 s), hence the timeout.
+        run: go test -p 1 -timeout 600s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
 
   test-windows:
     name: Test (Windows)
