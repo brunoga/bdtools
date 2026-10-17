@@ -550,6 +550,28 @@ type extra struct {
 // mux assembles the final file from the video's segments, with the
 // chapters given.
 func (r *Runner) mux(ctx context.Context, video []string, extras []extra, chapters []time.Duration) error {
+	if r.Opts.SubsOCR {
+		dir, err := os.MkdirTemp(r.Opts.TempDir, "bdtools-ocr-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		var out []extra
+		for i, e := range extras {
+			out = append(out, e)
+			if e.track.StreamID != "S_HDMV/PGS" {
+				continue
+			}
+			t, ok, err := r.ocrTrack(e, 20000+i, dir)
+			if err != nil {
+				return fmt.Errorf("--subs-ocr: track %d: %w", e.track.ID, err)
+			}
+			if ok {
+				out = append(out, t)
+			}
+		}
+		extras = out
+	}
 	if len(r.Opts.SubsFiles) > 0 {
 		dir, err := os.MkdirTemp(r.Opts.TempDir, "bdtools-subs-")
 		if err != nil {

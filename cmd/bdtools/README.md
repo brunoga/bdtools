@@ -357,6 +357,7 @@ scheduler such as pipeliner retry it.
 | `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
 | `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
+| `--subs-ocr` | — | Read each PGS subtitle track's pictures as text: an SRT track beside it in Matroska, a tx3g one in MP4 — see [Text subtitles](#text-subtitles) |
 | `--subs-file` | — | Add a subtitle file (SRT, ASS, SSA, WebVTT) as a track: `LANG:PATH`, or `PATH` with the language from its name (`film.en.srt`, `film.eng.forced.srt`); repeat for more — see [Text subtitles](#text-subtitles) |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
@@ -960,6 +961,18 @@ bdtools --input film.mkv --output film.mp4 --subs-file film.en.srt --subs-file p
 A file's language is the one given before a colon, else the one its name
 ends with (`film.en.srt`, `film.por.srt`); `forced` in its name marks it
 forced (`film.en.forced.srt`).
+
+A Blu-ray's subtitles are pictures (PGS), which an MP4 file cannot carry
+and some players cannot show. `--subs-ocr` reads them as text, by a
+network trained for it here (no Tesseract or other tool): each PGS track
+gets an SRT track beside it in Matroska, named after it with "(text)",
+and is the tx3g track an MP4 output carries. Italic lines are marked
+`<i>`. It reads the Latin letters of Western European languages; a track
+in another script is left as it is.
+
+```sh
+bdtools --input disc.iso --output film.mp4 --subs-ocr
+```
 
 ### Naming the output after the audio
 

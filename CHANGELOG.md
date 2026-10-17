@@ -78,6 +78,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   language and the forced flag from the file name, or given). Matroska
   blocks now carry their durations (BlockGroups with BlockDuration).
 
+- `--subs-ocr`: PGS subtitles read as text by a network trained here
+  (internal/ocr, docs/ocr.md; no OCR tool): an SRT track beside each PGS
+  track in Matroska, the tx3g track of an MP4. Italics are marked. On
+  seven discs' tracks against their films' SRTs, 1.2% of characters
+  differ, much of it the SRTs' own.
+
 ### Fixed
 
 - A 2D Matroska source no longer warns that its pictures had no
