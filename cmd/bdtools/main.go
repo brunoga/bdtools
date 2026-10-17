@@ -56,7 +56,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	var (
 		check    = fs.Bool("check", false, "report which external tools are present and which are missing, then exit")
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
-		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, or an MKV")
+		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, an MKV or MP4; or a directory of them (a batch, into --output a directory)")
 		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
 		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC)")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
@@ -122,6 +122,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 	startF := fs.String("start", "", "convert from this time of the title or file on: [[H:]M:]S, or 1h2m3s")
 	endF := fs.String("end", "", "convert up to this time (the end not included): as --start")
 	durF := fs.String("duration", "", "convert this long, from --start: as --start")
+	watch := fs.Bool("watch", false, "with --input a directory: go on converting the sources that arrive in it")
+	batchExt := fs.String("ext", "", "with --input a directory: the outputs' kind (mkv, mp4, mov; default mkv, or the --for device's)")
 	forDev := fs.String("for", "", "a player's settings, where the command line gives none: "+convert.DeviceNames())
 	subsOCR := fs.Bool("subs-ocr", false, "read each PGS subtitle track's pictures as text: an SRT track beside it in Matroska, the only one in MP4 (tx3g); Latin-script languages")
 	var subsFiles []string
@@ -131,6 +133,16 @@ func run(argv []string, stdout, stderr *os.File) int {
 	})
 	if err := fs.Parse(argv); err != nil {
 		return 2
+	}
+	if *input != "" && isBatch(*input) {
+		ext := ".mkv"
+		if d, err := convert.DeviceFor(*forDev); err == nil && *forDev != "" && d.Ext != "" {
+			ext = d.Ext
+		}
+		if *batchExt != "" {
+			ext = "." + strings.TrimPrefix(*batchExt, ".")
+		}
+		return runBatch(argv, *input, *output, ext, *watch, stdout, stderr)
 	}
 	if *showVer {
 		fmt.Fprintf(stdout, "bdtools %s\n", pversion.Resolve(version))

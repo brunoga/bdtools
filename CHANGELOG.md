@@ -98,6 +98,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   encoder at a few CRFs (a GOP's IDR picture counted apart): within about
   a tenth of the size on a disc's film, usually under.
 
+- Batches: `--input` a directory converts every source in it into
+  `--output` a directory, under the same paths, noting what is done;
+  `--watch` goes on converting what arrives.
+
 ### Fixed
 
 - A resumed conversion now starts over when `--crop`, `--scale`,
