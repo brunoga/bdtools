@@ -266,4 +266,3 @@ func shear(src []float32, w, h int, k float64) []float32 {
 	}
 	return out
 }
-
