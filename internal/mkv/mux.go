@@ -83,6 +83,9 @@ type Frame struct {
 	Order    time.Duration
 	Keyframe bool
 	Data     []byte
+	// Duration, when set, is the frame's time on screen: a subtitle's,
+	// written as its block's BlockDuration.
+	Duration time.Duration
 }
 
 // Source produces a track's frames in decode order; io.EOF ends it.
@@ -368,10 +371,24 @@ func (m *muxer) block(track int, f Frame) error {
 		flags |= 0x80
 	}
 	hdr[3] = flags
-	m.cluster = putID(m.cluster, idSimpleBlock)
-	m.cluster = putSize(m.cluster, uint64(len(f.Data)+4))
-	m.cluster = append(m.cluster, hdr[:]...)
-	m.cluster = append(m.cluster, f.Data...)
+	if f.Duration > 0 {
+		// A BlockGroup: the Block, and how long it shows.
+		dur := elemUint(nil, idBlockDuration, uint64(ticks(f.Duration)))
+		blockLen := uint64(len(f.Data) + 4)
+		blk := putSize(putID(nil, idBlock), blockLen)
+		hdr[3] &^= 0x80 // a Block's flags have no keyframe bit
+		m.cluster = putID(m.cluster, idBlockGroup)
+		m.cluster = putSize(m.cluster, uint64(len(blk))+blockLen+uint64(len(dur)))
+		m.cluster = append(m.cluster, blk...)
+		m.cluster = append(m.cluster, hdr[:]...)
+		m.cluster = append(m.cluster, f.Data...)
+		m.cluster = append(m.cluster, dur...)
+	} else {
+		m.cluster = putID(m.cluster, idSimpleBlock)
+		m.cluster = putSize(m.cluster, uint64(len(f.Data)+4))
+		m.cluster = append(m.cluster, hdr[:]...)
+		m.cluster = append(m.cluster, f.Data...)
+	}
 	if f.PTS > m.end {
 		m.end = f.PTS
 	}

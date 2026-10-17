@@ -78,6 +78,14 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 	sources := []mkv.Source{v}
 	subs := 0
 	for _, e := range extras {
+		if e.track.Kind() == KindSubtitle && isText(e.track.StreamID) {
+			f, err := open(e.path)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, newTextSource(f, e.track, nil, true))
+			continue
+		}
 		if e.track.Kind() == KindSubtitle {
 			subs++
 			continue

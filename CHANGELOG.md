@@ -71,7 +71,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scaled to 1080p and tone mapped converts at 16.6 fps with the encoder
   here.
 
+- Text subtitles: a Matroska or MP4 source's SRT, ASS, SSA, WebVTT and
+  timed text (tx3g, WebVTT in MP4) tracks are carried, as they are into
+  Matroska (MP4's as SRT) and as tx3g into MP4 and MOV, plain text there.
+  `--subs-file` adds SRT, ASS, SSA and WebVTT files as tracks (the
+  language and the forced flag from the file name, or given). Matroska
+  blocks now carry their durations (BlockGroups with BlockDuration).
+
 ### Fixed
+
+- A 2D Matroska source no longer warns that its pictures had no
+  dependent view.
 
 - The Go HEVC encoder's output could change from run to run at 4K: its
   motion search waited for the reference's rows around the block, but

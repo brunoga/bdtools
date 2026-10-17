@@ -62,8 +62,10 @@ jobs:
       - name: Test VideoToolbox
         # The virtual Macs have no media engine, so the VideoToolbox tests
         # fall back to Apple's software encoder and decoders: the same API
-        # and code.
-        run: go test -timeout 300s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
+        # and code. They fail now and then (an IOKit error, -536870212),
+        # more often with sessions of several packages at once: one
+        # package at a time.
+        run: go test -p 1 -timeout 400s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
 
   test-windows:
     name: Test (Windows)

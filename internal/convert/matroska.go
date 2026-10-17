@@ -277,6 +277,10 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 		case "S_HDMV/PGS":
 			tr.Type, tr.StreamID = "PGS", "S_HDMV/PGS"
 			tr.Info = fmt.Sprintf("Presentation Graphic Stream #%d", countKind(tracks, KindSubtitle))
+		case "S_TEXT/UTF8", "S_TEXT/ASS", "S_TEXT/SSA", "S_TEXT/WEBVTT", "D_WEBVTT/SUBTITLES", "S_TEXT/TX3G", "S_TEXT/WVTT":
+			ts := textStreamIDs[t.CodecID]
+			tr.Type, tr.StreamID, tr.private = ts.name, ts.id, t.CodecPrivate
+			tr.Info = describeText(ts.id, countKind(tracks, KindSubtitle)+1)
 		default:
 			continue // codecs the mux does not carry (AAC, FLAC, text subtitles)
 		}
@@ -701,6 +705,13 @@ func (g *mkvDemux) write(p mkv.Packet) error {
 	case w.track.StreamID == "S_HDMV/PGS":
 		at := int64(p.Time-g.t0) * 9 / 100000
 		err = writeSup(w, at, at, p.Data)
+	case isText(w.track.StreamID):
+		dur := p.Duration
+		if dur <= 0 {
+			dur = textDefaultDuration // a cue that does not say
+		}
+		err = writeCue(w.w, p.Time-g.t0, dur, p.Data)
+		w.n += int64(len(p.Data))
 	case w.wav != nil:
 		err = w.wav.write(p.Data)
 		w.n += int64(len(p.Data))
@@ -758,7 +769,7 @@ func (g *mkvDemux) finish() ([]extra, error) {
 	if len(g.dropped) > 0 {
 		g.report.Report("dropped audio and subtitle frames timed before the file's start")
 	}
-	if g.noDep > 0 {
+	if g.noDep > 0 && g.sel.Dependent.StreamID != "" { // a 2D conversion has none to miss
 		g.report.Report("warning: %d of %d pictures had no dependent view", g.noDep, g.aus)
 	}
 	return extras, firstErr

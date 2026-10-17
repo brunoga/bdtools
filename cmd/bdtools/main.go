@@ -117,6 +117,11 @@ func run(argv []string, stdout, stderr *os.File) int {
 			"More: https://github.com/brunoga/bdtools/tree/main/cmd/bdtools#common-tasks\n\nflags:\n")
 		fs.PrintDefaults()
 	}
+	var subsFiles []string
+	fs.Func("subs-file", "add a subtitle file (SRT, ASS, SSA, WebVTT) as a track, LANG:PATH or PATH (the language then from its name: film.en.srt, film.eng.forced.srt); repeat for more", func(v string) error {
+		subsFiles = append(subsFiles, v)
+		return nil
+	})
 	if err := fs.Parse(argv); err != nil {
 		return 2
 	}
@@ -242,6 +247,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 2
 	}
 	o.ToneMap = *toneMap
+	for _, f := range subsFiles {
+		o.SubsFiles = append(o.SubsFiles, convert.ParseSubsFile(f))
+	}
 	if o.Scale, err = convert.ParseScale(*scaleF); err != nil {
 		fmt.Fprintln(stderr, "bdtools:", err)
 		return 2

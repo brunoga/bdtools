@@ -31,6 +31,9 @@ type Track struct {
 	// stereo mode (1 side by side, 3 over-under, the left eye first; 11
 	// and 2 the right first), when the source states them.
 	Width, StereoMode int
+	// private is a text subtitle track's codec private data (an ASS
+	// track's script header), from a Matroska source.
+	private []byte
 }
 
 // Kind classifies a track by what the conversion must do with it.

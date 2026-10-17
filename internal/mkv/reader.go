@@ -24,6 +24,7 @@ const (
 	idBlockGroup        = 0xA0
 	idBlock             = 0xA1
 	idReferenceBlock    = 0xFB
+	idBlockDuration     = 0x9B
 	idFlagForced        = 0x55AA
 	idLanguageBCP47     = 0x22B59D
 	idContentEncodings  = 0x6D80
@@ -84,6 +85,9 @@ type ReadTrack struct {
 type Packet struct {
 	Track    uint64
 	Time     time.Duration // the block's timestamp: the presentation time
+	// Duration is the block's, when it states one (a subtitle's time on
+	// screen); 0 when it does not.
+	Duration time.Duration
 	Keyframe bool
 	Data     []byte
 }
@@ -502,19 +506,29 @@ func (m *Reader) advance() error {
 		}
 		var blk []byte
 		key := true
+		var dur int64
 		err = eachChild(b, func(id uint32, v []byte) error {
 			switch id {
 			case idBlock:
 				blk = v
 			case idReferenceBlock:
 				key = false
+			case idBlockDuration:
+				dur = int64(readUint(v)) //nolint:gosec // a duration
 			}
 			return nil
 		})
 		if err != nil || blk == nil {
 			return err
 		}
-		return m.block(blk, key)
+		n := len(m.pending)
+		if err := m.block(blk, key); err != nil {
+			return err
+		}
+		for i := n; i < len(m.pending); i++ {
+			m.pending[i].Duration = time.Duration(dur * m.scale)
+		}
+		return nil
 	case h.id == idChapters && len(m.Chapters) == 0:
 		b, err := m.data(h)
 		if err != nil {

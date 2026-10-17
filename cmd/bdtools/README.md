@@ -357,6 +357,7 @@ scheduler such as pipeliner retry it.
 | `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
 | `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
+| `--subs-file` | — | Add a subtitle file (SRT, ASS, SSA, WebVTT) as a track: `LANG:PATH`, or `PATH` with the language from its name (`film.en.srt`, `film.eng.forced.srt`); repeat for more — see [Text subtitles](#text-subtitles) |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
 | `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
@@ -942,6 +943,23 @@ follows, so its subtitles take the sequence nearest the viewer at each
 moment: never behind the picture, at most a little further forward than
 the disc meant. (On Avatar: Fire and Ash the subtitles follow other
 sequences than the first, which would have put them inside the scene.)
+
+### Text subtitles
+
+A Matroska or MP4 source's text subtitles are carried like its other
+tracks: SRT, ASS and SSA, and WebVTT into Matroska as they are (MP4's
+timed text as SRT), and every one into an MP4 or MOV output as timed text
+(tx3g), which Apple's players, Plex and Kodi show; there the text is
+plain, its styling and placement left out. Subtitle files are added with
+`--subs-file`, after the source's tracks:
+
+```sh
+bdtools --input film.mkv --output film.mp4 --subs-file film.en.srt --subs-file pt:film.legendas.srt
+```
+
+A file's language is the one given before a colon, else the one its name
+ends with (`film.en.srt`, `film.por.srt`); `forced` in its name marks it
+forced (`film.en.forced.srt`).
 
 ### Naming the output after the audio
 
