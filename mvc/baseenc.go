@@ -73,6 +73,7 @@ type BaseEncoder struct {
 	statsMu sync.Mutex
 
 	noDeblock bool // tests: leave the pictures unfiltered
+	noPyramid bool // tests and comparisons: every B picture a non-reference one
 }
 
 type baseFrame struct {
@@ -93,6 +94,7 @@ type baseJob struct {
 	after    *baseJob // decoded before this picture is coded: its references come from it (nil: none)
 
 	list  [2][]*picture // its reference lists, set when it is launched
+	dpb   []*picture    // the short-term references when it was launched
 	mvs   []mv          // a reference picture's list 0 vectors, once coded
 	coded chan struct{} // closed once au and err are set
 	au    []byte
@@ -113,6 +115,11 @@ func NewBaseEncoder(o BaseOptions) (*BaseEncoder, error) {
 	}
 	if o.Refs > 4 {
 		o.Refs = 4
+	}
+	if o.BFrames >= 2 {
+		// the pyramid's reference B picture takes a slot of the
+		// decoded picture buffer (level 4.1 holds four 1080p frames)
+		o.Refs = min(o.Refs, 3)
 	}
 	if o.Slices <= 0 {
 		o.Slices = 1
@@ -149,20 +156,20 @@ func NewBaseEncoder(o BaseOptions) (*BaseEncoder, error) {
 func (e *BaseEncoder) spsRBSP() []byte {
 	o := &e.o
 	var w bitWriter
-	w.u(8, 100)             // profile_idc: High
-	w.u(8, 0)               // constraint flags
-	w.u(8, uint32(o.Level)) // level_idc
-	w.ue(0)                 // seq_parameter_set_id
-	w.ue(1)                 // chroma_format_idc: 4:2:0
-	w.ue(0)                 // bit_depth_luma_minus8
-	w.ue(0)                 // bit_depth_chroma_minus8
-	w.u(1, 0)               // qpprime_y_zero_transform_bypass_flag
-	w.u(1, 0)               // seq_scaling_matrix_present_flag
-	w.ue(4)                 // log2_max_frame_num_minus4: 8 bits
-	w.ue(0)                 // pic_order_cnt_type
-	w.ue(4)                 // log2_max_pic_order_cnt_lsb_minus4: 8 bits
-	w.ue(uint32(o.Refs))    // max_num_ref_frames
-	w.u(1, 0)               // gaps_in_frame_num_value_allowed_flag
+	w.u(8, 100)               // profile_idc: High
+	w.u(8, 0)                 // constraint flags
+	w.u(8, uint32(o.Level))   // level_idc
+	w.ue(0)                   // seq_parameter_set_id
+	w.ue(1)                   // chroma_format_idc: 4:2:0
+	w.ue(0)                   // bit_depth_luma_minus8
+	w.ue(0)                   // bit_depth_chroma_minus8
+	w.u(1, 0)                 // qpprime_y_zero_transform_bypass_flag
+	w.u(1, 0)                 // seq_scaling_matrix_present_flag
+	w.ue(4)                   // log2_max_frame_num_minus4: 8 bits
+	w.ue(0)                   // pic_order_cnt_type
+	w.ue(4)                   // log2_max_pic_order_cnt_lsb_minus4: 8 bits
+	w.ue(uint32(e.dpbRefs())) // max_num_ref_frames
+	w.u(1, 0)                 // gaps_in_frame_num_value_allowed_flag
 	w.ue(uint32(e.w/16 - 1))
 	w.ue(uint32(e.h/16 - 1))
 	w.u(1, 1) // frame_mbs_only_flag
@@ -208,12 +215,12 @@ func (e *BaseEncoder) spsRBSP() []byte {
 	w.ue(0)   // max_bits_per_mb_denom
 	w.ue(16)  // log2_max_mv_length_horizontal
 	w.ue(16)  // log2_max_mv_length_vertical
-	reorder := 0
-	if o.BFrames > 0 {
-		reorder = 1
+	reorder := min(o.BFrames, 1)
+	if e.pyramid() {
+		reorder = 2
 	}
-	w.ue(uint32(reorder)) // max_num_reorder_frames
-	w.ue(uint32(o.Refs))  // max_dec_frame_buffering
+	w.ue(uint32(reorder))     // max_num_reorder_frames
+	w.ue(uint32(e.dpbRefs())) // max_dec_frame_buffering
 	return w.trailing()
 }
 
@@ -315,21 +322,43 @@ func (e *BaseEncoder) queueGroup(flush bool) {
 		n = e.o.Keyint - e.sinceIDR
 	}
 	e.queuePicture(e.queue[n-1], sliceP, false)
-	for _, f := range e.queue[:n-1] {
+	bs := e.queue[:n-1]
+	if e.pyramid() && len(bs) >= 2 {
+		// the middle B picture first, a reference for the others
+		mid := len(bs) / 2
+		e.queuePicture(bs[mid], sliceB, false, true)
+		bs = append(bs[:mid:mid], bs[mid+1:]...)
+	}
+	for _, f := range bs {
 		e.queuePicture(f, sliceB, false)
 	}
 	e.queue = e.queue[n:]
 }
 
+// pyramid is whether a group's middle B picture is a reference, coded
+// before the others and predicting them: with two B pictures or more.
+func (e *BaseEncoder) pyramid() bool { return e.o.BFrames >= 2 && !e.noPyramid }
+
+// dpbRefs is the reference frames the decoder keeps: the pyramid's B
+// picture besides the references P pictures use.
+func (e *BaseEncoder) dpbRefs() int {
+	if e.pyramid() {
+		return e.o.Refs + 1
+	}
+	return e.o.Refs
+}
+
 // queuePicture submits a picture to the pipeline, with its place in the
 // coded video sequence.
-func (e *BaseEncoder) queuePicture(f *baseFrame, typ int, idr bool) {
+func (e *BaseEncoder) queuePicture(f *baseFrame, typ int, idr bool, ref ...bool) {
 	j := &baseJob{f: f, typ: typ, idr: idr, after: e.lastRef, coded: make(chan struct{}), done: make(chan struct{})}
-	switch typ {
-	case sliceI:
+	switch {
+	case typ == sliceI:
 		j.refIdc = 3
-	case sliceP:
+	case typ == sliceP:
 		j.refIdc = 2
+	case len(ref) > 0 && ref[0]:
+		j.refIdc = 1
 	}
 	if idr {
 		e.sinceIDR, e.frameNum = 0, 0
@@ -361,6 +390,12 @@ func (e *BaseEncoder) run() {
 	submit := e.submit
 	launch := func(j *baseJob) {
 		j.list = e.listsFor(j)
+		j.dpb = j.dpb[:0]
+		for _, r := range e.dec.views[0].refs {
+			if r.shortRef {
+				j.dpb = append(j.dpb, r)
+			}
+		}
 		launched[j] = true
 		go func() {
 			c := <-e.coders
@@ -486,6 +521,9 @@ func (e *BaseEncoder) codePicture(j *baseJob, c *depCoder) ([]byte, error) {
 		}
 		if typ == sliceB {
 			qp = min(o.QP+2, 51)
+			if j.refIdc != 0 {
+				qp = min(o.QP+1, 51) // the pyramid's: between
+			}
 		}
 	}
 	c.tag = j.f.index
@@ -572,9 +610,9 @@ func (e *BaseEncoder) sliceHeader(w *bitWriter, j *baseJob, c *depCoder, typ, fi
 		if typ == sliceB {
 			w.ue(uint32(len(c.list[1]) - 1))
 		}
-		w.flag(false) // ref_pic_list_modification_flag_l0: the default order
+		e.listModification(w, j, c.list[0], typ)
 		if typ == sliceB {
-			w.flag(false)
+			w.flag(false) // ref_pic_list_modification_flag_l1: the default order
 		}
 	}
 	if j.refIdc != 0 {
@@ -643,4 +681,45 @@ func (c *depCoder) seedVectors(poc int32) {
 	} else {
 		clear(c.prev[2])
 	}
+}
+
+// listModification writes list 0's ref_pic_list_modification: none when
+// the list is the default's start (a P slice's references by descending
+// frame number, a B slice's by POC, which is how listsFor orders them),
+// else the commands that put each picture in place.
+func (e *BaseEncoder) listModification(w *bitWriter, j *baseJob, list []*picture, typ int) {
+	wrap := func(r *picture) int {
+		if r.frameNum > j.frameNum {
+			return r.frameNum - 256
+		}
+		return r.frameNum
+	}
+	same := true
+	if typ == sliceP {
+		def := slices.Clone(j.dpb)
+		slices.SortFunc(def, func(a, b *picture) int { return wrap(b) - wrap(a) })
+		for i, r := range list {
+			if i >= len(def) || def[i] != r {
+				same = false
+			}
+		}
+	}
+	if same {
+		w.flag(false) // ref_pic_list_modification_flag_l0: the default order
+		return
+	}
+	w.flag(true)
+	pred := j.frameNum
+	for _, r := range list {
+		pn := wrap(r)
+		if d := pn - pred; d < 0 {
+			w.ue(0) // modification_of_pic_nums_idc: subtract
+			w.ue(uint32(-d - 1))
+		} else {
+			w.ue(1) // add
+			w.ue(uint32(d - 1))
+		}
+		pred = pn
+	}
+	w.ue(3) // end
 }

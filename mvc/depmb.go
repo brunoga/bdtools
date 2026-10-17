@@ -238,6 +238,11 @@ func (c *depCoder) setQP(qp int) {
 	c.mfT = mfTranspose(&quantMF[qp%6])
 	c.mfTC = mfTranspose(&quantMF[c.qpc%6])
 	c.lambda2 = lambda2Tab[qp]
+	if c.bslice {
+		// B pictures' errors propagate less (into none but the
+		// pyramid's), so they buy fewer bits with them
+		c.lambda2 *= 1.4
+	}
 	c.lambda = math.Sqrt(c.lambda2)
 }
 
@@ -1448,16 +1453,16 @@ func (c *depCoder) rdPick(mbX, mbY int, cands []*cand) {
 		if best == nil || k.cost < best.cost {
 			best = k
 		}
-	}
-	if best.intra == intraNone && !best.skip && best.res.cbp&15 != 0 {
-		// the 8x8 transform, on the winner alone
-		alt := c.newCand()
-		*alt = *best
-		c.predictCand(mbX, mbY, alt)
-		if c.transformQuant8(mbX, mbY, &alt.res) {
-			c.rdEval(mbX, mbY, alt)
-			if alt.cost < best.cost {
-				best = alt
+		// the 8x8 transform too, on the candidates near the best: the
+		// choice between them may turn on it
+		if k.intra == intraNone && !k.skip && k.res.cbp&15 != 0 && k.cost <= best.cost*1.3 {
+			alt := c.newCand()
+			*alt = *k
+			if c.transformQuant8(mbX, mbY, &alt.res) {
+				c.rdEval(mbX, mbY, alt)
+				if alt.cost < best.cost {
+					best = alt
+				}
 			}
 		}
 	}
@@ -1628,7 +1633,7 @@ func (c *depCoder) codeMBP(mbX, mbY int) {
 	if c.wantParts(cands[1:]) {
 		cands = c.partCands(mbX, mbY, uni, costs, true, cands)
 	}
-	if c.wantIntra(cands[1:]) {
+	if c.wantIntra(mbX, mbY, cands[1:]) {
 		cands = append(cands, c.intraCands(mbX, mbY)...)
 	}
 	c.rdPick(mbX, mbY, cands)
@@ -1645,13 +1650,19 @@ func (c *depCoder) probeSkip(mbX, mbY int, skip *cand) bool {
 }
 
 // wantIntra reports whether intra prediction is worth trying in an inter
-// slice: the best inter prediction is poor.
-func (c *depCoder) wantIntra(motion []*cand) bool {
+// slice: the best inter prediction is poor, or about what I_16x16's
+// would be.
+func (c *depCoder) wantIntra(mbX, mbY int, motion []*cand) bool {
 	best := math.MaxFloat64
 	for _, k := range motion {
 		best = min(best, k.sad)
 	}
-	return best > c.lambda*320
+	if best > c.lambda*320 {
+		return true
+	}
+	// a smooth area the motion missed: I_16x16 alone would do about as
+	// well (the full intra candidates, I_4x4 and I_8x8 too, are dear)
+	return c.intraEstimate(mbX, mbY) < best*1.3
 }
 
 // codeMBI codes an I slice macroblock: the intra candidate that costs
@@ -1738,7 +1749,7 @@ func (c *depCoder) codeMBB(mbX, mbY int) {
 	if c.wantParts(motion) {
 		cands = c.partCands(mbX, mbY, uni, costs, sameT, cands)
 	}
-	if c.wantIntra(motion) {
+	if c.wantIntra(mbX, mbY, motion) {
 		cands = append(cands, c.intraCands(mbX, mbY)...)
 	}
 	c.rdPick(mbX, mbY, cands)

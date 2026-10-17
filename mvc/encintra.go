@@ -662,3 +662,24 @@ func (c *depCoder) writeIntraMB(mbX, mbY int, k *cand) {
 	cur.chroma = uint8(k.chroma)
 	c.writeResidual(mbX, mbY, &k.res)
 }
+
+// intraEstimate is a quick estimate of what intra prediction would cost
+// the macroblock, in the motion search's terms (SATD and lambda times
+// bits): the best I_16x16 mode's.
+func (c *depCoder) intraEstimate(mbX, mbY int) float64 {
+	nA, nB, _, nD := c.intraAvailMB(mbX, mbY)
+	yo, _ := c.recOffsets(mbX, mbY)
+	st := c.rec.stride[0]
+	best := math.MaxInt
+	for mode := 0; mode < 4; mode++ {
+		switch {
+		case mode == 0 && !nB, mode == 1 && !nA, mode == 3 && (!nA || !nB || !nD):
+			continue
+		}
+		pred16x16(c.rec.planes[0], yo, st, mode, nB, nA, nD)
+		var p [256]byte
+		c.copyRecLuma(yo, &p)
+		best = min(best, c.satd(mbX*16, mbY*16, 16, 16, p[:]))
+	}
+	return float64(best) + c.lambda*6
+}
