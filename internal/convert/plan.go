@@ -486,8 +486,6 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.Encoder == EncoderBuiltin && (o.Layout != LayoutMVC || o.TwoD) {
 		switch {
-		case o.Codec == CodecAV1:
-			return fmt.Errorf("--encoder builtin codes H.264 and H.265: AV1 needs SVT-AV1 (--encoder software) or a GPU")
 		case o.Codec == CodecH264 && o.BitDepth == 10:
 			return fmt.Errorf("--encoder builtin codes H.264 in 8 bits: use --bit-depth 8, or --codec h265 for 10")
 		}
@@ -736,6 +734,13 @@ func builtinPlan(opts Options, tmp, videoOut string) *Plan {
 			strconv.Itoa(builtinQP(opts.CRF)), "->", videoOut}}
 	case opts.Encoder == EncoderBuiltin && opts.Codec == CodecH264:
 		enc = Step{Name: "encode", Builtin: true, Argv: []string{"builtin h264, 8-bit, qp", strconv.Itoa(opts.CRF), "->", videoOut}}
+	case opts.Encoder == EncoderBuiltin && opts.Codec == CodecAV1:
+		depth := "8-bit"
+		if opts.tenBit() {
+			depth = "10-bit"
+		}
+		enc = Step{Name: "encode", Builtin: true, Argv: []string{"builtin av1, " + depth + ", q index",
+			strconv.Itoa(gpu.AV1QIndex(opts.CRF)), "->", videoOut}}
 	case opts.NativeGPU:
 		enc = nativeEncodeStep(opts, videoOut)
 	}

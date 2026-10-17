@@ -94,3 +94,63 @@ func benchOne(t *testing.T, file string, q, w, h int) string {
 	}
 	return fmt.Sprintf("%s %d %d %.4f %.2f", filepath.Base(file), q, len(u), 10*math.Log10(255*255/(se/float64(w*h))), el.Seconds())
 }
+
+// TestBenchSeq codes the 1080p 8-bit clips $AV1SEQ (seq-*.yuv) at the q
+// indexes of $AV1BENCH_Q, one clip and q at a time (its tiles at once),
+// printing "name q bytes mean-psnr-y seconds" lines.
+func TestBenchSeq(t *testing.T) {
+	dir := os.Getenv("AV1SEQ")
+	if dir == "" {
+		t.Skip("AV1SEQ unset")
+	}
+	qs := []int{60, 100, 140, 180}
+	if s := os.Getenv("AV1BENCH_Q"); s != "" {
+		qs = nil
+		for _, f := range strings.Split(s, ",") {
+			q, _ := strconv.Atoi(f)
+			qs = append(qs, q)
+		}
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "seq-*.yuv"))
+	const w, h = 1920, 1080
+	for _, file := range files {
+		b, err := os.ReadFile(file) //nolint:gosec // a test
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := len(b) / (w * h * 3 / 2)
+		for _, q := range qs {
+			e, err := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now()
+			total, seAll := 0, 0.0
+			for k := range n {
+				p := b[k*w*h*3/2:]
+				src := &Source{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4), StrideY: w, StrideC: w / 2}
+				for i := range src.Y {
+					src.Y[i] = uint16(p[i])
+				}
+				for i := range src.Cb {
+					src.Cb[i], src.Cr[i] = uint16(p[w*h+i]), uint16(p[w*h*5/4+i])
+				}
+				u, err := e.Encode(src)
+				if err != nil {
+					t.Fatal(err)
+				}
+				total += len(u)
+				y, _, _ := e.Recon()
+				var se float64
+				for i, v := range y {
+					d := float64(v) - float64(src.Y[i])
+					se += d * d
+				}
+				seAll += se
+			}
+			// PSNR from the clip's mean squared error, as ffmpeg's psnr filter
+			psnr := 10 * math.Log10(255*255/(seAll/float64(n*w*h)))
+			fmt.Printf("%s %d %d %.4f %.2f\n", strings.TrimSuffix(filepath.Base(file), ".yuv"), q, total, psnr, time.Since(start).Seconds())
+		}
+	}
+}

@@ -71,8 +71,8 @@ const (
 	// a Media Foundation transform: Intel Quick Sync, AMD AMF. Windows only.
 	EncoderMediaFoundation Encoder = "mediafoundation"
 	// EncoderBuiltin is the encoders in this program: H.264 (8-bit; both
-	// eyes of an MVC file) and HEVC, MV-HEVC included. No tool needed,
-	// every platform.
+	// eyes of an MVC file), HEVC (MV-HEVC included) and AV1. No tool
+	// needed, every platform.
 	EncoderBuiltin Encoder = "builtin"
 	// EncoderCopy keeps a 3D source's left eye as it is and codes the
 	// right eye here (--layout mvc): the 2D picture stays the disc's.
@@ -487,9 +487,9 @@ func DefaultEncoder(ctx context.Context, goos string, codec Codec, depth int, va
 			return enc
 		}
 	}
-	// No GPU encoder: x265 (or SVT-AV1, x264) when it is installed; for
-	// HEVC and 8-bit H.264 without it, the encoders here.
-	if (codec == CodecH265 || codec == CodecH264 && depth <= 8) && !Detect(ctx, goos, EncoderSoftware, codec, false).OK() {
+	// No GPU encoder: x265 (or SVT-AV1, x264) when it is installed;
+	// without it, the encoders here.
+	if (codec == CodecH265 || codec == CodecAV1 || codec == CodecH264 && depth <= 8) && !Detect(ctx, goos, EncoderSoftware, codec, false).OK() {
 		return EncoderBuiltin
 	}
 	return EncoderSoftware
