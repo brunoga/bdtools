@@ -193,3 +193,47 @@ func TestPCM71At96kHz(t *testing.T) {
 		}
 	}
 }
+
+// TestDTSFileToAC3 codes the DTS in $BDTOOLS_DTS to AC-3 here and gives
+// the SNR of each channel against ffmpeg's decoding of the DTS core.
+func TestDTSFileToAC3(t *testing.T) {
+	path := os.Getenv("BDTOOLS_DTS")
+	if path == "" {
+		t.Skip("BDTOOLS_DTS not set")
+	}
+	ff, err := LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	out := filepath.Join(t.TempDir(), "x.ac3")
+	start := time.Now()
+	if _, _, err := dtsToAC3(path, out); err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(start)
+	dec := func(args ...string) [][]float64 {
+		b, err := exec.CommandContext(t.Context(), ff, append([]string{"-v", "error"}, append(args, "-f", "f64le", "-c:a", "pcm_f64le", "-")...)...).Output() //nolint:gosec // test
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch := make([][]float64, 6)
+		for i := 0; i+48 <= len(b); i += 48 {
+			for c := range 6 {
+				ch[c] = append(ch[c], math.Float64frombits(binary.LittleEndian.Uint64(b[i+8*c:])))
+			}
+		}
+		return ch
+	}
+	ref := dec("-core_only", "1", "-i", path, "-ac", "6")
+	got := dec("-i", out)
+	for c := range 6 {
+		var s, n float64
+		for k := 4800; k+256 < len(got[c]) && k < len(ref[c]); k++ {
+			d := got[c][k+256] - ref[c][k]
+			s += ref[c][k] * ref[c][k]
+			n += d * d
+		}
+		t.Logf("channel %d: SNR %.1f dB (signal RMS %.5f, error RMS %.5f)", c, 10*math.Log10(s/n), math.Sqrt(s/float64(len(ref[c]))), math.Sqrt(n/float64(len(ref[c]))))
+	}
+	t.Logf("%.1f s of audio in %v", float64(len(ref[0]))/48000, took)
+}

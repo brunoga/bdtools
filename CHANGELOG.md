@@ -13,8 +13,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   640, 448, 320 and 192 kb/s (behind at 128 kb/s stereo, where ffmpeg
   couples the channels), at 80 times real time for 5.1.
 - PCM tracks go into an MP4 as AC-3 from that encoder, no ffmpeg needed:
-  7.1 and 7.0 folded to 5.1 and 5.0, 96 and 192 kHz brought to 48. DTS
-  still takes ffmpeg.
+  7.1 and 7.0 folded to 5.1 and 5.0, 96 and 192 kHz brought to 48.
+- A DTS decoder in Go (`internal/dts`): the core of DTS and DTS-HD
+  streams, fixed point, bit for bit what FFmpeg's reference-exact mode
+  decodes (on Blu-ray DTS and DTS-HD MA, and on FFmpeg's own streams).
+  DTS tracks go into an MP4 as AC-3 through it and the encoder here, at
+  about 40 times real time: audio needs no ffmpeg at all. Two of its
+  tables come from FFmpeg (LGPL); see NOTICE.
 
 ## [0.13.0] - 2026-10-16
 

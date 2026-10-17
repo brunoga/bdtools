@@ -78,14 +78,19 @@ func (r *Runner) toAC3(ctx context.Context, e extra, format mkv.AudioFormat) (st
 	}
 	out := strings.TrimSuffix(e.path, filepath.Ext(e.path)) + ".ac3"
 	var bits, delay int
+	// PCM and DTS (its core): the decoder and encoder here; ffmpeg for
+	// what they do not take.
 	if format == mkv.WAV {
-		// PCM: the encoder here.
 		bits, delay, err = pcmToAC3(e.path, out)
-		if err == nil {
-			r.Report.Report("coding the %s track %d as AC-3 here (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
-		}
+	} else {
+		bits, delay, err = dtsToAC3(e.path, out)
 	}
-	if format != mkv.WAV || err != nil {
+	if err == nil {
+		r.Report.Report("coding the %s track %d as AC-3 here (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
+	} else {
+		r.Report.Report("the %s track %d: %v; trying ffmpeg", e.track.Type, e.track.ID, err)
+	}
+	if err != nil {
 		if bits, delay, err = r.ffmpegAC3(ctx, e, channels, out); err != nil {
 			return "", nil, err
 		}
