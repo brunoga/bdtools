@@ -128,10 +128,14 @@ bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only
 1.85:1 one 42):
 
 ```sh
+bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
 bdtools --input uhd.iso --output film.mkv --crop 280:280:0:0 --scale 1080p
 ```
 
-The picture is cropped first, then fitted in the box with a Lanczos
+`--crop auto` looks at the film in twelve places before the conversion
+(a few seconds: the decoder decodes three pictures at each) and crops what
+is black in all of them that show anything, so a film whose shape changes
+(IMAX scenes) keeps its largest picture. The picture is cropped first, then fitted in the box with a Lanczos
 filter, never enlarged (3840x1600 becomes 1920x800). The subtitle tracks
 are cut with the picture, a line the disc put in a black bar moved up into
 it, and a Dolby Vision film's active area (its RPUs' level 5) follows. For
@@ -373,7 +377,7 @@ scheduler such as pipeliner retry it.
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
-| `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale` |
+| `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`; `auto` finds the black bars |
 | `--scale` | `none` | Fit a 2D conversion's picture in a box, its shape kept and never enlarged: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
 | `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names) |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |

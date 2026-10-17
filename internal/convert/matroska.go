@@ -871,6 +871,13 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if r.Opts.Remux {
 		return r.remuxToMKV(ctx, sel.Base, g.Next, nil, g.finish, src.chapters)
 	}
+	if r.Opts.Crop.Auto {
+		feed, done, err := r.matroskaFeed(src, sel)
+		if err := r.resolveCrop(sel.Base, feed, done, err); err != nil {
+			_ = g.f.Close()
+			return err
+		}
+	}
 	pics, err := r.pictures(sel.Base, g.Next)
 	if err != nil {
 		_ = g.f.Close()

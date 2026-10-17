@@ -113,7 +113,7 @@ func TestScaleRampsAndSiting(t *testing.T) {
 }
 
 func TestParseCropAndScale(t *testing.T) {
-	if c, err := ParseCrop("140:140:0:0"); err != nil || c != (Crop{140, 140, 0, 0}) {
+	if c, err := ParseCrop("140:140:0:0"); err != nil || c != (Crop{Top: 140, Bottom: 140}) {
 		t.Errorf("ParseCrop: %v, %v", c, err)
 	}
 	for _, bad := range []string{"1:2:3", "141:140:0:0", "a:b:c:d", "-2:0:0:0"} {

@@ -159,6 +159,10 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			skipped++ // a copied left eye starts at its first IDR picture
 			return nil
 		}
+		if r.Opts.Crop.Auto {
+			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
+			r.Opts.Crop = Crop{}
+		}
 		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero()) {
 			w, h, _ := sf.size()
 			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)

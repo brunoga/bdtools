@@ -13,24 +13,33 @@ import (
 // (--crop), before any scaling.
 type Crop struct {
 	Top, Bottom, Left, Right int
+	// Auto finds the black bars to crop before the conversion starts
+	// (--crop auto: see cropdetect.go).
+	Auto bool
 }
 
 // IsZero reports whether the crop takes nothing.
 func (c Crop) IsZero() bool { return c == Crop{} }
 
 func (c Crop) String() string {
+	if c.Auto {
+		return "auto"
+	}
 	return fmt.Sprintf("%d:%d:%d:%d", c.Top, c.Bottom, c.Left, c.Right)
 }
 
-// ParseCrop reads --crop: "none" (or "") or TOP:BOTTOM:LEFT:RIGHT in
-// samples, each even (4:2:0 chroma goes in pairs).
+// ParseCrop reads --crop: "none" (or ""), "auto", or TOP:BOTTOM:LEFT:RIGHT
+// in samples, each even (4:2:0 chroma goes in pairs).
 func ParseCrop(s string) (Crop, error) {
-	if s == "" || s == "none" {
+	switch s {
+	case "", "none":
 		return Crop{}, nil
+	case "auto":
+		return Crop{Auto: true}, nil
 	}
 	parts := strings.Split(s, ":")
 	if len(parts) != 4 {
-		return Crop{}, fmt.Errorf("--crop %q: want none or TOP:BOTTOM:LEFT:RIGHT", s)
+		return Crop{}, fmt.Errorf("--crop %q: want none, auto or TOP:BOTTOM:LEFT:RIGHT", s)
 	}
 	var v [4]int
 	for i, p := range parts {
