@@ -79,6 +79,9 @@ var subCount = [4]int{1, 2, 2, 4}
 func (s *sliceDec) beginMB() *mbInfo {
 	cur := &s.fc.mbs[s.mbAddr]
 	*cur = mbInfo{slice: uint16(s.sliceIdx), flags: mbfAvail}
+	if s.mbf.on && s.field {
+		cur.flags |= mbfField
+	}
 	mb := &s.mb
 	mb.flags = 0
 	mb.cbp = 0
@@ -108,6 +111,9 @@ func (s *sliceDec) beginMB() *mbInfo {
 		}
 	}
 	pic.mbSlice[s.mbAddr] = uint16(s.sliceIdx)
+	if pic.fieldMB != nil {
+		pic.fieldMB[s.mbAddr] = s.mbf.on && s.field
+	}
 	return cur
 }
 
@@ -352,7 +358,7 @@ func (s *sliceDec) parseCBP(intra bool) error {
 }
 
 func (s *sliceDec) readRefIdx(l, x, y int) (int8, error) {
-	n := s.h.numRefIdxActive[l]
+	n := s.numRef(l)
 	var v int
 	if s.cabacOn {
 		v = s.cabacRefIdx(l, x, y)
@@ -398,7 +404,7 @@ func (s *sliceDec) parseMBPred() error {
 				continue
 			}
 			x, y, w, h := partRect(mb.shape, p)
-			if s.h.numRefIdxActive[l] > 1 {
+			if s.numRef(l) > 1 {
 				r, err := s.readRefIdx(l, x, y)
 				if err != nil {
 					return err
@@ -483,7 +489,7 @@ func (s *sliceDec) parseSubMBPred(cur *mbInfo, isB, ref0 bool) error {
 				continue
 			}
 			x, y := (i&1)*2, (i>>1)*2
-			if s.h.numRefIdxActive[l] > 1 && !ref0 {
+			if s.numRef(l) > 1 && !ref0 {
 				r, err := s.readRefIdx(l, x, y)
 				if err != nil {
 					return err
@@ -666,15 +672,14 @@ func (s *sliceDec) decodePCM(cur *mbInfo) error {
 			mb.pcm[i] = byte(s.br.u(8))
 		}
 	}
-	pic := s.pic
-	yo := pic.origin[0] + s.mbY*16*pic.stride[0] + s.mbX*16
+	yo, ys := s.yo, s.ys
 	for y := 0; y < 16; y++ {
-		copy(pic.planes[0][yo+y*pic.stride[0]:], mb.pcm[y*16:y*16+16])
+		copy(s.spl[0][yo+y*ys:], mb.pcm[y*16:y*16+16])
 	}
-	co := pic.origin[1] + s.mbY*8*pic.stride[1] + s.mbX*8
+	co, cs := s.co, s.cs
 	for c := 0; c < 2; c++ {
 		for y := 0; y < 8; y++ {
-			d := pic.planes[1+c][co+y*pic.stride[1] : co+y*pic.stride[1]+8]
+			d := s.spl[1+c][co+y*cs : co+y*cs+8]
 			if n == 384 {
 				copy(d, mb.pcm[256+c*64+y*8:256+c*64+y*8+8])
 			} else {

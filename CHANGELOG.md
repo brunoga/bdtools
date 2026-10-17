@@ -30,11 +30,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from +41% to +8%; with Godzilla vs. Kong (fast action) added, the
   five's is +9%. It takes 4 times x264 medium's CPU.
 
-- Interlaced H.264 in the Go decoder, first part: field pictures (PAFF),
-  alone or mixed with frame pictures, CAVLC and CABAC, every slice type.
-  The 48 such JVT conformance streams decode as ffmpeg decodes them,
-  frame for frame; 8 of them are in the tests. MBAFF still goes to
-  ffmpeg (or the GPU) for now.
+- Interlaced H.264 in the Go decoder: field pictures (PAFF) and MBAFF
+  frames, alone or mixed, CAVLC and CABAC, every slice type, with the
+  MBAFF deblocking filter. 79 of the 80 interlaced JVT conformance
+  streams decode as ffmpeg decodes them, frame for frame (13 are in the
+  tests; CAMACI3_Sony_C, constrained intra prediction in MBAFF, is the
+  one left), and x264's MBAFF output does too. Interlaced H.264 sources
+  (1080i discs) are decoded here and deinterlaced (yadif) when no GPU
+  decoder takes them, instead of going to ffmpeg.
 
 ### Fixed
 

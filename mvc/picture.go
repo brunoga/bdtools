@@ -40,6 +40,7 @@ type picture struct {
 	refs [2][]int8
 	// per macroblock slice index into sliceInfo (for reference identity)
 	mbSlice   []uint16
+	fieldMB   []bool // per macroblock: an MBAFF field macroblock
 	sliceInfo [maxSliceChunks]*[sliceChunk]sliceRefInfo
 
 	// reference marking and ordering state
@@ -90,6 +91,7 @@ type picture struct {
 	refMask uint8
 	// fieldsDone: a frame's fields decoded as field pictures (bits as
 	// refMask); asFields: the frame's pictures are fields.
+	mbaffFrame    bool // a frame coded MBAFF
 	fieldsDone    uint8
 	fieldsStarted uint8 // a frame's fields whose decoding started (decoder side)
 	asFields      bool
@@ -202,7 +204,7 @@ func (p *picture) ensureCopy() {
 
 // resetFields prepares a frame's fields for a new picture.
 func (p *picture) resetFields() {
-	p.refMask, p.fieldsDone, p.fieldsStarted, p.asFields = 0, 0, 0, false
+	p.refMask, p.fieldsDone, p.fieldsStarted, p.asFields, p.mbaffFrame = 0, 0, 0, false, false
 	for _, f := range p.fld {
 		if f == nil {
 			continue
@@ -266,6 +268,7 @@ func allocNewPicture(mbW, mbH int) *picture {
 		p.refs[l] = make([]int8, n4)
 	}
 	p.mbSlice = make([]uint16, mbW*mbH)
+	p.fieldMB = make([]bool, mbW*mbH)
 	p.cond = sync.NewCond(&p.mu)
 	return p
 }

@@ -88,6 +88,7 @@ type sliceHeader struct {
 	frameNum            int
 	fieldPic            bool // field_pic_flag
 	bottomField         bool // bottom_field_flag
+	mbaff               bool // MbaffFrameFlag
 	idrPicID            int
 	pocLsb              int
 	deltaPocBottom      int32
@@ -152,10 +153,9 @@ func parseSliceHeader(br *bitReader, h *sliceHeader, nal nalHeader, spsTab *[max
 		h.fieldPic = br.flag()
 		if h.fieldPic {
 			h.bottomField = br.flag()
-		} else if s.mbaff {
-			return errUnsupported
 		}
 	}
+	h.mbaff = s.mbaff && !h.fieldPic
 	if nal.idr {
 		h.idrPicID = int(br.ue())
 	}

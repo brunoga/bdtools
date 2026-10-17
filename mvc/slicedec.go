@@ -57,6 +57,7 @@ type frameCtx struct {
 
 	dba           deblockArgs // arguments of the assembly deblocking control
 	field         bool        // the picture is a field
+	mbaff         bool        // the picture is an MBAFF frame
 	rowsDeblocked int         // MB rows deblocked
 	rowsFinal     int         // MB rows published as final
 	broken        bool
@@ -167,11 +168,21 @@ type sliceDec struct {
 	padded []byte // slice data with cabacPad zero bytes appended
 	ctx    [512]uint8
 
-	qp                             int
-	qpc                            [2]int
-	lastDQ                         int // previous mb_qp_delta (CABAC ctx)
-	mbX, mbY                       int
-	mbAddr                         int
+	qp       int
+	qpc      [2]int
+	lastDQ   int // previous mb_qp_delta (CABAC ctx)
+	mbX, mbY int
+	mbAddr   int
+	// the macroblock's samples: planes, offsets and strides of its
+	// top-left luma and chroma samples, and its macroblock row there (an
+	// MBAFF field macroblock's are its field's rows of the pair)
+	spl                            [3][]byte
+	yo, co                         int
+	ys, cs                         int
+	smbY                           int
+	sparity                        int      // the parity of a field macroblock's samples, or the picture's (fields)
+	spic                           *picture // the picture the samples are in (a view for MBAFF field macroblocks)
+	mbf                            mbaffState
 	firstMb                        int
 	mb                             mbData
 	availA, availB, availC, availD bool
@@ -195,9 +206,12 @@ type sliceDec struct {
 	directUniformValid bool
 
 	// inter prediction state
-	implicitW  [maxRefsPerList][maxRefsPerList][2]int16 // implicit bi-pred weights
+	implicitW  [maxRefsPerList][maxRefsPerList][2]int16  // implicit bi-pred weights
+	iw         *[maxRefsPerList][maxRefsPerList][2]int16 // the macroblock's (MBAFF field macroblocks have their own)
+	wpShift    uint                                      // explicit weights' index shift: an MBAFF field macroblock's refIdx >> 1
 	colPic     *picture
 	colMode    int           // colPic is: 0 the same structure, 1 a field of the frame's (field pair), 2 the field's frame
+	colPar     int           // the last co-located block's MBAFF field macroblock's parity (-1: none)
 	mapCol     map[int32]int // colocated ref picture id -> refIdxL0 (temporal direct)
 	distScale  [maxRefsPerList]int32
 	dsLongTerm [maxRefsPerList]bool
@@ -224,6 +238,7 @@ func (s *sliceDec) setMbPos(addr int) {
 		s.mbX = addr - s.mbY*w
 	}
 	s.mbAddr = addr
+	s.setSamples(s.pic, s.mbY)
 	f := s.firstMb
 	s.availA = s.mbX > 0 && addr-1 >= f
 	s.availB = s.mbY > 0 && addr-w >= f
@@ -266,7 +281,12 @@ func (fc *frameCtx) publish(n int) {
 
 // finishRows deblocks and publishes the remaining rows of the picture.
 func (fc *frameCtx) finishRows() {
-	for y := fc.rowsDeblocked; y < fc.mbH; y++ {
+	if fc.mbaff {
+		for r := fc.rowsDeblocked / 2; r < fc.mbH/2; r++ {
+			fc.deblockPairRow(r)
+		}
+	}
+	for y := fc.rowsDeblocked; y < fc.mbH && !fc.mbaff; y++ {
 		fc.deblockRow(y)
 	}
 	fc.rowsDeblocked = fc.mbH
@@ -367,4 +387,14 @@ func (s *sliceDec) sigs() *[8][64][2]uint16 {
 		return &sigLastCtx
 	}
 	return s.sigTab
+}
+
+// setSamples sets the macroblock's samples to row mbRow of picture p.
+func (s *sliceDec) setSamples(p *picture, mbRow int) {
+	s.spic, s.smbY = p, mbRow
+	s.spl = p.planes
+	s.ys, s.cs = p.stride[0], p.stride[1]
+	s.yo = p.origin[0] + mbRow*16*s.ys + s.mbX*16
+	s.co = p.origin[1] + mbRow*8*s.cs + s.mbX*8
+	s.sparity = p.parity
 }

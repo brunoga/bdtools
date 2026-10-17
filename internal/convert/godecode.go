@@ -10,6 +10,7 @@ import (
 	"github.com/brunoga/bdtools/internal/hevc"
 	"github.com/brunoga/bdtools/internal/mpeg2"
 	"github.com/brunoga/bdtools/internal/vc1"
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // The decoders written here, as gpu.Decoders: MPEG-2 and VC-1 (with
@@ -155,4 +156,81 @@ func inBands(h int, fn func(r0, r1 int)) {
 		}()
 	}
 	wg.Wait()
+}
+
+// goH264 is the H.264 decoder here for interlaced video (field pictures,
+// MBAFF frames), its frames deinterlaced as NVDEC and the ffmpeg path do;
+// a stream it does not decode goes to fallback from there.
+type goH264 struct {
+	d *mvc.Decoder
+	*gpu.Deinterlacing
+	fallback func() (gpu.Decoder, error)
+	other    gpu.Decoder
+}
+
+func openGoH264(picture func(*gpu.DecodedPicture) error, fallback func() (gpu.Decoder, error)) *goH264 {
+	return &goH264{d: mvc.NewDecoder(mvc.Options{BaseOnly: true}), Deinterlacing: gpu.NewDeinterlacing(picture), fallback: fallback}
+}
+
+// drain hands the frames decoded so far to the deinterlacer.
+func (g *goH264) drain() error {
+	for {
+		sf, ok := g.d.NextFrame()
+		if !ok {
+			return nil
+		}
+		f := sf.Base
+		num, den := g.d.FrameRate()
+		pr, tr, mx, full := g.d.ColorInfo()
+		err := g.Take(&gpu.PlanarPicture{Width: f.Width, Height: f.Height, Y: f.Y, Cb: f.Cb, Cr: f.Cr,
+			StrideY: f.StrideY, StrideC: f.StrideC, PTS: f.PTS, Interlaced: f.Interlaced, TopFieldFirst: f.TopFieldFirst,
+			FrameRateNum: num, FrameRateDen: den,
+			Color: gpu.ColorInfo{Primaries: pr, Transfer: tr, Matrix: mx, FullRange: full}})
+		sf.Release()
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (g *goH264) Decode(au []byte, pts int64) error {
+	if g.other != nil {
+		return g.other.Decode(au, pts)
+	}
+	err := g.d.DecodeAU(au, pts)
+	if mvc.IsUnsupported(err) && g.fallback != nil {
+		if err := g.Flush(); err != nil {
+			return err
+		}
+		other, ferr := g.fallback()
+		if ferr != nil {
+			return fmt.Errorf("%w, and %w", err, ferr)
+		}
+		g.other = other
+		return other.Decode(au, pts)
+	}
+	if err != nil {
+		return err
+	}
+	return g.drain()
+}
+
+func (g *goH264) Flush() error {
+	if g.other != nil {
+		return g.other.Flush()
+	}
+	if err := g.d.Flush(); err != nil {
+		return err
+	}
+	if err := g.drain(); err != nil {
+		return err
+	}
+	return g.Deinterlacing.Flush()
+}
+
+func (g *goH264) Close() error {
+	if g.other != nil {
+		return g.other.Close()
+	}
+	return nil
 }

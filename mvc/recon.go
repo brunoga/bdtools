@@ -5,6 +5,9 @@ import "unsafe"
 // Residual parsing and macroblock reconstruction.
 
 func (s *sliceDec) nCLuma(bx, by int) int {
+	if s.mbf.on {
+		return s.mbaffNC(s.fc.nnz, bx, by, false)
+	}
 	st := s.fc.mbW * 4
 	idx := s.idx4(bx, by)
 	aA := bx > 0 || s.availA
@@ -21,6 +24,9 @@ func (s *sliceDec) nCLuma(bx, by int) int {
 }
 
 func (s *sliceDec) nCChroma(c, bx, by int) int {
+	if s.mbf.on {
+		return s.mbaffNC(s.fc.nnzC[c], bx, by, true)
+	}
 	st := s.fc.mbW * 2
 	idx := (s.mbY*2+by)*st + s.mbX*2 + bx
 	g := s.fc.nnzC[c]
@@ -60,6 +66,9 @@ func (s *sliceDec) cbfMasks() (a, b uint32) {
 		un = ^uint32(0)
 	}
 	a, b = un, un
+	if s.mbf.on {
+		return s.mbaffCBF(un)
+	}
 	if s.availA {
 		a = s.leftMB().cbf
 	}
@@ -76,12 +85,12 @@ func (s *sliceDec) lumaCBF(cur *mbInfo, cat, bx, by int) int {
 	if bx > 0 {
 		a = cur.cbf >> (r - 1) & 1
 	} else {
-		a = s.cbfNeighbor(s.availA, s.leftMB(), 1<<(r+3))
+		a = s.cbfLeft(1 << (r + 3))
 	}
 	if by > 0 {
 		b = cur.cbf >> (r - 4) & 1
 	} else {
-		b = s.cbfNeighbor(s.availB, s.topMB(), 1<<(r+12))
+		b = s.cbfTop(1 << (r + 12))
 	}
 	return cbfCtxIdx(cat, a, b)
 }
@@ -92,12 +101,12 @@ func (s *sliceDec) chromaACCBF(cur *mbInfo, c, bx, by int) int {
 	if bx > 0 {
 		a = cur.cbf >> (bit - 1) & 1
 	} else {
-		a = s.cbfNeighbor(s.availA, s.leftMB(), 1<<(bit+1))
+		a = s.cbfLeft(1 << (bit + 1))
 	}
 	if by > 0 {
 		b = cur.cbf >> (bit - 2) & 1
 	} else {
-		b = s.cbfNeighbor(s.availB, s.topMB(), 1<<(bit+2))
+		b = s.cbfTop(1 << (bit + 2))
 	}
 	return cbfCtxIdx(catChromaAC, a, b)
 }
@@ -165,7 +174,11 @@ func (s *sliceDec) residualAndRecon(cur *mbInfo) error {
 	}
 	cur.qp = int8(s.qp)
 	if mb.flags&mbfIntra != 0 {
-		s.reconIntra(cur)
+		if s.mbf.on {
+			s.reconIntraMBAFF(cur)
+		} else {
+			s.reconIntra(cur)
+		}
 	} else {
 		s.reconInter()
 	}
@@ -445,7 +458,7 @@ func (s *sliceDec) addLuma4x4(r int, off, stride int) {
 	if mb.nzY>>r&1 == 0 {
 		return
 	}
-	idct4x4AddS(s.pic.planes[0], off, stride, mb.coefY[blkOff16[r]:], 16)
+	idct4x4AddS(s.spl[0], off, stride, mb.coefY[blkOff16[r]:], 16)
 }
 
 // addLumaResidual adds the residual of all luma 4x4 blocks of the
@@ -468,18 +481,17 @@ func (s *sliceDec) addLumaResidual(yo, st int) {
 					v[bx*4+i] = int16(dc)
 				}
 			}
-			addConst16(s.pic.planes[0], yo+by*4*st, st, &v, 4)
+			addConst16(s.spl[0], yo+by*4*st, st, &v, 4)
 			continue
 		}
-		idctRow4(s.pic.planes[0], yo+by*4*st, st, c, m)
+		idctRow4(s.spl[0], yo+by*4*st, st, c, m)
 	}
 }
 
 func (s *sliceDec) reconChroma() {
 	mb := &s.mb
-	pic := s.pic
-	st := pic.stride[1]
-	co := pic.origin[1] + s.mbY*8*st + s.mbX*8
+	pl := &s.spl
+	st, co := s.cs, s.co
 	if mb.nzC[0]|mb.nzC[1] == 0 {
 		return
 	}
@@ -493,17 +505,16 @@ func (s *sliceDec) reconChroma() {
 				mb.coefC[c][o] = 0
 			}
 		}
-		chromaAddDC(pic.planes[1], pic.planes[2], co, st, &dc)
+		chromaAddDC(pl[1], pl[2], co, st, &dc)
 		return
 	}
-	idctChroma(pic.planes[1], pic.planes[2], co, st, &mb.coefC, mb.nzC)
+	idctChroma(pl[1], pl[2], co, st, &mb.coefC, mb.nzC)
 }
 
 func (s *sliceDec) reconInter() {
 	mb := &s.mb
-	pic := s.pic
-	st := pic.stride[0]
-	yo := pic.origin[0] + s.mbY*16*st + s.mbX*16
+	pl := &s.spl
+	st, yo := s.ys, s.yo
 	if mb.flags&mbfT8x8 != 0 {
 		for row := 0; row < 2; row++ {
 			m := mb.nz8 >> (row * 2) & 3
@@ -521,10 +532,10 @@ func (s *sliceDec) reconInter() {
 						v[bx*8+i] = int16(dc)
 					}
 				}
-				addConst16(pic.planes[0], off, st, &v, 8)
+				addConst16(pl[0], off, st, &v, 8)
 				continue
 			}
-			idct8x8Row(pic.planes[0], off, st, c, m)
+			idct8x8Row(pl[0], off, st, c, m)
 		}
 	} else if mb.nzY != 0 {
 		s.addLumaResidual(yo, st)
@@ -549,15 +560,14 @@ func (s *sliceDec) intraNeighbours() (a, b, c, d bool) {
 
 func (s *sliceDec) reconIntra(cur *mbInfo) {
 	mb := &s.mb
-	pic := s.pic
-	st := pic.stride[0]
-	yo := pic.origin[0] + s.mbY*16*st + s.mbX*16
+	pl := &s.spl
+	st, yo := s.ys, s.yo
 	nA, nB, nC, nD := s.intraNeighbours()
 	g := s.fc.i4
 	gst := s.fc.mbW * 4
 	switch {
 	case mb.flags&mbfI16x16 != 0:
-		pred16x16(pic.planes[0], yo, st, int(mb.i16Mode), nB, nA, nD)
+		pred16x16(pl[0], yo, st, int(mb.i16Mode), nB, nA, nD)
 		s.addLumaResidual(yo, st)
 	case mb.flags&mbfT8x8 != 0:
 		for b8 := 0; b8 < 4; b8++ {
@@ -565,10 +575,7 @@ func (s *sliceDec) reconIntra(cur *mbInfo) {
 			gi := s.idx4(bx, by)
 			aA := bx > 0 || nA
 			aB := by > 0 || nB
-			pm := int8(2)
-			if aA && aB {
-				pm = min(g[gi-1], g[gi-gst])
-			}
+			pm := s.predIntraMode(gi, bx, by, aA, aB, true)
 			mode := pm
 			if !mb.prevFlag[b8] {
 				mode = mb.remMode[b8]
@@ -595,9 +602,9 @@ func (s *sliceDec) reconIntra(cur *mbInfo) {
 				av.topRight = false
 			}
 			off := yo + by*4*st + bx*4
-			pred8x8L(pic.planes[0], off, st, int(mode), av)
+			pred8x8L(pl[0], off, st, int(mode), av)
 			if mb.nz8>>b8&1 != 0 {
-				idct8x8AddS(pic.planes[0], off, st, mb.coefY[b8>>1*128+b8&1*8:], 16)
+				idct8x8AddS(pl[0], off, st, mb.coefY[b8>>1*128+b8&1*8:], 16)
 			}
 		}
 	default:
@@ -606,10 +613,7 @@ func (s *sliceDec) reconIntra(cur *mbInfo) {
 			gi := s.idx4(bx, by)
 			aA := bx > 0 || nA
 			aB := by > 0 || nB
-			pm := int8(2)
-			if aA && aB {
-				pm = min(g[gi-1], g[gi-gst])
-			}
+			pm := s.predIntraMode(gi, bx, by, aA, aB, false)
 			mode := pm
 			if !mb.prevFlag[blk] {
 				mode = mb.remMode[blk]
@@ -641,16 +645,15 @@ func (s *sliceDec) reconIntra(cur *mbInfo) {
 				av.topRight = blkOrder[(by-1)*4+bx+1] < blkOrder[by*4+bx]
 			}
 			off := yo + by*4*st + bx*4
-			pred4x4(pic.planes[0], off, st, int(mode), av)
+			pred4x4(pl[0], off, st, int(mode), av)
 			r := by*4 + bx
 			s.addLuma4x4(r, off, st)
 		}
 	}
 	if s.h.sps.chromaFormatIdc != 0 {
-		cst := pic.stride[1]
-		co := pic.origin[1] + s.mbY*8*cst + s.mbX*8
-		predChroma(pic.planes[1], co, cst, int(mb.chromaPred), nB, nA)
-		predChroma(pic.planes[2], co, cst, int(mb.chromaPred), nB, nA)
+		cst, co := s.cs, s.co
+		predChroma(pl[1], co, cst, int(mb.chromaPred), nB, nA)
+		predChroma(pl[2], co, cst, int(mb.chromaPred), nB, nA)
 		s.reconChroma()
 	}
 	_ = cur
