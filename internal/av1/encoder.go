@@ -57,11 +57,16 @@ type Encoder struct {
 	// (tests).
 	keepRecon bool
 	recons    map[int]*[3][]uint16
+	// recent is the last pictures in, by display index.
+	recent map[int]*Source
 	// slots are the reference frame slots (the spec's eight).
 	slots [NUM_REF_FRAMES]*refFrameState
 	// lfFixed, when set, gives the loop filter levels and sharpness
 	// instead of searching them (for tests).
 	lfFixed *[5]int
+	// sbQHook, when set, gives a frame's superblocks' q indexes (for
+	// tests; n superblocks).
+	sbQHook func(n int) []int
 	// cdefFixed, when set, gives the CDEF parameters instead of
 	// searching them (for tests).
 	cdefFixed *cdefSettings
@@ -78,7 +83,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.QIndex < 0 || o.QIndex > 255 {
 		return nil, errors.New("av1: q index 0..255")
 	}
-	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}}
+	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
 		edgeFilter: true, filterIntra: true, cdef: true,
@@ -114,7 +119,16 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		fp.highPrecisionMV = fp.qIndex < 128
 		fp.interpFilter = EIGHTTAP
 	}
+	if (e.sbQHook != nil || j.sbQ != nil) && fp.qIndex > 0 {
+		fp.deltaQ = true
+	}
 	f := e.newFrame(fp, src)
+	switch {
+	case e.sbQHook != nil && fp.deltaQ:
+		f.sbQ = e.sbQHook(((f.miCols + 15) >> 4) * ((f.miRows + 15) >> 4))
+	case fp.deltaQ:
+		f.sbQ = j.sbQ
+	}
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
@@ -148,10 +162,8 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				t := newTileEnc(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
+				recs[tr*fp.tiles.cols()+tc] = codeTile(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
 					fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols))
-				t.code()
-				recs[tr*fp.tiles.cols()+tc] = t.w.ops
 			}()
 		}
 	}

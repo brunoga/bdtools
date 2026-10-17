@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 )
 
@@ -218,5 +219,28 @@ func TestEncodeFramesConcurrently(t *testing.T) {
 	}
 	if a, b := code(false), code(true); !bytes.Equal(a, b) {
 		t.Fatalf("at once %d bytes, one at a time %d: different", len(a), len(b))
+	}
+}
+
+// The superblock rows coded at once make the same stream however they are
+// scheduled.
+func TestEncodeRowsDeterministic(t *testing.T) {
+	o := EncoderOptions{Width: 264, Height: 200, BitDepth: 8, QIndex: 120, MiniGOP: 4}
+	p := testPicture(264, 200, 8, 3)
+	pics := []*Source{p, shifted(p, 2, 1), shifted(p, 4, 2), shifted(p, 6, 3), shifted(p, 8, 4)}
+	code := func(procs int) []byte {
+		defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(procs))
+		e, err := NewEncoder(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b []byte
+		for _, u := range encodeAll(t, e, pics) {
+			b = append(b, u.Data...)
+		}
+		return b
+	}
+	if a, b := code(1), code(8); !bytes.Equal(a, b) {
+		t.Fatalf("one CPU %d bytes, eight %d: different", len(a), len(b))
 	}
 }

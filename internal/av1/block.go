@@ -13,6 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
+var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra bool
 var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode, dbgNoVarTx bool
 
 // lumaCands is how many luma modes are coded in full.
@@ -99,7 +100,7 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	t.save(start, r, c, size, true)
 	// inter first: when it codes no residual, intra is not tried
 	jn, dn := t.searchInterBlock(r, c, size)
-	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune) {
+	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune && !dbgNoPruneIntra) {
 		return jn, dn
 	}
 	t.save(intra, r, c, size, true) // the inter's
@@ -204,7 +205,7 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	b.skip = allZero
 	t.cost.n = 0
 	t.writeSkip(&t.cost)
-	j += f.lambda * float64(t.cost.n) / costScale
+	j += t.lambda * float64(t.cost.n) / costScale
 	if b.skip {
 		t.resetBlockContext()
 	}
@@ -245,6 +246,7 @@ func (t *tileEnc) finalBlock(dec *blockDec) {
 		f.cdefIdx[i] = 0
 		t.cdefDone = true
 	}
+	t.writeDeltaQ(t.w)
 	t.writeModes(t.w, dec.txDepth)
 	if b.skip {
 		t.resetBlockContext()
@@ -287,7 +289,7 @@ func (t *tileEnc) lumaTxSize(depth int) int {
 // coefficients' rates and the distortion) and whether every coefficient
 // is zero.
 func (t *tileEnc) codeLuma(dec *blockDec, search bool) (float64, bool) {
-	f, b := t.f, &t.b
+	b := &t.b
 	b.yMode, b.angleY, b.filterMode = dec.yMode, dec.angleY, dec.filterMode
 	b.txSz = t.lumaTxSize(dec.txDepth)
 	t.setModes()
@@ -296,7 +298,7 @@ func (t *tileEnc) codeLuma(dec *blockDec, search bool) (float64, bool) {
 	t.writeYMode(&t.cost)
 	t.writeFilterIntra(&t.cost)
 	t.writeTxDepth(&t.cost, dec.txDepth)
-	j := f.lambda * float64(t.cost.n) / costScale
+	j := t.lambda * float64(t.cost.n) / costScale
 	if search {
 		dec.txTypes = dec.txTypes[:0]
 	}
@@ -328,11 +330,11 @@ func (t *tileEnc) codeLuma(dec *blockDec, search bool) (float64, bool) {
 
 // codeChroma codes the block's chroma with its chroma mode.
 func (t *tileEnc) codeChroma(search bool) (float64, bool) {
-	f, b := t.f, &t.b
+	b := &t.b
 	t.setModes()
 	t.cost.n = 0
 	t.writeUVMode(&t.cost)
-	j := f.lambda * float64(t.cost.n) / costScale
+	j := t.lambda * float64(t.cost.n) / costScale
 	_ = search
 	zero := true
 	txSz := t.planeTxSize(1)
@@ -495,7 +497,7 @@ func (t *tileEnc) lumaEstimate(mode, angle, filterMode int) float64 {
 	t.writeYMode(&t.cost)
 	t.writeFilterIntra(&t.cost)
 	b.filterMode = -1
-	return float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale
+	return float64(satd) + math.Sqrt(t.lambda)*float64(t.cost.n)/costScale
 }
 
 // chromaEstimate is a chroma mode's (not CFL).
@@ -519,7 +521,7 @@ func (t *tileEnc) chromaEstimate(mode, angle int) float64 {
 	t.cost.n = 0
 	t.writeUVMode(&t.cost)
 	b.angleUV = 0
-	return float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale
+	return float64(satd) + math.Sqrt(t.lambda)*float64(t.cost.n)/costScale
 }
 
 // withAngles adds the other angles of the best directional candidates.
@@ -594,7 +596,7 @@ func (t *tileEnc) chromaCandidates() []modeCand {
 			}
 			t.cost.n = 0
 			t.writeUVMode(&t.cost)
-			cands = append(cands, modeCand{mode: UV_CFL_PRED, filterMode: -1, cost: float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale, cflU: au, cflV: av})
+			cands = append(cands, modeCand{mode: UV_CFL_PRED, filterMode: -1, cost: float64(satd) + math.Sqrt(t.lambda)*float64(t.cost.n)/costScale, cflU: au, cflV: av})
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
@@ -607,6 +609,9 @@ func (t *tileEnc) satd(plane, x0, y0, w, h int, pred []uint16) int64 {
 	f := t.f
 	st := f.stride[plane]
 	src := f.src[plane]
+	if w&7 == 0 && h&7 == 0 {
+		return satd8s(src[y0*st+x0:], st, pred, w, w, h)
+	}
 	var sum int64
 	var d [16]int32
 	for by := 0; by < h; by += 4 {
@@ -711,7 +716,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		tc.eob = t.quantize(plane, txSz, tt)
 		copy(t.trial[:w*h], t.pred[:w*h])
 		if tc.eob > 0 {
-			dequantize(t.levels[tc.off:], txSz, f.dcQ[plane], f.acQ[plane], f.bitDepth, t.dq[:])
+			dequantize(t.levels[tc.off:], txSz, t.dcQ[plane], t.acQ[plane], f.bitDepth, t.dq[:])
 			inverseTransform(t.dq[:], txSz, tt, f.bitDepth, f.lossless, t.inv[:])
 			reconstructAdd(t.trial[:], w, t.inv[:], txSz, tt, f.bitDepth)
 		}
@@ -724,7 +729,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		}
 		t.cost.n = 0
 		t.writeCoeffs(&t.cost, &tc, false)
-		j := float64(sse) + f.lambda*float64(t.cost.n)/costScale
+		j := float64(sse) + t.lambda*float64(t.cost.n)/costScale
 		if j < bestJ {
 			if bestOff >= 0 {
 				// keep the levels of the best only
@@ -751,7 +756,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		zero := txCoded{plane: plane, x4: tc.x4, y4: tc.y4, txSz: txSz, txType: DCT_DCT, off: len(t.levels)}
 		t.cost.n = 0
 		t.writeCoeffs(&t.cost, &zero, false)
-		if j := float64(sse) + f.lambda*float64(t.cost.n)/costScale; j < bestJ {
+		if j := float64(sse) + t.lambda*float64(t.cost.n)/costScale; j < bestJ {
 			t.levels = t.levels[:bestOff]
 			bestJ, best = j, zero
 			best.off = bestOff

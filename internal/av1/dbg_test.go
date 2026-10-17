@@ -2,6 +2,7 @@ package av1
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"testing"
 )
@@ -222,4 +223,24 @@ func TestDbgSkipMode(t *testing.T) {
 		}
 		checkDecodes(t, o, pics)
 	}
+}
+
+// A q index a superblock (delta_q), the targets random.
+func TestDeltaQ(t *testing.T) {
+	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+	p := testPicture(200, 136, 8, 1)
+	var pics []*Source
+	for i := range 6 {
+		pics = append(pics, shifted(p, i, i/2))
+	}
+	rng := rand.New(rand.NewPCG(5, 6))
+	checkDecodesWith(t, o, pics, func(e *Encoder) {
+		e.sbQHook = func(n int) []int {
+			q := make([]int, n)
+			for i := range q {
+				q[i] = 40 + rng.IntN(200)
+			}
+			return q
+		}
+	})
 }
