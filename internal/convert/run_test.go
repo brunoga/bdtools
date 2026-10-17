@@ -907,10 +907,10 @@ func composesFEL(t *testing.T, fs felSource, dec Decoder) {
 // behind type 63 headers. The output's layers compose to near the source's
 // composition, and nearer with the enhancement layer rebuilt for the
 // encoded base layer (keep) than with the source's re-encoded (reencode).
-// Skips without ffmpeg, x265, NVDEC and NVENC.
+// Skips without ffmpeg, and without NVENC or x265 for those.
 func TestRunnerKeepsFELLayers(t *testing.T) {
 	fs := makeFELSource(t, 10, 0)
-	for _, enc := range []Encoder{EncoderNVENC, EncoderSoftware} {
+	for _, enc := range []Encoder{EncoderNVENC, EncoderSoftware, EncoderBuiltin} {
 		t.Run(string(enc), func(t *testing.T) {
 			if enc == EncoderNVENC && !ProbeNative(EncoderNVENC, CodecH265, 10, "") {
 				t.Skip("no NVENC")

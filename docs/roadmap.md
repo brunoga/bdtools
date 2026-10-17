@@ -26,7 +26,7 @@ worked on one at a time in the order below.
 |---|---|---|
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
 | AV1 output | SVT-AV1 | An AV1 encoder in Go (the largest piece) |
-| Dolby Vision with the enhancement layer kept or re-encoded | NVENC or x265 | The two-layer form in the Go HEVC encoder |
+| Dolby Vision with the enhancement layer kept or re-encoded | none | Done: the Go HEVC encoder codes both layers |
 | Interlaced H.264 input | none | Done: field pictures and MBAFF decode in Go, deinterlaced |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |
 | GPU encoders and decoders | System libraries | None needed: optional speed-ups |
@@ -103,3 +103,4 @@ Measurement:
 | 3. Audio codecs in Go | Done: AC-3 encoder (coupling to do for 128 kb/s stereo), DTS core decoder (bit-exact), AAC passthrough and an AAC-LC encoder (short blocks to do) |
 | 4. H.264 encoder | Done for now: +9% BD-rate against x264 --tune psnr (trellis, B-pyramid, lookahead); speed later |
 | 5. Interlaced H.264 | Done: PAFF and MBAFF bit-exact on 79 of 80 JVT streams; 1080i sources decoded and deinterlaced in Go |
+| 6. Dolby Vision two layers | Done: `--dv-fel keep`/`reencode` with `--encoder builtin` (profile 7 out, no NVENC or x265) |

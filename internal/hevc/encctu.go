@@ -76,7 +76,6 @@ type picShared struct {
 	// lambda weighs bits against squared error; lambdaS against the SATD.
 	lambda, lambdaS float64
 	refs            [2][]*picture
-	planes          [2][]*refPlanes
 	ilr             int // the inter-layer reference's index in list 0, -1 for none
 	wppCtx          [][numContexts]uint8
 	// rows counts each CTB row's CTBs coded, for the wavefront: the row
@@ -170,13 +169,12 @@ func newPicCoder(sh *picShared) *picCoder {
 // ilr is the index in list 0 of the inter-layer reference (-1 for none),
 // a long-term reference; tmvp says whether the slice may predict from
 // the collocated picture's motion (not an IDR picture's).
-func (sh *picShared) start(pic *picture, src *Source, qp, typ, poc int, refs [2][]*picture, planes [2][]*refPlanes, ilr int, tmvp bool) {
+func (sh *picShared) start(pic *picture, src *Source, qp, typ, poc int, refs [2][]*picture, ilr int, tmvp bool) {
 	s := sh.s
 	sh.pic = pic
 	sh.src = src
 	sh.qp = qp
 	sh.refs = refs
-	sh.planes = planes
 	sh.ilr = ilr
 	sh.h = sliceHeader{firstSliceInPic: true, typ: typ, picOutput: true, sliceQP: qp,
 		qpDelta: qp - sh.p.initQP, maxMergeCand: 5, poc: poc, colFromL0: true}

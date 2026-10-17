@@ -94,16 +94,15 @@ func (p *gopPicture) key() int { return p.frame<<1 | p.layer }
 // picJob is a picture planned: what it predicts from and how, then its
 // access unit and its decoded picture.
 type picJob struct {
-	p      *gopPicture
-	typ    int
-	qp     int
-	refs   [2][]*gopPicture // the reference lists
-	kept   []*gopPicture    // every picture the set keeps: refs and others
-	state  int
-	au     []byte
-	pic    *picture  // the reconstruction, loop filtered as its rows end
-	planes refPlanes // its fractional planes, for the pictures predicted from it
-	sum    uint32    // its checksum, once coded
+	p     *gopPicture
+	typ   int
+	qp    int
+	refs  [2][]*gopPicture // the reference lists
+	kept  []*gopPicture    // every picture the set keeps: refs and others
+	state int
+	au    []byte
+	pic   *picture // the reconstruction, loop filtered as its rows end
+	sum   uint32   // its checksum, once coded
 	// ilr is the index in refs[0] of the inter-layer reference (the base
 	// layer's picture of a second view's), -1 for none.
 	ilr int
@@ -685,18 +684,16 @@ func (e *Encoder) newPicture() *picture {
 // what can start.
 func (e *Encoder) code(j *picJob, c *picShared) {
 	var refs [2][]*picture
-	var planes [2][]*refPlanes
 	e.mu.Lock()
 	for l := range 2 {
 		for _, r := range j.refs[l] {
 			rj := e.byFrame[r.key()]
 			refs[l] = append(refs[l], rj.pic)
-			planes[l] = append(planes[l], &rj.planes)
 		}
 	}
 	e.mu.Unlock()
 	p := j.p
-	c.start(j.pic, p.src, j.qp, j.typ, p.poc, refs, planes, j.ilr, !p.idr)
+	c.start(j.pic, p.src, j.qp, j.typ, p.poc, refs, j.ilr, !p.idr)
 	subs := c.codePicture()
 	var au []byte
 	nalType := nalTrailR
@@ -882,7 +879,6 @@ func (e *Encoder) collect(all bool) ([][]byte, error) {
 	for drop < e.outAt && drop < e.sendAt && e.jobs[drop].p.frame < minRef {
 		j := e.jobs[drop]
 		delete(e.byFrame, j.p.key())
-		j.planes.release()
 		e.pics = append(e.pics, j.pic)
 		j.pic = nil
 		drop++

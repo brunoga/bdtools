@@ -135,12 +135,16 @@ notes and the commit history), x265-style frame parallelism (each
 picture filtered row by row on the encoder's own state, pictures waiting
 on reference rows rather than on the decoder), groups of seven B
 pictures with sixteen pictures in flight (the anchor chain bound the
-clock with three), fractional reference planes, and AVX2 for SAD, SATD,
-SSD, the forward and inverse transforms and the quantiser.
+clock with three), and AVX2 for SAD, SATD, SSD, the forward and inverse
+transforms and the quantiser. Fractional reference planes (each
+reference's luma interpolated at the sixteen quarter-sample phases, read
+by the sub-sample search) helped once; with the interpolation in AVX2
+they no longer did (1080p 4-9% faster without them, 4K 3% slower) and
+held 280 MB a reference at 4K, 37 GB at once, so they went (2026-10-17).
 
 What is left: the CPU per picture is 2.8 times x265 medium's. Its
 largest parts are the motion search (sub-sample SATD), the merge
-candidates, the reference planes and the residual trials; beyond that,
+candidates, the interpolation and the residual trials; beyond that,
 x265's lookahead-driven analysis and its assembly for intra prediction
 and interpolation. A cheaper sub-sample search (four quarter-sample
 points, or four at both steps) was measured and rejected: it lost 0.7

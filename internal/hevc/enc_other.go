@@ -20,10 +20,6 @@ func ssdBlock(a []uint16, as int, b []uint16, bs, w, h int) int64 {
 	return ssdBlockGo(a, as, b, bs, w, h)
 }
 
-func avgBlock(dst []uint16, ds int, a []uint16, as int, b []uint16, bs, w, h int) {
-	avgBlockGo(dst, ds, a, as, b, bs, w, h)
-}
-
 func saoEO(rec []uint16, r0, rs int, src []uint16, s0, ss, w, h, off0, off1 int, sum, cnt *[4]int64) {
 	saoEOGo(rec, r0, rs, src, s0, ss, w, h, off0, off1, sum, cnt)
 }

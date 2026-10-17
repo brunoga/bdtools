@@ -228,16 +228,6 @@ func TestEncKernels(t *testing.T) {
 				if got, want := ssdBlock(a[3:], 80, b[5:], 80, w, h), ssdBlockGo(a[3:], 80, b[5:], 80, w, h); got != want {
 					t.Errorf("%d-bit ssd %dx%d: %d, want %d", depth, w, h, got, want)
 				}
-				if w >= 8 {
-					d0, d1 := make([]uint16, 64*64), make([]uint16, 64*64)
-					avgBlock(d0, 64, a[3:], 80, b[5:], 80, w, h)
-					avgBlockGo(d1, 64, a[3:], 80, b[5:], 80, w, h)
-					for i := range d0 {
-						if d0[i] != d1[i] {
-							t.Fatalf("%d-bit avg %dx%d differs at %d", depth, w, h, i)
-						}
-					}
-				}
 			}
 		}
 		for i := range 20 {
@@ -380,39 +370,6 @@ func TestInverseTransformFast(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-// The bands built with shared horizontal filtering are the ones built by
-// interpolate, block by block.
-func TestPlaneBands(t *testing.T) {
-	for _, depth := range []int{8, 10} {
-		e, err := NewEncoder(EncoderOptions{Width: 200, Height: 136, BitDepth: depth, QP: 30, NoVerify: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		pic := e.newPicture()
-		src := synthSource(200, 136, depth, 3)
-		for y := range 136 {
-			copy(pic.y[y*pic.strideY:], src.Y[y*200:y*200+200])
-		}
-		pic.setAllFinal()
-		var a, b refPlanes
-		a.init(pic, e.s)
-		b.init(pic, e.s)
-		for band := range a.bands {
-			a.buildBand(band)
-			b.buildBandInterp(band)
-		}
-		for phase := range 16 {
-			for i := range a.planes[phase] {
-				if a.planes[phase][i] != b.planes[phase][i] {
-					t.Fatalf("%d-bit phase %d: sample %d (%d,%d) = %d, want %d", depth, phase, i, i%a.stride, i/a.stride, a.planes[phase][i], b.planes[phase][i])
-				}
-			}
-		}
-		a.release()
-		b.release()
 	}
 }
 
