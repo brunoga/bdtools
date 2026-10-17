@@ -14,6 +14,7 @@ package av1
 import (
 	"fmt"
 	"math"
+	"sync"
 )
 
 var dbgCompare bool
@@ -196,11 +197,23 @@ func (t *tileEnc) inside(r, c int) bool {
 // code codes the tile.
 func (t *tileEnc) code() {
 	for r := t.rowStart; r < t.rowEnd; r += 16 {
-		for p := range 3 {
-			clear(t.leftLevel[p])
-			clear(t.leftDc[p])
+		t.codeRow(r, nil)
+	}
+}
+
+// codeRow codes a superblock row of the tile; with wait, each superblock
+// once wait says the rows above allow it (and done after it).
+func (t *tileEnc) codeRow(r int, sync *rowSync) {
+	for p := range 3 {
+		clear(t.leftLevel[p])
+		clear(t.leftDc[p])
+	}
+	k := 0
+	for c := t.colStart; c < t.colEnd; c += 16 {
+		if sync != nil {
+			sync.wait(k)
 		}
-		for c := t.colStart; c < t.colEnd; c += 16 {
+		{
 			t.startSB(r, c)
 			t.clearDecoded(r, c)
 			t.cdefDone = false
@@ -225,8 +238,110 @@ func (t *tileEnc) code() {
 				}
 			}
 		}
+		if sync != nil {
+			sync.done(k, t.live)
+		}
+		k++
 	}
 }
+
+// rowSync is a superblock row's place in a tile coded a row a worker,
+// each row two superblocks behind the one above (it needs the above
+// right superblock coded).
+type rowSync struct {
+	mu    *sync.Mutex
+	cond  *sync.Cond
+	above *rowSync // nil for the first row
+	n     int      // superblocks done
+	cols  int
+	// cdf is a copy of the row's CDFs after its second superblock (or its
+	// last): the row below decides from it.
+	cdf *cdfs
+}
+
+func (s *rowSync) wait(k int) {
+	if s.above == nil {
+		return
+	}
+	s.mu.Lock()
+	for s.above.n < min(k+2, s.above.cols) {
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+}
+
+func (s *rowSync) done(k int, live *cdfs) {
+	s.mu.Lock()
+	s.n = k + 1
+	if k == min(1, s.cols-1) {
+		c := *live
+		s.cdf = &c
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
+// codeTile codes a tile, its superblock rows at once (a wavefront) unless
+// a superblock's q chains from the one before (delta_q): the rows decide
+// from the CDFs of the row above as its second superblock ends (the
+// symbols are coded later, in order, by pack), so the decisions do not
+// depend on the timing. It gives the tile's symbols.
+func codeTile(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) []symOp {
+	if f.fp.deltaQ || dbgSerialRows {
+		t := newTileEnc(f, rowStart, rowEnd, colStart, colEnd)
+		t.code()
+		return t.w.ops
+	}
+	var rows []int
+	for r := rowStart; r < rowEnd; r += 16 {
+		rows = append(rows, r)
+	}
+	cols := (colEnd - colStart + 15) / 16
+	var mu sync.Mutex
+	cond := sync.NewCond(&mu)
+	syncs := make([]*rowSync, len(rows))
+	encs := make([]*tileEnc, len(rows))
+	for i := range rows {
+		syncs[i] = &rowSync{mu: &mu, cond: cond, cols: cols}
+		if i > 0 {
+			syncs[i].above = syncs[i-1]
+		}
+		encs[i] = newTileEnc(f, rowStart, rowEnd, colStart, colEnd)
+		if i > 0 {
+			// the tile's above contexts are shared: each row reads the
+			// columns the row above has coded
+			encs[i].aboveLevel, encs[i].aboveDc = encs[0].aboveLevel, encs[0].aboveDc
+		}
+	}
+	var wg sync.WaitGroup
+	for i, r := range rows {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := encs[i]
+			if i > 0 {
+				s := syncs[i-1]
+				mu.Lock()
+				for s.cdf == nil {
+					cond.Wait()
+				}
+				c := *s.cdf
+				mu.Unlock()
+				*t.cdf = c
+			}
+			t.codeRow(r, syncs[i])
+		}()
+	}
+	wg.Wait()
+	var ops []symOp
+	for _, t := range encs {
+		ops = append(ops, t.w.ops...)
+	}
+	return ops
+}
+
+// dbgSerialRows codes a tile's superblock rows one at a time.
+var dbgSerialRows bool
 
 // startSB sets the superblock's quantizer: the frame's, or with
 // delta_q_present its own (as near the target as the delta's steps get

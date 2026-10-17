@@ -162,10 +162,8 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				t := newTileEnc(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
+				recs[tr*fp.tiles.cols()+tc] = codeTile(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
 					fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols))
-				t.code()
-				recs[tr*fp.tiles.cols()+tc] = t.w.ops
 			}()
 		}
 	}
