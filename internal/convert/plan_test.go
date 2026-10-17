@@ -149,7 +149,6 @@ func TestValidateRejectsIncoherentOptions(t *testing.T) {
 		{"unknown layout", func(o *Options) { o.Layout = "sbs3d" }, "unknown layout"},
 		{"crf out of range", func(o *Options) { o.CRF = 99 }, "out of range"},
 		{"mvc with a GPU left eye", func(o *Options) { o.Layout, o.Codec, o.Encoder, o.NativeGPU = LayoutMVC, CodecH264, EncoderNVENC, true }, "x264"},
-		{"builtin for av1", func(o *Options) { o.Encoder, o.Codec = EncoderBuiltin, CodecAV1 }, "AV1"},
 		{"builtin for 10-bit h264", func(o *Options) { o.Encoder, o.Codec, o.BitDepth = EncoderBuiltin, CodecH264, 10 }, "8 bits"},
 		{"mvhevc into an mkv", func(o *Options) { o.Layout, o.Codec, o.Encoder = LayoutMVHEVC, CodecH265, EncoderNVENC }, ".mp4 or .mov"},
 		{"mvhevc by x265", func(o *Options) {

@@ -95,6 +95,10 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 		sink = &gpuSink{r: r, open: openBuiltinHEVC}
 		verb = "encoded"
 		r.Report.Report("decoding and encoding (h265, the encoder here, in process)")
+	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecAV1:
+		sink = &gpuSink{r: r, open: openBuiltinAV1}
+		verb = "encoded"
+		r.Report.Report("decoding and encoding (av1, the encoder here, in process)")
 	case r.Opts.NativeGPU:
 		k, _ := hwKind(r.Opts.Encoder)
 		sink = &gpuSink{r: r, kind: k}
