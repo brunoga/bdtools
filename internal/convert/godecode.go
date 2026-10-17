@@ -234,3 +234,101 @@ func (g *goH264) Close() error {
 	}
 	return nil
 }
+
+// gpuFallback is a GPU decoder that, failing before its first picture
+// (a virtual machine's media engine, a driver turning the stream down
+// after all), hands the stream to a decoder here: the access units fed
+// so far go to it again.
+type gpuFallback struct {
+	dec     gpu.Decoder
+	open    func() (gpu.Decoder, error) // the decoder here
+	report  Reporter
+	shown   bool // a picture has come out
+	fed     [][]byte
+	fedPTS  []int64
+	replace bool // on the decoder here now
+}
+
+// maxFallbackAUs is how many access units a GPU decoder may take before
+// its first picture and still be replaced: past them it is trusted.
+const maxFallbackAUs = 64
+
+func (g *gpuFallback) fall(err error) error {
+	if g.shown || g.replace || g.open == nil || len(g.fed) > maxFallbackAUs {
+		return err
+	}
+	g.report.Report("warning: the GPU decoder failed before its first picture (%v): decoding here instead", err)
+	_ = g.dec.Close()
+	dec, oerr := g.open()
+	if oerr != nil {
+		return fmt.Errorf("%w (and decoding here: %w)", err, oerr)
+	}
+	g.dec, g.replace = dec, true
+	for i, au := range g.fed {
+		if err := g.dec.Decode(au, g.fedPTS[i]); err != nil {
+			return err
+		}
+	}
+	g.fed, g.fedPTS = nil, nil
+	return nil
+}
+
+func (g *gpuFallback) Decode(au []byte, pts int64) error {
+	if !g.shown && !g.replace && len(g.fed) <= maxFallbackAUs {
+		g.fed = append(g.fed, append([]byte(nil), au...))
+		g.fedPTS = append(g.fedPTS, pts)
+	}
+	if err := g.dec.Decode(au, pts); err != nil {
+		return g.fall(err)
+	}
+	return nil
+}
+
+func (g *gpuFallback) Flush() error {
+	if err := g.dec.Flush(); err != nil {
+		if err = g.fall(err); err != nil {
+			return err
+		}
+		return g.dec.Flush()
+	}
+	return nil
+}
+
+func (g *gpuFallback) Close() error { return g.dec.Close() }
+
+// openGPUWithFallback opens a GPU decoder of kind k, the decoder here
+// (soft) taking over should it fail before its first picture.
+func openGPUWithFallback(k gpu.Kind, cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error,
+	soft func(picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error), report Reporter) (gpu.Decoder, error) {
+	g := &gpuFallback{report: report}
+	shown := func(p *gpu.DecodedPicture) error {
+		g.shown = true
+		g.fed, g.fedPTS = nil, nil
+		return picture(p)
+	}
+	dec, err := gpu.OpenDecoder(k, cfg, shown)
+	if err != nil {
+		return nil, err
+	}
+	g.dec = dec
+	if soft != nil {
+		g.open = func() (gpu.Decoder, error) { return soft(shown) }
+	}
+	return g, nil
+}
+
+// softDecoder opens the decoder here for a codec, to take over from a GPU
+// decoder (nil for none).
+func softDecoder(codec gpu.VideoCodec, cfg gpu.DecodeConfig) func(func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+	switch codec {
+	case gpu.DecodeH264:
+		return func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) { return openGoH264(p, nil), nil }
+	case gpu.DecodeHEVC:
+		return func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) { return openGoHEVC(p, nil), nil }
+	case gpu.DecodeMPEG2:
+		return func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) { return openGoMPEG2(cfg, p) }
+	case gpu.DecodeVC1:
+		return func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) { return openGoVC1(cfg, p) }
+	}
+	return nil
+}

@@ -197,7 +197,9 @@ func TestParseSubtitleFiles(t *testing.T) {
 		cues  func() []textCue
 		first string
 	}{
-		{"S_TEXT/UTF8", func() []textCue { return parseSRT(strings.ReplaceAll(strings.TrimPrefix(srtFile, "\ufeff"), "\r\n", "\n")) }, "<i>First</i> line"},
+		{"S_TEXT/UTF8", func() []textCue {
+			return parseSRT(strings.ReplaceAll(strings.TrimPrefix(srtFile, "\ufeff"), "\r\n", "\n"))
+		}, "<i>First</i> line"},
 		{"S_TEXT/WEBVTT", func() []textCue { return parseVTT(vttFile) }, "First line"},
 		{"S_TEXT/ASS", func() []textCue { _, c, _ := parseASS(assFile); return c }, `0,0,Default,,0,0,0,,{\i1}First{\i0} line`},
 	} {

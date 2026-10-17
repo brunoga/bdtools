@@ -353,7 +353,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 			if ProbeDecoder(k.kind, codec) {
 				r.Report.Report("decoding %s on the GPU (%s)", video.Type, k.name)
 				return decoded(func(cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
-					return gpu.OpenDecoder(k.kind, cfg, picture)
+					return openGPUWithFallback(k.kind, cfg, picture, softDecoder(codec, cfg), r.Report)
 				}), nil
 			}
 		}
