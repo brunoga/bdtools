@@ -125,6 +125,12 @@ func TestBenchSeq(t *testing.T) {
 			defer func() { *v = old }()
 		}
 	}
+	for env, v := range map[string]*bool{"AV1NOPRUNESKIP": &dbgNoPruneSkip, "AV1NOPRUNEEXT": &dbgNoPruneExt, "AV1NOPRUNEINTRA": &dbgNoPruneIntra} {
+		if os.Getenv(env) != "" {
+			*v = true
+			defer func() { *v = false }()
+		}
+	}
 	if os.Getenv("AV1NOPRUNE") != "" {
 		dbgNoPrune = true
 		defer func() { dbgNoPrune = false }()

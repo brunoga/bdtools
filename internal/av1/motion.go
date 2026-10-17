@@ -139,6 +139,9 @@ func sadAt(b *meBlock, px, py int) int64 {
 	lastX, lastY := b.ref.width-1, b.ref.height-1
 	var sum int64
 	if px >= 0 && py >= 0 && px+b.w-1 <= lastX && py+b.h-1 <= lastY {
+		if b.w&7 == 0 {
+			return int64(sadBlock(b.src[b.y*b.srcStride+b.x:], b.srcStride, ref[py*rs+px:], rs, b.w, b.h))
+		}
 		for i := range b.h {
 			s := b.src[(b.y+i)*b.srcStride+b.x:][:b.w]
 			r := ref[(py+i)*rs+px:][:b.w]
@@ -196,6 +199,9 @@ func (ms *motionSearch) subCost(b *meBlock, m mv) float64 {
 // satdBlock is the sum of the 4x4 Hadamard transforms' magnitudes of the
 // difference of two w by h blocks (w, h multiples of 4), halved.
 func satdBlock(src []uint16, srcStride int, pred []uint16, predStride, w, h int) int64 {
+	if w&7 == 0 && h&7 == 0 {
+		return satd8s(src, srcStride, pred, predStride, w, h)
+	}
 	var sum int64
 	var d [16]int32
 	for by := 0; by < h; by += 4 {

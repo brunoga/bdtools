@@ -605,8 +605,11 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		// the whole partition; the extended partitions in a direction
 		// splitting it that way did not help.
 		if jn, ok := jOf[PARTITION_NONE]; ok && !dbgNoPrune {
-			if bestNode != nil && bestNode.part == PARTITION_NONE && bestNode.blocks[0].isInter && bestNode.blocks[0].skip {
+			if bestNode != nil && bestNode.part == PARTITION_NONE && bestNode.blocks[0].isInter && bestNode.blocks[0].skip && !dbgNoPruneSkip {
 				break
+			}
+			if dbgNoPruneExt {
+				goto search
 			}
 			switch part {
 			case PARTITION_HORZ_A, PARTITION_HORZ_B, PARTITION_HORZ_4:
@@ -619,6 +622,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 				}
 			}
 		}
+	search:
 		if last >= 0 {
 			t.restore(start, true)
 		}

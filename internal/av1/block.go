@@ -13,6 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
+var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra bool
 var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode, dbgNoVarTx bool
 
 // lumaCands is how many luma modes are coded in full.
@@ -99,7 +100,7 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	t.save(start, r, c, size, true)
 	// inter first: when it codes no residual, intra is not tried
 	jn, dn := t.searchInterBlock(r, c, size)
-	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune) {
+	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune && !dbgNoPruneIntra) {
 		return jn, dn
 	}
 	t.save(intra, r, c, size, true) // the inter's
@@ -608,6 +609,9 @@ func (t *tileEnc) satd(plane, x0, y0, w, h int, pred []uint16) int64 {
 	f := t.f
 	st := f.stride[plane]
 	src := f.src[plane]
+	if w&7 == 0 && h&7 == 0 {
+		return satd8s(src[y0*st+x0:], st, pred, w, w, h)
+	}
 	var sum int64
 	var d [16]int32
 	for by := 0; by < h; by += 4 {
