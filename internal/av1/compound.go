@@ -192,5 +192,37 @@ func (t *tileEnc) compoundCands(r0, r1 int, new0, new1 mv, cands []interCand) []
 		}
 	}
 	add(NEW_NEWMV, best, new0, new1)
+	// one NEW vector: the other the stack's
+	add(NEAREST_NEWMV, 0, s.predMv(NEAREST_NEWMV, 0, 0), new1)
+	add(NEW_NEARESTMV, 0, new0, s.predMv(NEW_NEARESTMV, 0, 1))
+	if lo, hi := s.refMvIdxRange(NEAR_NEWMV); s.numMvFound > 1 {
+		for _, mode := range []int{NEAR_NEWMV, NEW_NEARMV} {
+			best, bestBits := lo, int64(-1)
+			for idx := lo; idx <= hi; idx++ {
+				t.cost.n = 0
+				ctx, val, n := s.drlModes(mode, idx)
+				for k := range n {
+					t.cost.symbol(val[k], t.cdf.drlMode[ctx[k]][:])
+				}
+				for i, m := range [2]mv{new0, new1} {
+					if getMode(mode, i) == NEWMV {
+						p := s.predMv(mode, idx, i)
+						t.writeMvDiff(&t.cost, mv{m.row - p.row, m.col - p.col})
+					}
+				}
+				if bestBits < 0 || t.cost.n < bestBits {
+					best, bestBits = idx, t.cost.n
+				}
+			}
+			m0, m1 := new0, new1
+			if getMode(mode, 0) != NEWMV {
+				m0 = s.predMv(mode, best, 0)
+			}
+			if getMode(mode, 1) != NEWMV {
+				m1 = s.predMv(mode, best, 1)
+			}
+			add(mode, best, m0, m1)
+		}
+	}
 	return cands
 }

@@ -194,7 +194,7 @@ func TestDbgCompound(t *testing.T) {
 	defer func() { dbgForceCompound, dbgForceInter, dbgInterModes = false, false, 0 }()
 	dbgForceCompound, dbgForceInter = true, true
 	// NEAREST_NEAREST, NEAR_NEAR, GLOBAL_GLOBAL, NEW_NEW, all
-	for _, m := range []int{1 << 0, 1 << 1, 1 << 6, 1 << 7, 0} {
+	for _, m := range []int{1 << 0, 1 << 1, 1 << 2, 1 << 3, 1 << 4, 1 << 5, 1 << 6, 1 << 7, 0} {
 		dbgInterModes = m
 		t.Run(fmt.Sprint(m), func(t *testing.T) {
 			o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
