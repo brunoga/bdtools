@@ -66,6 +66,7 @@ func (t *tileEnc) writeInterModes(cd coder) {
 	t.writeRefFrames(cd)
 	if t.isCompound() {
 		t.writeCompoundModes(cd)
+		t.writeCompoundIdx(cd)
 		t.writeInterpFilter(cd)
 		return
 	}
@@ -137,6 +138,7 @@ var dbgFewRefs = false
 // interCand is an inter mode to try.
 type interCand struct {
 	interp    int // the interpolation filter
+	compDist  bool
 	ref, ref2 int // ref2 NONE for a single reference
 	m2        mv
 	mode, idx int
@@ -217,7 +219,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp}
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
 		t.setInterState(dec)
 		// OBMC tried for the best two single reference candidates, with
@@ -308,6 +310,7 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b.refFrame2, b.mv2 = dec.refFrame2, dec.mv2
 	b.skipMode = dec.skipMode
 	b.interp = dec.interp
+	b.compDist = dec.compDist && !dec.skipMode && dec.refFrame2 > INTRA_FRAME
 	b.obmc = dec.obmc
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
@@ -609,23 +612,34 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.refFrame2 = NONE
 		}
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
-		b.interp, b.obmc = EIGHTTAP, false
+		b.interp, b.obmc, b.compDist = EIGHTTAP, false, false
 		filters := []int{EIGHTTAP}
 		if t.needsInterpFilter() && !dbgNoSwitchable {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}
 		}
-		cd.est, cd.interp = math.Inf(1), EIGHTTAP
-		for _, fl := range filters {
-			b.interp = fl
-			t.setModes()
-			f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
-			satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
-			t.cost.n = 0
-			t.writeInterModes(&t.cost)
-			if e := float64(satd) + sl*float64(t.cost.n)/costScale; e < cd.est {
-				cd.est, cd.interp = e, fl
+		weights := []bool{false}
+		if b.refFrame2 > INTRA_FRAME && f.seq.jntComp {
+			weights = []bool{false, true}
+			if dbgForceCompDist {
+				weights = []bool{true}
 			}
 		}
+		cd.est, cd.interp, cd.compDist = math.Inf(1), EIGHTTAP, false
+		for _, dist := range weights {
+			b.compDist = dist
+			for _, fl := range filters {
+				b.interp = fl
+				t.setModes()
+				f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
+				satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
+				t.cost.n = 0
+				t.writeInterModes(&t.cost)
+				if e := float64(satd) + sl*float64(t.cost.n)/costScale; e < cd.est {
+					cd.est, cd.interp, cd.compDist = e, fl, dist
+				}
+			}
+		}
+		b.compDist = false
 	}
 }
 

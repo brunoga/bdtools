@@ -41,6 +41,7 @@ type frameEnc struct {
 	isInter   []uint8
 	interp    []uint8 // InterpFilters (both directions: no dual filter)
 	skipMode  []uint8
+	compIdx   []uint8                              // compound_idx (1 where not coded)
 	inter     *interFrameInfo                      // inter frames' header values (nil for key frames)
 	refs      [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
 	filt      [2]int                               // the frame's interpolation filter
@@ -121,6 +122,7 @@ type blockState struct {
 	txSz             int // the luma's
 	skip             bool
 	skipMode         bool // skip_mode: the frame's SkipModeFrame, nothing coded
+	compDist         bool // a compound block's compound_idx 0
 	cflU, cflV       int  // the CFL alphas
 	// An inter block's: its reference, its motion vector and RefMvIdx (its
 	// mode is yMode).
@@ -163,6 +165,7 @@ type blockDec struct {
 	refMvIdx        int
 	skip            bool   // an inter block coded without residual
 	skipMode        bool   // coded as skip_mode
+	compDist        bool   // compound_idx 0: the predictions weighted by distance
 	obmc            bool   // motion_mode OBMC
 	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
@@ -444,7 +447,7 @@ func (t *tileEnc) clearDecoded(r, c int) {
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [9][]uint8
+	mi         [10][]uint8
 	refs       [2][]int8
 	mvs        [2][]mv
 	above, aDc [3][16]uint8
@@ -521,9 +524,9 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	s.decoded = t.decoded
 }
 
-func (t *tileEnc) miArrays() [9][]uint8 {
+func (t *tileEnc) miArrays() [10][]uint8 {
 	f := t.f
-	return [9][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp}
+	return [10][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp, f.compIdx}
 }
 
 // restore puts a snapshot back.

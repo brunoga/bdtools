@@ -67,6 +67,9 @@ type Encoder struct {
 	// sbQHook, when set, gives a frame's superblocks' q indexes (for
 	// tests; n superblocks).
 	sbQHook func(n int) []int
+	// frameHook, when set, sees each frame once its tiles are coded
+	// (frames coded at once call it at once; for tests).
+	frameHook func(f *frameEnc)
 	// cdefFixed, when set, gives the CDEF parameters instead of
 	// searching them (for tests).
 	cdefFixed *cdefSettings
@@ -89,7 +92,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true, cdef: true, restoration: true,
+		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -160,6 +163,10 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		}
 		fp.motionModeSwitchable = !dbgNoObmc
 		f.inter = fi
+		if e.seq.refFrameMvs {
+			fp.useRefFrameMvs, fi.useRefFrameMvs = true, true
+			f.motionFieldEstimation()
+		}
 		f.filt = [2]int{EIGHTTAP, EIGHTTAP} // the motion search's
 		if fp.interpFilter != SWITCHABLE {
 			f.filt = [2]int{fp.interpFilter, fp.interpFilter}
@@ -178,6 +185,9 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		}
 	}
 	wg.Wait()
+	if e.frameHook != nil {
+		e.frameHook(f)
+	}
 	f.deblock(e.lfFixed)
 	deblocked := f.rec // CDEF filters into a new frame
 	f.cdef(e.cdefFixed)
@@ -201,6 +211,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	if key {
 		st.frameType = KEY_FRAME
 	}
+	f.saveMotionField(st)
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
 	return appendOBU(nil, obuFrame, payload)
 }
@@ -250,7 +261,7 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	for i := range f.refFrames[0] {
 		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
 	}
-	f.isInter, f.skipMode, f.interp = make([]uint8, n), make([]uint8, n), make([]uint8, n)
+	f.isInter, f.skipMode, f.interp, f.compIdx = make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n)
 	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
 	for i := range f.cdefIdx {
 		f.cdefIdx[i] = -1
