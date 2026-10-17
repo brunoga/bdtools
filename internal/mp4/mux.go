@@ -108,6 +108,7 @@ type sample struct {
 	dts    int64 // in the track's timescale
 	cts    int64
 	key    bool
+	dur    int64 // a text sample's (they run end to end)
 }
 
 type track struct {
@@ -127,10 +128,19 @@ type track struct {
 
 func (tr *track) video() bool { return tr.t.Type == mkv.TypeVideo }
 
+// text reports whether the track is timed text (tx3g).
+func (tr *track) text() bool { return tr.t.Type == mkv.TypeSubtitle }
+
+// textTimescale is a text track's: milliseconds.
+const textTimescale = 1000
+
 // timescale is the track's media timescale.
 func (tr *track) timescale(o Options) int64 {
-	if tr.video() {
+	switch {
+	case tr.video():
 		return int64(o.FPSNum)
+	case tr.text():
+		return textTimescale
 	}
 	return int64(tr.t.SampleRate)
 }
@@ -175,8 +185,46 @@ func (m *muxer) interleave() error {
 	}
 }
 
+// textSample is a tx3g sample: the text's length, then the text.
+func textSample(text []byte) []byte {
+	return append([]byte{byte(len(text) >> 8), byte(len(text))}, text...)
+}
+
+// writeText puts a cue in a text track: the samples run end to end from
+// the start, an empty one over each gap, and a cue that overlaps the one
+// before starts where it ends.
+func (m *muxer) writeText(tr *track, fr *mkv.Frame) error {
+	ms := func(d time.Duration) int64 { return int64(math.Round(float64(d) / 1e6)) }
+	var end int64
+	if n := len(tr.samples); n > 0 {
+		end = tr.samples[n-1].dts + tr.samples[n-1].dur
+	}
+	start, stop := max(ms(fr.PTS), end), ms(fr.PTS+fr.Duration)
+	if stop <= start || len(fr.Data) > 0xffff {
+		return nil
+	}
+	put := func(data []byte, dts, dur int64) error {
+		n, err := m.f.Write(data)
+		if err != nil {
+			return err
+		}
+		tr.samples = append(tr.samples, sample{offset: m.pos, size: uint32(n), dts: dts, cts: dts, key: true, dur: dur}) //nolint:gosec // a sample size
+		m.pos += int64(n)
+		return nil
+	}
+	if start > end {
+		if err := put(textSample(nil), end, start-end); err != nil {
+			return err
+		}
+	}
+	return put(textSample(fr.Data), start, stop-start)
+}
+
 // write puts one frame's sample in the media data box.
 func (m *muxer) write(tr *track, fr *mkv.Frame) error {
+	if tr.text() {
+		return m.writeText(tr, fr)
+	}
 	data := fr.Data
 	ts := tr.timescale(m.o)
 	var dts, cts int64
@@ -332,7 +380,9 @@ func (m *muxer) trak(id int, tr *track) ([]byte, int64, error) {
 	// later by the largest lead and an edit skips that lead; a track that
 	// starts later than time zero gets an empty edit first.
 	var mediaDur int64
-	if n := len(tr.samples); n > 0 && !tr.video() {
+	if n := len(tr.samples); n > 0 && tr.text() {
+		mediaDur = tr.samples[n-1].dts + tr.samples[n-1].dur
+	} else if n > 0 && !tr.video() {
 		mediaDur = tr.samples[n-1].dts + m.audioDelta(tr, n-1)
 	}
 	startMovie := int64(math.Round(float64(tr.delay) / 1e9 * movieTimescale))
@@ -384,7 +434,7 @@ func (m *muxer) trak(id int, tr *track) ([]byte, int64, error) {
 		if tr.t.DisplayWidth > 0 && tr.t.DisplayHeight > 0 {
 			width, height = tr.t.DisplayWidth, tr.t.DisplayHeight
 		}
-	} else {
+	} else if !tr.text() {
 		volume = 0x0100
 	}
 	tkhd := fullBox("tkhd", 1, 7, // enabled, in movie, in preview
@@ -404,14 +454,20 @@ func (m *muxer) trak(id int, tr *track) ([]byte, int64, error) {
 	}
 	mdhd := fullBox("mdhd", 1, 0, u64(0), u64(0), u32(ts), u64(mediaDur), u16(packed), u16(0))
 	handler, name := "soun", "SoundHandler\x00"
-	if tr.video() {
+	switch {
+	case tr.video():
 		handler, name = "vide", "VideoHandler\x00"
+	case tr.text():
+		handler, name = "sbtl", "SubtitleHandler\x00"
 	}
 	hdlr := fullBox("hdlr", 0, 0, u32(0), []byte(handler), make([]byte, 12), []byte(name))
 	var mhd []byte
-	if tr.video() {
+	switch {
+	case tr.video():
 		mhd = fullBox("vmhd", 0, 1, make([]byte, 8))
-	} else {
+	case tr.text():
+		mhd = fullBox("nmhd", 0, 0)
+	default:
 		mhd = fullBox("smhd", 0, 0, make([]byte, 4))
 	}
 	dinf := box("dinf", fullBox("dref", 0, 0, u32(1), fullBox("url ", 0, 1)))
@@ -452,9 +508,12 @@ func (m *muxer) stbl(tr *track) ([]byte, error) {
 	var runs []run
 	for i, s := range tr.samples {
 		var d int64
-		if tr.video() {
+		switch {
+		case tr.video():
 			d = int64(m.o.FPSDen)
-		} else {
+		case tr.text():
+			d = s.dur
+		default:
 			d = m.audioDelta(tr, i)
 		}
 		if len(runs) > 0 && runs[len(runs)-1].delta == d {
@@ -462,7 +521,6 @@ func (m *muxer) stbl(tr *track) ([]byte, error) {
 		} else {
 			runs = append(runs, run{1, d})
 		}
-		_ = s
 	}
 	var sttsBody []byte
 	for _, r := range runs {
@@ -514,8 +572,25 @@ func (m *muxer) stbl(tr *track) ([]byte, error) {
 	return box("stbl", parts...), nil
 }
 
+// tx3gEntry is a 3GPP timed text sample description (TS 26.245): text
+// centred at the bottom, white sans-serif on nothing.
+func tx3gEntry() []byte {
+	font := "Sans-Serif"
+	ftab := box("ftab", u16(1), u16(1), []byte{byte(len(font))}, []byte(font))
+	return box("tx3g", make([]byte, 6), u16(1), // reserved, data reference index
+		u32(0),                                                                // display flags
+		[]byte{1, 0xff},                                                       // horizontal justification centred, vertical at the bottom
+		[]byte{0, 0, 0, 0},                                                    // background
+		make([]byte, 8),                                                       // default text box
+		u16(0), u16(0), u16(1), []byte{0, 18}, []byte{0xff, 0xff, 0xff, 0xff}, // default style
+		ftab)
+}
+
 // sampleEntry builds the track's sample description.
 func (m *muxer) sampleEntry(tr *track) ([]byte, error) {
+	if tr.text() {
+		return tx3gEntry(), nil
+	}
 	if tr.video() {
 		switch tr.t.CodecID {
 		case "V_MPEG4/ISO/AVC":

@@ -43,6 +43,7 @@ type inSample struct {
 	off  int64
 	size int
 	dts  int64 // in the track's timescale
+	dur  int64 // its stts delta
 	cts  int64 // composition offset
 	key  bool
 }
@@ -325,6 +326,18 @@ func (r *Reader) parseTrak(body []byte, movieScale int64) (*inTrack, error) {
 		if !audioEntry(t, e) {
 			return nil, nil
 		}
+	case "sbtl", "text", "subt":
+		// Timed text: 3GPP's (tx3g, a length and the UTF-8 text, then
+		// style boxes) or WebVTT's (wvtt, cue boxes).
+		switch e.typ {
+		case "tx3g":
+			t.rt.CodecID = "S_TEXT/TX3G"
+		case "wvtt":
+			t.rt.CodecID = "S_TEXT/WVTT"
+		default:
+			return nil, nil
+		}
+		t.rt.Type = mkv.TypeSubtitle
 	default:
 		return nil, nil
 	}
@@ -615,6 +628,7 @@ func (t *inTrack) sampleTable(stbl []rbox) error {
 		for range cnt {
 			if i < len(t.samples) {
 				t.samples[i].dts = dts
+				t.samples[i].dur = int64(delta)
 			}
 			dts += delta
 			i++
@@ -713,7 +727,11 @@ func (r *Reader) Next() (mkv.Packet, error) {
 		}
 	}
 	at := scaled(s.dts+s.cts-t.shift, t.timescale) + t.delay
-	return mkv.Packet{Track: t.rt.Number, Time: at, Keyframe: s.key, Data: data}, nil
+	p := mkv.Packet{Track: t.rt.Number, Time: at, Keyframe: s.key, Data: data}
+	if t.rt.Type == mkv.TypeSubtitle {
+		p.Duration = scaled(s.dur, t.timescale)
+	}
+	return p, nil
 }
 
 // esdsConfig reads an esds box: the object type and the decoder specific

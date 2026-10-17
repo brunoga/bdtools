@@ -111,6 +111,14 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	firstAudio, firstSubs := true, true
 	for _, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
+		if e.track.Kind() == KindSubtitle && isText(e.track.StreamID) {
+			f, err := open(e.path)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, newTextSource(f, e.track, e.track.private, false))
+			continue
+		}
 		if e.track.Kind() == KindSubtitle {
 			pgs := func() (*mkv.PGSSource, error) {
 				f, err := open(e.path)

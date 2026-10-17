@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -408,5 +409,67 @@ func TestVideoSourceKeepsMVHEVCLayersTogether(t *testing.T) {
 	}
 	if n != 24 {
 		t.Fatalf("%d frames, want 24 access units", n)
+	}
+}
+
+// listSource gives frames from a list.
+type listSource struct {
+	track  Track
+	frames []Frame
+}
+
+func (l *listSource) Track() Track { return l.track }
+
+func (l *listSource) Next() (Frame, error) {
+	if len(l.frames) == 0 {
+		return Frame{}, io.EOF
+	}
+	f := l.frames[0]
+	l.frames = l.frames[1:]
+	return f, nil
+}
+
+// A frame with a duration is written as a BlockGroup with its
+// BlockDuration, and read back with it.
+func TestBlockDuration(t *testing.T) {
+	src := &listSource{track: Track{Type: TypeSubtitle, CodecID: "S_TEXT/UTF8", Language: "eng"},
+		frames: []Frame{
+			{PTS: time.Second, Order: time.Second, Keyframe: true, Data: []byte("Hello"), Duration: 1500 * time.Millisecond},
+			{PTS: 4 * time.Second, Order: 4 * time.Second, Keyframe: true, Data: []byte("there"), Duration: 2 * time.Second},
+		}}
+	path := filepath.Join(t.TempDir(), "s.mkv")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Mux(f, []Source{src}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	f, err = os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck // read only
+	r, err := NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []struct {
+		at, dur time.Duration
+		text    string
+	}{{time.Second, 1500 * time.Millisecond, "Hello"}, {4 * time.Second, 2 * time.Second, "there"}} {
+		p, err := r.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Time != want.at || p.Duration != want.dur || string(p.Data) != want.text {
+			t.Errorf("frame %d: %v for %v %q, want %v for %v %q", i, p.Time, p.Duration, p.Data, want.at, want.dur, want.text)
+		}
+	}
+	if out, err := exec.CommandContext(t.Context(), "ffprobe", "-v", "error", "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path).Output(); err == nil {
+		if got := strings.TrimSpace(string(out)); got != "1.000000,1.500000\n4.000000,2.000000" {
+			t.Errorf("ffprobe reads %q", got)
+		}
 	}
 }

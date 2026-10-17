@@ -62,8 +62,8 @@ Picture:
 
 Audio:
 - Transcoding with downmix to AAC, AC-3 and Opus, in Go, from any input.
-  AAC tracks are carried as they are; FLAC and Opus tracks (and text
-  subtitles) are still dropped.
+  AAC tracks are carried as they are; FLAC and Opus tracks are still
+  dropped.
 - Loudness normalisation.
 
 Subtitles:
@@ -105,3 +105,4 @@ Measurement:
 | 5. Interlaced H.264 | Done: PAFF and MBAFF bit-exact on 79 of 80 JVT streams; 1080i sources decoded and deinterlaced in Go |
 | 6. Dolby Vision two layers | Done: `--dv-fel keep`/`reencode` with `--encoder builtin` (profile 7 out, no NVENC or x265) |
 | 7. Scaling, cropping, tone mapping | `--crop` (and `--crop auto`, the bars found at twelve places) and `--scale` done (2D, Lanczos, subtitles and DV L5 follow); `--tonemap` done (BT.2390 on max(R,G,B), dynamic peaks from DV L1 and HDR10+) |
+| 8. Text subtitles, PGS OCR | Text done: SRT, ASS/SSA, WebVTT and tx3g carried (Matroska as they are, MP4 as tx3g), `--subs-file` adds files; next: PGS OCR |

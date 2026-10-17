@@ -3,6 +3,7 @@ package convert
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -123,6 +124,9 @@ type Options struct {
 	// ToneMap makes an HDR picture SDR (BT.709), after any crop and
 	// scaling: see tonemap.go.
 	ToneMap bool
+	// SubsFiles are subtitle files (SRT, ASS, SSA, WebVTT) added to the
+	// output as tracks, after the source's.
+	SubsFiles []SubsFile
 	// TwoD converts the source as a 2D film: the picture, or a 3D source's
 	// base view (its left eye, or the right one where the disc says so),
 	// on its own. A source with no MVC dependent view is converted so in
@@ -326,6 +330,19 @@ func (o Options) Validate(goos string) error {
 	if unsupportedContainer(o.Input) {
 		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
 			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+	}
+	for _, f := range o.SubsFiles {
+		switch strings.ToLower(filepath.Ext(f.Path)) {
+		case ".srt", ".ass", ".ssa", ".vtt":
+		default:
+			return fmt.Errorf("--subs-file %s: want a .srt, .ass, .ssa or .vtt file", f.Path)
+		}
+		if _, err := os.Stat(f.Path); err != nil {
+			return fmt.Errorf("--subs-file: %w", err)
+		}
+		if o.Remux {
+			return fmt.Errorf("--subs-file with --remux: not yet; convert instead")
+		}
 	}
 	if o.ToneMap {
 		switch {

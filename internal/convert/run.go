@@ -550,6 +550,25 @@ type extra struct {
 // mux assembles the final file from the video's segments, with the
 // chapters given.
 func (r *Runner) mux(ctx context.Context, video []string, extras []extra, chapters []time.Duration) error {
+	if len(r.Opts.SubsFiles) > 0 {
+		dir, err := os.MkdirTemp(r.Opts.TempDir, "bdtools-subs-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		for i, f := range r.Opts.SubsFiles {
+			e, err := subsFileTrack(f, 10000+i, dir)
+			if err != nil {
+				return fmt.Errorf("--subs-file: %w", err)
+			}
+			lang := e.track.Lang
+			if lang == "" {
+				lang = "und"
+			}
+			r.Report.Report("subtitles: adding %s (%s, %s)", filepath.Base(f.Path), e.track.Type, lang)
+			extras = append(extras, e)
+		}
+	}
 	return r.muxBuiltin(ctx, video, extras, chapters)
 }
 

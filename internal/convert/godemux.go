@@ -1254,6 +1254,8 @@ func createESWriter(tmp, srcName string, t Track) (*esWriter, error) {
 	switch {
 	case t.StreamID == "S_HDMV/PGS":
 		ext = "sup"
+	case isText(t.StreamID):
+		ext = "cues"
 	case t.Type == "TRUE-HD":
 		ext = "thd"
 	case strings.HasPrefix(t.Type, "E-AC3"):
