@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -259,5 +260,38 @@ func TestDevicePresets(t *testing.T) {
 	}
 	if _, _, code := capture(t, "--dry-run", "--for", "toaster", "--input", "/in/a.iso", "--output", "/out/a.mkv"); code != 2 {
 		t.Errorf("an unknown device: exit %d", code)
+	}
+}
+
+// A batch: a directory's sources (one in a folder of its own) converted
+// into the output directory under the same paths; run again, nothing new
+// to do.
+func TestBatch(t *testing.T) {
+	ff, err := convert.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("no ffmpeg")
+	}
+	in, out := t.TempDir(), t.TempDir()
+	for _, p := range []string{"a.mkv", filepath.Join("Film (2020)", "film.mkv")} {
+		path := filepath.Join(in, p)
+		_ = os.MkdirAll(filepath.Dir(path), 0o750)
+		if b, err := exec.CommandContext(t.Context(), ff, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=24:d=1", //nolint:gosec // test
+			"-c:v", "libx264", path).CombinedOutput(); err != nil {
+			t.Skipf("ffmpeg: %v %s", err, b)
+		}
+	}
+	args := []string{"--input", in, "--output", out, "--encoder", "builtin", "--codec", "h265", "--decoder", "cpu", "--temp", t.TempDir()}
+	_, errs, code := capture(t, args...)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, errs)
+	}
+	for _, p := range []string{"a.mkv", filepath.Join("Film (2020)", "film.mkv")} {
+		if _, err := os.Stat(filepath.Join(out, p)); err != nil {
+			t.Errorf("%s: %v\n%s", p, err, errs)
+		}
+	}
+	_, errs, code = capture(t, args...)
+	if code != 0 || strings.Contains(errs, "batch: a.mkv") {
+		t.Errorf("run again (exit %d):\n%s", code, errs)
 	}
 }

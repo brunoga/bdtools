@@ -379,6 +379,7 @@ scheduler such as pipeliner retry it.
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
+| `--watch`, `--ext` | — | With `--input` a directory (a batch): go on converting what arrives in it; the outputs' kind (`mkv`, `mp4`, `mov`) — see [Batches](#batches) |
 | `--video-size` | — | The video's size to aim at (`4.5G`, `700M`, `3GiB`): the CRF is found for it first — see [A target size](#a-target-size) |
 | `--for` | — | A player's settings where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro` — see [Device presets](#device-presets) |
 | `--start`, `--end`, `--duration` | — | Convert part of the title or file: from `--start`, up to `--end` or for `--duration` (`[[H:]M:]S`, or `1h2m3s`); the sound, subtitles and chapters cut with the picture |
@@ -771,6 +772,25 @@ gave visibly fewer edge artefacts than centred, and down the two were
 alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
 made from ffmpeg's decodes of the two layers, and 28 dB from the base
 layer alone (that clip's enhancement layer brightens its credits).
+
+## Batches
+
+An `--input` that is a directory (not a disc's own BDMV folder) is a
+batch: every source in it, at any depth (disc images, BDMV folders,
+Matroska, MP4 and QuickTime files, transport streams), is converted with
+the same settings into `--output`, a directory, under the same path:
+
+```sh
+bdtools --input /media/inbox --output /media/films --for plex
+bdtools --input /media/inbox --output /media/films --for plex --watch
+```
+
+What is done is noted in the output directory (`.bdtools-batch.json`),
+so running it again converts only what is new; a source that fails is
+reported and the rest go on. `--watch` keeps looking, every minute, and
+takes a source once nothing in it has changed for a minute (a copy still
+arriving is left until it is done). The outputs are Matroska unless
+`--ext` or the `--for` device says otherwise.
 
 ## A target size
 
