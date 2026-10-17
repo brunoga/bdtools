@@ -169,10 +169,13 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	}
 	f.savedCDF = saved
 	j.frame = f
-	*j.state = refFrameState{disp: j.disp, cdf: f.savedCDF, rec: f.rec, stride: f.stride, orderHint: fp.orderHint,
-		miCols: f.miCols, miRows: f.miRows, width: f.width, height: f.height, frameType: INTER_FRAME, done: j.state.done}
+	// field by field: done is read by the frames waiting on this one
+	st := j.state
+	st.cdf, st.rec, st.stride, st.orderHint = f.savedCDF, f.rec, f.stride, fp.orderHint
+	st.miCols, st.miRows, st.width, st.height = f.miCols, f.miRows, f.width, f.height
+	st.frameType = INTER_FRAME
 	if key {
-		j.state.frameType = KEY_FRAME
+		st.frameType = KEY_FRAME
 	}
 	payload := append(e.seq.frameHeader(fp), fp.tileGroup(tiles)...)
 	return appendOBU(nil, obuFrame, payload)
