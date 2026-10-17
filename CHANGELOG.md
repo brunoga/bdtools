@@ -7,10 +7,23 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Trellis quantisation in the Go H.264 encoder: every residual block's
-  levels (luma 4x4 and 8x8, inter and intra, chroma AC) chosen for the
-  least error plus lambda times their CABAC bits. On 240 film pictures it
-  goes from +5.4% to +0.4% BD-rate against x264 medium.
+- The Go H.264 encoder much closer to x264. Measured by BD-rate (PSNR-Y)
+  against x264 medium `--tune psnr` on four 240-picture clips from Blu-ray
+  discs (live action and animation), it goes from +41% to +12%:
+  - trellis quantisation: every residual block's levels (luma 4x4 and
+    8x8, inter and intra, chroma AC) chosen for the least error plus
+    lambda times their CABAC bits;
+  - a B-pyramid: with two B pictures or more, the middle one is a
+    reference for the others (a list modification keeps P pictures'
+    nearest reference first);
+  - intra prediction tried in P and B pictures wherever I_16x16 alone
+    would come near the motion's cost (a cheap estimate gates it);
+  - the 8x8 transform tried on every candidate near the best, not only
+    on the winner;
+  - B pictures decided with a larger lambda.
+  It takes 4 to 5 times the CPU of x264 medium. Most of what is left
+  is rate control: x264's CRF and macroblock tree spend bits where later
+  pictures reuse them.
 
 ### Fixed
 
