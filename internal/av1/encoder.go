@@ -6,6 +6,8 @@ package av1
 import (
 	"errors"
 	"fmt"
+	"math/bits"
+	"sync"
 )
 
 // Source is a picture to code: 4:2:0, a sample a uint16.
@@ -25,6 +27,10 @@ type EncoderOptions struct {
 	// stream states (H.273); 0 for unspecified.
 	Primaries, Transfer, Matrix int
 	FullRange                   bool
+	// TileColsLog2 and TileRowsLog2 ask for 1<<n tile columns and rows
+	// (as the limits allow), coded at once: -1 picks by the picture
+	// size, about one tile a 512x512 area, at most 8x8.
+	TileColsLog2, TileRowsLog2 int
 }
 
 // Encoder codes pictures.
@@ -69,17 +75,30 @@ func (e *Encoder) SequenceHeader() []byte {
 func (e *Encoder) Encode(src *Source) ([]byte, error) {
 	fp := &frameParams{key: true, orderHint: e.n, adapt: true, qIndex: e.o.QIndex, txSelect: true, cdefDamping: 3}
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
-	fp.tiles = newTiling(miCols, miRows, 0, 0)
+	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
+	if cl < 0 {
+		cl = min(bits.Len(uint(max(e.o.Width/512, 1)))-1, 3)
+	}
+	if rl < 0 {
+		rl = min(bits.Len(uint(max(e.o.Height/512, 1)))-1, 3)
+	}
+	fp.tiles = newTiling(miCols, miRows, cl, rl)
 	f := e.newFrame(fp, src)
-	var recs [][]symOp
+	recs := make([][]symOp, fp.tiles.rows()*fp.tiles.cols())
+	var wg sync.WaitGroup
 	for tr := range fp.tiles.rows() {
 		for tc := range fp.tiles.cols() {
-			t := newTileEnc(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
-				fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols))
-			t.code()
-			recs = append(recs, t.w.ops)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				t := newTileEnc(f, fp.tiles.rowStarts[tr]*16, min(fp.tiles.rowStarts[tr+1]*16, miRows),
+					fp.tiles.colStarts[tc]*16, min(fp.tiles.colStarts[tc+1]*16, miCols))
+				t.code()
+				recs[tr*fp.tiles.cols()+tc] = t.w.ops
+			}()
 		}
 	}
+	wg.Wait()
 	f.deblock(e.lfFixed)
 	var tiles [][]byte
 	for _, ops := range recs {

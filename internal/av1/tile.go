@@ -67,7 +67,8 @@ type tileEnc struct {
 	cflL                 [32 * 32]int32
 	snaps                [10][4]*snapshot // by depth, a few each
 	sbStart              snapshot
-	cdefDone             bool // the superblock's cdef_idx is coded
+	cdefDone             bool
+	dctOnly              bool // luma transform types not searched // the superblock's cdef_idx is coded
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -351,6 +352,54 @@ func depthOf(bSize int) int {
 	return 4
 }
 
+// partBlock is a block of a partition: where it is from the partition's
+// corner, in mi, and its size.
+type partBlock struct{ dr, dc, size int }
+
+// partitionBlocks are the blocks a partition (not a split) has, as
+// decode_partition codes them, those outside the frame left out.
+func (t *tileEnc) partitionBlocks(part, r, c, bSize int) []partBlock {
+	f := t.f
+	half := int(num4x4BlocksWide[bSize]) >> 1
+	q := half >> 1
+	sub := int(partitionSubsize[part][bSize])
+	split := int(partitionSubsize[PARTITION_SPLIT][bSize])
+	hasRows, hasCols := r+half < f.miRows, c+half < f.miCols
+	switch part {
+	case PARTITION_NONE:
+		return []partBlock{{0, 0, sub}}
+	case PARTITION_HORZ:
+		if hasRows {
+			return []partBlock{{0, 0, sub}, {half, 0, sub}}
+		}
+		return []partBlock{{0, 0, sub}}
+	case PARTITION_VERT:
+		if hasCols {
+			return []partBlock{{0, 0, sub}, {0, half, sub}}
+		}
+		return []partBlock{{0, 0, sub}}
+	case PARTITION_HORZ_A:
+		return []partBlock{{0, 0, split}, {0, half, split}, {half, 0, sub}}
+	case PARTITION_HORZ_B:
+		return []partBlock{{0, 0, sub}, {half, 0, split}, {half, half, split}}
+	case PARTITION_VERT_A:
+		return []partBlock{{0, 0, split}, {half, 0, split}, {0, half, sub}}
+	case PARTITION_VERT_B:
+		return []partBlock{{0, 0, sub}, {0, half, split}, {half, half, split}}
+	case PARTITION_HORZ_4:
+		out := []partBlock{{0, 0, sub}, {q, 0, sub}, {2 * q, 0, sub}}
+		if r+3*q < f.miRows {
+			out = append(out, partBlock{3 * q, 0, sub})
+		}
+		return out
+	}
+	out := []partBlock{{0, 0, sub}, {0, q, sub}, {0, 2 * q, sub}}
+	if c+3*q < f.miCols {
+		out = append(out, partBlock{0, 3 * q, sub})
+	}
+	return out
+}
+
 // searchPartition decides the partition at (r, c) by rate and distortion,
 // leaving the state as the best leaves it.
 func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
@@ -378,8 +427,11 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		cands = []int{PARTITION_NONE}
 	case hasRows && hasCols && dbgSquare:
 		cands = []int{PARTITION_NONE, PARTITION_SPLIT}
-	case hasRows && hasCols:
+	case hasRows && hasCols && (bSize == BLOCK_8X8 || dbgNoExt):
 		cands = []int{PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT, PARTITION_SPLIT}
+	case hasRows && hasCols:
+		cands = []int{PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT, PARTITION_SPLIT,
+			PARTITION_HORZ_A, PARTITION_HORZ_B, PARTITION_VERT_A, PARTITION_VERT_B, PARTITION_HORZ_4, PARTITION_VERT_4}
 	case hasCols:
 		cands = []int{PARTITION_HORZ, PARTITION_SPLIT}
 	case hasRows:
@@ -405,20 +457,12 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		node := &partNode{part: part}
 		sub := int(partitionSubsize[part][bSize])
 		switch part {
-		case PARTITION_NONE:
-			bj, bd := t.searchBlock(r, c, sub)
-			j += bj
-			node.blocks = []*blockDec{bd}
-		case PARTITION_HORZ, PARTITION_VERT:
-			r2, c2, has := r+half, c, hasRows
-			if part == PARTITION_VERT {
-				r2, c2, has = r, c+half, hasCols
-			}
-			bj, bd := t.searchBlock(r, c, sub)
-			j += bj
-			node.blocks = []*blockDec{bd}
-			if has && j < bestJ {
-				bj, bd = t.searchBlock(r2, c2, sub)
+		default:
+			for _, pb := range t.partitionBlocks(part, r, c, bSize) {
+				if j >= bestJ {
+					break
+				}
+				bj, bd := t.searchBlock(r+pb.dr, c+pb.dc, pb.size)
 				j += bj
 				node.blocks = append(node.blocks, bd)
 			}
@@ -456,7 +500,7 @@ func (t *tileEnc) finalPartition(r, c, bSize int, node *partNode) {
 	t.writePartition(t.w, r, c, bSize, node.part)
 	sub := int(partitionSubsize[node.part][bSize])
 	switch node.part {
-	case PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT:
+	default:
 		for _, bd := range node.blocks {
 			t.finalBlock(bd)
 		}

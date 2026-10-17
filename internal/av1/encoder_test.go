@@ -111,3 +111,10 @@ func TestEncodeDecodes(t *testing.T) {
 		checkDecodes(t, o, []*Source{testPicture(c.w, c.h, c.depth, 1)})
 	}
 }
+
+func TestEncodeTiles(t *testing.T) {
+	for _, c := range []struct{ w, h, cl, rl int }{{200, 136, 1, 1}, {520, 264, 2, 1}, {136, 72, 1, 0}} {
+		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: 8, QIndex: 90, FPSNum: 25, FPSDen: 1, TileColsLog2: c.cl, TileRowsLog2: c.rl}
+		checkDecodes(t, o, []*Source{testPicture(c.w, c.h, 8, 2)})
+	}
+}

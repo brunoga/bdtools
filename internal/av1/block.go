@@ -13,7 +13,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNo4x4 bool
+var dbgNo4x4, dbgNoExt bool
 
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
@@ -97,6 +97,26 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	bestJ, bestZero := math.Inf(1), false
 	var bestLuma blockDec
 	n := 0
+	try := func(d blockDec) {
+		if n > 0 {
+			t.restore(start, true)
+			t.setupBlock(r, c, size)
+		}
+		n++
+		j, zero := t.codeLuma(&d, true)
+		if j < bestJ {
+			bestJ, bestZero, bestLuma = j, zero, d
+			t.save(best, r, c, size, true)
+		}
+	}
+	// Every candidate at every depth with DCT alone, then the best few
+	// with their transform types searched.
+	type ranked struct {
+		d blockDec
+		j float64
+	}
+	var all []ranked
+	t.dctOnly = true
 	for _, cand := range cands {
 		for depth := 0; depth <= maxDepth; depth++ {
 			if n > 0 {
@@ -104,13 +124,16 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 				t.setupBlock(r, c, size)
 			}
 			n++
-			try := blockDec{r: r, c: c, size: size, yMode: cand.mode, angleY: cand.angle, filterMode: cand.filterMode, txDepth: depth}
-			j, zero := t.codeLuma(&try, true)
-			if j < bestJ {
-				bestJ, bestZero, bestLuma = j, zero, try
-				t.save(best, r, c, size, true)
-			}
+			d := blockDec{r: r, c: c, size: size, yMode: cand.mode, angleY: cand.angle, filterMode: cand.filterMode, txDepth: depth}
+			j, _ := t.codeLuma(&d, true)
+			all = append(all, ranked{d, j})
 		}
+	}
+	t.dctOnly = false
+	sort.SliceStable(all, func(i, j int) bool { return all[i].j < all[j].j })
+	for _, a := range all[:min(typeSearches, len(all))] {
+		a.d.txTypes = nil
+		try(a.d)
 	}
 	t.restore(best, true)
 	t.setupBlock(r, c, size)
@@ -402,86 +425,116 @@ func (t *tileEnc) smoothAt(r, c, plane int) bool {
 	return isSmooth(int(t.f.uvMode[i]))
 }
 
-// lumaCandidates are the luma modes worth coding in full: every mode and
-// angle predicted for the whole block (the largest transform's), ranked
-// by SATD and the mode's rate.
-func (t *tileEnc) lumaCandidates() []modeCand {
+// typeSearches is how many of a block's luma candidates (mode and
+// depth) have their transform types searched.
+var typeSearches = 2
+
+// angleModes is how many of the best directional modes (at their
+// nominal angle) have their other angles tried.
+var angleModes = 2
+
+// lumaEstimate is a luma mode's estimated cost: its prediction's SATD
+// (each transform block of the largest size predicted from the
+// neighbours as they are) and its rate.
+func (t *tileEnc) lumaEstimate(mode, angle, filterMode int) float64 {
 	f, b := t.f, &t.b
 	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
 	txSz := int(maxTxSizeRect[b.size])
 	tw, th := int(txWidth[txSz]), int(txHeight[txSz])
-	sl := math.Sqrt(f.lambda)
-	var cands []modeCand
-	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
-		lo, hi := 0, 0
-		if isDirectional(mode) && b.size >= BLOCK_8X8 && !dbgNoAngles {
-			lo, hi = -MAX_ANGLE_DELTA, MAX_ANGLE_DELTA
-		}
-		for a := lo; a <= hi; a++ {
-			b.yMode, b.angleY = mode, a
-			var satd int64
-			for y := 0; y < h; y += th {
-				for x := 0; x < w; x += tw {
-					ib := t.intraBlockFor(0, b.c*4+x, b.r*4+y, txSz)
-					t.edges.predictIntra(&ib, f.rec[0], f.stride[0], t.pred[:])
-					satd += t.satd(0, b.c*4+x, b.r*4+y, tw, th, t.pred[:])
-				}
-			}
-			t.cost.n = 0
-			t.writeYMode(&t.cost)
-			t.writeFilterIntra(&t.cost)
-			cands = append(cands, modeCand{mode: mode, filterMode: -1, angle: a, cost: float64(satd) + sl*float64(t.cost.n)/costScale})
+	b.yMode, b.angleY, b.filterMode = mode, angle, filterMode
+	var satd int64
+	for y := 0; y < h; y += th {
+		for x := 0; x < w; x += tw {
+			ib := t.intraBlockFor(0, b.c*4+x, b.r*4+y, txSz)
+			t.edges.predictIntra(&ib, f.rec[0], f.stride[0], t.pred[:])
+			satd += t.satd(0, b.c*4+x, b.r*4+y, tw, th, t.pred[:])
 		}
 	}
-	if t.filterIntraAllowed() {
-		b.yMode, b.angleY = DC_PRED, 0
-		for fm := range INTRA_FILTER_MODES {
-			b.filterMode = fm
-			var satd int64
-			for y := 0; y < h; y += th {
-				for x := 0; x < w; x += tw {
-					ib := t.intraBlockFor(0, b.c*4+x, b.r*4+y, txSz)
-					t.edges.predictIntra(&ib, f.rec[0], f.stride[0], t.pred[:])
-					satd += t.satd(0, b.c*4+x, b.r*4+y, tw, th, t.pred[:])
-				}
+	t.cost.n = 0
+	t.writeYMode(&t.cost)
+	t.writeFilterIntra(&t.cost)
+	b.filterMode = -1
+	return float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale
+}
+
+// chromaEstimate is a chroma mode's (not CFL).
+func (t *tileEnc) chromaEstimate(mode, angle int) float64 {
+	f, b := t.f, &t.b
+	txSz := t.planeTxSize(1)
+	planeSz := int(subsampledSize[b.size][1][1])
+	w, h := int(blockWidth[planeSz]), int(blockHeight[planeSz])
+	tw, th := int(txWidth[txSz]), int(txHeight[txSz])
+	b.uvMode, b.angleUV = mode, angle
+	var satd int64
+	for p := 1; p <= 2; p++ {
+		for y := 0; y < h; y += th {
+			for x := 0; x < w; x += tw {
+				ib := t.intraBlockFor(p, (b.c>>1)*4+x, (b.r>>1)*4+y, txSz)
+				t.edges.predictIntra(&ib, f.rec[p], f.stride[p], t.pred[:])
+				satd += t.satd(p, (b.c>>1)*4+x, (b.r>>1)*4+y, tw, th, t.pred[:])
 			}
-			t.cost.n = 0
-			t.writeYMode(&t.cost)
-			t.writeFilterIntra(&t.cost)
-			cands = append(cands, modeCand{mode: DC_PRED, filterMode: fm, cost: float64(satd) + sl*float64(t.cost.n)/costScale})
 		}
-		b.filterMode = -1
+	}
+	t.cost.n = 0
+	t.writeUVMode(&t.cost)
+	b.angleUV = 0
+	return float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale
+}
+
+// withAngles adds the other angles of the best directional candidates.
+func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []modeCand {
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	var dirs []modeCand
+	for _, c := range cands {
+		if isDirectional(c.mode) && c.filterMode < 0 && len(dirs) < n {
+			dirs = append(dirs, c)
+		}
+	}
+	for _, d := range dirs {
+		for a := -MAX_ANGLE_DELTA; a <= MAX_ANGLE_DELTA; a++ {
+			if a != 0 {
+				cands = append(cands, modeCand{mode: d.mode, angle: a, filterMode: -1, cost: est(d.mode, a)})
+			}
+		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	return cands
+}
+
+// lumaCandidates are the luma modes worth coding in full, ranked by
+// their estimates.
+func (t *tileEnc) lumaCandidates() []modeCand {
+	b := &t.b
+	var cands []modeCand
+	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
+		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.lumaEstimate(mode, 0, -1)})
+	}
+	if t.filterIntraAllowed() {
+		for fm := range INTRA_FILTER_MODES {
+			cands = append(cands, modeCand{mode: DC_PRED, filterMode: fm, cost: t.lumaEstimate(DC_PRED, 0, fm)})
+		}
+	}
+	if b.size >= BLOCK_8X8 && !dbgNoAngles {
+		cands = withAngles(cands, angleModes, func(m, a int) float64 { return t.lumaEstimate(m, a, -1) })
+	} else {
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	}
 	return cands[:min(lumaCands, len(cands))]
 }
 
 // chromaCandidates are the chroma modes worth coding in full.
 func (t *tileEnc) chromaCandidates() []modeCand {
 	f, b := t.f, &t.b
-	txSz := t.planeTxSize(1)
-	planeSz := int(subsampledSize[b.size][1][1])
-	w, h := int(blockWidth[planeSz]), int(blockHeight[planeSz])
-	tw, th := int(txWidth[txSz]), int(txHeight[txSz])
-	sl := math.Sqrt(f.lambda)
 	var cands []modeCand
 	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
-		b.uvMode, b.angleUV = mode, 0
-		var satd int64
-		for p := 1; p <= 2; p++ {
-			for y := 0; y < h; y += th {
-				for x := 0; x < w; x += tw {
-					ib := t.intraBlockFor(p, (b.c>>1)*4+x, (b.r>>1)*4+y, txSz)
-					t.edges.predictIntra(&ib, f.rec[p], f.stride[p], t.pred[:])
-					satd += t.satd(p, (b.c>>1)*4+x, (b.r>>1)*4+y, tw, th, t.pred[:])
-				}
-			}
-		}
-		t.cost.n = 0
-		t.writeUVMode(&t.cost)
-		cands = append(cands, modeCand{mode: mode, cost: float64(satd) + sl*float64(t.cost.n)/costScale})
+		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.chromaEstimate(mode, 0)})
+	}
+	if b.size >= BLOCK_8X8 && !dbgNoAngles {
+		cands = withAngles(cands, 1, t.chromaEstimate)
 	}
 	if t.cflAllowed() {
+		txSz := t.planeTxSize(1)
+		tw, th := int(txWidth[txSz]), int(txHeight[txSz])
 		au, av := t.cflAlphas()
 		if au != 0 || av != 0 {
 			b.uvMode, b.cflU, b.cflV = UV_CFL_PRED, au, av
@@ -500,7 +553,7 @@ func (t *tileEnc) chromaCandidates() []modeCand {
 			}
 			t.cost.n = 0
 			t.writeUVMode(&t.cost)
-			cands = append(cands, modeCand{mode: UV_CFL_PRED, cost: float64(satd) + sl*float64(t.cost.n)/costScale, cflU: au, cflV: av})
+			cands = append(cands, modeCand{mode: UV_CFL_PRED, filterMode: -1, cost: float64(satd) + math.Sqrt(f.lambda)*float64(t.cost.n)/costScale, cflU: au, cflV: av})
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
@@ -592,7 +645,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	types := []int{txType}
 	if txType < 0 {
 		types = t.txTypes(plane, txSz)
-		if dbgDCTOnly {
+		if dbgDCTOnly || t.dctOnly {
 			types = types[:1]
 		}
 	}
