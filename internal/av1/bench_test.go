@@ -131,6 +131,16 @@ func TestBenchSeq(t *testing.T) {
 			defer func() { *v = false }()
 		}
 	}
+	if v, err := strconv.ParseFloat(os.Getenv("AV1LAMBDA"), 64); err == nil {
+		old := lambdaScale
+		lambdaScale = v
+		defer func() { lambdaScale = old }()
+	}
+	if v, err := strconv.Atoi(os.Getenv("AV1KEYQ")); err == nil {
+		old := keyQ
+		keyQ = v
+		defer func() { keyQ = old }()
+	}
 	if os.Getenv("AV1NOPRUNE") != "" {
 		dbgNoPrune = true
 		defer func() { dbgNoPrune = false }()

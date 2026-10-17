@@ -74,6 +74,11 @@ type cdfs struct {
 	coeffBaseEob [TX_SIZES][PLANE_TYPES][SIG_COEF_CONTEXTS_EOB][4]uint16
 	coeffBase    [TX_SIZES][PLANE_TYPES][SIG_COEF_CONTEXTS][5]uint16
 	coeffBr      [TX_SIZES][PLANE_TYPES][LEVEL_CONTEXTS][BR_CDF_SIZE + 1]uint16
+
+	// loop restoration's
+	useWiener       [3]uint16
+	useSgrproj      [3]uint16
+	restorationType [RESTORE_SWITCHABLE + 1]uint16
 }
 
 // coeffCDFIndex is init_coeff_cdfs' choice of defaults by q index.
@@ -113,6 +118,8 @@ func newCDFs(qIndex int) *cdfs {
 		skipMode: defaultSkipModeCdf, deltaQ: defaultDeltaQCdf, compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
 		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf,
 		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
+
+		useWiener: defaultUseWienerCdf, useSgrproj: defaultUseSgrprojCdf, restorationType: defaultRestorationTypeCdf,
 	}
 	for i := range MV_CONTEXTS {
 		c.mvJoint[i] = defaultMvJointCdf

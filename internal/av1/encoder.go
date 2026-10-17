@@ -70,6 +70,9 @@ type Encoder struct {
 	// cdefFixed, when set, gives the CDEF parameters instead of
 	// searching them (for tests).
 	cdefFixed *cdefSettings
+	// lrFixed, when set, gives the loop restoration settings instead of
+	// searching them (for tests).
+	lrFixed *lrSettings
 }
 
 // NewEncoder makes an encoder.
@@ -86,7 +89,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true, cdef: true,
+		edgeFilter: true, filterIntra: true, cdef: true, restoration: true,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -169,11 +172,13 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	}
 	wg.Wait()
 	f.deblock(e.lfFixed)
+	deblocked := f.rec // CDEF filters into a new frame
 	f.cdef(e.cdefFixed)
+	lr := f.restore(deblocked, e.lrFixed)
 	var tiles [][]byte
 	saved := f.cdf0
 	for i, ops := range recs {
-		b, end := pack(ops, f.cdf0, fp.adapt, f.cdefIdx, fp.cdefBits)
+		b, end := pack(ops, f.cdf0, fp.adapt, f.cdefIdx, fp.cdefBits, lr)
 		tiles = append(tiles, b)
 		if i == 0 && fp.adapt { // context_update_tile_id 0
 			saved = end
@@ -250,7 +255,7 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	f.acQ = [3]int{int(acQlookup[bd][qi(fp.qIndex)]), int(acQlookup[bd][qi(fp.qIndex+fp.deltaQUVAc)]), int(acQlookup[bd][qi(fp.qIndex+fp.deltaQUVAc)])}
 	// libaom's: 88/24 q^2 per bit, its distortion 2048 times the sum of
 	// squared errors
-	f.lambda = 88.0 / 24 * float64(f.dcQ[0]) * float64(f.dcQ[0]) / 2048
+	f.lambda = lambdaFor(f.dcQ[0])
 	return f
 }
 

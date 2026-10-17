@@ -68,6 +68,9 @@ var dbgNoOverlay bool
 // 3.5% BD-rate.)
 var depthQ = [...]int{40, 40, 28, 16, 0, 0, 0, 0}
 
+// keyQ is how much finer key frames code.
+var keyQ = 40
+
 // miniGOP is the mini-GOP length.
 func (e *Encoder) miniGOP() int {
 	if e.o.MiniGOP > 0 {
@@ -178,6 +181,9 @@ func (e *Encoder) plan(j *frameJob) step {
 	j.q = e.o.QIndex
 	if e.o.QIndex > 0 && !dbgFlatQ {
 		j.q = max(e.o.QIndex-depthQ[j.depth], 1)
+		if j.key {
+			j.q = max(e.o.QIndex-keyQ, 1)
+		}
 	}
 	j.state = &refFrameState{disp: j.disp, done: make(chan struct{})}
 	if j.key {

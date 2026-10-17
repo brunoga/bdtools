@@ -15,6 +15,7 @@ const (
 	opSplitHorz        // split_or_horz, from a partition CDF
 	opSplitVert        // split_or_vert
 	opCdef             // a 64x64's cdef_idx, its bits (n) filled in at the pack
+	opLR               // a superblock's loop restoration units (read_lr), at mi row off, column s
 )
 
 type symOp struct {
@@ -67,9 +68,16 @@ func (r *recorder) cdef(index int) {
 	r.ops = append(r.ops, symOp{kind: opCdef, s: uint16(index)}) //nolint:gosec // an index
 }
 
+// lr records a superblock's place for its loop restoration units, to be
+// coded at the pack.
+func (r *recorder) lr(row, col int) {
+	r.ops = append(r.ops, symOp{kind: opLR, s: uint16(col), off: uint32(row)}) //nolint:gosec // mi positions
+}
+
 // pack codes a tile's record from the frame's CDFs (start, which it does
-// not change), giving the bytes and the CDFs as the tile ends.
-func pack(ops []symOp, start *cdfs, adapt bool, cdefIdx []int8, cdefBits int) ([]byte, *cdfs) {
+// not change), giving the bytes and the CDFs as the tile ends; lr is the
+// frame's loop restoration (nil if none).
+func pack(ops []symOp, start *cdfs, adapt bool, cdefIdx []int8, cdefBits int, lr *lrFrame) ([]byte, *cdfs) {
 	cc := *start
 	c := &cc
 	base := unsafe.Pointer(c)
@@ -77,6 +85,10 @@ func pack(ops []symOp, start *cdfs, adapt bool, cdefIdx []int8, cdefBits int) ([
 		return unsafe.Slice((*uint16)(unsafe.Add(base, uintptr(off)*2)), n)
 	}
 	w := newSymbolWriter(adapt)
+	var refs [3]lrRef // RefLrWiener and RefSgrXqd, as the tile starts
+	for p := range refs {
+		refs[p] = newLRRef()
+	}
 	for _, op := range ops {
 		switch op.kind {
 		case opSymbol:
@@ -89,6 +101,10 @@ func pack(ops []symOp, start *cdfs, adapt bool, cdefIdx []int8, cdefBits int) ([
 			w.encode(int(op.s), splitOrVert(at(op.off, partitionCDFLen(int(op.n))), int(op.n)), 2)
 		case opCdef:
 			w.literal(uint32(cdefIdx[op.s]), cdefBits) //nolint:gosec // an index
+		case opLR:
+			if lr != nil {
+				writeLRSB(w, c, lr, int(op.off), int(op.s), &refs)
+			}
 		}
 	}
 	return w.finish(), c
