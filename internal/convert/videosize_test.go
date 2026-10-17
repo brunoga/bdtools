@@ -51,8 +51,8 @@ func TestAUSizes(t *testing.T) {
 func TestRunnerVideoSize(t *testing.T) {
 	work := t.TempDir()
 	src := filepath.Join(work, "src.mkv")
-	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=40",
-		"-c:v", "libx264", "-crf", "10", "-g", "48", src); err != nil {
+	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=24:d=24",
+		"-c:v", "libx264", "-crf", "10", "-g", "24", src); err != nil {
 		t.Skipf("could not build the source: %v", err)
 	}
 	encode := func(size int64) (int64, []string) {
