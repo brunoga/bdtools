@@ -145,6 +145,12 @@ func TestBenchSeq(t *testing.T) {
 		filterRD = false
 		defer func() { filterRD = true }()
 	}
+	for env, v := range map[string]*bool{"AV1NOWARP": &dbgNoWarp, "AV1NOMASKED": &dbgNoMasked, "AV1FEWREFS": &dbgFewRefs} {
+		if os.Getenv(env) != "" {
+			*v = true
+			defer func() { *v = false }()
+		}
+	}
 	if os.Getenv("AV1NOOBMC") != "" {
 		dbgNoObmc = true
 		defer func() { dbgNoObmc = false }()

@@ -186,7 +186,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	var cands []interCand
 	seen := map[*refFrameState]bool{}
 	refs, pairs := interRefs, compPairs
-	if dbgFewRefs {
+	if f.tools.fewRefs {
 		refs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
 		pairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}}
 	}
@@ -256,7 +256,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	t.save(start, r, c, size, true)
 	bestJ := math.Inf(1)
 	var bestDec *blockDec
-	for i, cd := range cands[:min(interCands, len(cands))] {
+	for i, cd := range cands[:min(f.tools.interCands, len(cands))] {
 		if i > 0 {
 			t.restore(start, true)
 		}
@@ -266,7 +266,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		// OBMC tried for the best two single reference candidates, with
 		// their vector and filter (all of them when forced, without the
 		// simple prediction)
-		obmc := (i < obmcCands || dbgForceObmc) && !dbgNoObmc && t.readsUseObmc()
+		obmc := (i < obmcCands || dbgForceObmc) && f.tools.obmc && t.readsUseObmc()
 		if obmc && !dbgForceObmc {
 			obmc = t.obmcPredictsBetter()
 		}
@@ -301,7 +301,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 	}
 	// the filter of the best, by rate and distortion
-	if filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE && !dbgNoSwitchable {
+	if f.tools.filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE && !dbgNoSwitchable {
 		b.refFrame, b.refFrame2, b.yMode = bestDec.refFrame, bestDec.refFrame2, bestDec.yMode
 		if b.refFrame2 <= INTRA_FRAME {
 			b.refFrame2 = NONE
@@ -461,7 +461,7 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 	}
 	var jl float64
 	var zero bool
-	if search && pruneTxTree && f.fp.qIndex > 0 && !dbgNoVarTx {
+	if search && f.tools.txTree && f.fp.qIndex > 0 && !dbgNoVarTx {
 		// the tree decided with DCT_DCT alone, then its types searched
 		s := t.snap(0, 8)
 		t.save(s, b.r, b.c, b.size, true)

@@ -3,6 +3,7 @@ package av1
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"runtime"
@@ -271,4 +272,21 @@ func TestPruneTxTree(t *testing.T) {
 		pics = append(pics, shifted(p, 2*i, i))
 	}
 	checkDecodes(t, o, pics)
+}
+
+// The faster settings code smaller searches, decoded to the
+// reconstruction, the more so the faster.
+func TestSpeeds(t *testing.T) {
+	t.Parallel()
+	p := testPicture(136, 96, 8, 2)
+	var pics []*Source
+	for i := range 9 {
+		pics = append(pics, shifted(p, 2*i, i))
+	}
+	for speed := range 3 {
+		t.Run(fmt.Sprint(speed), func(t *testing.T) {
+			o := EncoderOptions{Width: 136, Height: 96, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 8, Speed: speed}
+			checkDecodes(t, o, pics)
+		})
+	}
 }
