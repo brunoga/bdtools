@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's bottom pictures 8 coarser than the run's q, a
+  smaller lambda (0.6): 0.5% smaller, +27.2% against SVT-AV1 preset 4.
 - The AV1 encoder's anchors and the frames just below them code finer
   (q index offsets 52, 52, 36, 20 by depth, were 40, 40, 28, 16): 0.9%
   smaller on the 120-picture clips (Frozen II 1.8%), +27.7% against

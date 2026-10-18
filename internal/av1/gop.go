@@ -67,8 +67,9 @@ var dbgNoOverlay bool
 // (Measured on two 1080p disc clips: 40, 40, 28, 16 better than 24, 24,
 // 16, 8 by 3.5% BD-rate; on the 120-picture clips, with every tool in,
 // these 0.9% better than that (Frozen II 1.8%), 64, 64, 44, 24 0.7%
-// (Blade Runner 2049 0.9% worse), 32, 32, 22, 12 1.2% worse.)
-var depthQ = [...]int{52, 52, 36, 20, 0, 0, 0, 0}
+// (Blade Runner 2049 0.9% worse), 32, 32, 22, 12 1.2% worse; the
+// pictures at the bottom 8 coarser than the run's q, 0.2% better.)
+var depthQ = [...]int{52, 52, 36, 20, -8, 0, 0, 0}
 
 // keyQ is how much finer key frames code.
 var keyQ = 56
