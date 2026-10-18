@@ -2,6 +2,7 @@ package av1
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -356,4 +357,55 @@ func BenchmarkForwardTransform(b *testing.B) {
 			}
 		})
 	}
+}
+
+// forwardTypes, the column passes shared, as forwardTransform for every
+// type of every size to 32x32, a type at a time and all at once.
+func TestForwardTypes(t *testing.T) {
+	rng := rand.New(rand.NewPCG(5, 6))
+	var all []int
+	for tt := range TX_TYPES {
+		all = append(all, tt)
+	}
+	for txSz := range TX_SIZES_ALL {
+		w, h := int(txWidth[txSz]), int(txHeight[txSz])
+		if w > 32 || h > 32 {
+			continue
+		}
+		res := make([]int32, w*h)
+		for i := range res {
+			res[i] = rng.Int32N(511) - 255
+		}
+		var types []int
+		for _, tt := range all {
+			if fwdTypeExists(txSz, tt) {
+				types = append(types, tt)
+			}
+		}
+		var got [TX_TYPES][32 * 32]int32
+		var cc fwdColCache
+		forwardTypes(res, txSz, types, &got, &cc)
+		var one [TX_TYPES][32 * 32]int32
+		cc.reset()
+		for i := range types {
+			forwardTypes(res, txSz, types[i:i+1], &one, &cc)
+		}
+		want := make([]int32, w*h)
+		for _, tt := range types {
+			forwardTransform(res, txSz, tt, 8, false, want)
+			for i := range w * h {
+				if got[tt][i] != want[i] || one[tt][i] != want[i] {
+					t.Fatalf("size %d type %d at %d: %d and %d, want %d", txSz, tt, i, got[tt][i], one[tt][i], want[i])
+				}
+			}
+		}
+	}
+}
+
+// fwdTypeExists reports whether there are forward 1D transforms for a
+// type at a size.
+func fwdTypeExists(txSz, tt int) bool {
+	var in, out [64]int32
+	return fwd1D(int(txTypeCol[tt]), int(txHeightLog2[txSz]), &in, &out, 12) &&
+		fwd1D(int(txTypeRow[tt]), int(txWidthLog2[txSz]), &in, &out, 12)
 }

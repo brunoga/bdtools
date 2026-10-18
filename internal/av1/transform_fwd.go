@@ -163,39 +163,38 @@ func forwardTransform(residual []int32, txSz, txType, bitDepth int, lossless boo
 // forward2D is fwd_txfm2d_c. buf holds Min(h, 32) rows of w column results;
 // it may be coeffs itself when no dimension is 64.
 func forward2D(residual []int32, txSz, txType, log2W, log2H int, buf, coeffs []int32) {
+	fwdCols(residual, txSz, int(txTypeCol[txType]), txFlipUD[txType], log2W, log2H, buf)
+	fwdRows(buf, txSz, int(txTypeRow[txType]), txFlipLR[txType], log2W, log2H, coeffs)
+}
+
+// fwdCols is forward2D's column pass of a kind into buf, flipped upside
+// down or not, the columns in the residual's order (the left-right flip
+// is fwdRows').
+func fwdCols(residual []int32, txSz, kind int, flipUD bool, log2W, log2H int, buf []int32) {
 	w, h := 1<<log2W, 1<<log2H
-	tw, th := min(w, 32), min(h, 32)
+	th := min(h, 32)
 	residual = residual[:w*h]
 	shift := &fwdShift[txSz]
-	cosBitCol := int(fwdCosBitCol[log2W-2][log2H-2])
-	cosBitRow := int(fwdCosBitRow[log2W-2][log2H-2])
-	colKind, rowKind := int(txTypeCol[txType]), int(txTypeRow[txType])
-	flipUD, flipLR := txFlipUD[txType], txFlipLR[txType]
+	cosBit := int(fwdCosBitCol[log2W-2][log2H-2])
 	up := uint(shift[0])
-	down1, down2 := int(-shift[1]), int(-shift[2])
-	rect := log2W-log2H == 1 || log2H-log2W == 1
-
+	down := int(-shift[1])
 	var tin, tout [64]int32
 	for c := 0; c < w; c++ {
-		sc := c
-		if flipLR {
-			sc = w - 1 - c
-		}
 		if flipUD {
 			for r := 0; r < h; r++ {
-				tin[r] = residual[(h-1-r)*w+sc] << up
+				tin[r] = residual[(h-1-r)*w+c] << up
 			}
 		} else {
 			for r := 0; r < h; r++ {
-				tin[r] = residual[r*w+sc] << up
+				tin[r] = residual[r*w+c] << up
 			}
 		}
-		if !fwd1D(colKind, log2H, &tin, &tout, cosBitCol) {
+		if !fwd1D(kind, log2H, &tin, &tout, cosBit) {
 			panic("av1: no forward transform of this type at this size")
 		}
-		if down1 > 0 {
+		if down > 0 {
 			for r := 0; r < th; r++ {
-				buf[r*w+c] = roundShift(int64(tout[r]), down1)
+				buf[r*w+c] = roundShift(int64(tout[r]), down)
 			}
 		} else {
 			for r := 0; r < th; r++ {
@@ -203,24 +202,77 @@ func forward2D(residual []int32, txSz, txType, log2W, log2H int, buf, coeffs []i
 			}
 		}
 	}
-	// Row r of buf is read whole before row r of coeffs (at most as long,
-	// and never further on) is written.
+}
+
+// fwdRows is forward2D's row pass of a kind from fwdCols' buf into the
+// coefficients, each row read right to left when flipLR. Row r of buf is
+// read whole before row r of coeffs (at most as long, and never further
+// on) is written, so they may be the same.
+func fwdRows(buf []int32, txSz, kind int, flipLR bool, log2W, log2H int, coeffs []int32) {
+	w, h := 1<<log2W, 1<<log2H
+	tw, th := min(w, 32), min(h, 32)
+	shift := &fwdShift[txSz]
+	cosBit := int(fwdCosBitRow[log2W-2][log2H-2])
+	down := int(-shift[2])
+	rect := log2W-log2H == 1 || log2H-log2W == 1
+	var tin, tout [64]int32
 	for r := 0; r < th; r++ {
-		copy(tin[:w], buf[r*w:r*w+w])
-		if !fwd1D(rowKind, log2W, &tin, &tout, cosBitRow) {
+		row := buf[r*w : r*w+w]
+		if flipLR {
+			for c := range row {
+				tin[w-1-c] = row[c]
+			}
+		} else {
+			copy(tin[:w], row)
+		}
+		if !fwd1D(kind, log2W, &tin, &tout, cosBit) {
 			panic("av1: no forward transform of this type at this size")
 		}
 		out := coeffs[r*tw : r*tw+tw]
 		for c := range out {
 			v := tout[c]
-			if down2 > 0 {
-				v = roundShift(int64(v), down2)
+			if down > 0 {
+				v = roundShift(int64(v), down)
 			}
 			if rect {
 				v = roundShift(int64(v)*5793, 12)
 			}
 			out[c] = v
 		}
+	}
+}
+
+// fwdColCache holds a residual's column passes for forwardTypes, by
+// their kind and flip; reset empties it for another residual.
+type fwdColCache struct {
+	keys [4]int
+	n    int
+	cols [4][32 * 32]int32
+}
+
+func (cc *fwdColCache) reset() { cc.n = 0 }
+
+// forwardTypes is forwardTransform (not lossless) of a residual of at
+// most 32x32 by each of types into coeffs[type], each column pass made
+// once for the types sharing it (four at most, kept in cc).
+func forwardTypes(residual []int32, txSz int, types []int, coeffs *[TX_TYPES][32 * 32]int32, cc *fwdColCache) {
+	log2W, log2H := int(txWidthLog2[txSz]), int(txHeightLog2[txSz])
+	for _, tt := range types {
+		key := int(txTypeCol[tt])<<1 | b2i(txFlipUD[tt])
+		k := 0
+		for k < cc.n && cc.keys[k] != key {
+			k++
+		}
+		if k == cc.n {
+			if k == len(cc.keys) {
+				forward2D(residual, txSz, tt, log2W, log2H, coeffs[tt][:], coeffs[tt][:])
+				continue
+			}
+			cc.keys[k] = key
+			cc.n++
+			fwdCols(residual, txSz, int(txTypeCol[tt]), txFlipUD[tt], log2W, log2H, cc.cols[k][:])
+		}
+		fwdRows(cc.cols[k][:], txSz, int(txTypeRow[tt]), txFlipLR[tt], log2W, log2H, coeffs[tt][:])
 	}
 }
 
