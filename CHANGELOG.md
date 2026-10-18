@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder codes the next mini-GOP's anchor while the frames
+  below this one's are coded, and the frames of a depth at once (a frame
+  refers only to frames above it in the pyramid; an anchor also to the
+  last mini-GOP's frames to depth 2): 1.37 times faster on the two
+  120-picture clips, for 0.2% BD-rate (+29.5% against SVT-AV1 preset 4).
 - Local warped motion in the AV1 encoder (motion_mode LOCALWARP: an
   affine model fitted to the neighbours' motion): 0.2% smaller on the
   120-picture clips, +29.1% against SVT-AV1 preset 4.

@@ -102,6 +102,9 @@ func TestCdefSearchErrors(t *testing.T) {
 		if _, err := e.Encode(halfFlatPicture(c.w, c.h, c.depth, 5)); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := e.Flush(); err != nil {
+			t.Fatal(err)
+		}
 		f := e.frame
 		rec := f.rec
 		for _, damping := range []int{3, 6} {

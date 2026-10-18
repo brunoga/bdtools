@@ -46,6 +46,10 @@ type Encoder struct {
 	seq   seqParams
 	frame *frameEnc
 	// queue is the pictures not coded yet; nIn counts the pictures in;
+	// gopStart is the picture before the mini-GOP being planned.
+	gopStart int
+	// runs are the mini-GOPs being coded, oldest first.
+	runs []*gopRun
 	// pending is the coded OBUs of the temporal unit being made.
 	queue   []*frameJob
 	nIn     int

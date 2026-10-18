@@ -157,6 +157,11 @@ func TestBenchSeq(t *testing.T) {
 		dbgNoPrune = true
 		defer func() { dbgNoPrune = false }()
 	}
+	if v, err := strconv.Atoi(os.Getenv("AV1REFSPREVDEPTH")); err == nil {
+		old := refsPrevDepth
+		refsPrevDepth = v
+		defer func() { refsPrevDepth = old }()
+	}
 	if os.Getenv("AV1TPL") != "" {
 		dbgNoTPL = false
 		defer func() { dbgNoTPL = true }()

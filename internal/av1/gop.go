@@ -87,7 +87,8 @@ func (e *Encoder) keyint() int {
 }
 
 // Encode takes the next picture, giving the temporal units that are
-// complete (a mini-GOP is coded once all its pictures are in).
+// complete (a mini-GOP is coded once all its pictures are in, and while
+// the next ones come in: its units come from a later call, or Flush).
 func (e *Encoder) Encode(src *Source) ([]Unit, error) {
 	o := e.o
 	cw, ch := (o.Width+1)/2, (o.Height+1)/2
@@ -107,7 +108,11 @@ func (e *Encoder) Encode(src *Source) ([]Unit, error) {
 }
 
 // Flush codes the pictures held back, giving their units.
-func (e *Encoder) Flush() ([]Unit, error) { return e.drain(true), nil }
+func (e *Encoder) Flush() ([]Unit, error) {
+	out := e.drain(true)
+	e.collect(0, &out)
+	return out, nil
+}
 
 // drain codes what the queue allows.
 func (e *Encoder) drain(flush bool) []Unit {
@@ -132,6 +137,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		gop := e.queue[:n]
 		e.queue = e.queue[n:]
 		a := first.disp - 1
+		e.gopStart = a
 		byDisp := func(d int) *frameJob { return gop[d-first.disp] }
 		last := byDisp(a + n)
 		e.filterAnchor(gop)
@@ -185,11 +191,14 @@ func (e *Encoder) plan(j *frameJob) step {
 			j.q = max(e.o.QIndex-keyQ, 1)
 		}
 	}
-	j.state = &refFrameState{disp: j.disp, done: make(chan struct{})}
+	j.state = &refFrameState{disp: j.disp, depth: j.depth, done: make(chan struct{})}
+	if j.key {
+		j.state.depth = 0
+	}
 	if j.key {
 		j.refresh = 0xff
 	} else {
-		j.refIdx = e.refsFor(j.disp)
+		j.refIdx = e.refsFor(j.disp, j.depth)
 		for i, s := range j.refIdx {
 			j.refs[i] = e.slots[s]
 		}
@@ -215,9 +224,20 @@ func (e *Encoder) planShow(disp int) step {
 	panic("av1: a picture to show is in no slot")
 }
 
-// run codes the planned frames, each once its references are coded
-// (frames that do not depend on each other at once), and gives the
-// temporal units in the planned order.
+// gopRun is a mini-GOP's (or key frame's) steps being coded.
+type gopRun struct {
+	steps []step
+	done  chan struct{} // closed once every frame is coded
+}
+
+// maxRuns is how many mini-GOPs are coded at once: the next one's anchor
+// is coded while this one's frames above it are.
+const maxRuns = 2
+
+// run starts coding the planned frames, each once its references are
+// coded (frames that do not depend on each other at once, mini-GOPs
+// too), and gives the temporal units of the runs done, in order (waiting
+// for the oldest while maxRuns are coded).
 func (e *Encoder) run(steps []step, out *[]Unit) {
 	var wg sync.WaitGroup
 	for _, s := range steps {
@@ -245,7 +265,40 @@ func (e *Encoder) run(steps []step, out *[]Unit) {
 			}
 		}
 	}
-	wg.Wait()
+	r := &gopRun{steps: steps, done: make(chan struct{})}
+	go func() {
+		wg.Wait()
+		close(r.done)
+	}()
+	e.runs = append(e.runs, r)
+	keep := maxRuns - 1
+	if dbgSerialFrames {
+		keep = 0
+	}
+	e.collect(keep, out)
+}
+
+// collect emits the runs done, oldest first, waiting while more than
+// keep are left.
+func (e *Encoder) collect(keep int, out *[]Unit) {
+	for len(e.runs) > 0 {
+		r := e.runs[0]
+		if len(e.runs) > keep {
+			<-r.done
+		} else {
+			select {
+			case <-r.done:
+			default:
+				return
+			}
+		}
+		e.runs = e.runs[1:]
+		e.emitRun(r.steps, out)
+	}
+}
+
+// emitRun gives a coded run's temporal units.
+func (e *Encoder) emitRun(steps []step, out *[]Unit) {
 	for _, s := range steps {
 		j := s.job
 		if j == nil {
@@ -280,11 +333,33 @@ func (e *Encoder) emit(disp int, out *[]Unit) {
 	*out = append(*out, u)
 }
 
-// refsFor picks a frame's references among the slots' frames: LAST,
-// LAST2 and LAST3 the nearest before it, GOLDEN the farthest before it;
-// BWDREF and ALTREF2 the nearest after it, ALTREF the farthest after it
-// (those before it when none is after).
-func (e *Encoder) refsFor(disp int) [REFS_PER_FRAME]int {
+// refsPrevDepth is the deepest of the earlier mini-GOPs' frames an
+// anchor may use. (On the two 120-picture clips, against no limit: 2
+// cost 0.2% BD-rate and coded 1.12 times faster, 1 cost 1.1% and coded
+// 1.37 times faster.)
+var refsPrevDepth = 2
+
+// refUsable reports whether a frame of a depth may reference one of
+// another (earlier: of an earlier mini-GOP): within a mini-GOP, only
+// frames above it in the pyramid, so that the frames of a depth are
+// coded at once; anchors, the earlier anchors and key frames, and the
+// earlier mini-GOP's frames to refsPrevDepth, so that the next anchor
+// is coded while the frames below this one are.
+func refUsable(refDepth, depth int, earlier bool) bool {
+	switch {
+	case depth <= 1:
+		return refDepth <= 1 || earlier && refDepth <= refsPrevDepth
+	case earlier:
+		return true
+	}
+	return refDepth < depth
+}
+
+// refsFor picks a frame's references among the slots' frames it may use
+// (refUsable): LAST, LAST2 and LAST3 the nearest before it, GOLDEN the
+// farthest before it; BWDREF and ALTREF2 the nearest after it, ALTREF
+// the farthest after it (those before it when none is after).
+func (e *Encoder) refsFor(disp, depth int) [REFS_PER_FRAME]int {
 	slotOf := map[*refFrameState]int{}
 	var past, future []*refFrameState
 	for i := len(e.slots) - 1; i >= 0; i-- {
@@ -296,6 +371,9 @@ func (e *Encoder) refsFor(disp int) [REFS_PER_FRAME]int {
 			continue
 		}
 		slotOf[s] = i
+		if !refUsable(s.depth, depth, s.disp <= e.gopStart) {
+			continue
+		}
 		if s.disp < disp {
 			past = append(past, s)
 		} else {

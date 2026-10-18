@@ -18,6 +18,7 @@ type refFrameState struct {
 	miCols, miRows int
 	frameType      int
 	disp           int // its place in display order
+	depth          int // its depth in the pyramid (0 key frames, 1 anchors)
 	// done is closed once the frame is coded (its other fields set)
 	done chan struct{}
 	// cdf is the frame's CDFs as kept for later frames (save_cdfs).
