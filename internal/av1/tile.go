@@ -42,6 +42,7 @@ type frameEnc struct {
 	interp    []uint8 // InterpFilters (both directions: no dual filter)
 	skipMode  []uint8
 	compIdx   []uint8                              // compound_idx (1 where not coded)
+	compGroup []uint8                              // comp_group_idx
 	inter     *interFrameInfo                      // inter frames' header values (nil for key frames)
 	refs      [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
 	filt      [2]int                               // the frame's interpolation filter
@@ -110,6 +111,8 @@ type tileEnc struct {
 	ms         motionSearch
 	is         interScratch
 	interPred  [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
+	// maskP are the luma predictions masked variants are blended from
+	maskP [2][]int32
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -143,6 +146,11 @@ type blockState struct {
 	warp       bool
 	warpParams [6]int32
 	warpValid  bool
+	// masked is comp_group_idx 1, mask its mask (maskBuf a difference
+	// mask's samples)
+	masked     bool
+	mask       compMask
+	maskBuf    []uint8
 	filterMode int // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
@@ -170,11 +178,13 @@ type blockDec struct {
 	mv, mv2         mv
 	refFrame2       int
 	refMvIdx        int
-	skip            bool   // an inter block coded without residual
-	skipMode        bool   // coded as skip_mode
-	compDist        bool   // compound_idx 0: the predictions weighted by distance
-	obmc            bool   // motion_mode OBMC
-	warp            bool   // motion_mode LOCALWARP
+	skip            bool // an inter block coded without residual
+	skipMode        bool // coded as skip_mode
+	compDist        bool // compound_idx 0: the predictions weighted by distance
+	obmc            bool // motion_mode OBMC
+	warp            bool // motion_mode LOCALWARP
+	masked          bool // comp_group_idx 1, by mask
+	mask            compMask
 	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order
@@ -455,7 +465,7 @@ func (t *tileEnc) clearDecoded(r, c int) {
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [10][]uint8
+	mi         [11][]uint8
 	refs       [2][]int8
 	mvs        [2][]mv
 	above, aDc [3][16]uint8
@@ -532,9 +542,9 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	s.decoded = t.decoded
 }
 
-func (t *tileEnc) miArrays() [10][]uint8 {
+func (t *tileEnc) miArrays() [11][]uint8 {
 	f := t.f
-	return [10][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp, f.compIdx}
+	return [11][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp, f.compIdx, f.compGroup}
 }
 
 // restore puts a snapshot back.

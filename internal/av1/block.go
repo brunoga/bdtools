@@ -57,9 +57,10 @@ func (t *tileEnc) setModes() {
 					f.mvs[0][i], f.mvs[1][i], f.isInter[i] = b.mv, b.mv2, 1
 					f.interp[i] = uint8(b.interp) //nolint:gosec // a filter
 					f.compIdx[i] = uint8(b2i(!b.compDist || b.refFrame2 <= INTRA_FRAME))
+					f.compGroup[i] = uint8(b2i(b.masked && b.refFrame2 > INTRA_FRAME))
 				} else {
 					f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
-					f.compIdx[i] = 1
+					f.compIdx[i], f.compGroup[i] = 1, 0
 					f.mvs[0][i], f.isInter[i] = mv{}, 0
 				}
 			}

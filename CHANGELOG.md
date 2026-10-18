@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Masked compound in the AV1 encoder (comp_group_idx: a wedge, one of
+  sixteen with a sign, or the predictions' difference), the two best
+  compound candidates estimated masked: 0.1% smaller, +29.1% against
+  SVT-AV1 preset 4.
 - The AV1 encoder's sub-sample filters in AVX2: 18% less CPU, 12% less
   time, the same stream. (A legacy SSE move left in AVX2 code made the
   first try slower than Go on the P-cores; the OCR kernel had one too.)

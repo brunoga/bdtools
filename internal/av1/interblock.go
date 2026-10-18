@@ -66,7 +66,7 @@ func (t *tileEnc) writeInterModes(cd coder) {
 	t.writeRefFrames(cd)
 	if t.isCompound() {
 		t.writeCompoundModes(cd)
-		t.writeCompoundIdx(cd)
+		t.writeCompoundType(cd)
 		t.writeInterpFilter(cd)
 		return
 	}
@@ -164,6 +164,8 @@ var dbgFewRefs = false
 type interCand struct {
 	interp    int // the interpolation filter
 	compDist  bool
+	masked    bool
+	mask      compMask
 	ref, ref2 int // ref2 NONE for a single reference
 	m2        mv
 	mode, idx int
@@ -235,6 +237,20 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+	if f.seq.maskedCompound {
+		var extra []interCand
+		for _, cd := range cands {
+			if cd.ref2 > INTRA_FRAME && len(extra) < 2*maskedCands {
+				extra = append(extra, t.maskedVariants(cd)...)
+			}
+		}
+		if dbgForceMasked && len(extra) > 0 {
+			cands = extra
+		} else {
+			cands = append(cands, extra...)
+		}
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+	}
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
 	t.save(start, r, c, size, true)
@@ -244,7 +260,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist}
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist, masked: cd.masked, mask: cd.mask}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
 		t.setInterState(dec)
 		// OBMC tried for the best two single reference candidates, with
@@ -350,6 +366,10 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b.skipMode = dec.skipMode
 	b.interp = dec.interp
 	b.compDist = dec.compDist && !dec.skipMode && dec.refFrame2 > INTRA_FRAME
+	b.masked, b.mask = dec.masked && !dec.skipMode && dec.refFrame2 > INTRA_FRAME, dec.mask
+	if b.masked {
+		b.compDist = false
+	}
 	b.obmc = dec.obmc
 	b.warp, b.warpValid = dec.warp, false
 	if b.warp {
@@ -573,6 +593,9 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	if b.warp && b.warpValid {
 		warpedBlocks.Add(1)
 	}
+	if b.masked {
+		maskedBlocks[b2i(b.mask.wedge)].Add(1)
+	}
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
@@ -690,7 +713,7 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.refFrame2 = NONE
 		}
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
-		b.interp, b.obmc, b.compDist = EIGHTTAP, false, false
+		b.interp, b.obmc, b.compDist, b.masked = EIGHTTAP, false, false, false
 		filters := []int{EIGHTTAP}
 		if t.needsInterpFilter() && !dbgNoSwitchable {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}
