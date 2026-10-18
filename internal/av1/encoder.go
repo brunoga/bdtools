@@ -39,16 +39,16 @@ type EncoderOptions struct {
 	// before.
 	MiniGOP int
 	// Speed trades size for time: -2 the partitions searched without
-	// pruning (4.7 times slower, 4.0% smaller on two 120-picture 1080p
+	// pruning (5.0 times slower, 3.4% smaller on two 120-picture 1080p
 	// clips); -1 those after a skipped whole block too, intra everywhere
-	// and every inter candidate coded in full (2.5 times slower, 3.3%
+	// and every inter candidate coded in full (2.6 times slower, 2.8%
 	// smaller); 0 every tool searched, intra in inter pictures where its
 	// estimate is near inter's, inter candidates coded in full where
 	// theirs are near the best's; 1 the transform trees decided with
 	// DCT_DCT, the interpolation filter by SATD, no warped motion or
-	// masked compound, no compound of two earlier frames (1.7 times
-	// faster, 3.2% larger); 2 also no OBMC, four references and two
-	// candidates coded in full (2.2 times, 4.7%).
+	// masked compound, no compound of two earlier frames (1.6 times
+	// faster, 3.9% larger); 2 also no OBMC, four references and two
+	// candidates coded in full (2.0 times, 5.3%).
 	Speed int
 }
 
