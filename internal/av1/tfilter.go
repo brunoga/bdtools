@@ -50,11 +50,17 @@ const (
 	sqrtPiBy2                  = 1.25331413732
 )
 
-// dbgNoTF codes the anchors' sources unfiltered.
-// The filter is off: on two 1080p disc clips it cost 7.3% BD-rate (PSNR)
-// even with overlay frames, its window holding only pictures before the
-// anchor (libaom's has as many after it, from the lookahead).
+// dbgNoTF codes the anchors' sources unfiltered. The filter is off: on
+// the two 120-picture disc clips, with three pictures after the anchor
+// (tfAfter), it cost 1.3% BD-rate (PSNR) with overlay frames and 0.5%
+// showing the filtered anchor itself. It filters fully there (the mean
+// weight 982 of 1000), but those sources have little noise to take out
+// (the filtered anchor 53.6 dB from its source).
 var dbgNoTF = true
+
+// tfAfter is how many pictures after the anchor the filter waits for
+// (the next mini-GOP's first ones: a lookahead).
+var tfAfter = 3
 
 // tfWindowSize is how many pictures before and after the one filtered
 // the filter takes, of maxBefore and maxAfter available (the key frame
@@ -515,8 +521,8 @@ func estimateNoise(src []uint16, stride, w, h, bitDepth, edgeThresh int) float64
 // its lookahead, which the encoder does not hold. A mini-GOP of one
 // picture is not filtered (the picture is shown as coded). It keeps the
 // mini-GOP's sources, as they came, for the next one's window.
-func (e *Encoder) filterAnchor(gop []*frameJob) {
-	srcs := make([]*Source, 0, len(e.tfPast)+len(gop))
+func (e *Encoder) filterAnchor(gop []*frameJob, ahead []*Source) {
+	srcs := make([]*Source, 0, len(e.tfPast)+len(gop)+len(ahead))
 	srcs = append(srcs, e.tfPast...)
 	for _, j := range gop {
 		srcs = append(srcs, j.src)
@@ -527,8 +533,10 @@ func (e *Encoder) filterAnchor(gop []*frameJob) {
 	}
 	// libaom's q for the filter (get_q at a constant q) is the run's
 	// cq_level, not the anchor's own
-	before, _ := tfWindowSize(len(srcs)-1, 0)
-	window := srcs[len(srcs)-1-before:]
+	center := len(srcs) - 1
+	srcs = append(srcs, ahead...)
+	before, after := tfWindowSize(center, len(ahead))
+	window := srcs[center-before : center+after+1]
 	a := gop[len(gop)-1]
 	a.orig = a.src
 	a.src = temporalFilter(window, before, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)

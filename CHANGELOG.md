@@ -7,6 +7,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's anchors and the frames just below them code finer
+  (q index offsets 52, 52, 36, 20 by depth, were 40, 40, 28, 16): 0.9%
+  smaller on the 120-picture clips (Frozen II 1.8%), +27.7% against
+  SVT-AV1 preset 4. The temporal filter can take pictures after the
+  anchor (a lookahead); it stays off (the disc sources have little noise
+  for it to take out).
 - Masked compound in the AV1 encoder (comp_group_idx: a wedge, one of
   sixteen with a sign, or the predictions' difference), the two best
   compound candidates estimated masked: 0.1% smaller, +29.1% against

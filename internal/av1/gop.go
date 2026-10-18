@@ -64,9 +64,11 @@ var dbgNoTPL = true
 var dbgNoOverlay bool
 
 // depthQ is how much finer (in q index) a frame at a depth codes.
-// (Measured on two 1080p disc clips: steeper than 24, 24, 16, 8 by
-// 3.5% BD-rate.)
-var depthQ = [...]int{40, 40, 28, 16, 0, 0, 0, 0}
+// (Measured on two 1080p disc clips: 40, 40, 28, 16 better than 24, 24,
+// 16, 8 by 3.5% BD-rate; on the 120-picture clips, with every tool in,
+// these 0.9% better than that (Frozen II 1.8%), 64, 64, 44, 24 0.7%
+// (Blade Runner 2049 0.9% worse), 32, 32, 22, 12 1.2% worse.)
+var depthQ = [...]int{52, 52, 36, 20, 0, 0, 0, 0}
 
 // keyQ is how much finer key frames code.
 var keyQ = 56
@@ -130,17 +132,28 @@ func (e *Encoder) drain(flush bool) []Unit {
 		n := e.miniGOP()
 		next := (first.disp/e.keyint() + 1) * e.keyint()
 		n = min(n, next-first.disp)
-		if len(e.queue) < n && !flush {
+		// the temporal filter's pictures after the anchor (to the next
+		// key frame)
+		after := 0
+		if !dbgNoTF {
+			after = min(tfAfter, next-first.disp-n)
+		}
+		if len(e.queue) < n+after && !flush {
 			break
 		}
 		n = min(n, len(e.queue))
+		after = min(after, len(e.queue)-n)
+		var ahead []*Source
+		for _, j := range e.queue[n : n+after] {
+			ahead = append(ahead, j.src)
+		}
 		gop := e.queue[:n]
 		e.queue = e.queue[n:]
 		a := first.disp - 1
 		e.gopStart = a
 		byDisp := func(d int) *frameJob { return gop[d-first.disp] }
 		last := byDisp(a + n)
-		e.filterAnchor(gop)
+		e.filterAnchor(gop, ahead)
 		if n == 1 {
 			last.show, last.depth = true, 1
 			e.run([]step{e.plan(last)}, &out)
