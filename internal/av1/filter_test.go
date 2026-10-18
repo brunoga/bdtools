@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+// widen with AVX2 as in Go, every length and shift.
+func TestWidenMatches(t *testing.T) {
+	src := make([]uint16, 131)
+	for i := range src {
+		src[i] = uint16(i*7919) & 4095
+	}
+	for n := range len(src) {
+		for _, sh := range []uint{0, 2, 4, 7} {
+			a, b := make([]int32, n), make([]int32, n)
+			widen(a, src, sh)
+			widenGo(b, src, sh)
+			for i := range a {
+				if a[i] != b[i] {
+					t.Fatalf("n %d sh %d at %d: %d, want %d", n, sh, i, a[i], b[i])
+				}
+			}
+		}
+	}
+}
+
 // The filters with AVX2 (where there is) as in Go, for every kernel,
 // width and rounding.
 func TestFiltersMatch(t *testing.T) {
@@ -39,6 +59,15 @@ func TestFiltersMatch(t *testing.T) {
 						for c := range a {
 							if a[c] != b[c] {
 								t.Fatalf("col w %d filter %d frac %d: %d, want %d", w, fl, frac, a[c], b[c])
+							}
+						}
+						maxV := int32(1)<<bd - 1
+						p, q := make([]uint16, w), make([]uint16, w)
+						filterColClip(p, mid, w, k, lo, hi, add, sh, maxV, a)
+						filterColClipGo(q, mid, w, k, lo, hi, add, sh, maxV, b)
+						for c := range p {
+							if p[c] != q[c] {
+								t.Fatalf("clipped col w %d filter %d frac %d: %d, want %d", w, fl, frac, p[c], q[c])
 							}
 						}
 					}

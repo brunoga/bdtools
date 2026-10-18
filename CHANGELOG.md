@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's inter prediction clips and widens with AVX2 and
+  copies the reference's edges by rows: 5% less CPU, the same stream.
 - The AV1 encoder skips a block's intra search in inter pictures when
   intra's estimate is well above inter's (from `medium`, nearer): 1.08
   times faster for 0.1% on the 120-picture clips.
