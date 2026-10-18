@@ -56,8 +56,9 @@ type frameEnc struct {
 	lossless bool
 	lambda   float64 // distortion per bit (the frame's q's)
 	// sbQ is each superblock's target q index (nil: the frame's), with
-	// delta_q_present.
-	sbQ []int
+	// delta_q_present; sbLambda each one's lambda's scale (nil: 1).
+	sbQ      []int
+	sbLambda []float64
 	// cdf0 is the CDFs every tile starts from: the defaults, or those a
 	// reference kept (load_cdfs) with primary_ref_frame; savedCDF what the
 	// frame keeps for later frames.
@@ -395,6 +396,9 @@ func (t *tileEnc) startSB(r, c int) {
 		t.sbDelta, t.sbQ, t.readDeltas = d, q, true
 	}
 	t.setQ(q)
+	if f.sbLambda != nil {
+		t.lambda *= f.sbLambda[(r>>4)*((f.miCols+15)>>4)+c>>4]
+	}
 }
 
 // setQ sets the quantizers and lambda of a q index.

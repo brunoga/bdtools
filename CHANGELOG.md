@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's temporal model on: it scales each superblock's
+  lambda by how much later pictures take from it (nothing more to code,
+  the rows still coded at once): 0.4% smaller (Frozen II 0.9%), +26.7%
+  against SVT-AV1 preset 4.
 - The AV1 encoder's bottom pictures 8 coarser than the run's q, a
   smaller lambda (0.6): 0.5% smaller, +27.2% against SVT-AV1 preset 4.
 - The AV1 encoder's anchors and the frames just below them code finer

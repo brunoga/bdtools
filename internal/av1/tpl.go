@@ -28,6 +28,15 @@ type tplFrame struct {
 	mvx, mvy   []int // its integer vector, in samples
 }
 
+// tplLambda has the model scale the superblocks' lambdas (by
+// 1/beta^tplLambdaPow, within 0.5 and 1.5, as libaom's adaptive rdmult
+// does) and not their q indexes: nothing coded, the rows still coded at
+// once.
+var (
+	tplLambda    = true
+	tplLambdaPow = 0.5 // (1 was 0.3% better)
+)
+
 // tplMaxDelta bounds a superblock's q index offset.
 const tplMaxDelta = 48
 
@@ -100,6 +109,7 @@ func (e *Encoder) tpl(steps []step) {
 		r0 := sumIntra / sumAll
 		sbCols, sbRows := (2*((w+7)>>3)+15)>>4, (2*((h+7)>>3)+15)>>4
 		qs := make([]int, sbCols*sbRows)
+		ls := make([]float64, sbCols*sbRows)
 		any := false
 		for sy := range sbRows {
 			for sx := range sbCols {
@@ -110,16 +120,21 @@ func (e *Encoder) tpl(steps []step) {
 						all += tf.intra[y*cols+x] + tf.dep[y*cols+x]
 					}
 				}
-				q := j.q
+				q, l := j.q, 1.0
 				if in > 0 {
 					beta := r0 / (in / all)
 					q = deltaQFor(j.q, beta, bd)
+					l = min(max(math.Pow(beta, -tplLambdaPow), 0.5), 1.5)
 				}
-				qs[sy*sbCols+sx] = q
-				any = any || q != j.q
+				qs[sy*sbCols+sx], ls[sy*sbCols+sx] = q, l
+				any = any || q != j.q || l != 1
 			}
 		}
-		if any {
+		switch {
+		case !any:
+		case tplLambda:
+			j.sbLambda = ls
+		default:
 			j.sbQ = qs
 		}
 	}
