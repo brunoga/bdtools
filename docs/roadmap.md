@@ -25,7 +25,7 @@ worked on one at a time in the order below.
 | Need | Today | Go replacement |
 |---|---|---|
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
-| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder: key frames at SVT-AV1 preset 4's BD-rate, sequences +23.7% (two 120-picture 1080p disc clips), and slow; to tune and speed up |
+| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder: key frames at SVT-AV1 preset 4's BD-rate, sequences +23.7% (two 120-picture 1080p disc clips; +19.9% at `--preset veryslow`), and slow; to tune and speed up |
 | Dolby Vision with the enhancement layer kept or re-encoded | none | Done: the Go HEVC encoder codes both layers |
 | Interlaced H.264 input | none | Done: field pictures and MBAFF decode in Go, deinterlaced |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |

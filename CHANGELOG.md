@@ -11,7 +11,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to `slow`; at `medium` the transform trees decided with DCT_DCT, the
   filter by SATD, no warped motion or masked compound (1.5 times faster,
   2.4% larger); from `fast` also no OBMC, four references and two
-  candidates coded in full (2.2 times faster, 3.7% larger).
+  candidates coded in full (2.2 times faster, 3.7% larger); at `slower`
+  the partitions after a skipped whole block searched too (2 times
+  slower, 3.5% smaller), from `veryslow` none pruned (3.8 times slower,
+  4.0% smaller, +19.9% against SVT-AV1 preset 4).
 - The AV1 encoder's mini-GOPs 16 pictures (were 8): 1.1% smaller and a
   fifth faster on the 120-picture clips, +23.7% against SVT-AV1 preset 4.
 - The AV1 encoder's temporal model sets each mini-GOP's anchor q (and

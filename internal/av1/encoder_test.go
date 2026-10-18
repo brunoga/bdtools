@@ -283,7 +283,10 @@ func TestSpeeds(t *testing.T) {
 	for i := range 9 {
 		pics = append(pics, shifted(p, 2*i, i))
 	}
-	for speed := range 3 {
+	for speed := -2; speed <= 2; speed++ {
+		if raceOn && speed < 0 {
+			continue // the slow ones
+		}
 		t.Run(fmt.Sprint(speed), func(t *testing.T) {
 			o := EncoderOptions{Width: 136, Height: 96, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 8, Speed: speed}
 			checkDecodes(t, o, pics)
