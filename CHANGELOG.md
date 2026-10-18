@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder codes in full only the inter candidates whose
+  estimate is within 15% of the best one's (5% from `medium`): 1.08
+  times faster on the 120-picture clips, 0.1% smaller.
 - The AV1 encoder's inter prediction clips and widens with AVX2 and
   copies the reference's edges by rows: 5% less CPU, the same stream.
 - The AV1 encoder skips a block's intra search in inter pictures when
@@ -18,12 +21,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   120-picture clips at the same speed, +23.1% against SVT-AV1 preset 4.
 - `--preset` sets the built-in AV1 encoder's speed: every tool searched
   to `slow`; at `medium` the transform trees decided with DCT_DCT, the
-  filter by SATD, no warped motion or masked compound (1.5 times faster,
-  2.4% larger); from `fast` also no OBMC, four references and two
-  candidates coded in full (2.2 times faster, 3.7% larger); at `slower`
-  the partitions after a skipped whole block searched too (2 times
-  slower, 3.5% smaller), from `veryslow` none pruned (3.8 times slower,
-  4.0% smaller, +19.9% against SVT-AV1 preset 4).
+  filter by SATD, no warped motion or masked compound (1.7 times faster,
+  3.2% larger); from `fast` also no OBMC, four references and two
+  candidates coded in full (2.2 times faster, 4.7% larger); at `slower`
+  the partitions after a skipped whole block searched too, and every
+  inter candidate coded in full (2.5 times slower, 3.3% smaller), from
+  `veryslow` none pruned (4.7 times slower, 4.0% smaller, +19.4%
+  against SVT-AV1 preset 4).
 - The AV1 encoder's mini-GOPs 16 pictures (were 8): 1.1% smaller and a
   fifth faster on the 120-picture clips, +23.7% against SVT-AV1 preset 4.
 - The AV1 encoder's temporal model sets each mini-GOP's anchor q (and

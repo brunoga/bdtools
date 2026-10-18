@@ -15,6 +15,12 @@ import (
 // interCands is how many inter candidates are coded in full.
 var interCands = 4
 
+// candRatio stops coding candidates in full at the first whose estimate
+// is over candRatio times the best's (0 never). (On the two 120-picture
+// clips: 1.3 1.04 times faster for 0.1%, 1.15 1.08 for -0.1%, 1.05 1.19
+// for 0.2%, 1.0 1.43 for 3.5%.)
+var candRatio = 1.15
+
 // filterRD chooses the best candidate's interpolation filter by coding it
 // with each (else the estimates' SATD alone chooses).
 var filterRD = true
@@ -265,6 +271,9 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	bestJ := math.Inf(1)
 	var bestDec *blockDec
 	for i, cd := range cands[:min(f.tools.interCands, len(cands))] {
+		if i > 0 && f.tools.candRatio > 0 && cd.est > f.tools.candRatio*cands[0].est {
+			break
+		}
 		if i > 0 {
 			t.restore(start, true)
 		}
