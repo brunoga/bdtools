@@ -22,11 +22,17 @@ type builtinAV1 struct {
 	err error
 }
 
-// av1Speed is the built-in AV1 encoder's speed for a --preset: every
-// tool to slow, the transform trees and filters searched less for
-// medium, fewer references and candidates too for the faster ones.
+// av1Speed is the built-in AV1 encoder's speed for a --preset: the
+// partitions searched without pruning for veryslow and placebo, less
+// pruned for slower, every tool for slow, the transform trees and
+// filters searched less for medium, fewer references and candidates too
+// for the faster ones.
 func av1Speed(preset string) int {
 	switch preset {
+	case "veryslow", "placebo":
+		return -2
+	case "slower":
+		return -1
 	case "medium":
 		return 1
 	case "fast", "faster", "veryfast", "superfast", "ultrafast":
