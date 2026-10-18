@@ -21,6 +21,7 @@ var dbgCompare bool
 
 // frameEnc is the frame being coded, shared by its tiles.
 type frameEnc struct {
+	tools          *tools // the encoder's
 	seq            *seqParams
 	fp             *frameParams
 	bitDepth       int

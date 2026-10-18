@@ -38,12 +38,26 @@ type EncoderOptions struct {
 	// the last first); 0 picks 16, 1 codes each picture from the one
 	// before.
 	MiniGOP int
+	// Speed trades size for time: 0 every tool searched; 1 the
+	// transform trees decided with DCT_DCT, the interpolation filter by
+	// SATD, no warped motion or masked compound (1.5 times faster, 2.4%
+	// larger on two 120-picture 1080p clips); 2 also no OBMC, four
+	// references and two candidates coded in full (2.2 times, 3.7%).
+	Speed int
+}
+
+// tools are the search's settings, by EncoderOptions.Speed (from the
+// package's defaults, which tests and benches change).
+type tools struct {
+	interCands                      int
+	filterRD, obmc, fewRefs, txTree bool
 }
 
 // Encoder codes pictures.
 type Encoder struct {
 	o     EncoderOptions
 	seq   seqParams
+	tools tools
 	frame *frameEnc
 	// queue is the pictures not coded yet; nIn counts the pictures in;
 	// gopStart is the picture before the mini-GOP being planned.
@@ -99,6 +113,15 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
+	}
+	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree}
+	if o.Speed >= 1 {
+		e.tools.txTree, e.tools.filterRD = true, false
+		e.seq.warpedMotion, e.seq.maskedCompound = false, false
+	}
+	if o.Speed >= 2 {
+		e.tools.obmc, e.tools.fewRefs = false, true
+		e.tools.interCands = min(e.tools.interCands, 2)
 	}
 	return e, nil
 }
@@ -166,7 +189,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		if ok, frames := fp.skipModeAllowed(); fp.refSelect && ok && !dbgNoSkipMode {
 			fp.skipModePresent, fp.skipModeFrame = true, frames
 		}
-		fp.motionModeSwitchable = !dbgNoObmc || !dbgNoWarp
+		fp.motionModeSwitchable = e.tools.obmc || e.seq.warpedMotion
 		fp.allowWarp = e.seq.warpedMotion
 		f.inter = fi
 		if e.seq.refFrameMvs {
@@ -229,7 +252,7 @@ var dbgNoCDFCarry bool
 func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	o := e.o
 	miCols, miRows := 2*((o.Width+7)>>3), 2*((o.Height+7)>>3)
-	f := &frameEnc{seq: &e.seq, fp: fp, bitDepth: o.BitDepth, miCols: miCols, miRows: miRows, width: o.Width, height: o.Height}
+	f := &frameEnc{seq: &e.seq, tools: &e.tools, fp: fp, bitDepth: o.BitDepth, miCols: miCols, miRows: miRows, width: o.Width, height: o.Height}
 	pw, ph := (miCols+15)/16*64, (miRows+15)/16*64
 	for p := range 3 {
 		w, h, sw, sh := pw, ph, o.Width, o.Height
