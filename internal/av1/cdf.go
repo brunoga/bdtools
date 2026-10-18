@@ -52,6 +52,9 @@ type cdfs struct {
 	compBwdRef   [REF_CONTEXTS][BWD_REFS - 1][3]uint16
 	compoundMode [COMPOUND_MODE_CONTEXTS][COMPOUND_MODES + 1]uint16
 	compoundIdx  [COMPOUND_IDX_CONTEXTS][3]uint16
+	compGroupIdx [COMP_GROUP_IDX_CONTEXTS][3]uint16
+	compoundType [BLOCK_SIZES][COMPOUND_TYPES + 1]uint16
+	wedgeIndex   [BLOCK_SIZES][16 + 1]uint16
 	interTxSet1  [2][17]uint16
 	interTxSet2  [13]uint16
 	interTxSet3  [4][3]uint16
@@ -120,7 +123,7 @@ func newCDFs(qIndex int) *cdfs {
 		yModeInter: defaultYModeCdf, isInter: defaultIsInterCdf, newMv: defaultNewMvCdf, zeroMv: defaultZeroMvCdf,
 		refMv: defaultRefMvCdf, drlMode: defaultDrlModeCdf, singleRef: defaultSingleRefCdf, txfmSplit: defaultTxfmSplitCdf,
 		skipMode: defaultSkipModeCdf, interpFilter: defaultInterpFilterCdf, useObmc: defaultUseObmcCdf, motionMode: defaultMotionModeCdf, deltaQ: defaultDeltaQCdf, compMode: defaultCompModeCdf, compRefType: defaultCompRefTypeCdf, compRef: defaultCompRefCdf,
-		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf, compoundIdx: defaultCompoundIdxCdf,
+		compBwdRef: defaultCompBwdRefCdf, compoundMode: defaultCompoundModeCdf, compoundIdx: defaultCompoundIdxCdf, compGroupIdx: defaultCompGroupIdxCdf, compoundType: defaultCompoundTypeCdf, wedgeIndex: defaultWedgeIndexCdf,
 		interTxSet1: defaultInterTxTypeSet1Cdf, interTxSet2: defaultInterTxTypeSet2Cdf, interTxSet3: defaultInterTxTypeSet3Cdf,
 
 		useWiener: defaultUseWienerCdf, useSgrproj: defaultUseSgrprojCdf, restorationType: defaultRestorationTypeCdf,

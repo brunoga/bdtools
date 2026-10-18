@@ -20,6 +20,7 @@ type seqParams struct {
 	jntComp                     bool // enable_jnt_comp: distance weighted compound
 	refFrameMvs                 bool // enable_ref_frame_mvs
 	warpedMotion                bool // enable_warped_motion
+	maskedCompound              bool // enable_masked_compound
 	// timing, when the rate is known
 	num, den int
 }
@@ -75,15 +76,15 @@ func (s *seqParams) sequenceHeader() []byte {
 	w.flag(false)                           // use_128x128_superblock
 	w.flag(s.filterIntra)
 	w.flag(s.edgeFilter)
-	w.flag(false)          // enable_interintra_compound
-	w.flag(false)          // enable_masked_compound
-	w.flag(s.warpedMotion) // enable_warped_motion
-	w.flag(false)          // enable_dual_filter
-	w.flag(true)           // enable_order_hint
-	w.flag(s.jntComp)      // enable_jnt_comp
-	w.flag(s.refFrameMvs)  // enable_ref_frame_mvs
-	w.flag(false)          // seq_choose_screen_content_tools
-	w.flag(false)          // seq_force_screen_content_tools: off
+	w.flag(false)            // enable_interintra_compound
+	w.flag(s.maskedCompound) // enable_masked_compound
+	w.flag(s.warpedMotion)   // enable_warped_motion
+	w.flag(false)            // enable_dual_filter
+	w.flag(true)             // enable_order_hint
+	w.flag(s.jntComp)        // enable_jnt_comp
+	w.flag(s.refFrameMvs)    // enable_ref_frame_mvs
+	w.flag(false)            // seq_choose_screen_content_tools
+	w.flag(false)            // seq_force_screen_content_tools: off
 	w.f(orderHintBits-1, 3)
 	w.flag(false) // enable_superres
 	w.flag(s.cdef)

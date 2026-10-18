@@ -96,7 +96,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp,
+		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -266,7 +266,7 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	for i := range f.refFrames[0] {
 		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
 	}
-	f.isInter, f.skipMode, f.interp, f.compIdx = make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n)
+	f.isInter, f.skipMode, f.interp, f.compIdx, f.compGroup = make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n)
 	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
 	for i := range f.cdefIdx {
 		f.cdefIdx[i] = -1
