@@ -11,10 +11,10 @@ import (
 func TestWarpedMotion(t *testing.T) {
 	defer func() { dbgForceInter, dbgForceWarp = false, false }()
 	dbgForceInter, dbgForceWarp = true, true
-	for _, c := range []struct {
+	for _, c := range raceCut([]struct {
 		w, h, depth int
 		banded      bool
-	}{{136, 96, 8, true}, {104, 80, 10, false}, {96, 72, 8, true}} {
+	}{{136, 96, 8, true}, {104, 80, 10, false}, {96, 72, 8, true}}) {
 		t.Run(fmt.Sprintf("%dx%d-%d-%v", c.w, c.h, c.depth, c.banded), func(t *testing.T) {
 			o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: c.depth, QIndex: 110, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
 			p := testPicture(c.w, c.h, c.depth, 6)
