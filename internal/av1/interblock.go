@@ -495,7 +495,7 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 		j, zero := 0.0, true
 		for y := 0; y < b.bh4; y += stepY {
 			for x := 0; x < b.bw4; x += stepX {
-				jj, z := t.varTx(dec, b.r+y, b.c+x, txSz, 0, search, cur)
+				jj, z := t.varTx(dec, b.r+y, b.c+x, txSz, 0, search, cur, math.Inf(1))
 				j += jj
 				zero = zero && z
 			}
@@ -819,8 +819,10 @@ func (t *tileEnc) varTxSplits(txSz, depth int) bool {
 // varTx codes a node of an inter block's luma transform tree at mi (row,
 // col) (read_var_tx_size's order): whole, or split, as the search finds
 // cheaper (search) or dec says. It gives the cost and whether every
-// coefficient is zero; the leaves set InterTxSizes.
-func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, cur *varTxCursor) (float64, bool) {
+// coefficient is zero; the leaves set InterTxSizes. A search does not
+// finish a split costing budget or more: the node's parent then keeps its
+// whole, which the node's cost (as large) still tells.
+func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, cur *varTxCursor, budget float64) (float64, bool) {
 	f := t.f
 	if row >= f.miRows || col >= f.miCols {
 		return 0, true
@@ -845,7 +847,9 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		t.setTxSize(row, col, txSz)
 		return j + jj, eob == 0
 	}
-	split := func() (float64, bool) {
+	// split stops at a cost of limit or more (searching, the whole's: the
+	// split is then not taken, its costs only adding up)
+	split := func(limit float64) (float64, bool) {
 		t.cost.n = 0
 		t.writeTxfmSplit(&t.cost, row, col, txSz, true)
 		j := t.lambda * float64(t.cost.n) / costScale
@@ -854,7 +858,10 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		zero := true
 		for i := 0; i < int(txHeight[txSz])>>2; i += sh {
 			for k := 0; k < int(txWidth[txSz])>>2; k += sw {
-				jj, z := t.varTx(dec, row+i, col+k, sub, depth+1, search, cur)
+				if j >= limit {
+					return j, false
+				}
+				jj, z := t.varTx(dec, row+i, col+k, sub, depth+1, search, cur, limit-j)
 				j += jj
 				zero = zero && z
 			}
@@ -868,7 +875,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		s := dec.txSplit[cur.split]
 		cur.split++
 		if s {
-			return split()
+			return split(math.Inf(1))
 		}
 		return leaf()
 	}
@@ -892,7 +899,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 	t.restore(start, true)
 	dec.txTypes = dec.txTypes[:nTypes]
 	dec.txSplit[at] = true
-	j1, z1 := split()
+	j1, z1 := split(min(j0, budget))
 	if j1 < j0 {
 		return j1, z1
 	}
