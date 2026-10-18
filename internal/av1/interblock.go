@@ -88,7 +88,17 @@ func (t *tileEnc) writeInterModes(cd coder) {
 		t.writeMvDiff(cd, mv{b.mv.row - p.row, b.mv.col - p.col})
 	}
 	if t.readsUseObmc() {
-		cd.symbol(b2i(b.obmc), c.useObmc[b.size][:])
+		if t.readsMotionMode() {
+			mode := SIMPLE
+			if b.obmc {
+				mode = OBMC
+			} else if b.warp {
+				mode = LOCALWARP
+			}
+			cd.symbol(mode, c.motionMode[b.size][:])
+		} else {
+			cd.symbol(b2i(b.obmc), c.useObmc[b.size][:])
+		}
 	}
 }
 
@@ -106,6 +116,13 @@ func (t *tileEnc) readsUseObmc() bool {
 		return false
 	}
 	return !t.isCompound() && t.hasOverlappableCandidates()
+}
+
+// readsMotionMode reports whether read_motion_mode, reading it at all
+// (readsUseObmc), reads motion_mode rather than use_obmc: warped motion
+// allowed and a warp sample found.
+func (t *tileEnc) readsMotionMode() bool {
+	return t.f.fp.allowWarp && t.findWarpSamples().n > 0
 }
 
 // predictBlock makes an inter block's prediction of every plane.
@@ -244,6 +261,20 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 				t.save(best, r, c, size, true)
 			}
 		}
+		// warped, for the best two single reference candidates whose
+		// neighbours give a valid model
+		if (i < warpCands || dbgForceWarp) && cd.ref2 <= INTRA_FRAME && f.fp.allowWarp && t.readsUseObmc() && t.readsMotionMode() {
+			t.restore(start, true)
+			dw := *dec
+			dw.warp, dw.obmc, dw.skip, dw.txSplit, dw.txTypes, dw.interp = true, false, false, nil, nil, EIGHTTAP
+			t.setInterState(&dw)
+			if b.warpValid {
+				if j := t.codeInter(&dw, true); j < bestJ || dbgForceWarp {
+					bestJ, bestDec = j, &dw
+					t.save(best, r, c, size, true)
+				}
+			}
+		}
 	}
 	// the filter of the best, by rate and distortion
 	if filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE && !dbgNoSwitchable {
@@ -251,7 +282,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if b.refFrame2 <= INTRA_FRAME {
 			b.refFrame2 = NONE
 		}
-		b.skipMode = false
+		b.skipMode, b.warp = false, bestDec.warp
 		if t.needsInterpFilter() {
 			base := *bestDec
 			for _, fl := range []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP} {
@@ -312,6 +343,15 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	b.interp = dec.interp
 	b.compDist = dec.compDist && !dec.skipMode && dec.refFrame2 > INTRA_FRAME
 	b.obmc = dec.obmc
+	b.warp, b.warpValid = dec.warp, false
+	if b.warp {
+		b.interp = EIGHTTAP // interp_filter not coded
+		ws := t.findWarpSamples()
+		b.warpParams, b.warpValid = t.warpEstimation(&ws)
+		if b.warpValid {
+			b.warpValid = setupShear(&b.warpParams).valid
+		}
+	}
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
 	}
@@ -492,9 +532,16 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 		dec.mv2 = t.stack.predMv(dec.yMode, dec.refMvIdx, 1)
 	}
 	if !t.readsUseObmc() {
-		dec.obmc = false // as the search found it (so never)
+		dec.obmc, dec.warp = false, false // as the search found it (so never)
 	}
 	t.setInterState(dec)
+	if dec.warp && !t.readsMotionMode() {
+		dec.warp = false // never, as for OBMC
+		t.setInterState(dec)
+	}
+	if b.warp && b.warpValid {
+		warpedBlocks.Add(1)
+	}
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
@@ -791,7 +838,7 @@ func (t *tileEnc) writeVarTx(cd coder, dec *blockDec, row, col, txSz, depth int,
 // needsInterpFilter is needs_interp_filter (global motion IDENTITY).
 func (t *tileEnc) needsInterpFilter() bool {
 	b := &t.b
-	if b.skipMode || t.f.fp.interpFilter != SWITCHABLE {
+	if b.skipMode || b.warp || t.f.fp.interpFilter != SWITCHABLE {
 		return false
 	}
 	large := min(blockWidth[b.size], blockHeight[b.size]) >= 8

@@ -313,6 +313,26 @@ func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w,
 // them intra, it is predicted whole by the block's.
 func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, b *blockState, plane int, filt [2]int, dst []uint16, dstStride int, s *interScratch) {
 	sub := min(plane, 1)
+	if b.warp && b.warpValid {
+		// the block warp process (useWarp 1): luma, and chroma 8 or
+		// more both ways
+		w, h := int(blockWidth[b.size])>>sub, int(blockHeight[b.size])>>sub
+		if w >= 8 && h >= 8 {
+			if cap(s.comp[0]) < 128*128 {
+				s.comp[0] = make([]int32, 128*128)
+			}
+			pred := s.comp[0][:w*h]
+			blockWarp(refs[b.refFrame], plane, (b.c*MI_SIZE)>>sub, (b.r*MI_SIZE)>>sub, w, h, &b.warpParams, interRoundingFor(f.bitDepth, false), pred)
+			maxV := int32(1)<<uint(f.bitDepth) - 1
+			for i := range h {
+				row := dst[i*dstStride : i*dstStride+w]
+				for j := range row {
+					row[j] = uint16(clip(pred[i*w+j], maxV)) //nolint:gosec // clipped
+				}
+			}
+			return
+		}
+	}
 	planeSz := b.size
 	if plane > 0 {
 		planeSz = int(subsampledSize[b.size][1][1])

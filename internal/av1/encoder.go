@@ -92,7 +92,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs,
+		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
@@ -161,7 +161,8 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		if ok, frames := fp.skipModeAllowed(); fp.refSelect && ok && !dbgNoSkipMode {
 			fp.skipModePresent, fp.skipModeFrame = true, frames
 		}
-		fp.motionModeSwitchable = !dbgNoObmc
+		fp.motionModeSwitchable = !dbgNoObmc || !dbgNoWarp
+		fp.allowWarp = e.seq.warpedMotion
 		f.inter = fi
 		if e.seq.refFrameMvs {
 			fp.useRefFrameMvs, fi.useRefFrameMvs = true, true

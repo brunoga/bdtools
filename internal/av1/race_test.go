@@ -11,6 +11,6 @@ const raceOn = true
 // full and the first four references, the goroutines and what they share
 // the same.
 func init() {
-	interCands, obmcCands, lumaCands = 2, 1, 2
+	interCands, obmcCands, warpCands, lumaCands = 2, 1, 1, 2
 	dbgFewRefs = true
 }
