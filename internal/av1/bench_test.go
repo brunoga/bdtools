@@ -202,6 +202,11 @@ func TestBenchSeq(t *testing.T) {
 		tfAfter = v
 		defer func() { tfAfter = old }()
 	}
+	if v, err := strconv.ParseFloat(os.Getenv("AV1CANDRATIO"), 64); err == nil {
+		old := candRatio
+		candRatio = v
+		defer func() { candRatio = old }()
+	}
 	if v, err := strconv.ParseFloat(os.Getenv("AV1INTRASKIP"), 64); err == nil {
 		old := intraSkip
 		intraSkip = v
@@ -211,6 +216,7 @@ func TestBenchSeq(t *testing.T) {
 		dbgNoTF = false
 		defer func() { dbgNoTF = true }()
 	}
+	speed, _ := strconv.Atoi(os.Getenv("AV1SPEED"))
 	for _, file := range files {
 		b, err := os.ReadFile(file) //nolint:gosec // a test
 		if err != nil {
@@ -218,7 +224,7 @@ func TestBenchSeq(t *testing.T) {
 		}
 		n := len(b) / (w * h * 3 / 2)
 		for _, q := range qs {
-			e, err := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1, MiniGOP: mini})
+			e, err := NewEncoder(EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q, TileColsLog2: -1, TileRowsLog2: -1, MiniGOP: mini, Speed: speed})
 			if err != nil {
 				t.Fatal(err)
 			}
