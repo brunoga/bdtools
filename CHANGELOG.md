@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's inter transform trees stop searching a split once
+  it costs more than the whole: the same stream, 1% faster.
 - The AV1 encoder ranks a transform's types by an estimate from their
   forward transforms and searches the best three by rate and distortion:
   0.6% smaller on the 120-picture clips and 1.09 times faster, +22.5%
