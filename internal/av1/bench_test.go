@@ -169,9 +169,18 @@ func TestBenchSeq(t *testing.T) {
 			defer func() { *v = old }()
 		}
 	}
-	if os.Getenv("AV1TPL") != "" {
-		dbgNoTPL = false
-		defer func() { dbgNoTPL = true }()
+	if v, err := strconv.ParseFloat(os.Getenv("AV1TPLPOW"), 64); err == nil {
+		old := tplLambdaPow
+		tplLambdaPow = v
+		defer func() { tplLambdaPow = old }()
+	}
+	if os.Getenv("AV1TPLQ") != "" {
+		tplLambda = false
+		defer func() { tplLambda = true }()
+	}
+	if os.Getenv("AV1NOTPL") != "" {
+		dbgNoTPL = true
+		defer func() { dbgNoTPL = false }()
 	}
 	if os.Getenv("AV1NOOVERLAY") != "" {
 		dbgNoOverlay = true

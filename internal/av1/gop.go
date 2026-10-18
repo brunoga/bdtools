@@ -40,8 +40,10 @@ type frameJob struct {
 	frame *frameEnc
 	obu   []byte
 	recon *[3][]uint16
-	// sbQ is the superblocks' q indexes (the temporal model's), or nil
-	sbQ []int
+	// sbQ is the superblocks' q indexes (the temporal model's), or nil;
+	// sbLambda their lambdas' scales (the model's, tplLambda), or nil
+	sbQ      []int
+	sbLambda []float64
 }
 
 // step is a planned step of the stream: a frame coded, or one shown from
@@ -56,9 +58,11 @@ type step struct {
 // model: a mini-GOP and the anchors before it).
 const recentSources = 40
 
-// dbgNoTPL codes every superblock at its frame's q. The temporal model
-// is off: on two 1080p disc clips it cost 1.5% BD-rate.
-var dbgNoTPL = true
+// dbgNoTPL turns the temporal model off. On the two 120-picture clips
+// it is 0.4% better scaling the superblocks' lambdas (Frozen II 0.9%),
+// and was 0.6% worse setting their q indexes (delta_q, the rows coded
+// one after another).
+var dbgNoTPL = false
 
 // dbgNoOverlay shows a filtered anchor itself.
 var dbgNoOverlay bool

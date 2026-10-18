@@ -142,6 +142,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	case fp.deltaQ:
 		f.sbQ = j.sbQ
 	}
+	f.sbLambda = j.sbLambda
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
