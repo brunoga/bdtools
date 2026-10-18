@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's mini-GOPs 32 pictures (were 16), a level more of
+  the pyramid: 0.8% smaller on the 120-picture clips and 1.2 times
+  faster, +20.2% against SVT-AV1 preset 4 (which codes 32 too).
 - The AV1 encoder gathers the Wiener filter's statistics with AVX2: the
   same stream, 1.5% less CPU.
 - The AV1 encoder's transform type ranking makes each column pass once

@@ -74,9 +74,11 @@ var dbgNoOverlay bool
 // mini-GOPs of 8, 52, 52, 36, 20 0.9% better than that (Frozen II 1.8%),
 // 64, 64, 44, 24 0.7% (Blade Runner 2049 0.9% worse), 32, 32, 22, 12
 // 1.2% worse; the leaves 8 coarser 0.2% better; mini-GOPs of 16 with
-// these 1.1% better than of 8.)
+// these 1.1% better than of 8; of 32 with 52, 52, 40, 30, 20, 10 0.8%
+// better than of 16, and 1.2 times faster, 60, 60, 52, 40, 28, 16 1.9%
+// worse, 44, 44, 34, 24, 14, 6 and 52, 52, 40, 28, 16, 8 0.7% better.)
 var (
-	depthQ = [...]int{52, 52, 40, 28, 16, 0, 0, 0}
+	depthQ = [...]int{52, 52, 40, 30, 20, 10, 0, 0}
 	leafQ  = 8
 )
 
@@ -88,7 +90,7 @@ func (e *Encoder) miniGOP() int {
 	if e.o.MiniGOP > 0 {
 		return e.o.MiniGOP
 	}
-	return 16
+	return 32
 }
 
 func (e *Encoder) keyint() int {
