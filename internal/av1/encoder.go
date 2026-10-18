@@ -35,7 +35,7 @@ type EncoderOptions struct {
 	// only.
 	Keyint int
 	// MiniGOP is how many pictures a mini-GOP has (coded as a pyramid,
-	// the last first); 0 picks 8, 1 codes each picture from the one
+	// the last first); 0 picks 16, 1 codes each picture from the one
 	// before.
 	MiniGOP int
 }

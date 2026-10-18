@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's mini-GOPs 16 pictures (were 8): 1.1% smaller and a
+  fifth faster on the 120-picture clips, +23.7% against SVT-AV1 preset 4.
 - The AV1 encoder's temporal model sets each mini-GOP's anchor q (and
   its depth 2 frames') by how much the others take from it: 0.6%
   smaller (Frozen II 1.1%), +25.9% against SVT-AV1 preset 4.
