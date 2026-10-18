@@ -202,6 +202,11 @@ func TestBenchSeq(t *testing.T) {
 		tfAfter = v
 		defer func() { tfAfter = old }()
 	}
+	if v, err := strconv.Atoi(os.Getenv("AV1SAMEDIR")); err == nil {
+		old := sameDirComp
+		sameDirComp = v
+		defer func() { sameDirComp = old }()
+	}
 	if v, err := strconv.ParseFloat(os.Getenv("AV1CANDRATIO"), 64); err == nil {
 		old := candRatio
 		candRatio = v
