@@ -50,13 +50,14 @@ const (
 	sqrtPiBy2                  = 1.25331413732
 )
 
-// dbgNoTF codes the anchors' sources unfiltered. The filter is off: on
-// the two 120-picture disc clips, with three pictures after the anchor
-// (tfAfter), it cost 1.3% BD-rate (PSNR) with overlay frames and 0.5%
-// showing the filtered anchor itself. It filters fully there (the mean
-// weight 982 of 1000), but those sources have little noise to take out
-// (the filtered anchor 53.6 dB from its source).
-var dbgNoTF = true
+// dbgNoTF codes the anchors' sources unfiltered. On the two 120-picture
+// disc clips, with three pictures after the anchor (tfAfter), the filter
+// is 0.8% BD-rate (PSNR) better with overlay frames and 0.5% showing the
+// filtered anchor itself, in mini-GOPs of 32 (in those of 16 it cost
+// 1.3% and 0.5%: the anchors have half as many frames predicting from
+// them). Those sources have little noise to take out (the filtered anchor
+// 53.6 dB from its source), the mean weight 982 of 1000.
+var dbgNoTF = false
 
 // tfAfter is how many pictures after the anchor the filter waits for
 // (the next mini-GOP's first ones: a lookahead).
