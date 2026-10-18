@@ -14,6 +14,9 @@ func filterColClipAVX2(out *uint16, mid *int32, w int, n int, k *int32, taps int
 //go:noescape
 func widenAVX2(out *int32, src *uint16, n int, sh uint64)
 
+//go:noescape
+func compAvgAVX2(out *uint16, p0, p1 *int32, n int, w0, w1, add int32, sh uint64, maxV int32)
+
 // filterRow is filterRowGo, 8 outputs at a time with AVX2.
 func filterRow(out []int32, row []uint16, k *[8]int16, lo, hi int, add int32, sh uint) {
 	n := len(out)
@@ -63,4 +66,13 @@ func widen(out []int32, src []uint16, sh uint) {
 		widenAVX2(&out[0], &src[0], n, uint64(sh))
 	}
 	widenGo(out[n:], src[n:len(out)], sh)
+}
+
+// compAvg is compAvgGo, 8 at a time with AVX2.
+func compAvg(out []uint16, p0, p1 []int32, w0, w1 int32, sh uint, maxV int32) {
+	n := len(out) &^ 7
+	if useAVX2 && n > 0 {
+		compAvgAVX2(&out[0], &p0[0], &p1[0], n, w0, w1, 1<<(sh-1), uint64(sh), maxV)
+	}
+	compAvgGo(out[n:], p0[n:len(out)], p1[n:len(out)], w0, w1, sh, maxV)
 }

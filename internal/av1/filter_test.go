@@ -25,6 +25,32 @@ func TestWidenMatches(t *testing.T) {
 	}
 }
 
+// The compound average with AVX2 as in Go, plain and distance weighted,
+// for every length, the sums out of range both ways.
+func TestCompAvgMatches(t *testing.T) {
+	rng := rand.New(rand.NewPCG(3, 4))
+	p0, p1 := make([]int32, 131), make([]int32, 131)
+	for i := range p0 {
+		p0[i], p1[i] = rng.Int32N(1<<16)-1<<13, rng.Int32N(1<<16)-1<<13
+	}
+	for n := range len(p0) {
+		for _, c := range []struct {
+			w0, w1 int32
+			sh     uint
+			maxV   int32
+		}{{1, 1, 5, 255}, {1, 1, 3, 1023}, {9, 7, 8, 255}, {13, 3, 6, 1023}} {
+			a, b := make([]uint16, n), make([]uint16, n)
+			compAvg(a, p0, p1, c.w0, c.w1, c.sh, c.maxV)
+			compAvgGo(b, p0, p1, c.w0, c.w1, c.sh, c.maxV)
+			for i := range a {
+				if a[i] != b[i] {
+					t.Fatalf("n %d %+v at %d: %d, want %d", n, c, i, a[i], b[i])
+				}
+			}
+		}
+	}
+}
+
 // The filters with AVX2 (where there is) as in Go, for every kernel,
 // width and rounding.
 func TestFiltersMatch(t *testing.T) {

@@ -147,3 +147,44 @@ widenLoop:
 	JNZ       widenLoop
 	VZEROUPPER
 	RET
+
+// func compAvgAVX2(out *uint16, p0, p1 *int32, n int, w0, w1, add int32, sh uint64, maxV int32)
+// out[i] = clip((w0*p0[i] + w1*p1[i] + add) >> sh, 0, maxV), 8 at a time.
+TEXT ·compAvgAVX2(SB), NOSPLIT, $0-60
+	MOVQ         out+0(FP), DI
+	MOVQ         p0+8(FP), SI
+	MOVQ         p1+16(FP), R8
+	MOVQ         n+24(FP), CX
+	MOVL         w0+32(FP), AX
+	VMOVQ        AX, X8
+	VPBROADCASTD X8, Y8
+	MOVL         w1+36(FP), AX
+	VMOVQ        AX, X9
+	VPBROADCASTD X9, Y9
+	MOVL         add+40(FP), AX
+	VMOVQ        AX, X10
+	VPBROADCASTD X10, Y10
+	VMOVQ        sh+48(FP), X11
+	MOVL         maxV+56(FP), AX
+	VMOVQ        AX, X12
+	VPBROADCASTW X12, X12
+
+avgLoop:
+	VMOVDQU      (SI), Y0
+	VMOVDQU      (R8), Y1
+	VPMULLD      Y8, Y0, Y0
+	VPMULLD      Y9, Y1, Y1
+	VPADDD       Y1, Y0, Y0
+	VPADDD       Y10, Y0, Y0
+	VPSRAD       X11, Y0, Y0
+	VEXTRACTI128 $1, Y0, X1
+	VPACKUSDW    X1, X0, X0
+	VPMINUW      X12, X0, X0
+	VMOVDQU      X0, (DI)
+	ADDQ         $16, DI
+	ADDQ         $32, SI
+	ADDQ         $32, R8
+	SUBQ         $8, CX
+	JNZ          avgLoop
+	VZEROUPPER
+	RET

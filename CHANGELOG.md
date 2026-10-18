@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder averages compound predictions (plain and distance
+  weighted) with AVX2: 1.7% less CPU, the same stream.
 - The AV1 encoder's forward and inverse transforms call their 1D
   transforms directly, their buffers no longer allocated on the heap:
   2.5% less CPU, the same stream.
