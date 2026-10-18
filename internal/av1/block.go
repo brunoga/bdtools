@@ -708,6 +708,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 			types = types[:1]
 		}
 	}
+	zeroStop := pruneTxZero && t.b.isInter && len(types) > 1 && types[0] == DCT_DCT
 	tc := txCoded{plane: plane, x4: startX >> 2, y4: startY >> 2, txSz: txSz}
 	bestJ := math.Inf(1)
 	var best txCoded
@@ -745,6 +746,9 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 			copy(t.best[:w*h], t.trial[:w*h])
 		} else {
 			t.levels = t.levels[:tc.off]
+		}
+		if zeroStop && tc.eob == 0 {
+			break // DCT_DCT all zero: the others not tried
 		}
 	}
 	if best.eob > 0 {

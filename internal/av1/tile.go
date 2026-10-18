@@ -91,7 +91,7 @@ type tileEnc struct {
 	levels               []int32
 	lv                   [32 * 32]uint8
 	cflL                 [32 * 32]int32
-	snaps                [10][8]*snapshot // by depth, a few each
+	snaps                [10][9]*snapshot // by depth, a few each
 	sbStart              snapshot
 	cdefDone             bool
 	// The quantizers and lambda the tile codes with now (its
@@ -103,6 +103,8 @@ type tileEnc struct {
 	readDeltas bool
 	sbDelta    int
 	dctOnly    bool // luma transform types not searched
+	// retype codes a decided transform tree searching its types
+	retype     bool
 	stack      mvStack
 	txX4, txY4 int // the transform block being coded, in 4x4s of its plane
 	ms         motionSearch

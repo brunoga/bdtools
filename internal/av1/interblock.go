@@ -148,6 +148,14 @@ var (
 		{LAST2_FRAME, BWDREF_FRAME}, {LAST2_FRAME, ALTREF2_FRAME}, {LAST2_FRAME, ALTREF_FRAME}}
 )
 
+// pruneTxTree decides an inter block's transform tree with DCT_DCT only
+// and searches the types of its leaves after; pruneTxZero tries no other
+// type of a transform whose DCT_DCT quantizes to all zero.
+// (On the two 120-picture clips: the tree 1.39 times faster for 0.8%
+// BD-rate, 1.0% decided with IDTX too: off; the zero rule 1.19 times
+// faster for 0.2%.)
+var pruneTxTree, pruneTxZero = false, true
+
 // dbgFewRefs limits the search to the references and pairs it had first
 // (LAST, BWDREF, ALTREF, GOLDEN; LAST with BWDREF or ALTREF).
 var dbgFewRefs = false
@@ -419,15 +427,38 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 	}
 	txSz := b.txSz
 	stepX, stepY := int(txWidth[txSz])>>2, int(txHeight[txSz])>>2
-	cur := &varTxCursor{}
-	zero := true
-	for y := 0; y < b.bh4; y += stepY {
-		for x := 0; x < b.bw4; x += stepX {
-			jj, z := t.varTx(dec, b.r+y, b.c+x, txSz, 0, search, cur)
-			j += jj
-			zero = zero && z
+	luma := func(search bool) (float64, bool) {
+		cur := &varTxCursor{}
+		j, zero := 0.0, true
+		for y := 0; y < b.bh4; y += stepY {
+			for x := 0; x < b.bw4; x += stepX {
+				jj, z := t.varTx(dec, b.r+y, b.c+x, txSz, 0, search, cur)
+				j += jj
+				zero = zero && z
+			}
 		}
+		return j, zero
 	}
+	var jl float64
+	var zero bool
+	if search && pruneTxTree && f.fp.qIndex > 0 && !dbgNoVarTx {
+		// the tree decided with DCT_DCT alone, then its types searched
+		s := t.snap(0, 8)
+		t.save(s, b.r, b.c, b.size, true)
+		nTxs, nLevels := len(t.txs), len(t.levels)
+		t.dctOnly = true
+		luma(true)
+		t.dctOnly = false
+		t.restore(s, true)
+		t.txs, t.levels = t.txs[:nTxs], t.levels[:nLevels]
+		dec.txTypes = dec.txTypes[:0]
+		t.retype = true
+		jl, zero = luma(false)
+		t.retype = false
+	} else {
+		jl, zero = luma(search)
+	}
+	j += jl
 	if b.hasChroma {
 		uvTx := t.planeTxSize(1)
 		sx, sy := int(txWidth[uvTx])>>2, int(txHeight[uvTx])>>2
@@ -729,12 +760,12 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 			j = t.lambda * float64(t.cost.n) / costScale
 		}
 		tt := -1
-		if !search {
+		if !search && !t.retype {
 			tt = int(dec.txTypes[cur.typ])
 			cur.typ++
 		}
 		jj, eob, chosen, _ := t.transformBlock(0, col*4, row*4, txSz, tt)
-		if search {
+		if search || t.retype {
 			dec.txTypes = append(dec.txTypes, uint8(chosen)) //nolint:gosec // a type
 		}
 		t.setTxSize(row, col, txSz)

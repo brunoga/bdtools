@@ -162,6 +162,13 @@ func TestBenchSeq(t *testing.T) {
 		refsPrevDepth = v
 		defer func() { refsPrevDepth = old }()
 	}
+	for env, v := range map[string]*bool{"AV1PRUNETXTREE": &pruneTxTree, "AV1NOPRUNETXZERO": &pruneTxZero} {
+		if e := os.Getenv(env); e != "" {
+			old := *v
+			*v = e == "1" && env == "AV1PRUNETXTREE"
+			defer func() { *v = old }()
+		}
+	}
 	if os.Getenv("AV1TPL") != "" {
 		dbgNoTPL = false
 		defer func() { dbgNoTPL = true }()

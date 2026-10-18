@@ -258,3 +258,17 @@ func raceCut[T any](s []T) []T {
 	}
 	return s
 }
+
+// Inter transform trees decided with DCT_DCT and their types searched
+// after (off by default): decoded to the reconstruction.
+func TestPruneTxTree(t *testing.T) {
+	defer func(was bool) { pruneTxTree = was }(pruneTxTree)
+	pruneTxTree = true
+	o := EncoderOptions{Width: 136, Height: 96, BitDepth: 8, QIndex: 90, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+	p := testPicture(136, 96, 8, 2)
+	var pics []*Source
+	for i := range 5 {
+		pics = append(pics, shifted(p, 2*i, i))
+	}
+	checkDecodes(t, o, pics)
+}
