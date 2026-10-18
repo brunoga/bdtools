@@ -90,13 +90,18 @@ type tileEnc struct {
 	b                    blockState
 	pred, trial, best    [64 * 64]uint16
 	resid, coef, dq, inv [64 * 64]int32
-	txs                  []txCoded
-	levels               []int32
-	lv                   [32 * 32]uint8
-	cflL                 [32 * 32]int32
-	snaps                [10][9]*snapshot // by depth, a few each
-	sbStart              snapshot
-	cdefDone             bool
+	// txCoef are the forward transforms of the residual by type that
+	// rankTxTypes made, txCoefOK which (bit by type) are there
+	txCoef    [TX_TYPES][32 * 32]int32
+	txCoefOK  uint32
+	txTypeBuf [TX_TYPES]int
+	txs       []txCoded
+	levels    []int32
+	lv        [32 * 32]uint8
+	cflL      [32 * 32]int32
+	snaps     [10][9]*snapshot // by depth, a few each
+	sbStart   snapshot
+	cdefDone  bool
 	// The quantizers and lambda the tile codes with now (its
 	// CurrentQIndex's, a superblock's), and the delta_q to code on the
 	// superblock's first block.
