@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's transform type ranking makes each column pass once
+  for the types that share it: the same stream, 2.2% less CPU.
 - The AV1 encoder's inter transform trees stop searching a split once
   it costs more than the whole: the same stream, 1% faster.
 - The AV1 encoder ranks a transform's types by an estimate from their

@@ -890,7 +890,6 @@ var txCands = 3
 // to the last. DCT_DCT goes first when kept, and alone when it quantizes
 // to all zero in an inter block (as pruneTxZero would stop).
 func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
-	f := t.f
 	w, h := int(txWidth[txSz]), int(txHeight[txSz])
 	n := min(w, 32) * min(h, 32)
 	den := int64(dqDenom(txSz))
@@ -901,9 +900,10 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 		est float64
 	}
 	var rs [TX_TYPES]ranked
+	t.txCols.reset()
 	for i, tt := range types {
 		c := t.txCoef[tt][:n]
-		forwardTransform(t.resid[:w*h], txSz, tt, f.bitDepth, false, c)
+		forwardTypes(t.resid[:w*h], txSz, types[i:i+1], &t.txCoef, &t.txCols)
 		t.txCoefOK |= 1 << uint(tt)
 		inv := invScanFor(txSz, tt)[:n]
 		var d int64

@@ -94,6 +94,7 @@ type tileEnc struct {
 	// rankTxTypes made, txCoefOK which (bit by type) are there
 	txCoef    [TX_TYPES][32 * 32]int32
 	txCoefOK  uint32
+	txCols    fwdColCache
 	txTypeBuf [TX_TYPES]int
 	txs       []txCoded
 	levels    []int32
