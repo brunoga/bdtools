@@ -173,6 +173,15 @@ func TestBenchSeq(t *testing.T) {
 		dbgNoTPL = false
 		defer func() { dbgNoTPL = true }()
 	}
+	if os.Getenv("AV1NOOVERLAY") != "" {
+		dbgNoOverlay = true
+		defer func() { dbgNoOverlay = false }()
+	}
+	if v, err := strconv.Atoi(os.Getenv("AV1TFAFTER")); err == nil {
+		old := tfAfter
+		tfAfter = v
+		defer func() { tfAfter = old }()
+	}
 	if os.Getenv("AV1TF") != "" {
 		dbgNoTF = false
 		defer func() { dbgNoTF = true }()
