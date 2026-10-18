@@ -132,11 +132,16 @@ type blockState struct {
 	refMvIdx int
 	// a compound block's second reference (NONE for single prediction)
 	// and its motion vector
-	refFrame2  int
-	mv2        mv
-	interp     int  // its interpolation filter
-	obmc       bool // motion_mode OBMC (else SIMPLE)
-	filterMode int  // filter_intra_mode, or -1
+	refFrame2 int
+	mv2       mv
+	interp    int  // its interpolation filter
+	obmc      bool // motion_mode OBMC (else SIMPLE)
+	// warp is motion_mode LOCALWARP; warpParams LocalWarpParams, and
+	// warpValid LocalValid after the setup shear process
+	warp       bool
+	warpParams [6]int32
+	warpValid  bool
+	filterMode int // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
 	maxLumaW, maxLumaH int
@@ -167,6 +172,7 @@ type blockDec struct {
 	skipMode        bool   // coded as skip_mode
 	compDist        bool   // compound_idx 0: the predictions weighted by distance
 	obmc            bool   // motion_mode OBMC
+	warp            bool   // motion_mode LOCALWARP
 	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order

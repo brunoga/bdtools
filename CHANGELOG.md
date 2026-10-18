@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Local warped motion in the AV1 encoder (motion_mode LOCALWARP: an
+  affine model fitted to the neighbours' motion): 0.2% smaller on the
+  120-picture clips, +29.1% against SVT-AV1 preset 4.
 - Temporal motion vectors in the AV1 encoder (use_ref_frame_mvs: the
   references' motion projected to give candidates): 1.7% smaller on the
   120-picture clips, +29.5% against SVT-AV1 preset 4. Distance weighted
