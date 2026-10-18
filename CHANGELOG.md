@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's sub-sample filters in AVX2: 18% less CPU, 12% less
+  time, the same stream. (A legacy SSE move left in AVX2 code made the
+  first try slower than Go on the P-cores; the OCR kernel had one too.)
 - The AV1 encoder 1.19 times faster again: an inter transform whose
   DCT_DCT quantizes to all zero tries no other type (+0.2% BD-rate),
   and the quantizer divides only for the nonzero levels (the same

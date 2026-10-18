@@ -186,10 +186,11 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 	}
 }
 
-// filterCol is one row of the vertical filter: out[c] is the kernel's
+// filterColGo is filterCol in Go. filterCol is one row of the vertical
+// filter: out[c] is the kernel's
 // taps lo..hi-1 over column c of the rows (w apart) from mid's, rounded
 // by sh.
-func filterCol(out, mid []int32, w int, k *[8]int16, lo, hi int, add int32, sh uint) {
+func filterColGo(out, mid []int32, w int, k *[8]int16, lo, hi int, add int32, sh uint) {
 	switch hi - lo {
 	case 6:
 		k0, k1, k2, k3, k4, k5 := int32(k[lo]), int32(k[lo+1]), int32(k[lo+2]), int32(k[lo+3]), int32(k[lo+4]), int32(k[lo+5])
@@ -223,9 +224,10 @@ func filterCol(out, mid []int32, w int, k *[8]int16, lo, hi int, add int32, sh u
 	}
 }
 
-// filterRow is one row of the horizontal filter: out[c] is the kernel's
+// filterRowGo is filterRow in Go. filterRow is one row of the horizontal
+// filter: out[c] is the kernel's
 // taps lo..hi-1 over row[c+lo..], rounded by sh.
-func filterRow(out []int32, row []uint16, k *[8]int16, lo, hi int, add int32, sh uint) {
+func filterRowGo(out []int32, row []uint16, k *[8]int16, lo, hi int, add int32, sh uint) {
 	switch {
 	case lo == 1 && hi == 7:
 		k1, k2, k3, k4, k5, k6 := int32(k[1]), int32(k[2]), int32(k[3]), int32(k[4]), int32(k[5]), int32(k[6])
