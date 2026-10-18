@@ -67,13 +67,18 @@ var dbgNoTPL = false
 // dbgNoOverlay shows a filtered anchor itself.
 var dbgNoOverlay bool
 
-// depthQ is how much finer (in q index) a frame at a depth codes.
-// (Measured on two 1080p disc clips: 40, 40, 28, 16 better than 24, 24,
-// 16, 8 by 3.5% BD-rate; on the 120-picture clips, with every tool in,
-// these 0.9% better than that (Frozen II 1.8%), 64, 64, 44, 24 0.7%
-// (Blade Runner 2049 0.9% worse), 32, 32, 22, 12 1.2% worse; the
-// pictures at the bottom 8 coarser than the run's q, 0.2% better.)
-var depthQ = [...]int{52, 52, 36, 20, -8, 0, 0, 0}
+// depthQ is how much finer (in q index) a frame at a depth codes, and
+// leafQ how much coarser the pictures no other refers to. (Measured on
+// two 1080p disc clips: 40, 40, 28, 16 better than 24, 24, 16, 8 by
+// 3.5% BD-rate; on the 120-picture clips, with every tool in and
+// mini-GOPs of 8, 52, 52, 36, 20 0.9% better than that (Frozen II 1.8%),
+// 64, 64, 44, 24 0.7% (Blade Runner 2049 0.9% worse), 32, 32, 22, 12
+// 1.2% worse; the leaves 8 coarser 0.2% better; mini-GOPs of 16 with
+// these 1.1% better than of 8.)
+var (
+	depthQ = [...]int{52, 52, 40, 28, 16, 0, 0, 0}
+	leafQ  = 8
+)
 
 // keyQ is how much finer key frames code.
 var keyQ = 56
@@ -83,7 +88,7 @@ func (e *Encoder) miniGOP() int {
 	if e.o.MiniGOP > 0 {
 		return e.o.MiniGOP
 	}
-	return 8
+	return 16
 }
 
 func (e *Encoder) keyint() int {
@@ -205,8 +210,12 @@ func (e *Encoder) plan(j *frameJob) step {
 	j.q = e.o.QIndex
 	if e.o.QIndex > 0 && !dbgFlatQ {
 		j.q = max(e.o.QIndex-depthQ[j.depth], 1)
-		if j.key {
+		switch {
+		case j.key:
 			j.q = max(e.o.QIndex-keyQ, 1)
+		case j.show && e.miniGOP() > 1:
+			// a leaf (shown at once: kept in no slot)
+			j.q = min(e.o.QIndex+leafQ, 255)
 		}
 	}
 	j.state = &refFrameState{disp: j.disp, depth: j.depth, done: make(chan struct{})}
