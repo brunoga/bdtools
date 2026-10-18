@@ -202,6 +202,11 @@ func TestBenchSeq(t *testing.T) {
 		tfAfter = v
 		defer func() { tfAfter = old }()
 	}
+	if v, err := strconv.ParseFloat(os.Getenv("AV1INTRASKIP"), 64); err == nil {
+		old := intraSkip
+		intraSkip = v
+		defer func() { intraSkip = old }()
+	}
 	if os.Getenv("AV1TF") != "" {
 		dbgNoTF = false
 		defer func() { dbgNoTF = true }()
