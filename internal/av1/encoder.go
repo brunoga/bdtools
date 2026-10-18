@@ -46,8 +46,9 @@ type EncoderOptions struct {
 	// estimate is near inter's, inter candidates coded in full where
 	// theirs are near the best's; 1 the transform trees decided with
 	// DCT_DCT, the interpolation filter by SATD, no warped motion or
-	// masked compound (1.7 times faster, 3.2% larger); 2 also no OBMC,
-	// four references and two candidates coded in full (2.2 times, 4.7%).
+	// masked compound, no compound of two earlier frames (1.7 times
+	// faster, 3.2% larger); 2 also no OBMC, four references and two
+	// candidates coded in full (2.2 times, 4.7%).
 	Speed int
 }
 
@@ -58,6 +59,7 @@ type tools struct {
 	filterRD, obmc, fewRefs, txTree bool
 	pruneSkip, pruneExt             bool // the partition search's prunings
 	intraSkip, candRatio            float64
+	sameDir                         int // sameDirComp's
 }
 
 // Encoder codes pictures.
@@ -122,7 +124,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio = false, 0, 0
 	}
@@ -136,6 +138,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 			e.tools.candRatio = min(e.tools.candRatio, 1.05)
 		}
 		e.seq.warpedMotion, e.seq.maskedCompound = false, false
+		e.tools.sameDir = 0
 	}
 	if o.Speed >= 2 {
 		e.tools.obmc, e.tools.fewRefs = false, true
@@ -199,8 +202,8 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 			f.refs[ref] = r
 			fi.orderHints[ref] = r.orderHint & (1<<orderHintBits - 1)
 			fp.refHints[ref-LAST_FRAME] = fi.orderHints[ref]
-			if r.disp > j.disp && !dbgNoCompound {
-				fp.refSelect = true // a reference after the frame: compound blocks
+			if !dbgNoCompound && (r.disp > j.disp || e.tools.sameDir > 0 && r != j.refs[0]) {
+				fp.refSelect = true // two frames to compound
 			}
 		}
 		fi.setRefFrameSignBias()

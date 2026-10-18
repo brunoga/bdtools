@@ -1,10 +1,9 @@
 package av1
 
-// Compound prediction: a block predicted from a reference before the
-// frame and one after it, the two averaged (COMPOUND_AVERAGE: the masked
-// and distance-weighted compounds are not enabled). Its syntax: comp_mode,
-// the bidirectional references, compound_mode and the motion vectors of
-// its NEW parts.
+// Compound prediction: a block predicted from two references, the two
+// averaged, weighted by distance or masked. Its syntax: comp_mode, the
+// references (bidirectional or unidirectional), compound_mode and the
+// motion vectors of its NEW parts.
 
 // isCompound reports whether the block in t.b is compound.
 func (t *tileEnc) isCompound() bool { return t.b.refFrame2 > INTRA_FRAME }
@@ -127,8 +126,22 @@ func (t *tileEnc) writeRefFrames(cd coder) {
 		return n
 	}
 	c := t.cdf
-	cd.symbol(BIDIR_COMP_REFERENCE, c.compRefType[t.compRefTypeCtx()][:])
 	r0, r1 := b.refFrame, b.refFrame2
+	if samedirRefPair(r0, r1) {
+		cd.symbol(UNIDIR_COMP_REFERENCE, c.compRefType[t.compRefTypeCtx()][:])
+		fwd := cnt(LAST_FRAME, LAST2_FRAME, LAST3_FRAME, GOLDEN_FRAME)
+		bwd := cnt(BWDREF_FRAME, ALTREF2_FRAME, ALTREF_FRAME)
+		cd.symbol(b2i(r0 == BWDREF_FRAME), c.uniCompRef[refCountCtx(fwd, bwd)][0][:])
+		if r0 == BWDREF_FRAME {
+			return
+		}
+		cd.symbol(b2i(r1 != LAST2_FRAME), c.uniCompRef[refCountCtx(cnt(LAST2_FRAME), cnt(LAST3_FRAME, GOLDEN_FRAME))][1][:])
+		if r1 != LAST2_FRAME {
+			cd.symbol(b2i(r1 == GOLDEN_FRAME), c.uniCompRef[refCountCtx(cnt(LAST3_FRAME), cnt(GOLDEN_FRAME))][2][:])
+		}
+		return
+	}
+	cd.symbol(BIDIR_COMP_REFERENCE, c.compRefType[t.compRefTypeCtx()][:])
 	high := r0 == LAST3_FRAME || r0 == GOLDEN_FRAME
 	cd.symbol(b2i(high), c.compRef[refCountCtx(cnt(LAST_FRAME, LAST2_FRAME), cnt(LAST3_FRAME, GOLDEN_FRAME))][0][:])
 	if high {

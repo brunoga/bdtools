@@ -10,6 +10,7 @@ package av1
 import (
 	"math"
 	"sort"
+	"sync/atomic"
 )
 
 // interCands is how many inter candidates are coded in full.
@@ -149,11 +150,22 @@ func (t *tileEnc) predictBlock() {
 }
 
 // interRefs are the references inter blocks try (a frame two of them
-// are tried once), compPairs the compound pairs.
+// are tried once), compPairs the compound pairs: those of the
+// bidirectional syntax (a reference of LAST_FRAME to GOLDEN_FRAME, one of
+// BWDREF_FRAME to ALTREF_FRAME, in whichever order they are shown) and
+// the unidirectional one's. sameDirComp tries the pairs whose frames are
+// both before the frame or both after it too: 1 in frames with no later
+// reference, 2 in every frame. (On the two 120-picture clips: 1 0.1%
+// smaller for 3% more time, 2 0.0% for 10%.)
 var (
-	interRefs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF2_FRAME, ALTREF_FRAME, LAST2_FRAME, LAST3_FRAME, GOLDEN_FRAME}
-	compPairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF2_FRAME}, {LAST_FRAME, ALTREF_FRAME},
-		{LAST2_FRAME, BWDREF_FRAME}, {LAST2_FRAME, ALTREF2_FRAME}, {LAST2_FRAME, ALTREF_FRAME}}
+	sameDirComp = 1
+	// sameDirBlocks counts the compound blocks whose frames are on one
+	// side, by the unidirectional syntax and the bidirectional (tests).
+	sameDirBlocks [2]atomic.Int64
+	interRefs     = []int{LAST_FRAME, BWDREF_FRAME, ALTREF2_FRAME, ALTREF_FRAME, LAST2_FRAME, LAST3_FRAME, GOLDEN_FRAME}
+	compPairs     = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF2_FRAME}, {LAST_FRAME, ALTREF_FRAME},
+		{LAST2_FRAME, BWDREF_FRAME}, {LAST2_FRAME, ALTREF2_FRAME}, {LAST2_FRAME, ALTREF_FRAME},
+		{LAST_FRAME, LAST2_FRAME}, {LAST_FRAME, LAST3_FRAME}, {LAST_FRAME, GOLDEN_FRAME}, {BWDREF_FRAME, ALTREF_FRAME}}
 )
 
 // pruneTxTree decides an inter block's transform tree with DCT_DCT only
@@ -197,7 +209,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	refs, pairs := interRefs, compPairs
 	if f.tools.fewRefs {
 		refs = []int{LAST_FRAME, BWDREF_FRAME, ALTREF_FRAME, GOLDEN_FRAME}
-		pairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}}
+		pairs = [][2]int{{LAST_FRAME, BWDREF_FRAME}, {LAST_FRAME, ALTREF_FRAME}, {LAST_FRAME, GOLDEN_FRAME}}
 	}
 	// the reference tried for each frame
 	tried := map[*refFrameState]int{}
@@ -220,9 +232,19 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 			}
 		}
 		pairSeen := map[[2]*refFrameState]bool{}
+		sameDir := f.tools.sameDir == 2
+		if f.tools.sameDir == 1 {
+			sameDir = true
+			for _, r := range f.refs[LAST_FRAME:] {
+				if r != nil && r.disp > f.fp.orderHint {
+					sameDir = false
+				}
+			}
+		}
 		for _, pair := range pairs {
 			r0, r1 := f.refs[pair[0]], f.refs[pair[1]]
-			if r0 == nil || r1 == nil || !seen[r0] || !seen[r1] || r0.disp >= f.fp.orderHint || r1.disp <= f.fp.orderHint {
+			if r0 == nil || r1 == nil || r0 == r1 || !seen[r0] || !seen[r1] ||
+				!sameDir && (r0.disp >= f.fp.orderHint || r1.disp <= f.fp.orderHint) {
 				continue
 			}
 			if pairSeen[[2]*refFrameState{r0, r1}] {
@@ -619,6 +641,11 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	}
 	if b.ii.on {
 		interIntraBlocks[b2i(b.ii.wedge)].Add(1)
+	}
+	if b.refFrame2 > INTRA_FRAME && !b.skipMode {
+		if r0, r1 := t.f.refs[b.refFrame], t.f.refs[b.refFrame2]; (r0.disp > t.f.fp.orderHint) == (r1.disp > t.f.fp.orderHint) {
+			sameDirBlocks[b2i(!samedirRefPair(b.refFrame, b.refFrame2))].Add(1)
+		}
 	}
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)

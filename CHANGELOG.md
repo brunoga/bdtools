@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's compound blocks can take two frames on the same
+  side of the frame (the unidirectional pairs, and the bidirectional
+  syntax's with both frames earlier), in the frames with no later
+  reference (the mini-GOPs' anchors), to `slow`: 0.1% smaller on the
+  120-picture clips for 3% more time.
 - The AV1 encoder codes in full only the inter candidates whose
   estimate is within 15% of the best one's (5% from `medium`): 1.08
   times faster on the 120-picture clips, 0.1% smaller.

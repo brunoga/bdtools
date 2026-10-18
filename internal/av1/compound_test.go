@@ -53,3 +53,27 @@ func TestDistWeights(t *testing.T) {
 		}
 	}
 }
+
+// Compound blocks from two frames on one side: every picture coded from
+// the ones before it (MiniGOP 1), and in a mini-GOP's later frames.
+func TestSameDirCompound(t *testing.T) {
+	defer func() { dbgForceCompound, dbgForceInter = false, false }()
+	dbgForceCompound, dbgForceInter = true, true
+	for _, gop := range raceCut([]int{1, 4}) {
+		t.Run(fmt.Sprint(gop), func(t *testing.T) {
+			o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: gop}
+			p := testPicture(96, 64, 8, 3)
+			var pics []*Source
+			for i := range 9 {
+				pics = append(pics, shifted(p, i, i/3))
+			}
+			u0, b0 := sameDirBlocks[0].Load(), sameDirBlocks[1].Load()
+			checkDecodes(t, o, pics)
+			u, b := sameDirBlocks[0].Load()-u0, sameDirBlocks[1].Load()-b0
+			t.Logf("%d blocks unidirectional, %d bidirectional on one side", u, b)
+			if u == 0 {
+				t.Fatal("no unidirectional compound block")
+			}
+		})
+	}
+}
