@@ -174,6 +174,11 @@ func TestBenchSeq(t *testing.T) {
 		tplLambdaPow = v
 		defer func() { tplLambdaPow = old }()
 	}
+	if v, err := strconv.ParseFloat(os.Getenv("AV1TPLFRAMEK"), 64); err == nil {
+		old := tplFrameK
+		tplFrameK = v
+		defer func() { tplFrameK = old }()
+	}
 	if os.Getenv("AV1TPLQ") != "" {
 		tplLambda = false
 		defer func() { tplLambda = true }()

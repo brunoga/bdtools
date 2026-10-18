@@ -35,6 +35,11 @@ type tplFrame struct {
 var (
 	tplLambda    = true
 	tplLambdaPow = 0.5 // (1 was 0.3% better)
+	// tplFrameK moves an anchor's or a depth 2 frame's q by k log2(0.5/r0)
+	// (r0 its intra share): finer as more of it is taken. On the two
+	// 120-picture clips 8 is 0.6% better (Frozen II 1.1%, Blade Runner
+	// 2049 the same), 16 0.7% (Blade Runner 0.4% worse), 32 no better.
+	tplFrameK = 8.0
 )
 
 // tplMaxDelta bounds a superblock's q index offset.
@@ -107,6 +112,10 @@ func (e *Encoder) tpl(steps []step) {
 			continue
 		}
 		r0 := sumIntra / sumAll
+		if tplFrameK != 0 && j.depth <= 2 && !j.key {
+			// the frame's own q by how much the others take from it
+			j.q = min(max(j.q-int(math.Round(tplFrameK*math.Log2(0.5/r0))), 1), 255)
+		}
 		sbCols, sbRows := (2*((w+7)>>3)+15)>>4, (2*((h+7)>>3)+15)>>4
 		qs := make([]int, sbCols*sbRows)
 		ls := make([]float64, sbCols*sbRows)

@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's temporal model sets each mini-GOP's anchor q (and
+  its depth 2 frames') by how much the others take from it: 0.6%
+  smaller (Frozen II 1.1%), +25.9% against SVT-AV1 preset 4.
 - The AV1 encoder's temporal model on: it scales each superblock's
   lambda by how much later pictures take from it (nothing more to code,
   the rows still coded at once): 0.4% smaller (Frozen II 0.9%), +26.7%
