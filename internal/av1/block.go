@@ -19,6 +19,13 @@ var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSk
 // lumaCands is how many luma modes are coded in full.
 var lumaCands = 3
 
+// intraSkip skips an inter frame's block's intra search when its best
+// luma estimate is more than intraSkip times the best inter one's (0
+// never). (On the two 120-picture clips: 1.5 1.05 times faster for
+// 0.2% BD-rate, 1.2 1.06 for 0.1%, 1.0 1.08 for 0.2%, 0.8 1.10 for
+// 2.9%.)
+var intraSkip = 1.2
+
 // chromaCands is how many chroma modes are.
 var chromaCands = 2
 
@@ -112,6 +119,9 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	}
 	t.save(intra, r, c, size, true) // the inter's
 	t.restore(start, true)
+	if dn != nil {
+		t.intraLimit = t.f.tools.intraSkip * t.interEst
+	}
 	ji, di := t.searchIntraBlock(r, c, size)
 	if dn != nil && jn < ji {
 		t.restore(intra, true)
@@ -131,6 +141,12 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	dec := &blockDec{r: r, c: c, size: size}
 	// luma
 	cands := t.lumaCandidates()
+	if lim := t.intraLimit; lim > 0 {
+		t.intraLimit = 0
+		if cands[0].cost > lim {
+			return math.Inf(1), nil
+		}
+	}
 	maxDepth := 0
 	if !f.lossless && size > BLOCK_4X4 && f.fp.txSelect && !dbgNoDepth {
 		maxDepth = min(int(maxTxDepth[size]), MAX_TX_DEPTH)

@@ -115,6 +115,9 @@ type tileEnc struct {
 	interPred  [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
 	// maskP are the luma predictions masked variants are blended from
 	maskP [2][]int32
+	// interEst is the best inter candidate's estimate, intraLimit the
+	// intra estimate above which the intra search stops (0 none)
+	interEst, intraLimit float64
 	// iiPred is a plane's intra prediction of an inter-intra block,
 	// iiIntra the block's luma ones by mode, iiInter its luma inter one
 	iiPred  [32 * 32]uint16

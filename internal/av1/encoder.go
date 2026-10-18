@@ -40,8 +40,9 @@ type EncoderOptions struct {
 	MiniGOP int
 	// Speed trades size for time: -2 the partitions searched without
 	// pruning (3.8 times slower, 4.0% smaller on two 120-picture 1080p
-	// clips); -1 those after a skipped whole block too (2 times slower,
-	// 3.5% smaller); 0 every tool searched; 1 the
+	// clips); -1 those after a skipped whole block too, and intra
+	// everywhere (2 times slower, 3.5% smaller); 0 every tool searched,
+	// intra in inter pictures where its estimate is near inter's; 1 the
 	// transform trees decided with DCT_DCT, the interpolation filter by
 	// SATD, no warped motion or masked compound (1.5 times faster, 2.4%
 	// larger on two 120-picture 1080p clips); 2 also no OBMC, four
@@ -55,6 +56,7 @@ type tools struct {
 	interCands                      int
 	filterRD, obmc, fewRefs, txTree bool
 	pruneSkip, pruneExt             bool // the partition search's prunings
+	intraSkip                       float64
 }
 
 // Encoder codes pictures.
@@ -119,15 +121,16 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip}
 	if o.Speed <= -1 {
-		e.tools.pruneSkip = false
+		e.tools.pruneSkip, e.tools.intraSkip = false, 0
 	}
 	if o.Speed <= -2 {
 		e.tools.pruneExt = false
 	}
 	if o.Speed >= 1 {
 		e.tools.txTree, e.tools.filterRD = true, false
+		e.tools.intraSkip = min(e.tools.intraSkip, 1)
 		e.seq.warpedMotion, e.seq.maskedCompound = false, false
 	}
 	if o.Speed >= 2 {

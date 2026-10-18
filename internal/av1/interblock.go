@@ -258,6 +258,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 		sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
 	}
+	t.interEst = cands[0].est
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
 	t.save(start, r, c, size, true)

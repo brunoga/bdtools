@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder skips a block's intra search in inter pictures when
+  intra's estimate is well above inter's (from `medium`, nearer): 1.08
+  times faster for 0.1% on the 120-picture clips.
 - The AV1 encoder codes inter-intra blocks: a single reference block's
   prediction blended with a DC, V, H or smooth intra one, by a fading
   or a wedge mask, decoded bit-exact by libdav1d: 0.4% smaller on the
