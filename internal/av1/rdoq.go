@@ -18,6 +18,8 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	q := t.levels[off:]
 	den := int64(dqDenom(txSz))
 	dcQ, acQ := int64(t.dcQ[plane]), int64(t.acQ[plane])
+	inv := invScanFor(txSz, txType)[:n]
+	eob := 0
 	for i := range n {
 		qs := acQ
 		if i == 0 {
@@ -28,19 +30,18 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 		if neg {
 			c = -c
 		}
-		l := min((c*den+qs/2)/qs, 1<<18)
+		v := c*den + qs/2
+		if v < qs {
+			continue // 0 (q is zeroed): most are, and no division
+		}
+		l := min(v/qs, 1<<18)
 		if neg {
 			l = -l
 		}
 		q[i] = int32(l) //nolint:gosec // clamped
+		eob = max(eob, int(inv[i])+1)
 	}
 	scan := scanFor(txSz, txType)[:n]
-	eob := 0
-	for k, pos := range scan {
-		if q[pos] != 0 {
-			eob = k + 1
-		}
-	}
 	if eob == 0 || f.lossless || dbgNoRDOQ {
 		return eob
 	}
@@ -135,11 +136,9 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 		}
 		lv[pos] = uint8(min(bestL, NUM_BASE_LEVELS+COEFF_BASE_RANGE+1)) //nolint:gosec // at most 15
 	}
-	eob = 0
-	for k, pos := range scan {
-		if q[pos] != 0 {
-			eob = k + 1
-		}
+	// RDOQ only lowers levels: the end of block can only move back
+	for eob > 0 && q[scan[eob-1]] == 0 {
+		eob--
 	}
 	return eob
 }

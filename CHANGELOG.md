@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder 1.19 times faster again: an inter transform whose
+  DCT_DCT quantizes to all zero tries no other type (+0.2% BD-rate),
+  and the quantizer divides only for the nonzero levels (the same
+  stream).
 - The AV1 encoder codes the next mini-GOP's anchor while the frames
   below this one's are coded, and the frames of a depth at once (a frame
   refers only to frames above it in the pyramid; an anchor also to the

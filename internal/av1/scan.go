@@ -45,3 +45,34 @@ func scanFor(txSz, txType int) []uint16 {
 	}
 	return defaultScans[txSz]
 }
+
+// invScans are the scans' inverses (a position's place in the scan), as
+// scanFor picks them.
+var invDefaultScans, invMrowScans, invMcolScans = invertScans(&defaultScans), invertScans(&mrowScans), invertScans(&mcolScans)
+
+func invertScans(s *[TX_SIZES_ALL][]uint16) (inv [TX_SIZES_ALL][]uint16) {
+	for tx, scan := range s {
+		if scan == nil {
+			continue
+		}
+		inv[tx] = make([]uint16, len(scan))
+		for k, pos := range scan {
+			inv[tx][pos] = uint16(k) //nolint:gosec // at most 1023
+		}
+	}
+	return inv
+}
+
+// invScanFor is scanFor's scan inverted.
+func invScanFor(txSz, txType int) []uint16 {
+	if txSizeSqrUp[txSz] == TX_64X64 || txType == IDTX {
+		return invDefaultScans[txSz]
+	}
+	switch txClass(txType) {
+	case TX_CLASS_VERT:
+		return invMrowScans[txSz]
+	case TX_CLASS_HORIZ:
+		return invMcolScans[txSz]
+	}
+	return invDefaultScans[txSz]
+}
