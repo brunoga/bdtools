@@ -307,23 +307,24 @@ func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w,
 		mk.blend(plane, p0, p1, w, h, bitDepth, rnd, dst, dstStride)
 		return
 	}
+	w0, w1 := int32(1), int32(1)
 	if wt[0] != 0 { // COMPOUND_DISTANCE
 		sh = uint(4 + rnd.post)
-		for i := range h {
-			row := dst[i*dstStride : i*dstStride+w]
-			for j := range row {
-				v := (wt[0]*p0[i*w+j] + wt[1]*p1[i*w+j] + 1<<(sh-1)) >> sh
-				row[j] = uint16(clip(v, maxV)) //nolint:gosec // clipped
-			}
-		}
-		return
+		w0, w1 = wt[0], wt[1]
 	}
 	for i := range h {
-		row := dst[i*dstStride : i*dstStride+w]
-		for j := range row {
-			v := (p0[i*w+j] + p1[i*w+j] + 1<<(sh-1)) >> sh
-			row[j] = uint16(clip(v, maxV)) //nolint:gosec // clipped
-		}
+		compAvg(dst[i*dstStride:i*dstStride+w], p0[i*w:i*w+w], p1[i*w:i*w+w], w0, w1, sh, maxV)
+	}
+}
+
+// compAvgGo is the compound average, or with weights w0 and w1 the
+// distance weighted compound, of a row: out[i] = (w0*p0[i] + w1*p1[i] +
+// 1<<(sh-1)) >> sh, clipped to 0..maxV.
+func compAvgGo(out []uint16, p0, p1 []int32, w0, w1 int32, sh uint, maxV int32) {
+	p0, p1 = p0[:len(out)], p1[:len(out)]
+	for j := range out {
+		v := (w0*p0[j] + w1*p1[j] + 1<<(sh-1)) >> sh
+		out[j] = uint16(clip(v, maxV)) //nolint:gosec // clipped
 	}
 }
 
