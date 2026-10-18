@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder gathers the Wiener filter's statistics with AVX2: the
+  same stream, 1.5% less CPU.
 - The AV1 encoder's transform type ranking makes each column pass once
   for the types that share it: the same stream, 2.2% less CPU.
 - The AV1 encoder's inter transform trees stop searching a split once

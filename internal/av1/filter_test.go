@@ -102,3 +102,33 @@ func TestFiltersMatch(t *testing.T) {
 		}
 	}
 }
+
+// gram with AVX2 as in Go, random rows and rows at the 10-bit extremes,
+// for every padded width to 64.
+func TestGramMatches(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 8))
+	for n := 16; n <= 64; n += 16 {
+		for _, ext := range []bool{false, true} {
+			for k := 1; k <= 17; k++ {
+				y := make([]int16, k*n)
+				for i := range y {
+					switch {
+					case ext && i%3 == 0:
+						y[i] = -2048
+					case ext:
+						y[i] = 2044
+					default:
+						y[i] = int16(rng.IntN(4093) - 2048) //nolint:gosec // in range
+					}
+				}
+				var a, b [17 * 17]int64
+				a[5], b[5] = 7, 7 // added to
+				gram(y, n, k, &a)
+				gramGo(y, n, k, &b)
+				if a != b {
+					t.Fatalf("n %d k %d ext %v: %v, want %v", n, k, ext, a, b)
+				}
+			}
+		}
+	}
+}

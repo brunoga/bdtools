@@ -153,6 +153,30 @@ type lrScratch struct {
 	flt               [2][]int32 // a unit's two box filters
 	fltS              [2][]int32 // the search's, every strength's
 	out               []uint16
+	ymat              []int16 // lrCellStats' rows for gram
+}
+
+func grow16(b []int16, n int) []int16 {
+	if cap(b) < n {
+		return make([]int16, n)
+	}
+	return b[:n]
+}
+
+// gramGo adds to g[u*17+v], for u <= v < k, the sum of the products of
+// rows u and v of y (k rows of n).
+func gramGo(y []int16, n, k int, g *[17 * 17]int64) {
+	for u := range k {
+		ru := y[u*n : u*n+n]
+		for v := u; v < k; v++ {
+			rv := y[v*n : v*n+n]
+			var sum int64
+			for j, a := range ru {
+				sum += int64(a) * int64(rv[j])
+			}
+			g[u*17+v] += sum
+		}
+	}
 }
 
 func grow32(b []int32, n int) []int32 {
@@ -603,32 +627,37 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 			hf[o+k-1] = row[j+3] - center
 		}
 	}
-	var y [16]int64
+	// a row's sums (kk rows of w, padded to n, and the source's after):
+	// the sums of their products by gram
+	n := (w + 15) &^ 15
+	sc.ymat = grow16(sc.ymat, (kk+1)*n)
+	ym := sc.ymat[:(kk+1)*n]
+	clear(ym)
+	var gm [17 * 17]int64
 	for i := range h {
 		srow := src[(y0+i)*stride+x0:]
 		for j := range w {
 			for a := t0; a < 3; a++ {
 				o1, o2 := ((i+a)*w+j)*4, ((i+6-a)*w+j)*4
 				for b := range k {
-					y[(a-t0)*k+b] = int64(hf[o1+b] + hf[o2+b])
+					ym[((a-t0)*k+b)*n+j] = int16(hf[o1+b] + hf[o2+b]) //nolint:gosec // bitDepth+2 bits
 				}
 			}
 			o := ((i+3)*w + j) * 4
 			for b := range k {
-				y[(k-1)*k+b] = int64(hf[o+b])
+				ym[((k-1)*k+b)*n+j] = int16(hf[o+b]) //nolint:gosec // bitDepth+1 bits
 			}
-			s := int64(srow[j]) - int64(center)
-			st.s2 += s * s
-			for u := range kk {
-				yu := y[u]
-				st.wM[u] += s * yu
-				row := &st.wH[u]
-				for v := u; v < kk; v++ {
-					row[v] += yu * y[v]
-				}
-			}
+			ym[kk*n+j] = int16(int32(srow[j]) - center) //nolint:gosec // bitDepth bits
 		}
+		gram(ym, n, kk+1, &gm)
 	}
+	for u := range kk {
+		for v := u; v < kk; v++ {
+			st.wH[u][v] += gm[u*17+v]
+		}
+		st.wM[u] += gm[u*17+kk]
+	}
+	st.s2 += gm[kk*17+kk]
 	// the box filters of every strength
 	sc.sgrSizes(w, h)
 	for pass := range 2 {
