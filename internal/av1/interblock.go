@@ -87,6 +87,7 @@ func (t *tileEnc) writeInterModes(cd coder) {
 		p := s.predMv(NEWMV, b.refMvIdx, 0)
 		t.writeMvDiff(cd, mv{b.mv.row - p.row, b.mv.col - p.col})
 	}
+	t.writeInterIntra(cd)
 	if t.readsUseObmc() {
 		if t.readsMotionMode() {
 			mode := SIMPLE
@@ -115,7 +116,7 @@ func (t *tileEnc) readsUseObmc() bool {
 	if !fi.forceIntegerMv && (b.yMode == GLOBALMV || b.yMode == GLOBAL_GLOBALMV) && fi.gmType[b.refFrame] > TRANSLATION {
 		return false
 	}
-	return !t.isCompound() && t.hasOverlappableCandidates()
+	return !t.isCompound() && !b.ii.on && t.hasOverlappableCandidates()
 }
 
 // readsMotionMode reports whether read_motion_mode, reading it at all
@@ -134,6 +135,7 @@ func (t *tileEnc) predictBlock() {
 	}
 	for p := range planes {
 		f.predictInterBlock(&f.refs, b, p, f.filt, t.interPred[p][:], t.interStride(p), &t.is)
+		t.blendInterIntra(p, t.interPred[p][:], t.interStride(p))
 		if b.obmc {
 			f.overlapPredict(&f.refs, b, p, f.filt, t.interPred[p][:], t.interStride(p), &t.is)
 		}
@@ -166,6 +168,7 @@ type interCand struct {
 	compDist  bool
 	masked    bool
 	mask      compMask
+	ii        interIntra
 	ref, ref2 int // ref2 NONE for a single reference
 	m2        mv
 	mode, idx int
@@ -237,6 +240,10 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+	if f.seq.interIntra {
+		cands = t.interIntraCandidates(cands)
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+	}
 	if f.seq.maskedCompound {
 		var extra []interCand
 		for _, cd := range cands {
@@ -260,7 +267,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if i > 0 {
 			t.restore(start, true)
 		}
-		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist, masked: cd.masked, mask: cd.mask}
+		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist, masked: cd.masked, mask: cd.mask, ii: cd.ii}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
 		t.setInterState(dec)
 		// OBMC tried for the best two single reference candidates, with
@@ -382,6 +389,10 @@ func (t *tileEnc) setInterState(dec *blockDec) {
 	}
 	if b.refFrame2 <= INTRA_FRAME {
 		b.refFrame2, b.mv2 = NONE, mv{}
+	}
+	b.ii = interIntra{}
+	if dec.ii.on && t.readsInterIntra() {
+		b.ii = dec.ii
 	}
 	b.txSz = int(maxTxSizeRect[dec.size])
 	b.skip = dec.skip
@@ -596,6 +607,9 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	if b.masked {
 		maskedBlocks[b2i(b.mask.wedge)].Add(1)
 	}
+	if b.ii.on {
+		interIntraBlocks[b2i(b.ii.wedge)].Add(1)
+	}
 	var ctx snapshot
 	t.save(&ctx, dec.r, dec.c, dec.size, false)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
@@ -713,7 +727,7 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.refFrame2 = NONE
 		}
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
-		b.interp, b.obmc, b.compDist, b.masked = EIGHTTAP, false, false, false
+		b.interp, b.obmc, b.compDist, b.masked, b.ii = EIGHTTAP, false, false, false, interIntra{}
 		filters := []int{EIGHTTAP}
 		if t.needsInterpFilter() && !dbgNoSwitchable {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}

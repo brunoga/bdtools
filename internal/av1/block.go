@@ -54,6 +54,9 @@ func (t *tileEnc) setModes() {
 				}
 				if b.isInter {
 					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), int8(b.refFrame2) //nolint:gosec // references
+					if b.ii.on {
+						f.refFrames[1][i] = INTRA_FRAME
+					}
 					f.mvs[0][i], f.mvs[1][i], f.isInter[i] = b.mv, b.mv2, 1
 					f.interp[i] = uint8(b.interp) //nolint:gosec // a filter
 					f.compIdx[i] = uint8(b2i(!b.compDist || b.refFrame2 <= INTRA_FRAME))

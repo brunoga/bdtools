@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder codes inter-intra blocks: a single reference block's
+  prediction blended with a DC, V, H or smooth intra one, by a fading
+  or a wedge mask, decoded bit-exact by libdav1d: 0.4% smaller on the
+  120-picture clips at the same speed, +23.1% against SVT-AV1 preset 4.
 - `--preset` sets the built-in AV1 encoder's speed: every tool searched
   to `slow`; at `medium` the transform trees decided with DCT_DCT, the
   filter by SATD, no warped motion or masked compound (1.5 times faster,

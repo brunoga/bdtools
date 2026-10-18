@@ -21,6 +21,7 @@ type seqParams struct {
 	refFrameMvs                 bool // enable_ref_frame_mvs
 	warpedMotion                bool // enable_warped_motion
 	maskedCompound              bool // enable_masked_compound
+	interIntra                  bool // enable_interintra_compound
 	// timing, when the rate is known
 	num, den int
 }
@@ -76,7 +77,7 @@ func (s *seqParams) sequenceHeader() []byte {
 	w.flag(false)                           // use_128x128_superblock
 	w.flag(s.filterIntra)
 	w.flag(s.edgeFilter)
-	w.flag(false)            // enable_interintra_compound
+	w.flag(s.interIntra)     // enable_interintra_compound
 	w.flag(s.maskedCompound) // enable_masked_compound
 	w.flag(s.warpedMotion)   // enable_warped_motion
 	w.flag(false)            // enable_dual_filter
