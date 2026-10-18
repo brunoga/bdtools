@@ -97,14 +97,40 @@ func roundShift(x int64, bit int) int32 {
 	return int32((x + 1<<(bit-1)) >> bit)
 }
 
-// fwd1D is a forward 1D transform from in to out (distinct arrays).
-type fwd1D func(in, out *[64]int32, cosBit int)
-
-// fwdFuncs holds the 1D forward transforms by kind and log2 of the size.
-var fwdFuncs = [3][7]fwd1D{
-	tx1dDCT:      {2: fdct4, 3: fdct8, 4: fdct16, 5: fdct32, 6: fdct64},
-	tx1dADST:     {2: fadst4, 3: fadst8, 4: fadst16},
-	tx1dIdentity: {2: fidentity4, 3: fidentity8, 4: fidentity16, 5: fidentity32},
+// fwd1D runs the 1D forward transform of a kind and log2 of the size
+// from in to out (distinct arrays), reporting whether there is one. (A
+// switch of direct calls, not a table of funcs: through those, in and out
+// escape to the heap.)
+func fwd1D(kind, log2 int, in, out *[64]int32, cosBit int) bool {
+	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 2:
+		fdct4(in, out, cosBit)
+	case tx1dDCT<<3 | 3:
+		fdct8(in, out, cosBit)
+	case tx1dDCT<<3 | 4:
+		fdct16(in, out, cosBit)
+	case tx1dDCT<<3 | 5:
+		fdct32(in, out, cosBit)
+	case tx1dDCT<<3 | 6:
+		fdct64(in, out, cosBit)
+	case tx1dADST<<3 | 2:
+		fadst4(in, out, cosBit)
+	case tx1dADST<<3 | 3:
+		fadst8(in, out, cosBit)
+	case tx1dADST<<3 | 4:
+		fadst16(in, out, cosBit)
+	case tx1dIdentity<<3 | 2:
+		fidentity4(in, out, cosBit)
+	case tx1dIdentity<<3 | 3:
+		fidentity8(in, out, cosBit)
+	case tx1dIdentity<<3 | 4:
+		fidentity16(in, out, cosBit)
+	case tx1dIdentity<<3 | 5:
+		fidentity32(in, out, cosBit)
+	default:
+		return false
+	}
+	return true
 }
 
 // forwardTransform transforms the w*h residual of a txSz block (row-major,
@@ -143,11 +169,7 @@ func forward2D(residual []int32, txSz, txType, log2W, log2H int, buf, coeffs []i
 	shift := &fwdShift[txSz]
 	cosBitCol := int(fwdCosBitCol[log2W-2][log2H-2])
 	cosBitRow := int(fwdCosBitRow[log2W-2][log2H-2])
-	colFn := fwdFuncs[txTypeCol[txType]][log2H]
-	rowFn := fwdFuncs[txTypeRow[txType]][log2W]
-	if colFn == nil || rowFn == nil {
-		panic("av1: no forward transform of this type at this size")
-	}
+	colKind, rowKind := int(txTypeCol[txType]), int(txTypeRow[txType])
 	flipUD, flipLR := txFlipUD[txType], txFlipLR[txType]
 	up := uint(shift[0])
 	down1, down2 := int(-shift[1]), int(-shift[2])
@@ -168,7 +190,9 @@ func forward2D(residual []int32, txSz, txType, log2W, log2H int, buf, coeffs []i
 				tin[r] = residual[r*w+sc] << up
 			}
 		}
-		colFn(&tin, &tout, cosBitCol)
+		if !fwd1D(colKind, log2H, &tin, &tout, cosBitCol) {
+			panic("av1: no forward transform of this type at this size")
+		}
 		if down1 > 0 {
 			for r := 0; r < th; r++ {
 				buf[r*w+c] = roundShift(int64(tout[r]), down1)
@@ -183,7 +207,9 @@ func forward2D(residual []int32, txSz, txType, log2W, log2H int, buf, coeffs []i
 	// and never further on) is written.
 	for r := 0; r < th; r++ {
 		copy(tin[:w], buf[r*w:r*w+w])
-		rowFn(&tin, &tout, cosBitRow)
+		if !fwd1D(rowKind, log2W, &tin, &tout, cosBitRow) {
+			panic("av1: no forward transform of this type at this size")
+		}
 		out := coeffs[r*tw : r*tw+tw]
 		for c := range out {
 			v := tout[c]

@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's forward and inverse transforms call their 1D
+  transforms directly, their buffers no longer allocated on the heap:
+  2.5% less CPU, the same stream.
 - The AV1 encoder's compound blocks can take two frames on the same
   side of the frame (the unidirectional pairs, and the bidirectional
   syntax's with both frames earlier), in the frames with no later
