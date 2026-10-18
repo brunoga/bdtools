@@ -60,6 +60,7 @@ type tools struct {
 	pruneSkip, pruneExt             bool // the partition search's prunings
 	intraSkip, candRatio            float64
 	sameDir                         int // sameDirComp's
+	txCands                         int
 }
 
 // Encoder codes pictures.
@@ -124,7 +125,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio = false, 0, 0
 	}

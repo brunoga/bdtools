@@ -7,6 +7,7 @@ package av1
 
 import (
 	"math"
+	"math/bits"
 	"sort"
 )
 
@@ -728,6 +729,10 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 			types = types[:1]
 		}
 	}
+	t.txCoefOK = 0
+	if k := f.tools.txCands; k > 0 && len(types) > k && !f.lossless {
+		types = t.rankTxTypes(plane, txSz, types, k)
+	}
 	zeroStop := pruneTxZero && t.b.isInter && len(types) > 1 && types[0] == DCT_DCT
 	tc := txCoded{plane: plane, x4: startX >> 2, y4: startY >> 2, txSz: txSz}
 	bestJ := math.Inf(1)
@@ -736,7 +741,11 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	for _, tt := range types {
 		tc.txType = tt
 		tc.off = len(t.levels)
-		forwardTransform(t.resid[:w*h], txSz, tt, f.bitDepth, f.lossless, t.coef[:])
+		if t.txCoefOK>>uint(tt)&1 != 0 {
+			copy(t.coef[:], t.txCoef[tt][:min(w, 32)*min(h, 32)])
+		} else {
+			forwardTransform(t.resid[:w*h], txSz, tt, f.bitDepth, f.lossless, t.coef[:])
+		}
 		tc.eob = t.quantize(plane, txSz, tt)
 		copy(t.trial[:w*h], t.pred[:w*h])
 		if tc.eob > 0 {
@@ -866,6 +875,76 @@ func (t *tileEnc) txSet(txSz int) int {
 }
 
 // dqDenom is the dequantization's divisor by transform size.
+// txCands is how many transform types a transform searches by rate and
+// distortion when it has more to try, the others ranked out by
+// rankTxTypes (0: all searched). (On the two 120-picture clips against
+// all searched: 2 0.2% larger, 1.14 times faster; 3 0.6% smaller, 1.09
+// times; 4 and 5 0.4% smaller, 1.06 and 1.02 times. The estimate ranks
+// better than each transform's own rate and distortion decides.)
+var txCands = 3
+
+// rankTxTypes is the best k of a transform's types by an estimate from
+// their forward transforms of t.resid (kept in t.txCoef): the distortion
+// of rounding to the quantizer, in the samples' scale, and lambda times a
+// rate of a few bits a nonzero level and a fraction of one per position
+// to the last. DCT_DCT goes first when kept, and alone when it quantizes
+// to all zero in an inter block (as pruneTxZero would stop).
+func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
+	f := t.f
+	w, h := int(txWidth[txSz]), int(txHeight[txSz])
+	n := min(w, 32) * min(h, 32)
+	den := int64(dqDenom(txSz))
+	dcQ, acQ := int64(t.dcQ[plane]), int64(t.acQ[plane])
+	scale := float64(den*den) / 64
+	type ranked struct {
+		tt  int
+		est float64
+	}
+	var rs [TX_TYPES]ranked
+	for i, tt := range types {
+		c := t.txCoef[tt][:n]
+		forwardTransform(t.resid[:w*h], txSz, tt, f.bitDepth, false, c)
+		t.txCoefOK |= 1 << uint(tt)
+		inv := invScanFor(txSz, tt)[:n]
+		var d int64
+		nb, eob := 0, 0
+		for j, v := range c {
+			qs := acQ
+			if j == 0 {
+				qs = dcQ
+			}
+			a := int64(abs32(v))
+			l := (a*den + qs/2) / qs
+			if l == 0 {
+				d += a * a
+				continue
+			}
+			e := a - ((l*qs)&0xFFFFFF)/den
+			d += e * e
+			nb += 3 + 2*(bits.Len64(uint64(l))-1) //nolint:gosec // l > 0
+			eob = max(eob, int(inv[j])+1)
+		}
+		if tt == DCT_DCT && eob == 0 && pruneTxZero && t.b.isInter {
+			return types[i : i+1]
+		}
+		rs[i] = ranked{tt, float64(d)*scale + t.lambda*(float64(nb)+0.5*float64(eob))}
+	}
+	r := rs[:len(types)]
+	sort.SliceStable(r, func(a, b int) bool { return r[a].est < r[b].est })
+	out := t.txTypeBuf[:0]
+	for _, x := range r[:k] {
+		if x.tt == DCT_DCT {
+			out = append(out, DCT_DCT)
+		}
+	}
+	for _, x := range r[:k] {
+		if x.tt != DCT_DCT {
+			out = append(out, x.tt)
+		}
+	}
+	return out
+}
+
 func dqDenom(txSz int) int {
 	switch txSz {
 	case TX_32X32, TX_16X32, TX_32X16, TX_16X64, TX_64X16:

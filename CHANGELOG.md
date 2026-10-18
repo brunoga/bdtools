@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder ranks a transform's types by an estimate from their
+  forward transforms and searches the best three by rate and distortion:
+  0.6% smaller on the 120-picture clips and 1.09 times faster, +22.5%
+  against SVT-AV1 preset 4.
 - The AV1 encoder averages compound predictions (plain and distance
   weighted) with AVX2: 1.7% less CPU, the same stream.
 - The AV1 encoder's forward and inverse transforms call their 1D
