@@ -489,3 +489,10 @@ func TestButterflyUnrolled(t *testing.T) {
 		}
 	}
 }
+
+// idctFuncs and iadstFuncs hold the 1D inverse DCTs and ADSTs by log2 of
+// the size (transform_bf.go, and iadst4 in transform.go).
+var (
+	idctFuncs  = [7]func(t *[64]int32, lo, hi int32){2: idct4, 3: idct8, 4: idct16, 5: idct32, 6: idct64}
+	iadstFuncs = [5]func(t *[64]int32, lo, hi int32){2: iadst4, 3: iadst8, 4: iadst16}
+)

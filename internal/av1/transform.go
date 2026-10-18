@@ -155,25 +155,37 @@ func iwht(t *[64]int32, shift uint) {
 	t[0], t[1], t[2], t[3] = a, b, c, d
 }
 
-// idctFuncs and iadstFuncs hold the 1D inverse DCTs and ADSTs by log2 of
-// the size (transform_bf.go, and iadst4 here).
-var (
-	idctFuncs  = [7]func(t *[64]int32, lo, hi int32){2: idct4, 3: idct8, 4: idct16, 5: idct32, 6: idct64}
-	iadstFuncs = [5]func(t *[64]int32, lo, hi int32){2: iadst4, 3: iadst8, 4: iadst16}
-)
-
 // inverse1D applies the 1D inverse transform kind to 2^n samples of t,
 // with intermediate results clamped to r bits.
 func inverse1D(t *[64]int32, kind uint8, n, r int) {
 	lo, hi := -int32(1)<<(r-1), int32(1)<<(r-1)-1
+	// direct calls, not through a table of funcs: through those t escapes
+	// to the heap
 	switch kind {
 	case tx1dDCT:
-		idctFuncs[n](t, lo, hi)
+		switch n {
+		case 2:
+			idct4(t, lo, hi)
+		case 3:
+			idct8(t, lo, hi)
+		case 4:
+			idct16(t, lo, hi)
+		case 5:
+			idct32(t, lo, hi)
+		default:
+			idct64(t, lo, hi)
+		}
 	case tx1dADST:
-		if n > 4 {
+		switch n {
+		case 2:
+			iadst4(t, lo, hi)
+		case 3:
+			iadst8(t, lo, hi)
+		case 4:
+			iadst16(t, lo, hi)
+		default:
 			panic("av1: no ADST of this size")
 		}
-		iadstFuncs[n](t, lo, hi)
 	default:
 		iidentity(t, n)
 	}
