@@ -114,7 +114,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
-		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked,
+		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked, interIntra: !dbgNoInterIntra,
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}

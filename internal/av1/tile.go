@@ -115,6 +115,11 @@ type tileEnc struct {
 	interPred  [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
 	// maskP are the luma predictions masked variants are blended from
 	maskP [2][]int32
+	// iiPred is a plane's intra prediction of an inter-intra block,
+	// iiIntra the block's luma ones by mode, iiInter its luma inter one
+	iiPred  [32 * 32]uint16
+	iiIntra [INTERINTRA_MODES][32 * 32]uint16
+	iiInter [32 * 32]uint16
 }
 
 // blockState is the block being coded (the spec's MiRow, MiSize, ...).
@@ -153,7 +158,8 @@ type blockState struct {
 	masked     bool
 	mask       compMask
 	maskBuf    []uint8
-	filterMode int // filter_intra_mode, or -1
+	ii         interIntra // inter-intra
+	filterMode int        // filter_intra_mode, or -1
 	// maxLumaW and maxLumaH are MaxLumaW and MaxLumaH: where the last
 	// luma transform block coded ends.
 	maxLumaW, maxLumaH int
@@ -187,6 +193,7 @@ type blockDec struct {
 	warp            bool // motion_mode LOCALWARP
 	masked          bool // comp_group_idx 1, by mask
 	mask            compMask
+	ii              interIntra
 	txSplit         []bool // an inter block's txfm_split, in read_var_tx_size's order
 	txDepth         int
 	txTypes         []uint8 // the luma transform blocks', in order

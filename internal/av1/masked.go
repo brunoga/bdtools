@@ -201,7 +201,7 @@ func (t *tileEnc) maskedVariants(cd interCand) []interCand {
 	f, b := t.f, &t.b
 	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
 	b.refFrame, b.refFrame2, b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.ref, cd.ref2, cd.mode, cd.idx, cd.m, cd.m2
-	b.interp, b.obmc, b.warp, b.compDist, b.masked = cd.interp, false, false, false, true
+	b.interp, b.obmc, b.warp, b.compDist, b.masked, b.ii = cd.interp, false, false, false, true, interIntra{}
 	t.setModes()
 	rnd := interRoundingFor(f.bitDepth, true)
 	if cap(t.maskP[0]) < w*h {
