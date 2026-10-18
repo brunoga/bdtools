@@ -116,11 +116,20 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 	off := y0*ss + x0
 	if x0 < 0 || y0 < 0 || x0+w+6 > lastX || y0+h+6 > lastY {
 		ss = w + 7
+		// the columns inside the reference copied, those left and right
+		// of it its first and last
+		in0, in1 := min(max(-x0, 0), ss), min(max(lastX+1-x0, 0), ss)
 		for i := range h + 7 {
 			row := src[min(max(y0+i, 0), lastY)*ref.stride[plane]:]
 			e := s.edge[i*ss : i*ss+ss]
-			for j := range e {
-				e[j] = row[min(max(x0+j, 0), lastX)]
+			for j := range in0 {
+				e[j] = row[0]
+			}
+			if in1 > in0 {
+				copy(e[in0:in1], row[x0+in0:x0+in1])
+			}
+			for j := max(in1, in0); j < ss; j++ {
+				e[j] = row[lastX]
 			}
 		}
 		src, off = s.edge[:], 0
@@ -137,10 +146,7 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 				copy(dst16[i*dstStride:i*dstStride+w], row)
 				continue
 			}
-			d := dst32[i*dstStride : i*dstStride+w]
-			for j, v := range row {
-				d[j] = int32(v) << uint(rnd.post)
-			}
+			widen(dst32[i*dstStride:i*dstStride+w], row, uint(rnd.post))
 		}
 		return
 	}
@@ -158,9 +164,7 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 		row := src[off+r*ss : off+r*ss+w+7]
 		out := mid[r*w : r*w+w]
 		if fracX == 0 {
-			for c := range out {
-				out[c] = int32(row[c+3]) << (FILTER_BITS - sh0)
-			}
+			widen(out, row[3:], FILTER_BITS-sh0)
 			continue
 		}
 		filterRow(out, row, kx, int(tx[0]), int(tx[1]), add0, sh0)
@@ -177,12 +181,24 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 			filterCol(dst32[r*dstStride:r*dstStride+w], mid[(r+lo)*w:], w, ky, lo, hi, add1, sh1)
 			continue
 		}
-		a := acc[:w]
-		filterCol(a, mid[(r+lo)*w:], w, ky, lo, hi, add1, sh1)
-		d := dst16[r*dstStride : r*dstStride+w]
-		for c, v := range a {
-			d[c] = uint16(clip(v, maxV)) //nolint:gosec // clipped
-		}
+		filterColClip(dst16[r*dstStride:r*dstStride+w], mid[(r+lo)*w:], w, ky, lo, hi, add1, sh1, maxV, acc[:w])
+	}
+}
+
+// filterColClipGo is filterColGo with its outputs clipped to 0..maxV,
+// as samples (tmp holds the unclipped ones).
+func filterColClipGo(out []uint16, mid []int32, w int, k *[8]int16, lo, hi int, add int32, sh uint, maxV int32, tmp []int32) {
+	filterColGo(tmp, mid, w, k, lo, hi, add, sh)
+	for c, v := range tmp {
+		out[c] = uint16(clip(v, maxV)) //nolint:gosec // clipped
+	}
+}
+
+// widenGo sets out[i] to src[i] << sh.
+func widenGo(out []int32, src []uint16, sh uint) {
+	src = src[:len(out)]
+	for i, v := range src {
+		out[i] = int32(v) << sh
 	}
 }
 
