@@ -136,6 +136,11 @@ func TestBenchSeq(t *testing.T) {
 		lambdaScale = v
 		defer func() { lambdaScale = old }()
 	}
+	if v, err := strconv.Atoi(os.Getenv("AV1LEAFQ")); err == nil {
+		old := leafQ
+		leafQ = v
+		defer func() { leafQ = old }()
+	}
 	if v, err := strconv.Atoi(os.Getenv("AV1KEYQ")); err == nil {
 		old := keyQ
 		keyQ = v
@@ -222,9 +227,9 @@ func TestBenchSeq(t *testing.T) {
 		intraSkip = v
 		defer func() { intraSkip = old }()
 	}
-	if os.Getenv("AV1TF") != "" {
-		dbgNoTF = false
-		defer func() { dbgNoTF = true }()
+	if os.Getenv("AV1NOTF") != "" {
+		dbgNoTF = true
+		defer func() { dbgNoTF = false }()
 	}
 	speed, _ := strconv.Atoi(os.Getenv("AV1SPEED"))
 	for _, file := range files {
