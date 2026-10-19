@@ -33,7 +33,7 @@ import (
 )
 
 // libaom's temporal filter constants (temporal_filter.h) and its
-// defaults (arnr_strength, arnr_max_frames).
+// default arnr_max_frames.
 const (
 	tfBlock                    = 64 // TF_BLOCK_SIZE
 	tfWindowLength             = 5
@@ -45,10 +45,15 @@ const (
 	tfSearchDistanceThreshold  = 0.1
 	tfQIndexCutoff             = 128
 	noiseEdgeThreshold         = 50
-	tfStrength                 = 5 // arnr_strength
 	tfMaxFrames                = 7 // arnr_max_frames
 	sqrtPiBy2                  = 1.25331413732
 )
+
+// tfStrength is libaom's arnr_strength (4 and up the same, the decay
+// clamped). Its default, 5, filters too hard for the disc sources: on the
+// two 120-picture clips 2 is 1.3% better (and 2% faster), 3 0.6%, 1 1.1%,
+// and 0 (the weights all but the picture's own nothing) 1.9% worse.
+var tfStrength = 2
 
 // dbgNoTF codes the anchors' sources unfiltered. On the two 120-picture
 // disc clips, with three pictures after the anchor (tfAfter), the filter

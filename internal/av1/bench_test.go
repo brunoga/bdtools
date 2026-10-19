@@ -227,6 +227,11 @@ func TestBenchSeq(t *testing.T) {
 		intraSkip = v
 		defer func() { intraSkip = old }()
 	}
+	if v, err := strconv.Atoi(os.Getenv("AV1TFSTRENGTH")); err == nil {
+		old := tfStrength
+		tfStrength = v
+		defer func() { tfStrength = old }()
+	}
 	if os.Getenv("AV1NOTF") != "" {
 		dbgNoTF = true
 		defer func() { dbgNoTF = false }()

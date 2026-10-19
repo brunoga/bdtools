@@ -9,8 +9,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The AV1 encoder's temporal filter is on: each mini-GOP's anchor coded
   from a motion compensated average of its neighbours, shown by an
-  overlay frame: 0.8% smaller on the 120-picture clips for 1% more
-  time, +19.8% against SVT-AV1 preset 4.
+  overlay frame, at strength 2 (libaom's 5 filters the disc sources too
+  hard): 2.1% smaller on the 120-picture clips and 4% faster, +18.6%
+  against SVT-AV1 preset 4.
 - The AV1 encoder's mini-GOPs 32 pictures (were 16), a level more of
   the pyramid: 0.8% smaller on the 120-picture clips and 1.2 times
   faster, +20.2% against SVT-AV1 preset 4 (which codes 32 too).
