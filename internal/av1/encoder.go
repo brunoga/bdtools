@@ -194,6 +194,27 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
 		fp.primaryRef = 0 // LAST_FRAME's
+		if cdfSameDepth {
+			// the reference nearest the frame's depth (its q, its
+			// symbols' statistics), then nearest shown
+			best := -1
+			for i, o := range j.refs {
+				if o == nil || o.cdf == nil {
+					continue
+				}
+				if best < 0 {
+					best = i
+					continue
+				}
+				b := j.refs[best]
+				if d, bd := abs(o.depth-j.depth), abs(b.depth-j.depth); d < bd || d == bd && abs(o.disp-j.disp) < abs(b.disp-j.disp) {
+					best = i
+				}
+			}
+			if best >= 0 {
+				fp.primaryRef, r = best, j.refs[best]
+			}
+		}
 		f.cdf0 = r.cdf.loaded()
 	}
 	if !key {
@@ -353,3 +374,9 @@ func (f *frameEnc) recon(width, height int) (y, cb, cr []uint16) {
 // clips: 0.2% smaller and 3% faster than below 128, libaom's; below 100
 // 0.2% larger, below 160 0.7%.)
 var hpMaxQ = 0
+
+// cdfSameDepth has an inter frame take its CDFs (primary_ref_frame) from the
+// reference nearest its depth, as libaom does from its own layer's, not
+// LAST_FRAME's. (On the two 120-picture clips: 0.5% smaller at the same
+// speed.)
+var cdfSameDepth = true

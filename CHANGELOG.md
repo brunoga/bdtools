@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's inter frames take their CDFs from the reference nearest
+  their depth in the pyramid (was LAST_FRAME's), as libaom takes its own
+  layer's: 0.5% smaller on the 120-picture clips at the same speed, +11.6%
+  against SVT-AV1 preset 4.
 - What a library re-encode needs, in bdtools itself: `--audio-best` keeps
   the best track of each `--audio-lang` language; `--no-commentary` leaves
   commentaries out; `--default-audio` and `--default-subs` set the default

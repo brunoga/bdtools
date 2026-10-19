@@ -77,3 +77,27 @@ func TestSameDirCompound(t *testing.T) {
 		})
 	}
 }
+
+// Frames take their CDFs from the reference nearest their depth: in a
+// pyramid, some from another reference than LAST_FRAME; decoded to the
+// reconstruction.
+func TestPrimaryRefByDepth(t *testing.T) {
+	const w, h = 96, 64
+	o := EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 8}
+	p := testPicture(w, h, 8, 3)
+	var pics []*Source
+	for i := range 17 {
+		pics = append(pics, shifted(p, i, i/3))
+	}
+	var other atomic.Int64
+	checkDecodesWith(t, o, pics, func(e *Encoder) {
+		e.frameHook = func(f *frameEnc) {
+			if !f.fp.key && f.fp.primaryRef != PRIMARY_REF_NONE && f.fp.primaryRef != 0 {
+				other.Add(1)
+			}
+		}
+	})
+	if other.Load() == 0 {
+		t.Fatal("no frame took another reference's CDFs than LAST_FRAME's")
+	}
+}

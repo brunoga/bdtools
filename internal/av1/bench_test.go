@@ -232,6 +232,10 @@ func TestBenchSeq(t *testing.T) {
 		tfStrength = v
 		defer func() { tfStrength = old }()
 	}
+	if os.Getenv("AV1CDFLAST") != "" {
+		cdfSameDepth = false
+		defer func() { cdfSameDepth = true }()
+	}
 	if os.Getenv("AV1NOEOBSEARCH") != "" {
 		eobSearch = false
 		defer func() { eobSearch = true }()
