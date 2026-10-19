@@ -3,7 +3,7 @@ module github.com/brunoga/bdtools
 go 1.26.2
 
 require (
-	github.com/ebitengine/purego v0.11.1
+	github.com/ebitengine/purego v0.11.2
 	golift.io/udf v0.1.0
 )
 
