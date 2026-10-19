@@ -14,7 +14,7 @@ import (
 // Debugging switches.
 var dbgDCTOnly, dbgNoAngles, dbgNoDepth, dbgSquare, dbgNoRDOQ bool
 var dbgFixed int
-var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra, dbgNoSwitchable bool
+var dbgNoPruneSkip, dbgNoPruneExt, dbgNoPruneIntra bool
 var dbgNo4x4, dbgNoExt, dbgNoInter, dbgNoPrune, dbgFlatQ, dbgNoCompound, dbgNoSkipMode, dbgNoVarTx bool
 
 // lumaCands is how many luma modes are coded in full.
