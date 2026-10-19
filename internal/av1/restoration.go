@@ -152,6 +152,7 @@ type lrScratch struct {
 	a, b              []int32
 	flt               [2][]int32 // a unit's two box filters
 	fltS              [2][]int32 // the search's, every strength's
+	u, e              []int32    // lrCellStats' window and error, scaled
 	out               []uint16
 	ymat              []int16 // lrCellStats' rows for gram
 }
@@ -164,6 +165,16 @@ func grow16(b []int16, n int) []int16 {
 }
 
 // gramGo adds to g[u*17+v], for u <= v < k, the sum of the products of
+// dot32Go is the sum of a[i]*b[i], as 64 bits.
+func dot32Go(a, b []int32) int64 {
+	b = b[:len(a)]
+	var s int64
+	for i, v := range a {
+		s += int64(v) * int64(b[i])
+	}
+	return s
+}
+
 // rows u and v of y (k rows of n).
 func gramGo(y []int16, n, k int, g *[17 * 17]int64) {
 	for u := range k {
@@ -682,10 +693,10 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 			sgrFilter(win, w, h, pass, sc.a, sc.b, sc.fltS[pass][e*w*h:])
 		}
 	}
+	// each strength's filter less the window (u), and the error (e), as
+	// rows of the cell: the statistics are their dot products
 	n0, n1, wh := len(sgrEps[0]), len(sgrEps[1]), w*h
-	f0, f1 := sc.fltS[0], sc.fltS[1]
-	var d0 [12]int64
-	var d1 [11]int64
+	sc.u, sc.e = grow32(sc.u, wh), grow32(sc.e, wh)
 	for i := range h {
 		srow := src[(y0+i)*stride+x0:]
 		wrow := win[(i+3)*ww+3:]
@@ -693,26 +704,26 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 			x := wrow[j]
 			d := int64(srow[j]) - int64(x)
 			st.sse0 += d * d
-			u := x << SGRPROJ_RST_BITS
-			e := d << SGRPROJ_RST_BITS
-			at := i*w + j
-			for q := range n0 {
-				v := int64(f0[q*wh+at] - u)
-				d0[q] = v
-				st.h00[q] += v * v
-				st.c0[q] += v * e
+			sc.u[i*w+j], sc.e[i*w+j] = x<<SGRPROJ_RST_BITS, int32(d)<<SGRPROJ_RST_BITS //nolint:gosec // bitDepth+1 bits
+		}
+	}
+	u, e := sc.u[:wh], sc.e[:wh]
+	for pass, n := range [2]int{n0, n1} {
+		for q := range n {
+			fq := sc.fltS[pass][q*wh : (q+1)*wh]
+			for k := range fq {
+				fq[k] -= u[k]
 			}
-			for q := range n1 {
-				v := int64(f1[q*wh+at] - u)
-				d1[q] = v
-				st.h11[q] += v * v
-				st.c1[q] += v * e
+			if pass == 0 {
+				st.h00[q], st.c0[q] = st.h00[q]+dot32(fq, fq), st.c0[q]+dot32(fq, e)
+			} else {
+				st.h11[q], st.c1[q] = st.h11[q]+dot32(fq, fq), st.c1[q]+dot32(fq, e)
 			}
-			for s := range 16 {
-				if i0, i1 := sgrEpsIdx[s][0], sgrEpsIdx[s][1]; i0 >= 0 && i1 >= 0 {
-					st.h01[s] += d0[i0] * d1[i1]
-				}
-			}
+		}
+	}
+	for s := range 16 {
+		if i0, i1 := sgrEpsIdx[s][0], sgrEpsIdx[s][1]; i0 >= 0 && i1 >= 0 {
+			st.h01[s] += dot32(sc.fltS[0][i0*wh:(i0+1)*wh], sc.fltS[1][i1*wh:(i1+1)*wh])
 		}
 	}
 	st.n += int64(wh)
