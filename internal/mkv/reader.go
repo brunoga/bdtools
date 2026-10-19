@@ -26,6 +26,7 @@ const (
 	idReferenceBlock    = 0xFB
 	idBlockDuration     = 0x9B
 	idFlagForced        = 0x55AA
+	idFlagCommentary    = 0x55AF
 	idLanguageBCP47     = 0x22B59D
 	idContentEncodings  = 0x6D80
 	idContentEncoding   = 0x6240
@@ -53,6 +54,7 @@ type ReadTrack struct {
 	Name          string
 	Default       bool
 	Forced        bool
+	Commentary    bool // FlagCommentary
 	// Video.
 	Width, Height int
 	StereoMode    int
@@ -274,6 +276,8 @@ func parseTrack(b []byte) (ReadTrack, error) {
 			t.DefaultDuration = time.Duration(readUint(v)) //nolint:gosec // nanoseconds
 		case idFlagForced:
 			t.Forced = readUint(v) != 0
+		case idFlagCommentary:
+			t.Commentary = readUint(v) != 0
 		case idVideo:
 			return eachChild(v, func(id uint32, v []byte) error {
 				switch id {
