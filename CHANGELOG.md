@@ -68,11 +68,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--preset` sets the built-in AV1 encoder's speed: every tool searched
   to `slow`; at `medium` the transform trees decided with DCT_DCT, the
   filter by SATD, no warped motion or masked compound (1.6 times faster,
-  3.9% larger); from `fast` also no OBMC, four references and two
-  candidates coded in full (2.0 times faster, 5.3% larger); at `slower`
+  2.9% larger); from `fast` also no OBMC, four references and two
+  candidates coded in full (2.0 times faster, 4.0% larger); at `slower`
   the partitions after a skipped whole block searched too, and every
-  inter candidate coded in full (2.6 times slower, 2.8% smaller), from
-  `veryslow` none pruned (5.0 times slower, 3.4% smaller, +19.7%
+  inter candidate coded in full (3.4 times slower, 2.5% smaller), from
+  `veryslow` none pruned (6.8 times slower, 3.0% smaller, +10.2%
   against SVT-AV1 preset 4).
 - The AV1 encoder's mini-GOPs 16 pictures (were 8): 1.1% smaller and a
   fifth faster on the 120-picture clips, +23.7% against SVT-AV1 preset 4.
