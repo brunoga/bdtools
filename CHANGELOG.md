@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's directional intra prediction splits its rows where
+  the edge it reads changes, not testing each sample (the same output):
+  1.3% less CPU.
 - The AV1 encoder's transform type ranking divides only the coefficients
   not quantized to 0 (the same output): 1.4% less CPU.
 - The AV1 encoder's self guided restoration A and B in AVX2 (the same
