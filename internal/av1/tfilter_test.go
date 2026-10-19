@@ -69,6 +69,8 @@ func psnrPlanes(a, b *Source, depth int) float64 {
 // one than the noisy one is, with the window on both sides or before
 // only.
 func TestTemporalFilterNoise(t *testing.T) {
+	defer func(was int) { tfStrength = was }(tfStrength)
+	tfStrength = 5 // libaom's default, whose filtering this checks
 	const w, h = 160, 96
 	for _, depth := range []int{8, 10} {
 		clean := cleanPicture(w, h, depth, 0, 0)
@@ -91,6 +93,8 @@ func TestTemporalFilterNoise(t *testing.T) {
 // than the noisy picture, and far better than a plain average, which
 // smears), and a clean moving picture comes out nearly as it was.
 func TestTemporalFilterMotion(t *testing.T) {
+	defer func(was int) { tfStrength = was }(tfStrength)
+	tfStrength = 5 // libaom's default, whose filtering this checks
 	const w, h, depth = 320, 240, 8
 	var clean, win []*Source
 	for i := range 7 {
