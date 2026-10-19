@@ -2,6 +2,7 @@ package convert
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -19,12 +20,16 @@ type TrackFilter struct {
 	// special value "und" matches a track the source gave no language for,
 	// which is what Matroska already calls undetermined.
 	Langs []string
-	// Best keeps only the single highest-quality track of those matching,
+	// Best keeps only the highest-quality track of those matching, of each
+	// language asked for (in their order; with no language, the one best),
 	// which is what "the best English track" means. Lossless beats lossy,
 	// then more channels, then higher bitrate. It applies after the language
 	// and codec filters, so the two compose: language eng plus Best is "the
-	// best English track", not "the best track, if it happens to be English".
+	// best English track", not "the best track, if it happens to be English",
+	// and eng,jpn the best English track and the best Japanese one.
 	Best bool
+	// NoCommentary leaves out commentaries (Track.IsCommentary).
+	NoCommentary bool
 	// Codecs are matched against the track's stream ID and its human type,
 	// case-insensitively, as substrings: "truehd" matches A_TRUEHD, and "dts"
 	// matches both A_DTS and DTS-HD Master Audio. A substring is the right
@@ -35,7 +40,13 @@ type TrackFilter struct {
 
 // Empty reports whether the filter would keep everything.
 func (f TrackFilter) Empty() bool {
-	return len(f.Langs) == 0 && len(f.Codecs) == 0 && !f.Best
+	return len(f.Langs) == 0 && len(f.Codecs) == 0 && !f.Best && !f.NoCommentary
+}
+
+// None reports whether the filter asks for no track at all (language
+// "none").
+func (f TrackFilter) None() bool {
+	return len(f.Langs) == 1 && strings.EqualFold(strings.TrimSpace(f.Langs[0]), "none")
 }
 
 // langAliases maps the spellings people and discs actually use onto the
@@ -90,6 +101,9 @@ func expandLangs(langs []string) []string {
 
 // Matches reports whether t survives the filter.
 func (f TrackFilter) Matches(t Track) bool {
+	if f.None() || f.NoCommentary && t.IsCommentary() {
+		return false
+	}
 	if len(f.Langs) > 0 {
 		lang := strings.ToLower(strings.TrimSpace(t.Lang))
 		if lang == "" {
@@ -162,20 +176,18 @@ func (s Selection) Apply(audio, subs TrackFilter) (Selection, error) {
 	out := s
 	if !audio.Empty() {
 		kept := filterTracks(s.Audio, audio)
-		if len(kept) == 0 && len(s.Audio) > 0 {
+		if len(kept) == 0 && len(s.Audio) > 0 && !audio.None() {
 			return Selection{}, fmt.Errorf("no audio track matches %s; this source has %s",
 				audio, describeTracks(s.Audio))
 		}
 		if audio.Best && len(kept) > 1 {
-			if best, ok := BestAudio(kept); ok {
-				kept = []Track{best}
-			}
+			kept = bestByLang(kept, audio.Langs)
 		}
 		out.Audio = kept
 	}
 	if !subs.Empty() {
 		kept := filterTracks(s.Subtitles, subs)
-		if len(kept) == 0 && len(s.Subtitles) > 0 {
+		if len(kept) == 0 && len(s.Subtitles) > 0 && !subs.None() {
 			return Selection{}, fmt.Errorf("no subtitle track matches %s; this source has %s",
 				subs, describeTracks(s.Subtitles))
 		}
@@ -185,6 +197,29 @@ func (s Selection) Apply(audio, subs TrackFilter) (Selection, error) {
 		out.Subtitles = kept
 	}
 	return out, nil
+}
+
+// bestByLang is the best track of each language of langs, in their order
+// (the one best with none).
+func bestByLang(tracks []Track, langs []string) []Track {
+	if len(langs) == 0 {
+		best, _ := BestAudio(tracks)
+		return []Track{best}
+	}
+	var out []Track
+	for _, l := range langs {
+		one := TrackFilter{Langs: []string{l}}
+		var of []Track
+		for _, t := range tracks {
+			if one.Matches(t) && !slices.ContainsFunc(out, func(o Track) bool { return o.ID == t.ID }) {
+				of = append(of, t)
+			}
+		}
+		if best, ok := BestAudio(of); ok {
+			out = append(out, best)
+		}
+	}
+	return out
 }
 
 func filterTracks(tracks []Track, f TrackFilter) []Track {
@@ -205,6 +240,9 @@ func (f TrackFilter) String() string {
 	}
 	if len(f.Codecs) > 0 {
 		parts = append(parts, "codec "+strings.Join(f.Codecs, "/"))
+	}
+	if f.NoCommentary {
+		parts = append(parts, "no commentary")
 	}
 	if f.Best {
 		parts = append(parts, "the best of them")

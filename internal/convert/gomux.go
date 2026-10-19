@@ -109,14 +109,23 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	sources := []mkv.Source{v}
 	var timed []timedAudio
 	firstAudio, firstSubs := true, true
-	for _, e := range extras {
+	defAudio, defSubs := defaultExtras(extras, r.Opts.DefaultAudio, r.Opts.DefaultSubs)
+	if defAudio >= 0 {
+		firstAudio = false
+	}
+	if defSubs >= 0 {
+		firstSubs = false
+	}
+	for i, e := range extras {
 		lang := strings.TrimSpace(e.track.Lang)
 		if e.track.Kind() == KindSubtitle && isText(e.track.StreamID) {
 			f, err := open(e.path)
 			if err != nil {
 				return err
 			}
-			sources = append(sources, newTextSource(f, e.track, e.track.private, false))
+			ts := newTextSource(f, e.track, e.track.private, false)
+			ts.track.Default = i == defSubs
+			sources = append(sources, ts)
 			continue
 		}
 		if e.track.Kind() == KindSubtitle {
@@ -140,7 +149,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 				// itself (Kodi showing the film frame packed) draws
 				// squeezed into one eye: the first flat track is the
 				// default.
-				if r.Opts.Subs3D == Subs3DBoth && firstSubs {
+				if r.Opts.Subs3D == Subs3DBoth && firstSubs || i == defSubs {
 					p.SetDefault(true)
 					firstSubs = false
 				}
@@ -177,7 +186,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		a.SetName(e.track.Name)
 		a.SetSyncPoints(e.sync)
 		timed = append(timed, timedAudio{a, e.track, ""})
-		if firstAudio {
+		if firstAudio || i == defAudio {
 			a.SetDefault(true)
 			firstAudio = false
 		}
@@ -381,4 +390,40 @@ func mvcConfig(path string) ([]byte, error) {
 		return nil, err
 	}
 	return mvc.ConfigRecord(head[:n])
+}
+
+// defaultExtras are the indexes in extras of the audio track and the
+// subtitle track to flag default for Options.DefaultAudio and DefaultSubs
+// (-1 none asked or found): the first audio track in the language; the
+// first subtitle track in it neither forced nor so named ("Forced",
+// "Foreign parts"), one not SDH first.
+func defaultExtras(extras []extra, audioLang, subsLang string) (int, int) {
+	a, s := -1, -1
+	if audioLang != "" {
+		f := TrackFilter{Langs: []string{audioLang}}
+		for i, e := range extras {
+			if e.track.Kind() == KindAudio && f.Matches(e.track) {
+				a = i
+				break
+			}
+		}
+	}
+	if subsLang != "" {
+		f := TrackFilter{Langs: []string{subsLang}}
+		for _, sdh := range []bool{false, true} {
+			for i, e := range extras {
+				n := strings.ToLower(e.track.Name)
+				if e.track.Kind() != KindSubtitle || !f.Matches(e.track) || e.track.Forced ||
+					strings.Contains(n, "forced") || strings.Contains(n, "foreign") || strings.Contains(n, "sdh") != sdh {
+					continue
+				}
+				s = i
+				break
+			}
+			if s >= 0 {
+				break
+			}
+		}
+	}
+	return a, s
 }

@@ -361,10 +361,14 @@ scheduler such as pipeliner retry it.
 | `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
 | `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
+| `--json` | — | With `--list`: the tracks (names, forced and commentary flags, picture size) and the source's running time as JSON, for a script |
 | `--audio-lang` | — | Keep only audio in these languages, e.g. `eng` or `eng,fra` |
 | `--audio-codec` | — | Keep only audio matching these codecs, e.g. `truehd` or `dts,ac3` |
-| `--audio-best` | — | Of the audio that matches, keep only the highest-quality track |
-| `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br` |
+| `--audio-best` | — | Of the audio that matches, keep only the highest-quality track, of each `--audio-lang` language |
+| `--no-commentary` | — | Leave out commentary audio and subtitles (flagged so, or with *comment* in their name) |
+| `--default-audio` | first track | Make the first kept audio track in this language the default, e.g. `jpn` for a film watched in its own language |
+| `--default-subs` | none | Make the first full subtitle track in this language (not forced; SDH only when there is no other) the default, e.g. `eng` |
+| `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br`, or `none` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
 | `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
 | `--subs-ocr` | — | Read each PGS subtitle track's pictures as text: an SRT track beside it in Matroska, a tx3g one in MP4 — see [Text subtitles](#text-subtitles) |

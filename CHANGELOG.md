@@ -7,6 +7,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- What a library re-encode needs, in bdtools itself: `--audio-best` keeps
+  the best track of each `--audio-lang` language; `--no-commentary` leaves
+  commentaries out; `--default-audio` and `--default-subs` set the default
+  tracks (a film in its own language, English subtitles on);
+  `--subs-lang none`; an untagged Matroska track whose name says its
+  language has it; and `--list --json` gives the tracks (names, forced and
+  commentary flags, picture size) and the running time to a script.
 - The AV1 encoder's directional intra prediction splits its rows where
   the edge it reads changes, not testing each sample (the same output):
   1.3% less CPU.

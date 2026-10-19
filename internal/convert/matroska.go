@@ -183,7 +183,13 @@ func probeMatroska(ctx context.Context, path string) (*mkvSource, []Track, error
 	}
 	var tracks []Track
 	for _, t := range r.tracks {
-		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced} //nolint:gosec // track numbers are small
+		tr := Track{ID: int(t.Number), Lang: t.Language, Name: t.Name, Forced: t.Forced, Commentary: t.Commentary} //nolint:gosec // track numbers are small
+		if l := strings.TrimSpace(tr.Lang); l == "" || l == "und" {
+			// A track tagged undetermined whose name says its language
+			if nl := langFromName(t.Name); nl != "" {
+				tr.Lang = nl
+			}
+		}
 		if t.Type == mkv.TypeVideo {
 			tr.Height, tr.Width, tr.StereoMode = t.Height, t.Width, t.StereoMode
 		}

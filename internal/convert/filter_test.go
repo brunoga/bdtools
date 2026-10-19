@@ -330,3 +330,75 @@ func TestUnknownLanguageCodesStillMatch(t *testing.T) {
 		t.Error("a code with no alias entry should still match itself")
 	}
 }
+
+// Best keeps the best track of each language asked for, in their order;
+// with no language, the one best.
+func TestBestOfEachLanguage(t *testing.T) {
+	got, err := disc().Apply(TrackFilter{Langs: []string{"fra", "eng"}, Best: true}, TrackFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameIDs(got.Audio, 4354, 4352) {
+		t.Errorf("fra,eng best: %v, want [4354 4352]", ids(got.Audio))
+	}
+	got, err = disc().Apply(TrackFilter{Best: true}, TrackFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Audio) != 1 {
+		t.Errorf("best of all: %v, want one track", ids(got.Audio))
+	}
+}
+
+// NoCommentary leaves out tracks flagged or named commentaries; a filter
+// for no language ("none") keeps no track and is no error.
+func TestNoCommentaryAndNone(t *testing.T) {
+	s := disc()
+	s.Audio[1].Name = "Commentary by the director"
+	s.Subtitles[0].Commentary = true
+	got, err := s.Apply(TrackFilter{NoCommentary: true}, TrackFilter{NoCommentary: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameIDs(got.Audio, 4352, 4354, 4355, 4356) || !sameIDs(got.Subtitles, 4609, 4610) {
+		t.Errorf("audio %v, subtitles %v", ids(got.Audio), ids(got.Subtitles))
+	}
+	got, err = disc().Apply(TrackFilter{}, TrackFilter{Langs: []string{"none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Subtitles) != 0 {
+		t.Errorf("none kept %v", ids(got.Subtitles))
+	}
+}
+
+// A track's name gives its language when it has none.
+func TestLangFromName(t *testing.T) {
+	for name, want := range map[string]string{"English SDH": "eng", "Portuguese (Brazil)": "por", "Brazilian": "por",
+		"Japanese": "jpn", "Commentary": "", "": ""} {
+		if got := langFromName(name); got != want {
+			t.Errorf("%q: %q, want %q", name, got, want)
+		}
+	}
+}
+
+// The default audio track is the first in its language; the default
+// subtitle track the first full one, SDH only when there is no other.
+func TestDefaultExtras(t *testing.T) {
+	ex := func(k string, lang, name string, forced bool) extra {
+		id := map[string]string{"a": "A_AC3", "s": "S_HDMV/PGS"}[k]
+		return extra{track: Track{StreamID: id, Lang: lang, Name: name, Forced: forced}}
+	}
+	extras := []extra{ex("a", "eng", "", false), ex("a", "jpn", "", false), ex("a", "jpn", "", false),
+		ex("s", "eng", "Forced", false), ex("s", "eng", "", true), ex("s", "eng", "English SDH", false),
+		ex("s", "eng", "English", false), ex("s", "jpn", "", false)}
+	if a, s := defaultExtras(extras, "jpn", "eng"); a != 1 || s != 6 {
+		t.Errorf("jpn, eng: %d, %d, want 1, 6", a, s)
+	}
+	if _, s := defaultExtras(extras[:6], "", "eng"); s != 5 {
+		t.Errorf("SDH alone: %d, want 5", s)
+	}
+	if a, s := defaultExtras(extras, "", ""); a != -1 || s != -1 {
+		t.Errorf("none asked: %d, %d", a, s)
+	}
+}

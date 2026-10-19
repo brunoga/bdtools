@@ -25,8 +25,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -75,14 +77,18 @@ func run(argv []string, stdout, stderr *os.File) int {
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
 		swapLR   = fs.Bool("swap-lr", false, "exchange the eyes (default: taken from the disc's own base-view marking)")
 		list     = fs.Bool("list", false, "print the source's tracks and exit, to see what the track filters can select")
+		listJSON = fs.Bool("json", false, "with --list: the tracks (and the source's running time) as JSON, for a script")
+		noComm   = fs.Bool("no-commentary", false, "leave out commentary audio and subtitle tracks (flagged so, or with comment in their name)")
+		defAudio = fs.String("default-audio", "", "make the first kept audio track in this language the default, e.g. jpn for a film watched in its own language (default: the first track)")
+		defSubs  = fs.String("default-subs", "", "make the first full subtitle track in this language (not forced, SDH only if there is no other) the default, e.g. eng (default: none)")
 		audioLng = fs.String("audio-lang", "", "keep only audio in these languages, e.g. eng or eng,fra (default: every track)")
 		audioCdc = fs.String("audio-codec", "", "keep only audio matching these codecs, e.g. truehd or dts,ac3 (default: every track)")
-		audioBst = fs.Bool("audio-best", false, "of the audio tracks that match, keep only the highest quality one (lossless, then channels, then bitrate)")
+		audioBst = fs.Bool("audio-best", false, "of the audio tracks that match, keep only the highest quality one (lossless, then channels, then bitrate), of each --audio-lang language")
 		nameCdc  = fs.Bool("name-audio-codec", false, "append the kept audio codec to the output filename, e.g. \"Film 3D FSBS.TrueHD-Atmos.mkv\"")
 		nameDet  = fs.Bool("name-details", false, "append the layout, resolution, HDR (DV, HDR10+, HDR10, HLG), codec, quality, encoder and main audio track to the output filename, e.g. \"Film (2016) 3D FSBS 1080p HEVC 10bit CQ26 NVENC TrueHD-Atmos 7.1.mkv\"")
 		keepFall = fs.Bool("keep-fallback", false, "keep the lossy core embedded in a lossless track (the AC-3 inside TrueHD, the DTS inside DTS-HD) instead of dropping it")
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
-		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng (default: every track)")
+		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng, or none for no subtitles (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
@@ -358,8 +364,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		}
 		return 0
 	}
-	o.Audio = convert.TrackFilter{Langs: convert.ParseList(*audioLng), Codecs: convert.ParseList(*audioCdc), Best: *audioBst}
-	o.Subs = convert.TrackFilter{Langs: convert.ParseList(*subsLng), Codecs: convert.ParseList(*subsCdc)}
+	o.Audio = convert.TrackFilter{Langs: convert.ParseList(*audioLng), Codecs: convert.ParseList(*audioCdc), Best: *audioBst, NoCommentary: *noComm}
+	o.Subs = convert.TrackFilter{Langs: convert.ParseList(*subsLng), Codecs: convert.ParseList(*subsCdc), NoCommentary: *noComm}
+	o.DefaultAudio, o.DefaultSubs = strings.TrimSpace(*defAudio), strings.TrimSpace(*defSubs)
 
 	// Listing comes before the plan is built, because it needs no output file
 	// and asking for one to see what a disc holds would be a silly thing to
@@ -369,10 +376,13 @@ func run(argv []string, stdout, stderr *os.File) int {
 			fmt.Fprintf(stderr, "bdtools: --list needs --input\n")
 			return 2
 		}
-		tracks, err := convert.NewRunner(goos, o, nil).ListTracks(ctx)
+		tracks, dur, err := convert.NewRunner(goos, o, nil).ListSource(ctx)
 		if err != nil {
 			fmt.Fprintf(stderr, "bdtools: %v\n", err)
 			return 1
+		}
+		if *listJSON {
+			return writeListJSON(stdout, stderr, tracks, dur)
 		}
 		fmt.Fprintf(stdout, "%-5s %-18s %-5s %-20s %s\n", "track", "kind", "lang", "codec", "info")
 		fmt.Fprint(stdout, convert.DescribeTracks(tracks))
@@ -476,4 +486,44 @@ func appendCodecToName(path string, audio []convert.Track) (string, error) {
 		return path, fmt.Errorf("renaming to %s: %w", filepath.Base(target), err)
 	}
 	return target, nil
+}
+
+// listedTrack is a track as --list --json gives it.
+type listedTrack struct {
+	ID         int    `json:"id"`
+	Kind       string `json:"kind"`
+	Lang       string `json:"lang"`
+	Codec      string `json:"codec"`
+	StreamID   string `json:"stream_id"`
+	Info       string `json:"info"`
+	Name       string `json:"name,omitempty"`
+	Forced     bool   `json:"forced,omitempty"`
+	Commentary bool   `json:"commentary,omitempty"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+}
+
+// writeListJSON writes --list --json: the running time in seconds and the
+// tracks.
+func writeListJSON(stdout, stderr io.Writer, tracks []convert.Track, dur time.Duration) int {
+	out := struct {
+		Duration float64       `json:"duration"`
+		Tracks   []listedTrack `json:"tracks"`
+	}{Duration: dur.Seconds(), Tracks: []listedTrack{}}
+	for _, t := range tracks {
+		lang := strings.TrimSpace(t.Lang)
+		if lang == "" {
+			lang = "und"
+		}
+		out.Tracks = append(out.Tracks, listedTrack{ID: t.ID, Kind: convert.TrackKind(t), Lang: lang, Codec: t.Type,
+			StreamID: t.StreamID, Info: t.Info, Name: t.Name, Forced: t.Forced, Commentary: t.IsCommentary(),
+			Width: t.Width, Height: t.Height})
+	}
+	e := json.NewEncoder(stdout)
+	e.SetIndent("", "  ")
+	if err := e.Encode(out); err != nil {
+		fmt.Fprintf(stderr, "bdtools: %v\n", err)
+		return 1
+	}
+	return 0
 }

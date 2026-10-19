@@ -495,21 +495,49 @@ func (r *Runner) check2D() {
 // It reads the playlists and the first megabytes of the feature, wherever
 // the source is: nothing is extracted.
 func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
+	tracks, _, err := r.ListSource(ctx)
+	return tracks, err
+}
+
+// ListSource is ListTracks with the source's running time: a Matroska
+// file's, a disc title's playlist's (0 when the source does not say).
+func (r *Runner) ListSource(ctx context.Context) ([]Track, time.Duration, error) {
 	if unsupportedContainer(r.Opts.Input) {
-		return nil, fmt.Errorf("cannot read %s: the source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file", filepath.Base(r.Opts.Input))
+		return nil, 0, fmt.Errorf("cannot read %s: the source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file", filepath.Base(r.Opts.Input))
 	}
 	if isMatroska(r.Opts.Input) {
-		_, tracks, err := probeMatroska(ctx, r.Opts.Input)
-		return tracks, err
+		src, tracks, err := probeMatroska(ctx, r.Opts.Input)
+		if err != nil {
+			return nil, 0, err
+		}
+		return tracks, src.duration, nil
 	}
 	// Reading the playlists and the first megabytes of the feature's stream
 	// is enough, wherever the disc is: nothing is extracted.
 	src, err := resolveGo(r.Opts.Input, r.Opts.Playlist, r.Opts.TwoD, r.Report)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer src.close()
-	return probeGo(ctx, src)
+	tracks, err := probeGo(ctx, src)
+	return tracks, src.duration, err
+}
+
+// TrackKind is the --list name of a track's kind.
+func TrackKind(t Track) string {
+	switch t.Kind() {
+	case KindBaseView:
+		return "video (base view)"
+	case KindDependentView:
+		return "video (dependent)"
+	case KindEnhancement:
+		return "video (DV layer)"
+	case KindAudio:
+		return "audio"
+	case KindSubtitle:
+		return "subtitle"
+	}
+	return "other"
 }
 
 // DescribeTracks renders a track listing for --list: one line per track, with

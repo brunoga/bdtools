@@ -24,6 +24,9 @@ type Track struct {
 	// has them (a Matroska file does; a disc does not).
 	Name   string
 	Forced bool
+	// Commentary is a Matroska track's commentary flag; IsCommentary also
+	// reads the track's name.
+	Commentary bool
 	// Height is a video track's picture height, when the source states it
 	// before decoding (a Matroska file does; a disc's playlist does not).
 	Height int
@@ -188,4 +191,30 @@ func describeVideo(tracks []Track) string {
 		return "no video tracks at all"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// IsCommentary reports whether a track is a commentary: flagged so, or so
+// named ("Commentary by the director", "Audio commentary").
+func (t Track) IsCommentary() bool {
+	return t.Commentary || strings.Contains(strings.ToLower(t.Name), "comment")
+}
+
+// nameLangs are the languages a track's name can give, by its first word,
+// for a track whose language is not set.
+var nameLangs = []struct{ prefix, lang string }{
+	{"english", "eng"}, {"portug", "por"}, {"brazil", "por"}, {"japanese", "jpn"}, {"french", "fre"},
+	{"français", "fre"}, {"spanish", "spa"}, {"español", "spa"}, {"castellano", "spa"}, {"german", "ger"},
+	{"deutsch", "ger"}, {"italian", "ita"}, {"italiano", "ita"}, {"korean", "kor"}, {"chinese", "chi"},
+}
+
+// langFromName is the language a track's name starts with ("English SDH",
+// "Portuguese (Brazil)"), or "".
+func langFromName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	for _, l := range nameLangs {
+		if strings.HasPrefix(n, l.prefix) {
+			return l.lang
+		}
+	}
+	return ""
 }

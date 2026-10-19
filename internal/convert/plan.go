@@ -72,6 +72,13 @@ type Options struct {
 	// that costs no picture quality.
 	Audio TrackFilter
 	Subs  TrackFilter
+	// DefaultAudio, when set, is the language whose first kept audio track
+	// is the default (else the first track is); DefaultSubs the language
+	// whose first full subtitle track (not forced, SDH only when there is
+	// no other) is the default (else none is, but a 3D film's first flat
+	// track). A film in another language is watched so: its own audio,
+	// subtitles in English.
+	DefaultAudio, DefaultSubs string
 	// KeepFallback keeps the lossy core embedded in a lossless stream — the
 	// AC-3 inside TrueHD, the DTS inside DTS-HD — instead of dropping it.
 	// It costs space for audio that duplicates the track beside it, and buys
