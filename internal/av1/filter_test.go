@@ -132,3 +132,17 @@ func TestGramMatches(t *testing.T) {
 		}
 	}
 }
+
+// dot32 (AVX2 where it can) matches dot32Go, signs and tails included.
+func TestDot32Matches(t *testing.T) {
+	rng := rand.New(rand.NewPCG(8, 1))
+	for _, n := range []int{0, 1, 7, 8, 9, 64, 1000} {
+		a, b := make([]int32, n), make([]int32, n)
+		for i := range a {
+			a[i], b[i] = rng.Int32N(1<<20)-1<<19, rng.Int32N(1<<20)-1<<19
+		}
+		if got, want := dot32(a, b), dot32Go(a, b); got != want {
+			t.Errorf("n %d: %d, want %d", n, got, want)
+		}
+	}
+}

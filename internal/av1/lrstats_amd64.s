@@ -56,3 +56,35 @@ jLoop:
 	JLT  uLoop
 	VZEROUPPER
 	RET
+
+// func dot32AVX2(a, b *int32, n int) int64
+// The sum of a[i]*b[i] (as 64 bits) for i < n, n a positive multiple of 8.
+TEXT ·dot32AVX2(SB), NOSPLIT, $0-32
+	MOVQ a+0(FP), SI
+	MOVQ b+8(FP), DI
+	MOVQ n+16(FP), CX
+	VPXOR Y0, Y0, Y0
+	VPXOR Y1, Y1, Y1
+
+dotLoop:
+	VMOVDQU (SI), Y2
+	VMOVDQU (DI), Y3
+	VPMULDQ Y3, Y2, Y4 // the even lanes
+	VPADDQ  Y4, Y0, Y0
+	VPSRLQ  $32, Y2, Y2
+	VPSRLQ  $32, Y3, Y3
+	VPMULDQ Y3, Y2, Y4 // the odd ones
+	VPADDQ  Y4, Y1, Y1
+	ADDQ    $32, SI
+	ADDQ    $32, DI
+	SUBQ    $8, CX
+	JG      dotLoop
+	VPADDQ       Y1, Y0, Y0
+	VEXTRACTI128 $1, Y0, X1
+	VPADDQ       X1, X0, X0
+	VPSHUFD      $0x4e, X0, X1
+	VPADDQ       X1, X0, X0
+	VMOVQ        X0, AX
+	MOVQ         AX, ret+24(FP)
+	VZEROUPPER
+	RET
