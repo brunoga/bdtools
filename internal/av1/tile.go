@@ -435,9 +435,11 @@ func (t *tileEnc) setQ(q int) {
 // its distortion 2048 times the sum of squared errors.
 func lambdaFor(dcQ int) float64 { return lambdaScale * 88.0 / 24 * float64(dcQ) * float64(dcQ) / 2048 }
 
-// lambdaScale scales lambda (for tuning: 0.6 0.3% better than 0.7 on
-// the 120-picture clips, with the steeper q offsets).
-var lambdaScale = 0.6
+// lambdaScale scales lambda. (On the 120-picture clips, with the end of
+// block searched: 1 1.4% better than 0.6 and 1.14 times faster, 0.9 1.2%,
+// 1.15 1.1%, 0.7 0.7%, 0.5 1.3% worse; before it, 0.6 was 0.3% better
+// than 0.7.)
+var lambdaScale = 1.0
 
 // writeDeltaQ is read_delta_qindex, on a superblock's first block.
 func (t *tileEnc) writeDeltaQ(cd coder) {
