@@ -351,28 +351,41 @@ func sgrAB(sum, sq []int32, w, h, r, eps, bitDepth int, odd bool, a, b []int32) 
 
 // sgrFilter is the box filter's output F (7.17.3) of a pass from A and B.
 func sgrFilter(win []int32, w, h, pass int, a, b, flt []int32) {
+	sgrFilterFrom(win, w, h, pass, a, b, flt, true)
+}
+
+// sgrFilterGo is sgrFilter without the AVX2 rows.
+func sgrFilterGo(win []int32, w, h, pass int, a, b, flt []int32) {
+	sgrFilterFrom(win, w, h, pass, a, b, flt, false)
+}
+
+func sgrFilterFrom(win []int32, w, h, pass int, a, b, flt []int32, simd bool) {
 	ww, bw := w+6, w+2
 	for i := range h {
 		u := win[(i+3)*ww+3:]
 		out := flt[i*w : (i+1)*w]
 		k := (i+1)*bw + 1 // A[i][0]
+		j0 := 0
+		if simd {
+			j0 = sgrRows(out, u, a, b, i, k, bw, pass)
+		}
 		switch {
 		case pass == 0 && i&1 == 0:
-			for j := range out {
+			for j := j0; j < len(out); j++ {
 				up, dn := k+j-bw, k+j+bw
 				av := 6*(a[up]+a[dn]) + 5*(a[up-1]+a[up+1]+a[dn-1]+a[dn+1])
 				bv := 6*(b[up]+b[dn]) + 5*(b[up-1]+b[up+1]+b[dn-1]+b[dn+1])
 				out[j] = (av*u[j] + bv + 1<<8) >> 9
 			}
 		case pass == 0:
-			for j := range out {
+			for j := j0; j < len(out); j++ {
 				c := k + j
 				av := 6*a[c] + 5*(a[c-1]+a[c+1])
 				bv := 6*b[c] + 5*(b[c-1]+b[c+1])
 				out[j] = (av*u[j] + bv + 1<<7) >> 8
 			}
 		default:
-			for j := range out {
+			for j := j0; j < len(out); j++ {
 				c := k + j
 				av := 4*(a[c]+a[c-1]+a[c+1]+a[c-bw]+a[c+bw]) + 3*(a[c-bw-1]+a[c-bw+1]+a[c+bw-1]+a[c+bw+1])
 				bv := 4*(b[c]+b[c-1]+b[c+1]+b[c-bw]+b[c+bw]) + 3*(b[c-bw-1]+b[c-bw+1]+b[c+bw-1]+b[c+bw+1])

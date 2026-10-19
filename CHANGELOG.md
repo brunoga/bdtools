@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's self guided restoration filter in AVX2 (the same
+  output): 3% less CPU.
 - The AV1 encoder's inter frames filter with EIGHTTAP throughout (the
   filter was switchable by block): 0.3% smaller on the 120-picture clips
   and 1.23 times faster, +12.2% against SVT-AV1 preset 4.
