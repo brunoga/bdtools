@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's lambda is retuned for the end of block search (1, was
+  0.6): 1.4% smaller on the 120-picture clips and 1.14 times faster,
+  +13.4% against SVT-AV1 preset 4; key frames 4.5% smaller than SVT-AV1
+  preset 4's on the six disc frames.
 - The AV1 encoder's quantization searches each transform's end of block:
   the levels after a nonzero one zeroed where their distortion is worth
   less than their bits and the end's: 2.1% smaller on the 120-picture
