@@ -893,6 +893,7 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 	w, h := int(txWidth[txSz]), int(txHeight[txSz])
 	n := min(w, 32) * min(h, 32)
 	den := int64(dqDenom(txSz))
+	dsh := uint(bits.TrailingZeros64(uint64(den))) //nolint:gosec // 1, 2 or 4
 	dcQ, acQ := int64(t.dcQ[plane]), int64(t.acQ[plane])
 	scale := float64(den*den) / 64
 	type ranked struct {
@@ -908,18 +909,19 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 		inv := invScanFor(txSz, tt)[:n]
 		var d int64
 		nb, eob := 0, 0
+		qs := dcQ
 		for j, v := range c {
-			qs := acQ
-			if j == 0 {
-				qs = dcQ
+			if j == 1 {
+				qs = acQ
 			}
 			a := int64(abs32(v))
-			l := (a*den + qs/2) / qs
-			if l == 0 {
+			r := a<<dsh + qs/2
+			if r < qs { // a level of 0: most are, and no division
 				d += a * a
 				continue
 			}
-			e := a - ((l*qs)&0xFFFFFF)/den
+			l := r / qs
+			e := a - ((l*qs)&0xFFFFFF)>>dsh
 			d += e * e
 			nb += 3 + 2*(bits.Len64(uint64(l))-1) //nolint:gosec // l > 0
 			eob = max(eob, int(inv[j])+1)
