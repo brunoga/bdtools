@@ -118,22 +118,10 @@ func (t *tileEnc) writeTxType(cd coder, txSz, txType int) {
 	panic("av1: a transform type not in its set")
 }
 
-// writeLevels writes a block with coefficients, from its transform
-// type on, giving its culLevel and dcCategory.
-func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, int) {
-	txSz, txType, eob := tc.txSz, tc.txType, tc.eob
-	if tc.plane == 0 {
-		if t.b.isInter {
-			t.writeInterTxType(cd, txSz, txType)
-		} else {
-			t.writeTxType(cd, txSz, txType)
-		}
-	}
+// writeEob writes the end of block of a transform's levels: eob_pt and
+// its extra bits.
+func (t *tileEnc) writeEob(cd coder, txSz, cls, txSzCtx, ptype, eob int) {
 	cdf := t.cdf
-	quant := t.levels[tc.off:]
-	scan := scanFor(txSz, txType)
-	cls := txClass(txType)
-	// end of block
 	eobPt := 1
 	if eob >= 2 {
 		eobPt = bits.Len(uint(eob-1)) + 1
@@ -163,6 +151,24 @@ func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, i
 			cd.boolean(rem>>uint(eobPt-3-i)&1 != 0)
 		}
 	}
+}
+
+// writeLevels writes a block with coefficients, from its transform
+// type on, giving its culLevel and dcCategory.
+func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, int) {
+	txSz, txType, eob := tc.txSz, tc.txType, tc.eob
+	if tc.plane == 0 {
+		if t.b.isInter {
+			t.writeInterTxType(cd, txSz, txType)
+		} else {
+			t.writeTxType(cd, txSz, txType)
+		}
+	}
+	cdf := t.cdf
+	quant := t.levels[tc.off:]
+	scan := scanFor(txSz, txType)
+	cls := txClass(txType)
+	t.writeEob(cd, txSz, cls, txSzCtx, ptype, eob)
 	// levels, last first
 	adj := int(adjustedTxSize[txSz])
 	bwl := int(txWidthLog2[adj])

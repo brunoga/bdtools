@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's quantization searches each transform's end of block:
+  the levels after a nonzero one zeroed where their distortion is worth
+  less than their bits and the end's: 2.1% smaller on the 120-picture
+  clips at the same speed, +14.4% against SVT-AV1 preset 4.
 - The AV1 encoder refines a NEW_NEWMV block's two vectors together,
   each searched again for the prediction that, averaged with the
   other's, matches the source (to `slow`): 0.7% smaller on the

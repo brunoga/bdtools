@@ -58,10 +58,12 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	scale := float64(den*den) / 64
 	lambda := t.lambda
 	brCDF := &cdf.coeffBr[min(txSzCtx, TX_32X32)][ptype]
+	gain := t.eobGain[:eob]
 	for c := eob - 1; c >= 0; c-- {
 		pos := int(scan[c])
 		l0 := int64(abs32(q[pos]))
 		if l0 == 0 {
+			gain[c] = -lambda * eobZeroBits // its base level's symbol, roughly
 			continue
 		}
 		qs := acQ
@@ -86,7 +88,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 			baseCDF = cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:]
 		}
 		bctx := -1
-		bestL, bestJ := l0, 0.0
+		bestL, bestJ, bestD, bestR := l0, 0.0, 0.0, int32(0)
 		for k, l := range [2]int64{l0, l0 - 1} {
 			if l < 0 || (last && l == 0) {
 				break
@@ -126,9 +128,10 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 			}
 			j := d + lambda*float64(r)/costScale
 			if k == 0 || j < bestJ {
-				bestL, bestJ = l, j
+				bestL, bestJ, bestD, bestR = l, j, d, r
 			}
 		}
+		gain[c] = coef*coef*scale - bestD - lambda*float64(bestR)/costScale
 		if q[pos] < 0 {
 			q[pos] = -int32(bestL) //nolint:gosec // a level
 		} else {
@@ -140,5 +143,40 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	for eob > 0 && q[scan[eob-1]] == 0 {
 		eob--
 	}
-	return eob
+	if !eobSearch || eob < 2 {
+		return eob
+	}
+	// the end of block searched: the levels after each nonzero one zeroed
+	// if their distortion is worth less than their and the end's bits
+	// (their contexts as the greedy pass had them)
+	eobBits := func(e int) float64 {
+		t.cost.n = 0
+		t.writeEob(&t.cost, txSz, cls, txSzCtx, ptype, e)
+		return lambda * float64(t.cost.n) / costScale
+	}
+	base := eobBits(eob)
+	best, bestDelta, acc := eob, 0.0, 0.0
+	for c := eob - 1; c >= 1; c-- {
+		acc += gain[c]
+		if q[scan[c-1]] == 0 {
+			continue
+		}
+		if d := acc + eobBits(c) - base; d < bestDelta {
+			best, bestDelta = c, d
+		}
+	}
+	for c := best; c < eob; c++ {
+		q[scan[c]] = 0
+	}
+	return best
 }
+
+// eobSearch moves a transform's end of block back where the levels after
+// are worth less than their bits; eobZeroBits is the rate it takes a zero
+// level before the end to have. (On the two 120-picture clips, at the same
+// speed: 2.1% better with 0.25 bits, 2.0% with 0.5, 1.5% with 1, 1.8%
+// with 0.)
+var (
+	eobSearch   = true
+	eobZeroBits = 0.25
+)
