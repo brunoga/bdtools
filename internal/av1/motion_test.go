@@ -148,3 +148,29 @@ func eighthShifted(w, h int, dx float64) *Source {
 	}
 	return s
 }
+
+// Switchable interpolation filters (switchable on): blocks coded with
+// other filters than EIGHTTAP, and decoded to the reconstruction.
+func TestSwitchableFilters(t *testing.T) {
+	defer func(v bool) { switchable = v }(switchable)
+	switchable = true
+	const w, h = 96, 64
+	o := EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: 60, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+	var pics []*Source
+	for i := range 5 {
+		pics = append(pics, eighthShifted(w, h, float64(3*i)/4))
+	}
+	var other atomic.Int64
+	checkDecodesWith(t, o, pics, func(e *Encoder) {
+		e.frameHook = func(f *frameEnc) {
+			for i, v := range f.interp {
+				if f.isInter[i] != 0 && v != EIGHTTAP {
+					other.Add(1)
+				}
+			}
+		}
+	})
+	if other.Load() == 0 {
+		t.Fatal("no block with another filter")
+	}
+}

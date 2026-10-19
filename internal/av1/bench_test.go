@@ -160,9 +160,9 @@ func TestBenchSeq(t *testing.T) {
 		dbgNoObmc = true
 		defer func() { dbgNoObmc = false }()
 	}
-	if os.Getenv("AV1NOSWITCHABLE") != "" {
-		dbgNoSwitchable = true
-		defer func() { dbgNoSwitchable = false }()
+	if os.Getenv("AV1SWITCHABLE") != "" {
+		switchable = true
+		defer func() { switchable = false }()
 	}
 	if os.Getenv("AV1NOPRUNE") != "" {
 		dbgNoPrune = true

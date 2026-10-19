@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's inter frames filter with EIGHTTAP throughout (the
+  filter was switchable by block): 0.3% smaller on the 120-picture clips
+  and 1.23 times faster, +12.2% against SVT-AV1 preset 4.
 - The AV1 encoder's inter frames code quarter sample vectors only (eighth
   sample below q 128 before): 0.2% smaller on the 120-picture clips and 3%
   faster, +12.7% against SVT-AV1 preset 4.
@@ -72,13 +75,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or a wedge mask, decoded bit-exact by libdav1d: 0.4% smaller on the
   120-picture clips at the same speed, +23.1% against SVT-AV1 preset 4.
 - `--preset` sets the built-in AV1 encoder's speed: every tool searched
-  to `slow`; at `medium` the transform trees decided with DCT_DCT, the
-  filter by SATD, no warped motion or masked compound (1.6 times faster,
-  2.9% larger); from `fast` also no OBMC, four references and two
-  candidates coded in full (2.0 times faster, 4.0% larger); at `slower`
-  the partitions after a skipped whole block searched too, and every
-  inter candidate coded in full (3.4 times slower, 2.5% smaller), from
-  `veryslow` none pruned (6.8 times slower, 3.0% smaller, +10.2%
+  to `slow`; at `medium` the transform trees decided with DCT_DCT,
+  no warped motion or masked compound (1.45 times faster, 2.7% larger);
+  from `fast` also no OBMC, four references and two candidates coded in
+  full (1.76 times faster, 3.9% larger); at `slower` the partitions after a skipped whole block searched too, and every
+  inter candidate coded in full (3.2 times slower, 1.9% smaller), from
+  `veryslow` none pruned (6.3 times slower, 2.5% smaller, +9.6%
   against SVT-AV1 preset 4).
 - The AV1 encoder's mini-GOPs 16 pictures (were 8): 1.1% smaller and a
   fifth faster on the 120-picture clips, +23.7% against SVT-AV1 preset 4.

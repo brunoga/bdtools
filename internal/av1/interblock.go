@@ -22,6 +22,12 @@ var interCands = 4
 // for 0.2%, 1.0 1.43 for 3.5%.)
 var candRatio = 1.15
 
+// switchable makes the inter frames' interpolation filter switchable by
+// block (else EIGHTTAP throughout): off, as the filters' symbols and the
+// search cost more than they save. (On the two 120-picture clips, against
+// switchable with filterRD: 0.3% smaller and 1.23 times faster.)
+var switchable = false
+
 // filterRD chooses the best candidate's interpolation filter by coding it
 // with each (else the estimates' SATD alone chooses).
 var filterRD = true
@@ -347,7 +353,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 	}
 	// the filter of the best, by rate and distortion
-	if f.tools.filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE && !dbgNoSwitchable {
+	if f.tools.filterRD && bestDec != nil && f.fp.interpFilter == SWITCHABLE {
 		b.refFrame, b.refFrame2, b.yMode = bestDec.refFrame, bestDec.refFrame2, bestDec.yMode
 		if b.refFrame2 <= INTRA_FRAME {
 			b.refFrame2 = NONE
@@ -778,7 +784,7 @@ func (t *tileEnc) estimate(cands []interCand) {
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
 		b.interp, b.obmc, b.compDist, b.masked, b.ii = EIGHTTAP, false, false, false, interIntra{}
 		filters := []int{EIGHTTAP}
-		if t.needsInterpFilter() && !dbgNoSwitchable {
+		if t.needsInterpFilter() {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}
 		}
 		weights := []bool{false}
