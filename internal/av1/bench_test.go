@@ -232,6 +232,15 @@ func TestBenchSeq(t *testing.T) {
 		tfStrength = v
 		defer func() { tfStrength = old }()
 	}
+	if v, err := strconv.ParseFloat(os.Getenv("AV1EOBZERO"), 64); err == nil {
+		old := eobZeroBits
+		eobZeroBits = v
+		defer func() { eobZeroBits = old }()
+	}
+	if os.Getenv("AV1NOEOBSEARCH") != "" {
+		eobSearch = false
+		defer func() { eobSearch = true }()
+	}
 	if os.Getenv("AV1NOJOINTME") != "" {
 		jointME = false
 		defer func() { jointME = true }()

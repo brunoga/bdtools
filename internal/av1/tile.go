@@ -94,6 +94,7 @@ type tileEnc struct {
 	// rankTxTypes made, txCoefOK which (bit by type) are there
 	txCoef              [TX_TYPES][32 * 32]int32
 	txCoefOK            uint32
+	eobGain             [32 * 32]float64  // quantize's, by scan position
 	jointPred, jointTgt [128 * 128]uint16 // jointRefine's
 	txCols              fwdColCache
 	txTypeBuf           [TX_TYPES]int
