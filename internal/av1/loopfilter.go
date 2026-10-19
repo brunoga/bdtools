@@ -257,26 +257,26 @@ func (lf *loopFilter) sample(buf []uint16, pos, step, plane, size int, limit, bl
 
 // wideFilter is the wide filter process (spec 7.14.6.4): n taps each
 // side of the centre, the n2 nearest weighing 2, the sum over 1<<log2Size.
+// The sums of both windows (the samples clamped to the n+1 each side)
+// slide along from one output to the next.
 func wideFilter(buf []uint16, pos, step, n, n2 int, log2Size uint) {
 	var s [14]int32 // s[k+n+1] is the sample at k, k from -(n+1) to n
 	for k := -(n + 1); k <= n; k++ {
 		s[k+n+1] = int32(buf[pos+k*step])
 	}
-	var out [12]int32
-	for i := -n; i < n; i++ {
-		var t int32
-		for j := -n; j <= n; j++ {
-			k := min(max(i+j, -(n+1)), n)
-			v := s[k+n+1]
-			if j >= -n2 && j <= n2 {
-				v *= 2
-			}
-			t += v
-		}
-		out[i+n] = (t + 1<<(log2Size-1)) >> log2Size
+	at := func(k int) int32 { return s[min(max(k, -(n+1)), n)+n+1] }
+	var wn, w2 int32 // the windows' sums for output -n
+	for j := -n; j <= n; j++ {
+		wn += at(j - n)
 	}
+	for j := -n2; j <= n2; j++ {
+		w2 += at(j - n)
+	}
+	round := int32(1) << (log2Size - 1)
 	for i := -n; i < n; i++ {
-		buf[pos+i*step] = uint16(out[i+n]) //nolint:gosec // a sample
+		buf[pos+i*step] = uint16((wn + w2 + round) >> log2Size) //nolint:gosec // a sample
+		wn += at(i+n+1) - at(i-n)
+		w2 += at(i+n2+1) - at(i-n2)
 	}
 }
 
