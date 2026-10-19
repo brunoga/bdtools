@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's sub-sample motion search filters the eight
+  neighbours of a step through their three columns' horizontal passes
+  (the same output): 3.6% less CPU.
 - The AV1 encoder's deblocking wide filters slide their sums from one
   sample to the next (the same output): 4% less CPU.
 - The AV1 encoder's self guided restoration filter in AVX2 (the same

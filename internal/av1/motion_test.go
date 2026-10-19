@@ -174,3 +174,41 @@ func TestSwitchableFilters(t *testing.T) {
 		t.Fatal("no block with another filter")
 	}
 }
+
+// subPelStep's costs are subCost's: every block size's shape, filter,
+// step and centre phase, near the edges too (where it does not apply).
+func TestSubPelStepMatches(t *testing.T) {
+	const W, H = 192, 160
+	ref := &refFrameState{width: W, height: H}
+	ref.rec[0], ref.stride[0] = mePicture(W, H, 1.2), W
+	src := mePicture(W, H, 0.7)
+	var ms motionSearch
+	shared := 0
+	for _, sz := range [][2]int{{8, 8}, {16, 8}, {8, 32}, {32, 32}, {64, 16}, {128, 128}} {
+		for _, filt := range [][2]int{{EIGHTTAP, EIGHTTAP}, {EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}} {
+			for _, c := range []mv{{0, 0}, {4, -4}, {-12, 20}, {6, 2}, {-3, 5}, {-300, 40}} {
+				for _, step := range []int32{4, 2, 1} {
+					b := &meBlock{ref: ref, src: src, srcStride: W, x: 16, y: 8, w: sz[0], h: sz[1], bitDepth: 8, filt: filt,
+						cost: func(m mv) float64 { return 0.5 * float64(abs(int(m.row))+abs(int(m.col))) }}
+					if b.x+b.w > W || b.y+b.h > H {
+						b.x, b.y = 0, 0
+					}
+					var costs [8]float64
+					if !ms.subPelStep(b, c, step, &costs) {
+						continue
+					}
+					shared++
+					for i, d := range subPelDirs {
+						m := mv{row: c.row + d[0]*step, col: c.col + d[1]*step}
+						if want := ms.subCost(b, m); costs[i] != want {
+							t.Fatalf("%dx%d filters %v centre %+v step %d: %+v costs %v, want %v", b.w, b.h, filt, c, step, m, costs[i], want)
+						}
+					}
+				}
+			}
+		}
+	}
+	if shared == 0 {
+		t.Fatal("no step shared")
+	}
+}
