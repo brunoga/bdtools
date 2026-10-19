@@ -275,6 +275,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A GPU decoder failing mid-stream (a virtual machine's media engine, as
+  macOS CI's VideoToolbox does now and then) hands H.264 and HEVC to the
+  decoder here from the last IDR, the pictures already out not repeated;
+  it was only replaced before its first picture, the conversion failing
+  after.
 - A resumed conversion now starts over when `--crop`, `--scale`,
   `--tonemap` or the trim changed, instead of joining segments made with
   other settings.
