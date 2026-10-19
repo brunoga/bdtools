@@ -92,17 +92,18 @@ type tileEnc struct {
 	resid, coef, dq, inv [64 * 64]int32
 	// txCoef are the forward transforms of the residual by type that
 	// rankTxTypes made, txCoefOK which (bit by type) are there
-	txCoef    [TX_TYPES][32 * 32]int32
-	txCoefOK  uint32
-	txCols    fwdColCache
-	txTypeBuf [TX_TYPES]int
-	txs       []txCoded
-	levels    []int32
-	lv        [32 * 32]uint8
-	cflL      [32 * 32]int32
-	snaps     [10][9]*snapshot // by depth, a few each
-	sbStart   snapshot
-	cdefDone  bool
+	txCoef              [TX_TYPES][32 * 32]int32
+	txCoefOK            uint32
+	jointPred, jointTgt [128 * 128]uint16 // jointRefine's
+	txCols              fwdColCache
+	txTypeBuf           [TX_TYPES]int
+	txs                 []txCoded
+	levels              []int32
+	lv                  [32 * 32]uint8
+	cflL                [32 * 32]int32
+	snaps               [10][9]*snapshot // by depth, a few each
+	sbStart             snapshot
+	cdefDone            bool
 	// The quantizers and lambda the tile codes with now (its
 	// CurrentQIndex's, a superblock's), and the delta_q to code on the
 	// superblock's first block.

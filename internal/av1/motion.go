@@ -16,12 +16,23 @@ type meBlock struct {
 	bitDepth   int
 	filt       [2]int // InterpFilter, as for predictInter
 	allowHP    bool   // allow_high_precision_mv: eighth sample vectors
+	// blk, when set, is the block to match instead of src's at (x, y)
+	// (with srcStride)
+	blk []uint16
 	// searchRange is how far, in samples, the integer search goes from
 	// its best start point (0 is 64).
 	searchRange int
 	// cost is a motion vector's rate in the distortion's units (SAD and
 	// SATD alike, so sqrt(lambda) times its bits).
 	cost func(m mv) float64
+}
+
+// srcBlock is the samples the search matches, from the block's top left.
+func (b *meBlock) srcBlock() []uint16 {
+	if b.blk != nil {
+		return b.blk
+	}
+	return b.src[b.y*b.srcStride+b.x:]
 }
 
 // mvLimit is the largest motion vector component magnitude
@@ -140,10 +151,10 @@ func sadAt(b *meBlock, px, py int) int64 {
 	var sum int64
 	if px >= 0 && py >= 0 && px+b.w-1 <= lastX && py+b.h-1 <= lastY {
 		if b.w&7 == 0 {
-			return int64(sadBlock(b.src[b.y*b.srcStride+b.x:], b.srcStride, ref[py*rs+px:], rs, b.w, b.h))
+			return int64(sadBlock(b.srcBlock(), b.srcStride, ref[py*rs+px:], rs, b.w, b.h))
 		}
 		for i := range b.h {
-			s := b.src[(b.y+i)*b.srcStride+b.x:][:b.w]
+			s := b.srcBlock()[i*b.srcStride:][:b.w]
 			r := ref[(py+i)*rs+px:][:b.w]
 			var d int32
 			for j, v := range s {
@@ -154,7 +165,7 @@ func sadAt(b *meBlock, px, py int) int64 {
 		return sum
 	}
 	for i := range b.h {
-		s := b.src[(b.y+i)*b.srcStride+b.x:][:b.w]
+		s := b.srcBlock()[i*b.srcStride:][:b.w]
 		r := ref[min(max(py+i, 0), lastY)*rs:]
 		var d int32
 		for j, v := range s {
@@ -193,7 +204,7 @@ func (ms *motionSearch) subPel(b *meBlock, start mv) (mv, float64) {
 // subCost is the SATD and rate of the block's exact prediction by m.
 func (ms *motionSearch) subCost(b *meBlock, m mv) float64 {
 	predictInter(b.ref, 0, b.x, b.y, b.w, b.h, m, b.filt, b.bitDepth, ms.pred[:], b.w, &ms.s)
-	return float64(satdBlock(b.src[b.y*b.srcStride+b.x:], b.srcStride, ms.pred[:], b.w, b.w, b.h)) + b.cost(m)
+	return float64(satdBlock(b.srcBlock(), b.srcStride, ms.pred[:], b.w, b.w, b.h)) + b.cost(m)
 }
 
 // satdBlock is the sum of the 4x4 Hadamard transforms' magnitudes of the

@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder refines a NEW_NEWMV block's two vectors together,
+  each searched again for the prediction that, averaged with the
+  other's, matches the source (to `slow`): 0.7% smaller on the
+  120-picture clips for 9% more time, +16.4% against SVT-AV1 preset 4.
 - The AV1 encoder's motion search also starts from two rings of points
   around the block, 8 and 24 samples out: 0.5% smaller on the
   120-picture clips at the same speed, +17.2% against SVT-AV1 preset 4.
