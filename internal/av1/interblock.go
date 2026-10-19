@@ -149,6 +149,13 @@ func (t *tileEnc) predictBlock() {
 	}
 }
 
+// meRings are the radii (in samples) of the rings of eight start points
+// the motion search tries besides the stack's vectors, so that its
+// hexagon walk starts near motion the neighbours do not have. (On the two
+// 120-picture clips, at the same speed: 8 and 24 0.5% better, 8, 16 and
+// 32 0.5%, 16 and 48 0.3%, 32 and 96 0.4% worse.)
+var meRings = []int32{8, 24}
+
 // interRefs are the references inter blocks try (a frame two of them
 // are tried once), compPairs the compound pairs: those of the
 // bidirectional syntax (a reference of LAST_FRAME to GOLDEN_FRAME, one of
@@ -721,6 +728,11 @@ func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
 	starts := []mv{{}}
 	for i := range min(s.numMvFound, 4) {
 		starts = append(starts, s.refStackMv[i][0])
+	}
+	for _, r := range meRings {
+		for _, d := range [8][2]int32{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}} {
+			starts = append(starts, mv{row: d[0] * r * 8, col: d[1] * r * 8})
+		}
 	}
 	m, _ := t.ms.search(&me, starts)
 	lo, hi := s.refMvIdxRange(NEWMV)
