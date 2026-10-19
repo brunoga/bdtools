@@ -232,6 +232,16 @@ func TestBenchSeq(t *testing.T) {
 		tfStrength = v
 		defer func() { tfStrength = old }()
 	}
+	if e, ok := os.LookupEnv("AV1MERINGS"); ok {
+		old := meRings
+		meRings = nil
+		for _, f := range strings.Split(e, ",") {
+			if v, err := strconv.Atoi(f); err == nil {
+				meRings = append(meRings, int32(v))
+			}
+		}
+		defer func() { meRings = old }()
+	}
 	if v, err := strconv.Atoi(os.Getenv("AV1TFKEY")); err == nil {
 		old := tfKeyAfter
 		tfKeyAfter = v
