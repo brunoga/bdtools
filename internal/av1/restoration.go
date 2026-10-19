@@ -331,6 +331,10 @@ func sgrBoxSums(win []int32, w, h, r int, odd bool, sum, sq, vs, vq []int32) {
 // sgrAB makes the box filter's A and B (7.17.3) from the box sums, for
 // radius r and strength eps.
 func sgrAB(sum, sq []int32, w, h, r, eps, bitDepth int, odd bool, a, b []int32) {
+	sgrABFrom(sum, sq, w, h, r, eps, bitDepth, odd, a, b, true)
+}
+
+func sgrABFrom(sum, sq []int32, w, h, r, eps, bitDepth int, odd bool, a, b []int32, simd bool) {
 	n := (2*r + 1) * (2*r + 1)
 	n2e := n * n * eps
 	s := ((1 << SGRPROJ_MTABLE_BITS) + n2e/2) / n2e
@@ -341,7 +345,11 @@ func sgrAB(sum, sq []int32, w, h, r, eps, bitDepth int, odd bool, a, b []int32) 
 		if odd && i&1 == 0 {
 			continue
 		}
-		for k := (i + 1) * bw; k < (i+2)*bw; k++ {
+		k0 := (i + 1) * bw
+		if simd {
+			k0 += sgrABRow(sq, sum, a, b, k0, bw, n, s, oneOverN, sh)
+		}
+		for k := k0; k < (i+2)*bw; k++ {
 			aa, bb := int(sq[k]), int(sum[k])
 			d := bb
 			if sh > 0 {
