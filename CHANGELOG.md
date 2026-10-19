@@ -5,6 +5,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-19
+
+### Changed
+
+- purego (the GPU libraries' loader, no cgo) 0.11.2, was 0.11.1.
+
+### Fixed
+
+- The GPU decoder comparison test is skipped when VideoToolbox's media
+  engine fails a frame (kIOReturnError), as macOS CI's virtual machine does
+  now and then; conversions already hand such a stream to the decoders here.
+
 ## [0.14.0] - 2026-10-19
 
 ### Added
@@ -991,7 +1003,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/brunoga/bdtools/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/brunoga/bdtools/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/brunoga/bdtools/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/brunoga/bdtools/compare/v0.11.0...v0.12.0
