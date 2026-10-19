@@ -232,6 +232,11 @@ func TestBenchSeq(t *testing.T) {
 		tfStrength = v
 		defer func() { tfStrength = old }()
 	}
+	if v, err := strconv.Atoi(os.Getenv("AV1TFKEY")); err == nil {
+		old := tfKeyAfter
+		tfKeyAfter = v
+		defer func() { tfKeyAfter = old }()
+	}
 	if os.Getenv("AV1NOTF") != "" {
 		dbgNoTF = true
 		defer func() { dbgNoTF = false }()
@@ -271,6 +276,9 @@ func TestBenchSeq(t *testing.T) {
 					se += d * d
 				}
 				seAll += se
+				if os.Getenv("AV1FRAMES") != "" {
+					fmt.Printf("frame %d %d %.4f\n", k, len(u.Data), 10*math.Log10(255*255/(se/float64(w*h))))
+				}
 			}
 			// PSNR from the clip's mean squared error, as ffmpeg's psnr filter
 			psnr := 10 * math.Log10(255*255/(seAll/float64(n*w*h)))

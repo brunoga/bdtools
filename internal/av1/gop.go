@@ -26,7 +26,7 @@ type Unit struct {
 type frameJob struct {
 	disp    int // in display order
 	src     *Source
-	orig    *Source // the source before the temporal filter (an anchor's)
+	orig    *Source // the source before the temporal filter (an anchor's or a key frame's)
 	key     bool
 	show    bool
 	depth   int // in the pyramid: 0 key, 1 the mini-GOP's last, ...
@@ -134,8 +134,28 @@ func (e *Encoder) drain(flush bool) []Unit {
 	for len(e.queue) > 0 {
 		first := e.queue[0]
 		if first.disp%e.keyint() == 0 {
+			// the key frame filtered with the pictures after it (to the
+			// next key frame), and shown so
+			if tfKeyAfter > 0 && !dbgNoTF && e.o.QIndex > 0 && e.keyint() > 1 {
+				after := min(tfKeyAfter, e.keyint()-1)
+				if len(e.queue) < 1+after && !flush {
+					break
+				}
+				after = min(after, len(e.queue)-1)
+				if after > 0 && first.orig == nil {
+					window := make([]*Source, 0, 1+after)
+					for _, j := range e.queue[:1+after] {
+						window = append(window, j.src)
+					}
+					first.orig = first.src
+					first.src = temporalFilter(window, 0, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
+				}
+			}
 			first.key, first.show, first.depth = true, true, 0
 			e.tfPast = []*Source{first.src}
+			if first.orig != nil {
+				e.tfPast[0] = first.orig
+			}
 			e.run([]step{e.plan(first)}, &out)
 			e.queue = e.queue[1:]
 			continue
