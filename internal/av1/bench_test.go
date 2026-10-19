@@ -232,6 +232,10 @@ func TestBenchSeq(t *testing.T) {
 		tfStrength = v
 		defer func() { tfStrength = old }()
 	}
+	if os.Getenv("AV1NOJOINTME") != "" {
+		jointME = false
+		defer func() { jointME = true }()
+	}
 	if e, ok := os.LookupEnv("AV1MERINGS"); ok {
 		old := meRings
 		meRings = nil

@@ -46,9 +46,10 @@ type EncoderOptions struct {
 	// estimate is near inter's, inter candidates coded in full where
 	// theirs are near the best's; 1 the transform trees decided with
 	// DCT_DCT, the interpolation filter by SATD, no warped motion or
-	// masked compound, no compound of two earlier frames (1.6 times
-	// faster, 3.9% larger); 2 also no OBMC, four references and two
-	// candidates coded in full (2.0 times, 5.3%).
+	// masked compound, no compound of two earlier frames or joint
+	// compound motion search (1.6 times faster, 3.9% larger); 2 also no
+	// OBMC, four references and two candidates coded in full (2.0
+	// times, 5.3%).
 	Speed int
 }
 
@@ -61,6 +62,7 @@ type tools struct {
 	intraSkip, candRatio            float64
 	sameDir                         int // sameDirComp's
 	txCands                         int
+	jointME                         bool
 }
 
 // Encoder codes pictures.
@@ -125,7 +127,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio = false, 0, 0
 	}
@@ -140,6 +142,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		}
 		e.seq.warpedMotion, e.seq.maskedCompound = false, false
 		e.tools.sameDir = 0
+		e.tools.jointME = false
 	}
 	if o.Speed >= 2 {
 		e.tools.obmc, e.tools.fewRefs = false, true
