@@ -128,13 +128,26 @@ func decodeAll(t *testing.T, k Kind, codec VideoCodec, units [][]byte, pts []int
 	defer func() { _ = d.Close() }()
 	for i, u := range units {
 		if err := d.Decode(u, pts[i]); err != nil {
+			skipEngineFailure(t, err)
 			t.Fatal(err)
 		}
 	}
 	if err := d.Flush(); err != nil {
+		skipEngineFailure(t, err)
 		t.Fatal(err)
 	}
 	return sums, got, &last
+}
+
+// skipEngineFailure skips a test whose decoder's media engine failed a
+// frame with kIOReturnError (-536870212): a virtual machine's VideoToolbox
+// (macOS CI's) does now and then, and the conversions hand such a stream to
+// the decoders here (gpuFallback); this test compares the GPU's own output.
+func skipEngineFailure(t *testing.T, err error) {
+	t.Helper()
+	if strings.Contains(err.Error(), "videotoolbox: decoding: -536870212") {
+		t.Skipf("the media engine failed a frame: %v", err)
+	}
 }
 
 // NVDEC decodes exactly what ffmpeg's software decoders do, in display
