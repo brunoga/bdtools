@@ -7,6 +7,8 @@ package av1
 // eighth sample steps, each candidate predicted exactly and measured by
 // SATD), both adding the motion vector's rate as the caller prices it.
 
+import "math"
+
 // meBlock is the block a motion search predicts.
 type meBlock struct {
 	ref        *refFrameState
@@ -43,6 +45,7 @@ const mvLimit = 1<<14 - 1
 type motionSearch struct {
 	s    interScratch
 	pred [128 * 128]uint16
+	hmid [3][]int32 // subPelStep's horizontal passes
 	seen [1024]seenPoint
 	gen  uint32
 }
@@ -188,17 +191,103 @@ func (ms *motionSearch) subPel(b *meBlock, start mv) (mv, float64) {
 	}
 	for step := int32(4); step >= minStep; step >>= 1 {
 		c := best
-		for _, d := range [8][2]int32{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}} {
+		var costs [8]float64
+		shared := ms.subPelStep(b, c, step, &costs)
+		for i, d := range subPelDirs {
 			m := mv{row: c.row + d[0]*step, col: c.col + d[1]*step}
 			if m.row < -mvLimit || m.row > mvLimit || m.col < -mvLimit || m.col > mvLimit {
 				continue
 			}
-			if k := ms.subCost(b, m); k < bestCost {
+			k := costs[i]
+			if !shared {
+				k = ms.subCost(b, m)
+			}
+			if k < bestCost {
 				best, bestCost = m, k
 			}
 		}
 	}
 	return best, bestCost
+}
+
+// subPelDirs are the eight neighbours a sub-sample step tries, in order.
+var subPelDirs = [8][2]int32{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}}
+
+// subPelStep is subCost of c's eight neighbours step apart (costs, in
+// subPelDirs' order), their predictions sharing the horizontal filter of
+// each of their three columns: the same predictions as blockInterPred's.
+// It reports false (costs unset) where it does not apply: a neighbour
+// near the reference's edges, at a whole sample or out of mvLimit.
+func (ms *motionSearch) subPelStep(b *meBlock, c mv, step int32, costs *[8]float64) bool {
+	w, h := b.w, b.h
+	lastX, lastY := b.ref.width-1, b.ref.height-1
+	var sx, sy [8]int
+	ymin, ymax := math.MaxInt, math.MinInt
+	fx, fy := filterFor(b.filt[1], w), filterFor(b.filt[0], h)
+	for i, d := range subPelDirs {
+		m := mv{row: c.row + d[0]*step, col: c.col + d[1]*step}
+		if m.row < -mvLimit || m.row > mvLimit || m.col < -mvLimit || m.col > mvLimit {
+			return false
+		}
+		sx[i], sy[i], _, _ = scaleMv(0, b.x, b.y, m, b.ref.width, b.ref.height, b.ref.width, b.ref.height)
+		fracX, fracY := (sx[i]>>6)&SUBPEL_MASK, (sy[i]>>6)&SUBPEL_MASK
+		x0, y0 := (sx[i]>>10)-3, (sy[i]>>10)-3
+		if fracX == 0 && fracY == 0 || x0 < 0 || y0 < 0 || x0+w+6 > lastX || y0+h+6 > lastY {
+			return false
+		}
+		ty := subpelTaps[fy][fracY]
+		ymin, ymax = min(ymin, y0+int(ty[0])), max(ymax, y0+h-1+int(ty[1]))
+	}
+	rnd := interRoundingFor(b.bitDepth, false)
+	sh0 := uint(rnd.round0)
+	add0 := int32(1) << (sh0 - 1)
+	src, ss := b.ref.rec[0], b.ref.stride[0]
+	// the horizontal passes, by column (c's and either side's)
+	var cols [3]int
+	nc := 0
+	col := func(x int) int {
+		for k := range nc {
+			if cols[k] == x {
+				return k
+			}
+		}
+		k := nc
+		cols[k], nc = x, nc+1
+		if n := w * (ymax - ymin); cap(ms.hmid[k]) < n {
+			ms.hmid[k] = make([]int32, n)
+		}
+		mid := ms.hmid[k]
+		fracX, x0 := (x>>6)&SUBPEL_MASK, (x>>10)-3
+		kx := &subpelFilters[fx][fracX]
+		tx := subpelTaps[fx][fracX]
+		for y := ymin; y < ymax; y++ {
+			row := src[y*ss+x0 : y*ss+x0+w+7]
+			out := mid[(y-ymin)*w : (y-ymin)*w+w]
+			if fracX == 0 {
+				widen(out, row[3:], FILTER_BITS-sh0)
+				continue
+			}
+			filterRow(out, row, kx, int(tx[0]), int(tx[1]), add0, sh0)
+		}
+		return k
+	}
+	sh1 := uint(rnd.round1)
+	add1 := int32(1) << (sh1 - 1)
+	maxV := int32(1)<<uint(b.bitDepth) - 1
+	var acc [128]int32
+	for i, d := range subPelDirs {
+		mid := ms.hmid[col(sx[i])]
+		fracY, y0 := (sy[i]>>6)&SUBPEL_MASK, (sy[i]>>10)-3
+		ky := &subpelFilters[fy][fracY]
+		ty := subpelTaps[fy][fracY]
+		lo, hi := int(ty[0]), int(ty[1])
+		for r := range h {
+			filterColClip(ms.pred[r*w:r*w+w], mid[(y0+r+lo-ymin)*w:], w, ky, lo, hi, add1, sh1, maxV, acc[:w])
+		}
+		m := mv{row: c.row + d[0]*step, col: c.col + d[1]*step}
+		costs[i] = float64(satdBlock(b.srcBlock(), b.srcStride, ms.pred[:], w, w, h)) + b.cost(m)
+	}
+	return true
 }
 
 // subCost is the SATD and rate of the block's exact prediction by m.
