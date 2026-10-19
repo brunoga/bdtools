@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder codes a picture as one tile, the fewest the limits allow
+  (was about one a 512x512 area, 2x2 at 1080p): 5.9% smaller on the
+  120-picture clips for 1.31 times the time, +5.7% against SVT-AV1 preset 4
+  (which codes 1080p as one tile too).
 - The AV1 encoder's inter frames take their CDFs from the reference nearest
   their depth in the pyramid (was LAST_FRAME's), as libaom takes its own
   layer's: 0.5% smaller on the 120-picture clips at the same speed, +11.6%
