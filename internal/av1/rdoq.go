@@ -63,7 +63,9 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 		pos := int(scan[c])
 		l0 := int64(abs32(q[pos]))
 		if l0 == 0 {
-			gain[c] = -lambda * eobZeroBits // its base level's symbol, roughly
+			// its base level's symbol: the rate the end of block saves
+			r := symbolCost(0, cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:])
+			gain[c] = -lambda * float64(r) / costScale
 			continue
 		}
 		qs := acQ
@@ -172,11 +174,8 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 }
 
 // eobSearch moves a transform's end of block back where the levels after
-// are worth less than their bits; eobZeroBits is the rate it takes a zero
-// level before the end to have. (On the two 120-picture clips, at the same
-// speed: 2.1% better with 0.25 bits, 2.0% with 0.5, 1.5% with 1, 1.8%
-// with 0.)
-var (
-	eobSearch   = true
-	eobZeroBits = 0.25
-)
+// are worth less than their bits, the zeros among them priced by their
+// base level's symbol. (On the two 120-picture clips, at the same speed:
+// 2.1% better with each zero at 0.25 bits, 0.3% more with their symbols;
+// 0.1% less at 0.6 of those, 0.5% less at 1.5.)
+var eobSearch = true
