@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's self guided restoration A and B in AVX2 (the same
+  output): 1.5% less CPU.
 - The AV1 encoder's self guided restoration statistics as dot products of
   each strength's rows, in AVX2 (the same output): 2% less CPU.
 - The AV1 encoder's sub-sample motion search filters the eight
