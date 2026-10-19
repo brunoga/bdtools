@@ -108,4 +108,48 @@ Measurement:
 | 8. Text subtitles, PGS OCR | Done: SRT, ASS/SSA, WebVTT and tx3g carried (Matroska as they are, MP4 as tx3g), `--subs-file` adds files; `--subs-ocr` reads PGS as text (a CRNN trained here, internal/ocr) |
 | 9. Control features | Trimming (`--start`, `--end`, `--duration`), device presets (`--for`), a target size (`--video-size`) and batches (`--input` a directory, `--watch`) done |
 | 10. Quality metrics in Go | Done: VMAF (libvmaf's integer VIF, ADM, motion and its v0.6.1 models), PSNR and float SSIM, the same numbers as libvmaf's tool; `--compare` |
-| 11. AV1 encoder | First version: `--encoder builtin --codec av1`, every stream decoded bit-exact by libdav1d in the tests. Key frames -4.5% BD-rate (PSNR-Y) against SVT-AV1 preset 4 `tune=1` on six 1080p disc frames; 120-picture clips +5.7% (Blade Runner 2049, Frozen II; loop restoration, OBMC, every compound mode, all seven references, temporal motion vectors, local warped motion, masked compound, inter-intra, compound of two earlier frames in the mini-GOPs' anchors in). To do: the inter coding (global motion: SVT-AV1's own is worth 0.0% on these clips; same-direction compound in every frame 0.0% for 10% more time), the rate (the temporal model scales lambdas per superblock and sets the anchors' q; SVT-AV1's own model is worth 5.5% to it), and speed (0.3 to 1.0 s a 1080p picture on 24 cores by q, after a wavefront of superblock rows and mini-GOPs coded at once; SVT-AV1 preset 4 takes 0.04 s) |
+| 11. AV1 encoder | Done for now: `--encoder builtin --codec av1`, every stream decoded bit-exact by libdav1d in the tests. Key frames -4.5% BD-rate (PSNR-Y) against SVT-AV1 preset 4 `tune=1` on six 1080p disc frames; 120-picture clips +5.7% (Blade Runner 2049, Frozen II), +2.8% at `--preset veryslow` (loop restoration, OBMC, every compound mode, all seven references, temporal motion vectors, local warped motion, masked compound, inter-intra, a temporal filter and model, one tile a picture); about 0.46 s a 1080p picture on 24 cores (SVT-AV1 preset 4: 0.04 s). See [AV1: next steps](#av1-next-steps) |
+
+## AV1: next steps
+
+What is left of the gap to SVT-AV1 preset 4 (+5.7% at the default speed)
+and of its speed, by what each step is likely worth. The numbers are from
+the two 120-picture 1080p clips; the small tunings around today's settings
+(lambda, key frame and pyramid q, the temporal filter and model's
+strengths, the motion search's starts) are all within 0.3% of them.
+
+1. **A full temporal model.** Ours costs blocks by SATD on the source
+   pictures and is worth 3.0%; SVT-AV1's own is worth 5.5% to it. libaom's
+   form codes each block in the model (a transform, the frame's quantizer,
+   a reconstruction the later frames predict from) and propagates rates and
+   distortions, not SATD ratios. A cheap quantization-aware cost (a 4x4
+   Hadamard dead-zone estimate) was 3.2% worse: its rate floor makes intra
+   and inter costs alike, and any weaker propagation loses (the inter costs
+   scaled by 1.4 or the references' quantization noise added: 0.8% to
+   4.7% worse). Likely 1 to 2%.
+2. **Frame-level parallelism.** One tile a picture (5.9% smaller than 2x2)
+   costs 1.31 times the time: a 1080p frame is 30 by 17 superblocks, and
+   its rows, two superblocks apart, keep about 8 cores busy where four
+   tiles kept 17; more mini-GOPs at once do not help (the pyramid's first
+   levels are one frame each). Starting a frame's rows as its references'
+   rows are done (x264's frame threads) is the way, but a frame's CDFs
+   (primary_ref_frame, 0.5%) and its temporal motion vectors need its
+   references whole: they would have to come from earlier frames, or the
+   references' rows be done in an order that gives them early.
+3. **128x128 superblocks.** Fewer partition and skip symbols where the
+   picture is flat, blocks up to 128x128: in libaom 0.5 to 1% on HD. It
+   touches the superblock loops, the partition search, CDEF's and loop
+   restoration's signalling and the wavefront (half the rows, fewer cores
+   busy: see 2).
+4. **The side information.** Coefficients are only a third of an inter
+   frame's bits (motion vectors about 17%, compound modes and references
+   about 10%, skip mode 3 to 6%): where the remaining gap is, by a breakdown
+   of the symbols' bits. Kept for this: every tool earns its bits (no OBMC
+   0.6% worse, no warped motion 0.6%, no masked compound 0.6%, no
+   inter-intra 0.2%, no skip mode 1.2%).
+5. **Smaller things.** A frame's interpolation filter chosen by its content
+   (EIGHTTAP_SHARP throughout is 0.8% better on Blade Runner 2049 and 0.5%
+   worse on Frozen II; EIGHTTAP_SMOOTH 7.1% worse); the remaining SIMD (the
+   temporal filter's weights, the quantizer's scan); 4K, coded as one tile
+   now too, measured.
+

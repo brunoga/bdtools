@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-19
+
 ### Added
 
 - The AV1 encoder codes a picture as one tile, the fewest the limits allow
@@ -989,7 +991,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/brunoga/bdtools/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/brunoga/bdtools/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/brunoga/bdtools/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/brunoga/bdtools/compare/v0.10.0...v0.11.0
