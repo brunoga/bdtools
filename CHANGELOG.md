@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's temporal filter takes key frames too, with the six
+  pictures after them, the filtered picture shown: 0.7% smaller on the
+  120-picture clips (a key frame each), +17.8% against SVT-AV1 preset 4.
 - The AV1 encoder's temporal filter is on: each mini-GOP's anchor coded
   from a motion compensated average of its neighbours, shown by an
   overlay frame, at strength 2 (libaom's 5 filters the disc sources too

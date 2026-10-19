@@ -64,6 +64,12 @@ var tfStrength = 2
 // 53.6 dB from its source), the mean weight 982 of 1000.
 var dbgNoTF = false
 
+// tfKeyAfter is how many pictures after a key frame filter it (0: the
+// key frames not filtered), the filtered picture shown. (On the two
+// 120-picture clips, a key frame each: 6 0.7% better, 3 0.5%; with it,
+// key frames coded finer than keyQ do not gain.)
+var tfKeyAfter = 6
+
 // tfAfter is how many pictures after the anchor the filter waits for
 // (the next mini-GOP's first ones: a lookahead).
 var tfAfter = 3

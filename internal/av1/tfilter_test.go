@@ -162,3 +162,28 @@ func TestTemporalFilterEncode(t *testing.T) {
 		t.Logf("q %d, filter %v: %d bytes, PSNR %.2f dB against the clean source, %.2f dB against the noisy", o.QIndex, !off, bytes, vsClean, vsNoisy)
 	}
 }
+
+// A key frame is filtered with the pictures after it, and shown so: its
+// unit differs from the unfiltered one's, and the stream decodes.
+func TestTemporalFilterKey(t *testing.T) {
+	const w, h, depth = 96, 64, 8
+	var src []*Source
+	for i := range 8 {
+		src = append(src, noisy(cleanPicture(w, h, depth, i, i/3), depth, 5, uint64(i+7)))
+	}
+	o := EncoderOptions{Width: w, Height: h, BitDepth: depth, QIndex: 140, FPSNum: 25, FPSDen: 1}
+	defer func(was int) { tfKeyAfter = was }(tfKeyAfter)
+	var keys [2][]byte
+	for i, after := range []int{0, 6} {
+		tfKeyAfter = after
+		e, err := NewEncoder(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys[i] = encodeAll(t, e, src)[0].Data
+	}
+	if string(keys[0]) == string(keys[1]) {
+		t.Fatal("the key frame coded the same filtered")
+	}
+	checkDecodes(t, o, src)
+}
