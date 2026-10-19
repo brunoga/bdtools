@@ -426,31 +426,42 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 		for i := range h {
 			idx := (i + 1) * dx
 			shift := int32((idx<<uint(upA))>>1) & 0x1f
-			for j := range w {
-				base := (idx >> uint(6-upA)) + (j << uint(upA))
-				v := above[maxBase]
-				if base < maxBase {
-					v = (above[base]*(32-shift) + above[base+1]*shift + 16) >> 5
+			b0 := idx >> uint(6-upA)
+			// the samples whose base is before maxBase, then its sample
+			n := min(max((maxBase-b0+(1<<uint(upA))-1)>>uint(upA), 0), w)
+			out := pred[i*w : i*w+w]
+			if upA == 0 {
+				a := above[b0 : b0+n+1]
+				for j := range out[:n] {
+					out[j] = uint16((a[j]*(32-shift) + a[j+1]*shift + 16) >> 5) //nolint:gosec // a sample
 				}
-				pred[i*w+j] = uint16(v) //nolint:gosec // a sample
+			} else {
+				for j := range out[:n] {
+					base := b0 + 2*j
+					out[j] = uint16((above[base]*(32-shift) + above[base+1]*shift + 16) >> 5) //nolint:gosec // a sample
+				}
+			}
+			for j := n; j < w; j++ {
+				out[j] = uint16(above[maxBase]) //nolint:gosec // a sample
 			}
 		}
 	case pAngle > 90 && pAngle < 180:
 		for i := range h {
-			for j := range w {
+			// from the left edge while the above one's base would be
+			// before -(1 << upA), that is idx < -64: to j0
+			j0 := min(max(((i+1)*dx-64+63)>>6, 0), w)
+			out := pred[i*w : i*w+w]
+			for j := range out[:j0] {
+				idx := (i << 6) - (j+1)*dy
+				base := idx >> uint(6-upL)
+				shift := int32((idx<<uint(upL))>>1) & 0x1f
+				out[j] = uint16((lf(base)*(32-shift) + lf(base+1)*shift + 16) >> 5) //nolint:gosec // a sample
+			}
+			for j := j0; j < w; j++ {
 				idx := (j << 6) - (i+1)*dx
 				base := idx >> uint(6-upA)
-				var v int32
-				if base >= -(1 << uint(upA)) {
-					shift := int32((idx<<uint(upA))>>1) & 0x1f
-					v = (ab(base)*(32-shift) + ab(base+1)*shift + 16) >> 5
-				} else {
-					idx = (i << 6) - (j+1)*dy
-					base = idx >> uint(6-upL)
-					shift := int32((idx<<uint(upL))>>1) & 0x1f
-					v = (lf(base)*(32-shift) + lf(base+1)*shift + 16) >> 5
-				}
-				pred[i*w+j] = uint16(v) //nolint:gosec // a sample
+				shift := int32((idx<<uint(upA))>>1) & 0x1f
+				out[j] = uint16((ab(base)*(32-shift) + ab(base+1)*shift + 16) >> 5) //nolint:gosec // a sample
 			}
 		}
 	case pAngle > 180:
