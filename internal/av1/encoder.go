@@ -6,7 +6,6 @@ package av1
 import (
 	"errors"
 	"fmt"
-	"math/bits"
 	"sync"
 )
 
@@ -28,8 +27,12 @@ type EncoderOptions struct {
 	Primaries, Transfer, Matrix int
 	FullRange                   bool
 	// TileColsLog2 and TileRowsLog2 ask for 1<<n tile columns and rows
-	// (as the limits allow), coded at once: -1 picks by the picture
-	// size, about one tile a 512x512 area, at most 8x8.
+	// (as the limits allow), coded at once: -1 the fewest the limits
+	// allow, one tile to 4096x2304. (A tile starts its CDFs and its
+	// neighbours afresh: on the two 120-picture 1080p clips one tile is
+	// 5.9% smaller than 2x2, two columns 3.6%, for 1.31 and 1.17 times
+	// the time; the superblock rows of a tile and several frames are
+	// coded at once still.)
 	TileColsLog2, TileRowsLog2 int
 	// Keyint is the key frame interval; 0 picks 250, 1 codes key frames
 	// only.
@@ -165,12 +168,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	src := j.src
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
-	if cl < 0 {
-		cl = min(bits.Len(uint(max(e.o.Width/512, 1)))-1, 3)
-	}
-	if rl < 0 {
-		rl = min(bits.Len(uint(max(e.o.Height/512, 1)))-1, 3)
-	}
+	cl, rl = max(cl, 0), max(rl, 0) // newTiling raises them to the limits'
 	fp.tiles = newTiling(miCols, miRows, cl, rl)
 	if !key {
 		fp.highPrecisionMV = fp.qIndex < hpMaxQ
