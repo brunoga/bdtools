@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The AV1 encoder's inter frames code quarter sample vectors only (eighth
+  sample below q 128 before): 0.2% smaller on the 120-picture clips and 3%
+  faster, +12.7% against SVT-AV1 preset 4.
 - The AV1 encoder's end of block search prices the zeros it drops by
   their base level's symbol (was 0.25 bits each): 0.3% smaller on the
   120-picture clips for 2% more time, +13.1% against SVT-AV1 preset 4.

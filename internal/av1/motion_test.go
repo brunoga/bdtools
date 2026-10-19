@@ -2,6 +2,7 @@ package av1
 
 import (
 	"math"
+	"sync/atomic"
 	"testing"
 )
 
@@ -100,4 +101,50 @@ func BenchmarkPredictInter(b *testing.B) {
 	for b.Loop() {
 		predictInter(ref, 0, 40, 40, 64, 64, mv{-53, 27}, [2]int{EIGHTTAP, EIGHTTAP}, 8, dst, 64, &s)
 	}
+}
+
+// Eighth sample vectors allowed (hpMaxQ above the q): some coded, and
+// decoded to the reconstruction.
+func TestHighPrecisionMV(t *testing.T) {
+	defer func(v int) { hpMaxQ = v }(hpMaxQ)
+	hpMaxQ = 256
+	const w, h = 96, 64
+	o := EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: 60, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
+	var pics []*Source
+	for i := range 5 {
+		pics = append(pics, eighthShifted(w, h, float64(3*i)/8))
+	}
+	var hp, eighth atomic.Int64
+	checkDecodesWith(t, o, pics, func(e *Encoder) {
+		e.frameHook = func(f *frameEnc) {
+			if f.fp.key || !f.fp.highPrecisionMV {
+				return
+			}
+			hp.Add(1)
+			for i, v := range f.mvs[0] {
+				if f.isInter[i] != 0 && (v.row|v.col)&1 != 0 {
+					eighth.Add(1)
+				}
+			}
+		}
+	})
+	if hp.Load() == 0 || eighth.Load() == 0 {
+		t.Fatalf("%d frames allowed eighth sample vectors, %d vectors", hp.Load(), eighth.Load())
+	}
+}
+
+// eighthShifted is a smooth 8-bit picture moved right by dx samples.
+func eighthShifted(w, h int, dx float64) *Source {
+	cw, ch := (w+1)/2, (h+1)/2
+	s := &Source{Y: make([]uint16, w*h), Cb: make([]uint16, cw*ch), Cr: make([]uint16, cw*ch), StrideY: w, StrideC: cw}
+	for y := range h {
+		for x := range w {
+			xx := float64(x) - dx
+			s.Y[y*w+x] = uint16(128 + 90*math.Sin(xx/3.1)*math.Cos(float64(y)/4.3))
+		}
+	}
+	for i := range s.Cb {
+		s.Cb[i], s.Cr[i] = 128, 128
+	}
+	return s
 }
