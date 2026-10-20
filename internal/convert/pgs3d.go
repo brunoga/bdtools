@@ -54,6 +54,20 @@ type pgs3D struct {
 	palettes map[byte]*[256]byte
 	palette  byte              // the composition's palette
 	objects  map[uint16][]byte // object data being gathered, for squeezing
+	// report, when set, is told of the display sets left out (ones the
+	// rewrite cannot read).
+	report  Reporter
+	dropped int
+}
+
+// wdsCount is how many whole windows a window definition carries: the
+// number it gives, or as many as its bytes hold when it gives more (a
+// disc's authoring tool cut one short: Titanic 3D's, 11 minutes in).
+func wdsCount(s []byte) int {
+	if len(s) == 0 {
+		return 0
+	}
+	return min(int(s[0]), (len(s)-1)/9)
 }
 
 type pgsWindow struct{ x, y, w, h int }
@@ -73,16 +87,24 @@ func newPGS3D(src mkv.Source, layout Layout, offset func(time.Duration) int) *pg
 func (p *pgs3D) Track() mkv.Track { return p.track }
 
 func (p *pgs3D) Next() (mkv.Frame, error) {
-	f, err := p.src.Next()
-	if err != nil {
-		return f, err
+	for {
+		f, err := p.src.Next()
+		if err != nil {
+			return f, err
+		}
+		data, err := p.rewrite(f.Data, p.offset(f.PTS))
+		if err != nil {
+			// A display set it cannot read is left out: a subtitle missing
+			// is better than a conversion lost hours in, at the mux.
+			p.dropped++
+			if p.report != nil && p.dropped <= 3 {
+				p.report.Report("warning: 3D subtitles: left out the display set at %s: %v", f.PTS, err)
+			}
+			continue
+		}
+		f.Data = data
+		return f, nil
 	}
-	data, err := p.rewrite(f.Data, p.offset(f.PTS))
-	if err != nil {
-		return f, fmt.Errorf("3D subtitles at %s: %w", f.PTS, err)
-	}
-	f.Data = data
-	return f, nil
 }
 
 // segments splits a display set into its segments' types and payloads.
@@ -128,10 +150,7 @@ func (p *pgs3D) rewrite(ds []byte, offset int) ([]byte, error) {
 			p.height = int(binary.BigEndian.Uint16(s[2:]))
 			p.palette = s[9]
 		case segWDS:
-			if len(s) < 1 || len(s) < 1+9*int(s[0]) {
-				return nil, errors.New("a short window definition")
-			}
-			for k := range int(s[0]) {
+			for k := range wdsCount(s) {
 				w := s[1+9*k:]
 				p.windows[w[0]] = pgsWindow{int(binary.BigEndian.Uint16(w[1:])), int(binary.BigEndian.Uint16(w[3:])),
 					int(binary.BigEndian.Uint16(w[5:])), int(binary.BigEndian.Uint16(w[7:]))}
@@ -275,7 +294,7 @@ func (p *pgs3D) compositionOU(s []byte, eyeH, scale int, shifts func(byte) (int,
 
 // windowsOU is windowDefinition for over-under.
 func (p *pgs3D) windowsOU(s []byte, eyeH, scale int, shifts func(byte) (int, int)) []byte {
-	n := int(s[0])
+	n := wdsCount(s)
 	out := []byte{byte(2 * n)} //nolint:gosec // at most 2 x 255
 	for side := range 2 {
 		for k := range n {
@@ -344,7 +363,7 @@ func (p *pgs3D) composition(s []byte, eye, scale int, shifts func(byte) (int, in
 // windowDefinition rewrites a window definition segment: each window once
 // per eye.
 func (p *pgs3D) windowDefinition(s []byte, eye, scale int, shifts func(byte) (int, int)) []byte {
-	n := int(s[0])
+	n := wdsCount(s)
 	out := []byte{byte(2 * n)} //nolint:gosec // at most 2 x 255
 	for side := range 2 {
 		for k := range n {
@@ -570,5 +589,7 @@ func (r *Runner) subtitles3D(src mkv.Source, t Track) mkv.Source {
 	default:
 		r.Report.Report("3D subtitles: track %d follows offset sequence %d", t.ID, seq)
 	}
-	return newPGS3D(src, r.Opts.Layout, func(at time.Duration) int { return r.depth.offset(seq, at) })
+	p := newPGS3D(src, r.Opts.Layout, func(at time.Duration) int { return r.depth.offset(seq, at) })
+	p.report = r.Report
+	return p
 }

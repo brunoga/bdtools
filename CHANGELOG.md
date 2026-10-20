@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- 3D subtitles: a window definition that claims more windows than it
+  carries is read for the windows it has (Titanic 3D's disc failed its
+  mux on one, 11 minutes in), and a display set the 3D rewrite cannot read
+  is left out with a warning instead of failing the conversion.
+
 ## [0.14.1] - 2026-10-19
 
 ### Changed
