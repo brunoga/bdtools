@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-19
+
 ### Fixed
 
 - 3D subtitles: a window definition that claims more windows than it
@@ -1010,7 +1012,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.2...HEAD
+[0.14.2]: https://github.com/brunoga/bdtools/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/brunoga/bdtools/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/brunoga/bdtools/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/brunoga/bdtools/compare/v0.12.0...v0.13.0
