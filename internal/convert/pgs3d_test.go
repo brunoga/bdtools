@@ -417,3 +417,34 @@ func FuzzOffsetMetadata(f *testing.F) {
 		_, _ = parseOffsetMetadata(au)
 	})
 }
+
+// A window definition claiming more windows than it carries (Titanic 3D's
+// disc, 11 minutes in) is read for the windows it has; a display set that
+// cannot be read at all is left out, the next one given.
+func TestPGS3DShortWindowsAndUnreadableSets(t *testing.T) {
+	pix := bytes.Repeat([]byte{1}, 100*10)
+	ds := displaySet(800, 900, 100, 10, pix)
+	for s := ds; len(s) >= 3; {
+		n := int(s[1])<<8 | int(s[2])
+		if s[0] == segWDS {
+			s[3] = 2 // two windows said, one there
+		}
+		s = s[3+n:]
+	}
+	truncated := []byte{segPCS, 0, 50, 1, 2, 3}
+	p := newPGS3D(&framesSource{frames: [][]byte{truncated, ds}}, LayoutFullSBS, func(time.Duration) int { return 6 })
+	f, err := p.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := readLayout(t, f.Data)
+	if len(l.windows) != 2 || l.windows[0] != [3]int{0, 806, 100} || l.windows[1] != [3]int{rightWindow, 2714, 100} {
+		t.Errorf("windows %v", l.windows)
+	}
+	if p.dropped != 1 {
+		t.Errorf("%d display sets left out, want 1", p.dropped)
+	}
+	if _, err := p.Next(); err != io.EOF {
+		t.Errorf("after the last set: %v", err)
+	}
+}
