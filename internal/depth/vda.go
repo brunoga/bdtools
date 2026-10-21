@@ -33,8 +33,10 @@ type Model struct {
 	pos map[[2]int]*nn.Tensor // the position embedding, by patch grid
 
 	// cache holds the frames' temporal states, oldest first: for each, the
-	// inputs of the head's eight temporal attention blocks.
-	cache [][8]*nn.Tensor
+	// keys and values of the head's eight temporal attention blocks (their
+	// projections less the position encoding's, which is added at its
+	// place in the window: the projections are linear).
+	cache [][8]kv
 	n     int // the frames done
 }
 
@@ -86,18 +88,15 @@ func (m *Model) Frame(x *nn.Tensor) *nn.Tensor {
 	h, w := x.Dim(1), x.Dim(2)
 	ph, pw := h/patch, w/patch
 	feats := m.encode(x, ph, pw)
-	var cached [8]*nn.Tensor
+	var win [][8]kv
 	if m.n > 0 {
 		// the window: the first two frames' states and the last
 		// inferLen-3, as the reference does
-		win := append(append([][8]*nn.Tensor(nil), m.cache[0:2]...), m.cache[len(m.cache)-(inferLen-3):]...)
-		for i := range cached {
-			cached[i] = stackFrames(win, i)
-		}
+		win = append(append(win, m.cache[0:2]...), m.cache[len(m.cache)-(inferLen-3):]...)
 	}
-	d, states := m.head(feats, ph, pw, cached)
+	d, states := m.head(feats, ph, pw, win)
 	if m.n == 0 {
-		m.cache = make([][8]*nn.Tensor, inferLen)
+		m.cache = make([][8]kv, inferLen)
 		for i := range m.cache {
 			m.cache[i] = states
 		}
@@ -112,16 +111,15 @@ func (m *Model) Frame(x *nn.Tensor) *nn.Tensor {
 	return nn.ReLU(d).Reshape(h, w)
 }
 
-// stackFrames is attention block i's state of each frame of win, as one
-// [D, frames, C] tensor (D the positions).
-func stackFrames(win [][8]*nn.Tensor, i int) *nn.Tensor {
-	d, c := win[0][i].Dim(0), win[0][i].Dim(1)
-	t := len(win)
-	out := nn.New(d, t, c)
-	for f, s := range win {
-		for p := range d {
-			copy(out.Data[(p*t+f)*c:(p*t+f+1)*c], s[i].Data[p*c:(p+1)*c])
-		}
+// kv is a frame's keys and values for a temporal attention block ([D, C]
+// each, D the positions), less the position encoding's part.
+type kv struct{ k, v *nn.Tensor }
+
+// column is block b's states in a window.
+func column(win [][8]kv, b int) []kv {
+	out := make([]kv, len(win))
+	for i, w := range win {
+		out[i] = w[b]
 	}
 	return out
 }
@@ -241,7 +239,7 @@ func mapToTokens(x *nn.Tensor) *nn.Tensor {
 
 // head is the temporal DPT head: the depth at the patch grid times 14
 // ([1, H, W]) and the frame's eight temporal states.
-func (m *Model) head(feats [4]*nn.Tensor, ph, pw int, cached [8]*nn.Tensor) (*nn.Tensor, [8]*nn.Tensor) {
+func (m *Model) head(feats [4]*nn.Tensor, ph, pw int, win [][8]kv) (*nn.Tensor, [8]kv) {
 	var layers [4]*nn.Tensor
 	for i, f := range feats {
 		x := tokensToMap(f, ph, pw)
@@ -255,21 +253,21 @@ func (m *Model) head(feats [4]*nn.Tensor, ph, pw int, cached [8]*nn.Tensor) (*nn
 		}
 		layers[i] = x
 	}
-	var states [8]*nn.Tensor
-	var s [2]*nn.Tensor
-	layers[2], s = m.temporal(0, layers[2], cached[0], cached[1])
+	var states [8]kv
+	var s [2]kv
+	layers[2], s = m.temporal(0, layers[2], column(win, 0), column(win, 1))
 	states[0], states[1] = s[0], s[1]
-	layers[3], s = m.temporal(1, layers[3], cached[2], cached[3])
+	layers[3], s = m.temporal(1, layers[3], column(win, 2), column(win, 3))
 	states[2], states[3] = s[0], s[1]
 	var rn [4]*nn.Tensor
 	for i := range rn {
 		rn[i] = nn.Conv2d(layers[i], m.t(fmt.Sprintf("head.scratch.layer%d_rn.weight", i+1)), nil, 1, 1)
 	}
 	p4 := m.fusion(4, rn[3], nil, rn[2].Dim(1), rn[2].Dim(2))
-	p4, s = m.temporal(2, p4, cached[4], cached[5])
+	p4, s = m.temporal(2, p4, column(win, 4), column(win, 5))
 	states[4], states[5] = s[0], s[1]
 	p3 := m.fusion(3, p4, rn[2], rn[1].Dim(1), rn[1].Dim(2))
-	p3, s = m.temporal(3, p3, cached[6], cached[7])
+	p3, s = m.temporal(3, p3, column(win, 6), column(win, 7))
 	states[6], states[7] = s[0], s[1]
 	p2 := m.fusion(2, p3, rn[1], rn[0].Dim(1), rn[0].Dim(2))
 	p1 := m.fusion(1, p2, rn[0], 2*rn[0].Dim(1), 2*rn[0].Dim(2))
@@ -308,18 +306,19 @@ func (m *Model) residual(pre string, x *nn.Tensor) *nn.Tensor {
 // attentions over the frames' cached states, then a GEGLU feed forward),
 // a projection back, plus x. It gives the map and the two attentions'
 // states for the frame (their inputs).
-func (m *Model) temporal(k int, x, cache0, cache1 *nn.Tensor) (*nn.Tensor, [2]*nn.Tensor) {
+func (m *Model) temporal(k int, x *nn.Tensor, past0, past1 []kv) (*nn.Tensor, [2]kv) {
 	pre := fmt.Sprintf("head.motion_modules.%d.temporal_transformer.", k)
 	c, h, w := x.Dim(0), x.Dim(1), x.Dim(2)
 	n := nn.GroupNorm(x, 32, m.t(pre+"norm.weight"), m.t(pre+"norm.bias"), 1e-6)
 	tok := nn.Linear(mapToTokens(n), m.t(pre+"proj_in.weight"), m.opt(pre+"proj_in.bias"))
 	bp := pre + "transformer_blocks.0."
-	var states [2]*nn.Tensor
-	for i, cached := range [2]*nn.Tensor{cache0, cache1} {
+	var states [2]kv
+	for i, past := range [2][]kv{past0, past1} {
 		ap := fmt.Sprintf("%sattention_blocks.%d.", bp, i)
 		normed := nn.LayerNorm(tok, m.t(fmt.Sprintf("%snorms.%d.weight", bp, i)), m.t(fmt.Sprintf("%snorms.%d.bias", bp, i)), 1e-5)
-		states[i] = normed
-		nn.Add(tok, m.temporalAttention(ap, normed, cached))
+		out, cur := m.temporalAttention(ap, normed, past)
+		states[i] = cur
+		nn.Add(tok, out)
 	}
 	ff := nn.LayerNorm(tok, m.t(bp+"ff_norm.weight"), m.t(bp+"ff_norm.bias"), 1e-5)
 	ff = geglu(nn.Linear(ff, m.t(bp+"ff.net.0.proj.weight"), m.opt(bp+"ff.net.0.proj.bias")))
@@ -367,62 +366,66 @@ func (m *Model) pe(ap string, c int) *nn.Tensor {
 }
 
 // temporalAttention is a TemporalAttention on the current frame's states
-// x [D, C]: at each position, the frame attends over the cached frames'
-// states and its own ([D, T-1, C] and x), each with its frame's position
-// encoding; the query is the current frame's alone.
-func (m *Model) temporalAttention(ap string, x, cached *nn.Tensor) *nn.Tensor {
+// x [D, C]: at each position, the frame attends over the window's frames
+// and itself, each with its place's position encoding; the query is the
+// current frame's alone. As (x + pe) W = x W + pe W, a frame's keys and
+// values are its states' projections (kept: the frame's kv, returned) plus
+// the projected encoding of its place.
+func (m *Model) temporalAttention(ap string, x *nn.Tensor, past []kv) (*nn.Tensor, kv) {
 	d, c := x.Dim(0), x.Dim(1)
-	t := 1
-	if cached != nil {
-		t += cached.Dim(1)
-	}
+	t := len(past) + 1
 	pe := m.pe(ap, c)
-	seq := nn.New(d*t, c) // [D, T, C], the frames in order, the current last
-	for p := range d {
-		for f := range t - 1 {
-			copy(seq.Data[(p*t+f)*c:(p*t+f+1)*c], cached.Data[(p*(t-1)+f)*c:(p*(t-1)+f+1)*c])
-		}
-		copy(seq.Data[(p*t+t-1)*c:(p*t+t)*c], x.Data[p*c:(p+1)*c])
-		for f := range t {
-			row := seq.Data[(p*t+f)*c : (p*t+f+1)*c]
-			for ch := range row {
-				row[ch] += pe.Data[f*c+ch]
-			}
-		}
-	}
-	cur := nn.New(d, c)
-	for p := range d {
-		copy(cur.Data[p*c:(p+1)*c], seq.Data[(p*t+t-1)*c:(p*t+t)*c])
-	}
-	q := nn.Linear(cur, m.t(ap+"to_q.weight"), m.opt(ap+"to_q.bias"))
-	k := nn.Linear(seq, m.t(ap+"to_k.weight"), m.opt(ap+"to_k.bias"))
-	v := nn.Linear(seq, m.t(ap+"to_v.weight"), m.opt(ap+"to_v.bias"))
+	wq, wk, wv := m.t(ap+"to_q.weight"), m.t(ap+"to_k.weight"), m.t(ap+"to_v.weight")
+	cur := kv{nn.Linear(x, wk, m.opt(ap+"to_k.bias")), nn.Linear(x, wv, m.opt(ap+"to_v.bias"))}
+	qx := nn.Linear(x, wq, m.opt(ap+"to_q.bias"))
+	pt := &nn.Tensor{Shape: []int{t, c}, Data: pe.Data[:t*c]}
+	peK, peV := nn.Linear(pt, wk, nil), nn.Linear(pt, wv, nil)
+	peQ := nn.Linear(&nn.Tensor{Shape: []int{1, c}, Data: pe.Data[(t-1)*c : t*c]}, wq, nil)
 	hd := c / temporalHead
 	scale := float32(1 / math.Sqrt(float64(hd)))
 	out := nn.New(d, c)
-	scores := make([]float32, t)
-	for p := range d {
-		for h := range temporalHead {
-			qh := q.Data[p*c+h*hd : p*c+h*hd+hd]
-			for f := range t {
-				kf := k.Data[(p*t+f)*c+h*hd : (p*t+f)*c+h*hd+hd]
-				var s float32
-				for i, qv := range qh {
-					s += qv * kf[i]
-				}
-				scores[f] = s * scale
+	const chunk = 64
+	nn.Parallel((d+chunk-1)/chunk, func(job int) {
+		q := make([]float32, c)
+		scores := make([]float32, t)
+		key := func(f, p int) []float32 {
+			if f < t-1 {
+				return past[f].k.Data[p*c : (p+1)*c]
 			}
-			softmax(scores)
-			oh := out.Data[p*c+h*hd : p*c+h*hd+hd]
-			for f, pr := range scores {
-				vf := v.Data[(p*t+f)*c+h*hd : (p*t+f)*c+h*hd+hd]
-				for i := range oh {
-					oh[i] += pr * vf[i]
+			return cur.k.Data[p*c : (p+1)*c]
+		}
+		val := func(f, p int) []float32 {
+			if f < t-1 {
+				return past[f].v.Data[p*c : (p+1)*c]
+			}
+			return cur.v.Data[p*c : (p+1)*c]
+		}
+		for p := job * chunk; p < min(job*chunk+chunk, d); p++ {
+			for i := range q {
+				q[i] = qx.Data[p*c+i] + peQ.Data[i]
+			}
+			for h := range temporalHead {
+				lo := h * hd
+				for f := range t {
+					kf, pk := key(f, p), peK.Data[f*c:]
+					var s float32
+					for i := lo; i < lo+hd; i++ {
+						s += q[i] * (kf[i] + pk[i])
+					}
+					scores[f] = s * scale
+				}
+				softmax(scores)
+				oh := out.Data[p*c+lo : p*c+lo+hd]
+				for f, pr := range scores {
+					vf, pv := val(f, p), peV.Data[f*c:]
+					for i := range oh {
+						oh[i] += pr * (vf[lo+i] + pv[lo+i])
+					}
 				}
 			}
 		}
-	}
-	return nn.Linear(out, m.t(ap+"to_out.0.weight"), m.opt(ap+"to_out.0.bias"))
+	})
+	return nn.Linear(out, m.t(ap+"to_out.0.weight"), m.opt(ap+"to_out.0.bias")), cur
 }
 
 func softmax(r []float32) {

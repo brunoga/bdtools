@@ -1,0 +1,106 @@
+//go:build amd64 && !purego
+
+#include "textflag.h"
+
+// func cpuidAsm(leaf, sub uint32) (eax, ebx, ecx, edx uint32)
+TEXT ·cpuidAsm(SB), NOSPLIT, $0-24
+	MOVL leaf+0(FP), AX
+	MOVL sub+4(FP), CX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+// func xgetbvAsm() (eax, edx uint32)
+TEXT ·xgetbvAsm(SB), NOSPLIT, $0-8
+	XORL CX, CX
+	XGETBV
+	MOVL AX, eax+0(FP)
+	MOVL DX, edx+4(FP)
+	RET
+
+// func kernel6x16AVX2(k int, a, b, c *float32, ldc int)
+// The 6x16 tile of c (rows ldc floats apart) plus a's packed 6-row panel
+// times b's packed 16-column panel, over k: a holds 6 floats a step, b 16.
+TEXT ·kernel6x16AVX2(SB), NOSPLIT, $0-40
+	MOVQ k+0(FP), CX
+	MOVQ a+8(FP), SI
+	MOVQ b+16(FP), DI
+	MOVQ c+24(FP), DX
+	MOVQ ldc+32(FP), R8
+	SHLQ $2, R8
+	VXORPS Y0, Y0, Y0
+	VXORPS Y1, Y1, Y1
+	VXORPS Y2, Y2, Y2
+	VXORPS Y3, Y3, Y3
+	VXORPS Y4, Y4, Y4
+	VXORPS Y5, Y5, Y5
+	VXORPS Y6, Y6, Y6
+	VXORPS Y7, Y7, Y7
+	VXORPS Y8, Y8, Y8
+	VXORPS Y9, Y9, Y9
+	VXORPS Y10, Y10, Y10
+	VXORPS Y11, Y11, Y11
+	TESTQ CX, CX
+	JZ    store
+
+loop:
+	VMOVUPS      (DI), Y12
+	VMOVUPS      32(DI), Y13
+	VBROADCASTSS (SI), Y14
+	VFMADD231PS  Y12, Y14, Y0
+	VFMADD231PS  Y13, Y14, Y1
+	VBROADCASTSS 4(SI), Y15
+	VFMADD231PS  Y12, Y15, Y2
+	VFMADD231PS  Y13, Y15, Y3
+	VBROADCASTSS 8(SI), Y14
+	VFMADD231PS  Y12, Y14, Y4
+	VFMADD231PS  Y13, Y14, Y5
+	VBROADCASTSS 12(SI), Y15
+	VFMADD231PS  Y12, Y15, Y6
+	VFMADD231PS  Y13, Y15, Y7
+	VBROADCASTSS 16(SI), Y14
+	VFMADD231PS  Y12, Y14, Y8
+	VFMADD231PS  Y13, Y14, Y9
+	VBROADCASTSS 20(SI), Y15
+	VFMADD231PS  Y12, Y15, Y10
+	VFMADD231PS  Y13, Y15, Y11
+	ADDQ         $24, SI
+	ADDQ         $64, DI
+	DECQ         CX
+	JNZ          loop
+
+store:
+	VADDPS  (DX), Y0, Y0
+	VMOVUPS Y0, (DX)
+	VADDPS  32(DX), Y1, Y1
+	VMOVUPS Y1, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y2, Y2
+	VMOVUPS Y2, (DX)
+	VADDPS  32(DX), Y3, Y3
+	VMOVUPS Y3, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y4, Y4
+	VMOVUPS Y4, (DX)
+	VADDPS  32(DX), Y5, Y5
+	VMOVUPS Y5, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y6, Y6
+	VMOVUPS Y6, (DX)
+	VADDPS  32(DX), Y7, Y7
+	VMOVUPS Y7, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y8, Y8
+	VMOVUPS Y8, (DX)
+	VADDPS  32(DX), Y9, Y9
+	VMOVUPS Y9, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y10, Y10
+	VMOVUPS Y10, (DX)
+	VADDPS  32(DX), Y11, Y11
+	VMOVUPS Y11, 32(DX)
+	VZEROUPPER
+	RET
