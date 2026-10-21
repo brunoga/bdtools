@@ -147,6 +147,15 @@ type Options struct {
 	// on its own. A source with no MVC dependent view is converted so in
 	// any case.
 	TwoD bool
+	// To3D converts a 2D source to 3D: each picture's depth estimated (a
+	// video depth network, DepthModel's weights, or Video Depth Anything
+	// Small's, downloaded once), the two eyes made from it, and the pair
+	// put out in the layout asked for, as a 3D source's would be. Depth3D
+	// is the depth in all, in percent of the width (0: 3); Screen3D where
+	// the screen sits in it, 0 the farthest and 1 the nearest (0: 0.7).
+	To3D              bool
+	DepthModel        string
+	Depth3D, Screen3D float64
 	// Subs3D is what becomes of the subtitles: kept as they are, drawn
 	// once for a player to place in 3D itself (Subs3DOff, the default);
 	// drawn into both halves of the frame at the depth the disc gives them,
@@ -338,6 +347,18 @@ func (o Options) Validate(goos string) error {
 	}
 	if o.Output == "" {
 		return fmt.Errorf("no output given")
+	}
+	if o.To3D {
+		switch {
+		case o.Remux:
+			return fmt.Errorf("--to-3d makes new pictures: it cannot be a --remux")
+		case o.TwoD:
+			return fmt.Errorf("--to-3d and --2d ask for opposite things")
+		case o.Depth3D < 0 || o.Depth3D > 10:
+			return fmt.Errorf("--3d-depth is a percentage of the width, 0 to 10 (got %g)", o.Depth3D)
+		case o.Screen3D < 0 || o.Screen3D > 1:
+			return fmt.Errorf("--3d-screen is where the screen sits in the depth, 0 (the farthest) to 1 (the nearest) (got %g)", o.Screen3D)
+		}
 	}
 	if strings.EqualFold(o.Input, o.Output) {
 		return fmt.Errorf("input and output are the same file")

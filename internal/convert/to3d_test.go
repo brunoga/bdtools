@@ -1,0 +1,75 @@
+package convert
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/brunoga/bdtools/internal/mkv"
+)
+
+// A 2D source made 3D (--to-3d, the depth by the depth tests' small
+// model): full side by side out, twice the source's width, marked side by
+// side, every picture there. The source is the MVC fixture's base view,
+// converted 2D first (no tools beside this program).
+func TestRunnerTo3D(t *testing.T) {
+	work := t.TempDir()
+	flat := filepath.Join(work, "flat.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.TempDir = mvcMatroska(t), flat, work
+	o.Encoder, o.Codec, o.TwoD, o.CRF, o.Decoder = EncoderBuiltin, CodecH265, true, 30, DecoderCPU
+	o.Scale = Scale{W: 160, H: 120}
+	var lines []string
+	report := func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }
+	if err := NewRunner(CurrentGOOS, o, report).Run(context.Background()); err != nil {
+		t.Fatalf("the 2D source: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+
+	out := filepath.Join(work, "3d.mkv")
+	o = DefaultOptions()
+	o.Input, o.Output, o.TempDir = flat, out, t.TempDir()
+	o.Encoder, o.Codec, o.CRF, o.Decoder = EncoderBuiltin, CodecH265, 30, DecoderCPU
+	o.To3D, o.DepthModel = true, filepath.Join("..", "depth", "testdata", "tiny.pth")
+	lines = nil
+	if err := NewRunner(CurrentGOOS, o, report).Run(context.Background()); err != nil {
+		t.Fatalf("--to-3d: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "made 3D (its depth estimated)") {
+		t.Errorf("no report of the conversion:\n%s", strings.Join(lines, "\n"))
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := rd.Tracks[0]
+	if v.Width != 320 || v.Height != 120 || v.StereoMode != 1 {
+		t.Fatalf("video %dx%d, stereo mode %d; want 320x120 side by side (1)", v.Width, v.Height, v.StereoMode)
+	}
+	frames := 0
+	for {
+		p, err := rd.Next()
+		if err != nil {
+			break
+		}
+		if p.Track == v.Number {
+			frames++
+		}
+	}
+	if frames == 0 {
+		t.Error("no pictures")
+	}
+
+	// a 3D source is refused
+	o.Input = mvcMatroska(t)
+	if err := NewRunner(CurrentGOOS, o, func(string, ...any) {}).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "3D already") {
+		t.Errorf("a 3D source: %v", err)
+	}
+}

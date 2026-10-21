@@ -865,7 +865,12 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 			r.flat, r.Opts.TwoD = false, false
 		}
 	}
-	if r.framedIn != "" && !r.flat {
+	if err := r.useTo3D(threeD(tracks)); err != nil {
+		return err
+	}
+	if r.to3D {
+		r.Report.Report("source: 2D, made 3D (its depth estimated), video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+	} else if r.framedIn != "" && !r.flat {
 		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle", r.framedIn, sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	} else if r.flat {
 		r.Report.Report("source: 2D, video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))

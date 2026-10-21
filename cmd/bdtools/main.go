@@ -90,6 +90,10 @@ func run(argv []string, stdout, stderr *os.File) int {
 		remux    = fs.Bool("remux", false, "copy the disc's MVC video out with no re-encoding, keeping only the selected tracks; output must be .m2ts and needs a player that decodes MVC")
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng, or none for no subtitles (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
+		to3D     = fs.Bool("to-3d", false, "make a 2D source 3D: its depth estimated by a video depth network (Video Depth Anything Small, downloaded once, or --depth-model's), the two eyes made from it, out in the --layout asked for")
+		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network's checkpoint (a Video Depth Anything .pth; default: the small model, downloaded to the cache the first time)")
+		depth3D  = fs.Float64("3d-depth", 3, "with --to-3d: the depth in all, as a percentage of the picture's width (more is stronger, and harder on the eyes)")
+		screen3D = fs.Float64("3d-screen", 0.7, "with --to-3d: where the screen sits in the depth, 0 the farthest and 1 the nearest (what is nearer comes out of the screen)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
 		decoder  = fs.String("decoder", "auto", "how a 2D source's video is decoded: auto (on the GPU when one can, else the decoders here), gpu, or cpu (never the GPU); 3D always decodes here")
 		dvFEL    = fs.String("dv-fel", "compose", "a Dolby Vision full enhancement layer (FEL) in a conversion: compose it into the picture (profile 8.1 out); keep it as a layer, rebuilt for the encoded base layer, or reencode the source's (profile 7 out, --codec h265, --encoder nvenc, software or builtin); or drop it (the HDR10 base layer as it is)")
@@ -290,6 +294,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		o.Subs3D = convert.Subs3DOff
 	}
 	o.TwoD = *twoD
+	o.To3D, o.DepthModel, o.Depth3D, o.Screen3D = *to3D, *depthMdl, *depth3D, *screen3D
 	o.Decoder = convert.Decoder(*decoder)
 	if o.Decoder == "auto" {
 		o.Decoder = convert.DecoderAuto

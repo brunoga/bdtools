@@ -40,19 +40,20 @@ type Model struct {
 	n     int // the frames done
 }
 
-// Load reads a checkpoint (video_depth_anything_vits.pth, or a smaller
-// model of the same make). heads is its encoder's attention heads: 6 for
-// the small model.
-func Load(file string, heads int) (*Model, error) {
+// Load reads a checkpoint (video_depth_anything_vits.pth, or another
+// model of the same make).
+func Load(file string) (*Model, error) {
 	w, err := nn.LoadPTH(file)
 	if err != nil {
 		return nil, err
 	}
-	return New(w, heads)
+	return New(w)
 }
 
-// New is a model of loaded weights.
-func New(w map[string]*nn.Tensor, heads int) (*Model, error) {
+// New is a model of loaded weights. Its encoder's attention heads are not
+// in them: every DINOv2's are 64 channels each (the small model's 384 in
+// 6), a model narrower than 64's 12 (the tests').
+func New(w map[string]*nn.Tensor) (*Model, error) {
 	cls, ok := w["pretrained.cls_token"]
 	if !ok {
 		return nil, errors.New("depth: not a Video Depth Anything checkpoint (no pretrained.cls_token)")
@@ -62,7 +63,15 @@ func New(w map[string]*nn.Tensor, heads int) (*Model, error) {
 			return nil, fmt.Errorf("depth: the checkpoint has no %s", k)
 		}
 	}
-	return &Model{w: w, heads: heads, dim: cls.Dim(-1), pos: map[[2]int]*nn.Tensor{}}, nil
+	dim := cls.Dim(-1)
+	hd := 64
+	if dim < 64 {
+		hd = 12
+	}
+	if dim%hd != 0 {
+		return nil, fmt.Errorf("depth: an encoder %d wide is not in heads of %d", dim, hd)
+	}
+	return &Model{w: w, heads: dim / hd, dim: dim, pos: map[[2]int]*nn.Tensor{}}, nil
 }
 
 func (m *Model) t(name string) *nn.Tensor {

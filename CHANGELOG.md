@@ -5,6 +5,19 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--to-3d` makes a 2D film 3D, out in any 3D layout (full or half side by
+  side or over-under, MVC): each picture's depth estimated by Video Depth
+  Anything Small (Apache-2.0), run in Go from its published checkpoint
+  (downloaded once), the eyes made from it, the nearer covering the
+  farther and what an eye sees behind an edge filled from the background
+  side. `--3d-depth` and `--3d-screen` set the depth (3% of the width by
+  default, most of it behind the screen), `--depth-model` another
+  checkpoint. Letterbox bars stay at the screen, cuts start the depth
+  afresh, an HDR source is tone mapped. About a second a 1080p picture on
+  the CPU for now.
+
 ## [0.14.2] - 2026-10-19
 
 ### Fixed
