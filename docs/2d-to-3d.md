@@ -188,26 +188,49 @@ and the Ugoos, the only judge of comfort.
 
 ## Milestones
 
-1. **Depth in Go:**
-   - `internal/nn` on the CPU;
-   - Video Depth Anything Small loaded from its weights;
-   - its depth maps the same as PyTorch's (within a tolerance) on twenty
-     frames;
-   - a `--depth-preview` output (the depth map as a video) to look at.
-2. **A first conversion**, at any speed: cut detection, depth finishing and
-   grading, splatting and classical filling, full SBS out. Measured on the
-   native discs, and watched.
-3. **The GPU backend**: a two-hour film's depth in under half an hour.
-4. **Quality**:
-   - temporal filling;
-   - edge handling (hair, thin things);
-   - subtitles at depth;
-   - Depth Anything 3 compared.
+1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything
+   Small from its published checkpoint, the same depth as PyTorch's
+   (within 1e-3 on film frames).
+2. **A first conversion** (done): `--to-3d`, cut detection, depth shaped
+   into disparity, the eyes rendered nearer over farther, holes mirrored
+   from the background, every 3D layout out.
+3. **The benchmark**: `bdtools 3d-bench` on clips of native 3D discs. The
+   left eye converted, its made right eye compared with the disc's:
+   - disparity: the made one against the one measured between the real
+     eyes (a semi-global matcher in Go), after fitting its scale and
+     offset, since a conversion need not copy the disc's depth budget;
+   - the picture: PSNR and VMAF of the made right eye, overall and where
+     holes were filled;
+   - other tools (iw3, ...) run on the same clips, for a yardstick.
 
-   Each change measured against the native discs.
-5. **Every layout**: full and half side by side and over-under, at full
-   resolution and 1080p; MVC MKV.
-6. **Blu-ray 3D authoring**, checked on a disc player.
+   Every later milestone is kept only where this says it helps.
+4. **The GPU backend**: the depth network on CUDA (through purego, as
+   NVENC), a two-hour film's depth in under half an hour.
+5. **Depth edges**: the network's soft depth edges snapped to the
+   picture's (an edge-aware filter guided by the full-resolution picture),
+   against halos and cardboard cut-outs.
+6. **Shots planned whole**: a conversion is not live, so each shot is read
+   before it is made:
+   - its depth graded from the whole shot's statistics, smoothed forwards
+     and backwards;
+   - holes filled from the shot's other frames, wherever they show the
+     background; only what no frame shows inpainted.
+7. **Like a stereographer**:
+   - floating windows (black masks moving at the picture's sides), where
+     something in front of the screen meets the frame's edge;
+   - subtitles placed just in front of what they cover;
+   - screens, captions and graphics in the picture kept flat.
+8. **Depth graded as the discs are**: a small model, learnt from the
+   native and studio-converted discs, of the depth budget, the screen's
+   place and its moves within a shot and across cuts, in place of fixed
+   numbers.
+9. **A learnt refinement**: a small network, trained on the discs' real
+   pairs (in PyTorch, offline; run here as the depth network is), from the
+   picture and its depth to the right eye: depth errors corrected, holes
+   filled. The training tool ships; weights learnt from commercial films
+   may not (their law is unsettled), so each user trains on their own.
+10. **Blu-ray 3D authoring**: `--output film.iso` (or a folder) for MVC,
+    checked on a disc player.
 
 ## Decisions for you
 
