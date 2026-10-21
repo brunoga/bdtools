@@ -46,7 +46,7 @@ func stream(t *testing.T, m *Model, io map[string]*nn.Tensor, tol float64) {
 // frames (the temporal cache's window filled and slid): the same depth as
 // PyTorch's (testdata, written by internal/nn/testdata/gen/vda.py tiny).
 func TestTinyModelMatchesPyTorch(t *testing.T) {
-	m, err := Load("testdata/tiny.pth", 2)
+	m, err := Load("testdata/tiny.pth")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestSmallModelMatchesPyTorch(t *testing.T) {
 	if wf == "" || rf == "" {
 		t.Skip("VDA_WEIGHTS or VDA_REF unset")
 	}
-	m, err := Load(wf, 6)
+	m, err := Load(wf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func BenchmarkFrame(b *testing.B) {
 	if wf == "" {
 		b.Skip("VDA_WEIGHTS unset")
 	}
-	m, err := Load(wf, 6)
+	m, err := Load(wf)
 	if err != nil {
 		b.Fatal(err)
 	}

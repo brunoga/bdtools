@@ -380,6 +380,10 @@ scheduler such as pipeliner retry it.
 | `--crf` | by the source: `20` 3D, `18` Ultra HD, `16` HD | Quality target, 0–51; lower is better. **Not comparable between codecs** — see [Defaults by source](#defaults-by-source) |
 | `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
+| `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
+| `--3d-depth` | `3` | With `--to-3d`: the depth in all, in percent of the width |
+| `--3d-screen` | `0.7` | With `--to-3d`: where the screen sits in the depth, 0 the farthest, 1 the nearest |
+| `--depth-model` | the small model | With `--to-3d`: a Video Depth Anything checkpoint (`.pth`) to use instead |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
@@ -441,6 +445,30 @@ files from its 2.0.2 beta (set its 3D mode to side by side); the
 headset's own player shows only the base layer of a local MV-HEVC file,
 and 4XVR's own MV-HEVC decoder plays iPhone recordings only (see
 [docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md)).
+
+### 2D to 3D
+
+`--to-3d` makes a 2D film 3D. A video depth network gives each picture's
+depth: Video Depth Anything Small (Apache-2.0), run here from its
+published checkpoint, which is downloaded to the cache the first time (116
+MB). Each eye is the picture shifted by half its disparity, the nearer
+covering the farther; what an eye sees behind an edge is filled from the
+background side. The pair goes out as a 3D source's would, in any
+`--layout` (full or half side by side or over-under, MVC), with `--scale
+1080p` for a player that takes 1080p a view:
+
+```sh
+bdtools --input "Film (2020).mkv" --output "Film (2020) 3D FSBS.mkv" --to-3d
+bdtools --input "Film (2020).mkv" --output "Film (2020) 3D.mkv" --to-3d --layout mvc
+```
+
+The depth is gentle by default: 3% of the width in all, 2.1% behind the
+screen and 0.9% in front of it (`--3d-depth`, `--3d-screen`). Letterbox
+bars stay at the screen; each cut starts the depth afresh; an HDR source is
+tone mapped (the 3D is 8-bit). It is slow for now: about a second a 1080p
+picture on 24 cores, the depth network's (a GPU path is to come). Hair,
+glass, smoke and reflections, and things on screens in the picture, get
+one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
 
 ### MVC output
 

@@ -180,6 +180,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
 			r.Opts.Crop = Crop{}
 		}
+		if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
+			// the stereo pictures are 8-bit: an HDR source is made SDR first
+			r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
+			r.Opts.ToneMap = true
+		}
 		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
 			w, h, _ := sf.size()
 			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
@@ -199,6 +204,12 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		if r.xform != nil {
 			var err error
 			if sf, err = r.xform.apply(sf); err != nil {
+				return err
+			}
+		}
+		if r.to3D {
+			var err error
+			if sf, err = r.convert3D(sf); err != nil {
 				return err
 			}
 		}
@@ -337,7 +348,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	switch {
 	case n == 0:
 		return nil, fmt.Errorf("the video decoded to no frames")
-	case !r.flat && src.dependentFrames() == 0:
+	case !r.flat && !r.to3D && src.dependentFrames() == 0:
 		return nil, fmt.Errorf("the dependent view decoded to nothing: the source does not look like 3D")
 	case n < skip:
 		return nil, fmt.Errorf("the source has %d frames, fewer than the %d an earlier run encoded: "+

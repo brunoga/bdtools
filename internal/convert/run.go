@@ -116,6 +116,9 @@ type Runner struct {
 	// layout), framedSwap that the right eye comes first.
 	framedIn   Layout
 	framedSwap bool
+	// to3D is a 2D source made 3D (Options.To3D), by conv.
+	to3D bool
+	conv *to3DState
 
 	// Version is bdtools' version, which the files written say made them.
 	Version string
@@ -220,6 +223,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 			r.flat, r.Opts.TwoD = false, false
 		}
 	}
+	if err := r.useTo3D(threeD(tracks)); err != nil {
+		return err
+	}
 	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
 		return r.remuxBuiltin(ctx, src, sel)
 	}
@@ -227,10 +233,13 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
 			"remux to .m2ts, or add --2d for its base view alone")
 	}
-	if (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) && !r.flat {
+	if (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) && !r.flat && !r.to3D {
 		return fmt.Errorf("--crop, --scale and --tonemap convert a 2D picture for now: add --2d for a 3D source's base view")
 	}
 	switch {
+	case r.to3D:
+		r.Report.Report("source: 2D, made 3D (its depth estimated), video track %d (%s), %d audio, %d subtitle",
+			sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	case r.framedIn != "" && !r.flat:
 		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle",
 			r.framedIn, sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
@@ -323,7 +332,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 			}
 		}}, nil
 	}
-	if !r.flat && r.framedIn == "" {
+	if !r.flat && r.framedIn == "" && !r.to3D {
 		return cpu(), nil
 	}
 	codec, ok := map[string]gpu.VideoCodec{"V_MPEG4/ISO/AVC": gpu.DecodeH264, "V_MPEGH/ISO/HEVC": gpu.DecodeHEVC,
