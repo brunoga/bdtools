@@ -10,6 +10,9 @@ import (
 	"sync"
 )
 
+// Parallel runs f(i) for i < n over the CPUs.
+func Parallel(n int, f func(i int)) { parallel(n, f) }
+
 // parallel runs f(i) for i < n over the CPUs.
 func parallel(n int, f func(i int)) {
 	w := min(runtime.GOMAXPROCS(0), n)
@@ -58,36 +61,66 @@ func Linear(x, w, b *Tensor) *Tensor {
 	return y
 }
 
+// convBand is a band of a convolution's patches, packed, for a job.
+type convBand struct {
+	col []float32
+	pb  packedB
+}
+
+var convPool = sync.Pool{New: func() any { return &convBand{} }}
+
 // Conv2d is nn.Conv2d on x [C, H, W] with w [O, C, kh, kw] and b [O] (nil
-// for none), the stride and padding the same in both directions.
+// for none), the stride and padding the same in both directions. A 1x1
+// convolution is a matrix product as it is; any other is done in bands of
+// output rows, each band's patches gathered as columns ([C kh kw, the
+// band's outputs]) and multiplied by w, so no buffer holds them all.
 func Conv2d(x, w, b *Tensor, stride, pad int) *Tensor {
 	c, h, wd := x.Dim(0), x.Dim(1), x.Dim(2)
 	o, kh, kw := w.Dim(0), w.Dim(2), w.Dim(3)
 	ho, wo := (h+2*pad-kh)/stride+1, (wd+2*pad-kw)/stride+1
-	// the patches as columns: [C kh kw, ho wo]
 	k := c * kh * kw
-	col := make([]float32, k*ho*wo)
-	parallel(c, func(ci int) {
-		for i := range kh {
-			for j := range kw {
-				row := col[((ci*kh+i)*kw+j)*ho*wo:]
-				for y := range ho {
-					sy := y*stride - pad + i
-					if sy < 0 || sy >= h {
-						continue
-					}
-					src := x.Data[(ci*h+sy)*wd:]
-					for xx := range wo {
-						if sx := xx*stride - pad + j; sx >= 0 && sx < wd {
-							row[y*wo+xx] = src[sx]
+	y := New(o, ho, wo)
+	if kh == 1 && kw == 1 && stride == 1 && pad == 0 {
+		gemmNN(y.Data, w.Data, x.Data, o, c, h*wd)
+	} else {
+		band := max(1, 2048/wo) // output rows a job
+		parallel((ho+band-1)/band, func(job int) {
+			y0 := job * band
+			y1 := min(y0+band, ho)
+			nb := (y1 - y0) * wo
+			cb := convPool.Get().(*convBand)
+			defer convPool.Put(cb)
+			if cap(cb.col) < k*nb {
+				cb.col = make([]float32, k*nb)
+			}
+			col := cb.col[:k*nb]
+			for ci := range c {
+				for i := range kh {
+					for j := range kw {
+						row := col[((ci*kh+i)*kw+j)*nb : ((ci*kh+i)*kw+j+1)*nb]
+						for yy := y0; yy < y1; yy++ {
+							out := row[(yy-y0)*wo : (yy-y0+1)*wo]
+							sy := yy*stride - pad + i
+							if sy < 0 || sy >= h {
+								clear(out)
+								continue
+							}
+							src := x.Data[(ci*h+sy)*wd : (ci*h+sy+1)*wd]
+							for xx := range out {
+								if sx := xx*stride - pad + j; sx >= 0 && sx < wd {
+									out[xx] = src[sx]
+								} else {
+									out[xx] = 0
+								}
+							}
 						}
 					}
 				}
 			}
-		}
-	})
-	y := New(o, ho, wo)
-	gemmNN(y.Data, w.Data, col, o, k, ho*wo)
+			packBInto(&cb.pb, col, nb, 1, k, nb)
+			mulPacked(y.Data[y0*wo:], ho*wo, w.Data, k, 1, &cb.pb, o)
+		})
+	}
 	if b != nil {
 		parallel(o, func(oi int) {
 			row := y.Data[oi*ho*wo : (oi+1)*ho*wo]
@@ -192,7 +225,7 @@ func GELU(x *Tensor) *Tensor {
 	parallel(len(x.Data)/4096+1, func(k int) {
 		d := x.Data[k*4096 : min((k+1)*4096, len(x.Data))]
 		for i, v := range d {
-			d[i] = float32(0.5 * float64(v) * (1 + math.Erf(float64(v)/math.Sqrt2)))
+			d[i] = 0.5 * v * (1 + erff(v*(1/math.Sqrt2)))
 		}
 	})
 	return x
@@ -222,13 +255,13 @@ func softmaxRow(r []float32) {
 	for _, v := range r {
 		m = max(m, v)
 	}
-	var s float64
+	var s float32
 	for i, v := range r {
-		e := math.Exp(float64(v - m))
-		r[i] = float32(e)
+		e := expf(v - m)
+		r[i] = e
 		s += e
 	}
-	inv := float32(1 / s)
+	inv := 1 / s
 	for i := range r {
 		r[i] *= inv
 	}
@@ -236,34 +269,33 @@ func softmaxRow(r []float32) {
 
 // Attention is multi-head scaled dot product attention: q [Nq, D], k and v
 // [Nk, D], the D channels in heads of D/heads, each head's softmax(q k^T
-// scale) v; out [Nq, D].
+// scale) v; out [Nq, D]. Each head's keys and values are packed once; the
+// jobs are a head's 64 query rows each: their scores, softmax and output.
 func Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
 	nq, nk, d := q.Dim(0), k.Dim(0), q.Dim(1)
 	hd := d / heads
 	out := New(nq, d)
-	parallel(heads*((nq+63)/64), func(job int) {
-		h, blk := job%heads, job/heads
-		r0, r1 := blk*64, min(blk*64+64, nq)
-		scores := make([]float32, nk)
-		for i := r0; i < r1; i++ {
-			qi := q.Data[i*d+h*hd : i*d+h*hd+hd]
-			for j := range nk {
-				kj := k.Data[j*d+h*hd : j*d+h*hd+hd]
-				var s float32
-				for c, qv := range qi {
-					s += qv * kj[c]
-				}
-				scores[j] = s * scale
+	pk, pv := make([]*packedB, heads), make([]*packedB, heads)
+	for h := range heads {
+		pk[h] = packB(k.Data[h*hd:], 1, d, hd, nk) // k_h transposed
+		pv[h] = packB(v.Data[h*hd:], d, 1, nk, hd)
+	}
+	const rows = 64
+	blocks := (nq + rows - 1) / rows
+	parallel(heads*blocks, func(job int) {
+		h, blk := job/blocks, job%blocks
+		i0 := blk * rows
+		n := min(rows, nq-i0)
+		scores := make([]float32, n*nk)
+		mulPacked(scores, nk, q.Data[i0*d+h*hd:], d, 1, pk[h], n)
+		for i := range n {
+			r := scores[i*nk : (i+1)*nk]
+			for j := range r {
+				r[j] *= scale
 			}
-			softmaxRow(scores)
-			oi := out.Data[i*d+h*hd : i*d+h*hd+hd]
-			for j, p := range scores {
-				vj := v.Data[j*d+h*hd : j*d+h*hd+hd]
-				for c := range oi {
-					oi[c] += p * vj[c]
-				}
-			}
+			softmaxRow(r)
 		}
+		mulPacked(out.Data[i0*d+h*hd:], d, scores, nk, 1, pv[h], n)
 	})
 	return out
 }
