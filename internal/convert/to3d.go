@@ -266,6 +266,5 @@ func DecodeFrames(ctx context.Context, goos string, o Options, path string, keep
 	return err
 }
 
-// ErrDecodeDone, from DecodeFrames' fn, stops the decode without an
-// error.
+// ErrDecodeDone stops DecodeFrames without an error, returned by its fn.
 var ErrDecodeDone = errors.New("decode done")
