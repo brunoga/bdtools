@@ -82,3 +82,25 @@ func TestSmallModelMatchesPyTorch(t *testing.T) {
 	}
 	stream(t, m, io, 1e-3)
 }
+
+// One 518x924 frame (a 1080p frame's network size), when $VDA_WEIGHTS
+// names the small model: go test -bench Frame -run ^$.
+func BenchmarkFrame(b *testing.B) {
+	wf := os.Getenv("VDA_WEIGHTS")
+	if wf == "" {
+		b.Skip("VDA_WEIGHTS unset")
+	}
+	m, err := Load(wf, 6)
+	if err != nil {
+		b.Fatal(err)
+	}
+	x := nn.New(3, 518, 924)
+	for i := range x.Data {
+		x.Data[i] = float32(i%97) / 97
+	}
+	m.Frame(x)
+	b.ResetTimer()
+	for range b.N {
+		m.Frame(x)
+	}
+}
