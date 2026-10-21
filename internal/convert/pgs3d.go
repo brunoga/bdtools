@@ -579,6 +579,8 @@ func (r *Runner) subtitles3D(src mkv.Source, t Track) mkv.Source {
 		seq = r.offsetSequence(t)
 	}
 	switch {
+	case r.to3D:
+		r.Report.Report("3D subtitles: track %d just in front of the made 3D picture beneath it", t.ID)
 	case r.depth == nil || len(r.depth.gops) == 0:
 		r.Report.Report("3D subtitles: track %d: the source carries no offset metadata, so they sit at the screen", t.ID)
 	case seq == frontMost:

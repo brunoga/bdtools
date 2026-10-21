@@ -267,6 +267,10 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		g.depth = r.depth
 		r.offsetSequence = func(t Track) int { return src.offsetSequence(uint16(t.ID)) } //nolint:gosec // a PID
 	}
+	if r.to3D && r.depth != nil {
+		// the conversion gives the subtitles their depth, as sequence 0
+		r.offsetSequence = func(Track) int { return 0 }
+	}
 	if err := g.start(); err != nil {
 		return err
 	}
@@ -477,6 +481,8 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 		r.burnSeq = r.offsetSequence(*t)
 	}
 	switch {
+	case r.to3D:
+		r.Report.Report("burning subtitle track %d into the picture, just in front of the made 3D picture beneath it", t.ID)
 	case r.burnSeq == frontMost:
 		r.Report.Report("burning subtitle track %d into the picture, at the offset nearest the viewer at each moment (the source does not say which it follows)", t.ID)
 	case r.burnSeq < 0:

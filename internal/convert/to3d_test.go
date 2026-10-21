@@ -73,3 +73,27 @@ func TestRunnerTo3D(t *testing.T) {
 		t.Errorf("a 3D source: %v", err)
 	}
 }
+
+// A subtitle sits just in front of the nearest of the picture's lower
+// half, at the screen when it is all behind.
+func TestSubtitleOffset(t *testing.T) {
+	const w, h = 64, 40
+	d := make([]float32, w*h)
+	for i := range d {
+		d[i] = -6
+	}
+	if o := subtitleOffset(d, w); o != 0 {
+		t.Errorf("all behind: offset %g, want 0 (the screen)", o)
+	}
+	for y := h / 2; y < h; y++ {
+		for x := range w / 2 {
+			d[y*w+x] = 10 // nearer, in the lower half
+		}
+	}
+	for x := range w {
+		d[x] = 40 // nearer still, but at the top
+	}
+	if o := subtitleOffset(d, w); o != 6 {
+		t.Errorf("offset %g, want 6 (half of 10, plus 1)", o)
+	}
+}

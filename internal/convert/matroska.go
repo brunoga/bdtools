@@ -902,6 +902,10 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		// moment never puts a subtitle behind the picture.
 		r.offsetSequence = func(Track) int { return frontMost }
 	}
+	if r.to3D && r.depth != nil {
+		// the conversion gives the subtitles their depth, as sequence 0
+		r.offsetSequence = func(Track) int { return 0 }
+	}
 	if err := g.start(); err != nil {
 		if g.f != nil {
 			_ = g.f.Close()
