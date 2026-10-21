@@ -16,14 +16,23 @@ var kernelsPTX []byte
 // kernels (kernels.cu). Memory is reused: what an op allocates is given
 // back at Release unless kept, to be handed out again to the next op
 // asking for as many bytes (a network's frames ask for the same each
-// time). An op's failure is kept and reported by the next Download.
+// time); what no op asked for again between two Releases is freed (the
+// sizes change with the picture's). An op's failure is kept and reported
+// by the next Download.
 type GPU struct {
 	c     *cuda.Context
 	mod   *cuda.Module
 	k     map[string]*cuda.Kernel
-	free  map[int][]*cuda.Buffer
+	free  map[int][]spare
 	arena []*alloc
+	gen   int // Releases so far
 	err   error
+}
+
+// spare is a free buffer and the Release it was given back at.
+type spare struct {
+	buf *cuda.Buffer
+	gen int
 }
 
 // alloc is a device allocation; devBuf a tensor's place in one.
@@ -49,7 +58,7 @@ func NewGPU() (*GPU, error) {
 		c.Close()
 		return nil, err
 	}
-	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]*cuda.Buffer{}}
+	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]spare{}}
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
@@ -77,12 +86,16 @@ func (g *GPU) tensor(shape ...int) *Tensor {
 	n := 4 * max(Numel(shape), 1)
 	var b *cuda.Buffer
 	if l := g.free[n]; len(l) > 0 {
-		b, g.free[n] = l[len(l)-1], l[:len(l)-1]
+		b, g.free[n] = l[len(l)-1].buf, l[:len(l)-1]
 	} else {
 		var err error
 		if b, err = g.c.Alloc(n); err != nil {
-			g.fail(err)
-			b = &cuda.Buffer{Size: n}
+			// the spares first, then again
+			g.drop(func(spare) bool { return true })
+			if b, err = g.c.Alloc(n); err != nil {
+				g.fail(err)
+				b = &cuda.Buffer{Size: n}
+			}
 		}
 	}
 	a := &alloc{buf: b}
@@ -144,17 +157,40 @@ func (g *GPU) Keep(t *Tensor) { t.dev.a.kept = true }
 func (g *GPU) Free(t *Tensor) {
 	if a := t.dev.a; a.kept {
 		a.kept = false
-		g.free[a.buf.Size] = append(g.free[a.buf.Size], a.buf)
+		g.free[a.buf.Size] = append(g.free[a.buf.Size], spare{a.buf, g.gen})
 	}
 }
 
 func (g *GPU) Release() {
+	g.gen++
 	for _, a := range g.arena {
 		if !a.kept {
-			g.free[a.buf.Size] = append(g.free[a.buf.Size], a.buf)
+			g.free[a.buf.Size] = append(g.free[a.buf.Size], spare{a.buf, g.gen})
 		}
 	}
 	g.arena = g.arena[:0]
+	// what lay unused through the last frame is not needed any more
+	g.drop(func(s spare) bool { return s.gen < g.gen-1 })
+}
+
+// drop frees the spare buffers gone says go.
+func (g *GPU) drop(gone func(spare) bool) {
+	for n, l := range g.free {
+		k := 0
+		for _, s := range l {
+			if gone(s) {
+				g.c.Free(s.buf)
+			} else {
+				l[k] = s
+				k++
+			}
+		}
+		if k == 0 {
+			delete(g.free, n)
+		} else {
+			g.free[n] = l[:k]
+		}
+	}
 }
 
 // gemm queues c = alpha a b (+ bias) through kernel nn or nt (see
