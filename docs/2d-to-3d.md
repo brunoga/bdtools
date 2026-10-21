@@ -186,6 +186,51 @@ That gives a number for every change (a better depth network, a better
 filler), as the encoders have their BD-rate. Beside it, viewing on the TV
 and the Ugoos, the only judge of comfort.
 
+## Measured so far
+
+`tools/stereobench` on twelve 4-second clips, two from each of six discs
+(Avatar: The Way of Water, Hugo and Life of Pi shot in 3D; Gravity,
+Titanic and Mad Max: Fury Road converted by studios), plus four of
+Gravity's glass shots. The right eye made from the left against the
+disc's:
+
+| Right eye from | PSNR | VMAF | What it says |
+|---|---|---|---|
+| no depth (flat) | 27.4 | 34 | the floor |
+| the disc's own depth | 36.0 | 80 | the renderer and filler, given perfect depth |
+| our depth, scaled per picture to the disc's | 30.1 | 43 | the depth's shape |
+| our conversion (first defaults) | 24.1 | 13 | the shape and the grading |
+| our conversion (the discs' grading) | 25.3 | 16 | the defaults now |
+
+What that teaches:
+
+- **The depth is most of the gap**, not the renderer: with the disc's
+  depth our right eye is 6 dB nearer the disc's.
+- **The grading was too far behind the screen.** The discs spread their
+  depth about the screen (5th to 95th percentile -21 to +16 px at 1920,
+  the median -4); the first defaults (-40 to +13, median -24) cost 1.2 dB.
+  The defaults are now the discs': 1.9% of the width, the screen at 0.57.
+- **A curve fits better than a line.** Our depth fitted to the disc's by
+  any rising curve is 2.9 px off, by a line 3.9: the discs' grading is
+  not a scale and an offset, which is what milestone 8 is to learn.
+- **The made eye's errors are at edges**, where the depth's soft edges
+  drag the background along. A guided filter (radius 8) did not help as
+  tuned; it is off.
+- **Glass:** clear glass with one thing behind it is fine (Gravity's
+  visor close-up: correlation 0.85, 1.7 px). A window showing two things
+  at once is not: Gravity's porthole, her face over the Earth, is the
+  worst clip (correlation 0.42, 7 px off), because one depth a pixel
+  cannot put the face and the Earth at their two depths. Mirror-like
+  visors match too, but only around the glass: on it the disc's eyes
+  agree on no one depth, as if the reflections had a depth of their own.
+  What fixes that is layered rendering: such regions split into what is
+  seen through the glass and what is reflected, each its own depth, each
+  rendered and the two added. The matcher first needs to find two depths
+  in a region, so the benchmark can measure it.
+- **The matcher** trusts a match only where the picture has texture:
+  without that, space and night skies matched the grain, which two
+  cameras do not share.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything
@@ -216,6 +261,7 @@ and the Ugoos, the only judge of comfort.
    - holes filled from the shot's other frames, wherever they show the
      background; only what no frame shows inpainted.
 7. **Like a stereographer**:
+   - glass and reflections in layers (see [Measured so far](#measured-so-far));
    - floating windows (black masks moving at the picture's sides), where
      something in front of the screen meets the frame's edge;
    - subtitles placed just in front of what they cover;

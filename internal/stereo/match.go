@@ -29,6 +29,11 @@ const (
 	matchP1         = 4
 	matchP2         = 36
 	matchUniqueness = 0.95
+	// matchTexture is the least deviation of the luma (half resolution,
+	// over the census window) a match is trusted on: below it, as in
+	// night skies and space, the match follows the grain, which two
+	// cameras do not share.
+	matchTexture = 2.5
 )
 
 // Match measures the disparity between a stereo pair's eyes (8-bit
@@ -38,7 +43,8 @@ const (
 // eye's match of the pixel it lands on comes back to it.
 func Match(left, right *mvc.Frame) *Disparity {
 	w, h := left.Width/2, left.Height/2
-	lc := census(half(left), w, h)
+	lh := half(left)
+	lc := census(lh, w, h)
 	rc := census(half(right), w, h)
 	const nd = 2*matchRange + 1
 	cost := make([]uint8, w*h*nd)
@@ -111,7 +117,7 @@ func Match(left, right *mvc.Frame) *Disparity {
 		for x := censusRadius; x < w-censusRadius; x++ {
 			i := y*w + x
 			xr := x - il[i]
-			if !unique[i] || xr < 0 || xr >= w {
+			if !unique[i] || xr < 0 || xr >= w || !textured(lh, w, x, y) {
 				continue
 			}
 			if d := il[i] - ir[y*w+xr]; d >= -1 && d <= 1 {
@@ -120,6 +126,21 @@ func Match(left, right *mvc.Frame) *Disparity {
 		}
 	}
 	return &Disparity{W: w, H: h, D: dl, Valid: valid}
+}
+
+// textured reports whether the luma about (x, y), over the census
+// window, deviates by matchTexture or more.
+func textured(p []byte, w, x, y int) bool {
+	var s, ss, n float64
+	for dy := -censusRadius; dy <= censusRadius; dy++ {
+		for dx := -censusRadius; dx <= censusRadius; dx++ {
+			v := float64(p[(y+dy)*w+x+dx])
+			s += v
+			ss += v * v
+			n++
+		}
+	}
+	return ss/n-(s/n)*(s/n) >= matchTexture*matchTexture
 }
 
 // half is a frame's luma at half its size (each 2x2 averaged).

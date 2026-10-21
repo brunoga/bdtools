@@ -12,8 +12,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Anything Small (Apache-2.0), run in Go from its published checkpoint
   (downloaded once), the eyes made from it, the nearer covering the
   farther and what an eye sees behind an edge filled from the background
-  side. `--3d-depth` and `--3d-screen` set the depth (3% of the width by
-  default, most of it behind the screen), `--depth-model` another
+  side. `--3d-depth` and `--3d-screen` set the depth (by default the 3D
+  discs': 1.9% of the width, the screen a little nearer than the middle), `--depth-model` another
   checkpoint. Letterbox bars stay at the screen, cuts start the depth
   afresh, an HDR source is tone mapped. About a second a 1080p picture on
   the CPU for now.

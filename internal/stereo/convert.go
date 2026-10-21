@@ -16,6 +16,9 @@ import (
 type Converter struct {
 	Model *depth.Model
 	Shaper
+	// Guide snaps the depth's edges to the picture's (DefaultGuide; the
+	// zero Guide leaves the depth as the network gives it, upsampled).
+	Guide           Guide
 	cuts            cutDetector
 	top, bottom     int // the active rows
 	netW, netH      int // the network's input size
@@ -24,7 +27,7 @@ type Converter struct {
 
 // NewConverter is a converter for a depth model.
 func NewConverter(m *depth.Model, shape Shape) *Converter {
-	return &Converter{Model: m, Shaper: Shaper{Shape: shape}, top: -1}
+	return &Converter{Model: m, Shaper: Shaper{Shape: shape}, Guide: DefaultGuide, top: -1}
 }
 
 // Cuts is how many cuts the converter has seen.
@@ -62,6 +65,7 @@ func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32) {
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm := c.Model.Frame(x)
 		up := nn.Bilinear(dm.Reshape(1, c.netH, c.netW), ah, w)
+		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
 		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
 	}

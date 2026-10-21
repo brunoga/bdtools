@@ -151,8 +151,8 @@ type Options struct {
 	// video depth network, DepthModel's weights, or Video Depth Anything
 	// Small's, downloaded once), the two eyes made from it, and the pair
 	// put out in the layout asked for, as a 3D source's would be. Depth3D
-	// is the depth in all, in percent of the width (0: 3); Screen3D where
-	// the screen sits in it, 0 the farthest and 1 the nearest (0: 0.7).
+	// is the depth across its range, in percent of the width (0: 1.9); Screen3D where
+	// the screen sits in it, 0 the farthest and 1 the nearest (0: 0.57).
 	To3D              bool
 	DepthModel        string
 	Depth3D, Screen3D float64

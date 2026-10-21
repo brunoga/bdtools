@@ -7,8 +7,9 @@ import (
 
 // Shape is how depth becomes disparity.
 type Shape struct {
-	// Budget is the disparity from the farthest to the nearest, as a
-	// fraction of the picture's width.
+	// Budget is the disparity across the depth's range (its 5th to 95th
+	// percentile; what lies beyond goes up to a quarter of it farther), as
+	// a fraction of the picture's width.
 	Budget float64
 	// Screen is where the screen sits in the depth range, 0 the farthest
 	// and 1 the nearest: what is nearer comes out of it, what is farther
@@ -16,12 +17,15 @@ type Shape struct {
 	Screen float64
 }
 
-// DefaultShape is a gentle depth: 3% of the width in all, most of it
-// behind the screen (2.1%), 0.9% in front.
-var DefaultShape = Shape{Budget: 0.03, Screen: 0.7}
+// DefaultShape is the 3D discs' depth (native and studio-converted ones,
+// measured by tools/stereobench): 1.9% of the width across the range,
+// the screen a little nearer than its middle (1.1% behind it, 0.8% in
+// front).
+var DefaultShape = Shape{Budget: 0.019, Screen: 0.57}
 
 // Shaper turns a stream's depth maps into disparity: each map's range (its
-// 1st to 99th percentile, the extremes left out) normalised to 0..1, the
+// 5th to 95th percentile) normalised to 0..1 (what lies beyond kept to a
+// quarter of the range more), the
 // range steadied over the frames of a shot, then the shape's budget and
 // screen applied.
 type Shaper struct {
@@ -45,8 +49,8 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 		sample = append(sample, depth[i])
 	}
 	slices.Sort(sample)
-	lo := float64(sample[len(sample)/100])
-	hi := float64(sample[len(sample)-1-len(sample)/100])
+	lo := float64(sample[len(sample)/20])
+	hi := float64(sample[len(sample)-1-len(sample)/20])
 	if !s.primed {
 		s.lo, s.hi, s.primed = lo, hi, true
 	} else {
@@ -57,7 +61,7 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 	budget := s.Shape.Budget * float64(width)
 	out := make([]float32, len(depth))
 	for i, v := range depth {
-		n := math.Min(math.Max((float64(v)-s.lo)/span, 0), 1)
+		n := math.Min(math.Max((float64(v)-s.lo)/span, -0.25), 1.25)
 		out[i] = float32(budget * (n - s.Shape.Screen))
 	}
 	return out
