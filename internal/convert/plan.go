@@ -156,6 +156,10 @@ type Options struct {
 	To3D              bool
 	DepthModel        string
 	Depth3D, Screen3D float64
+	// NoWindow3D leaves out the floating window: the black strips down a
+	// side of one eye that put the picture's edge in front of what comes
+	// out of the screen there.
+	NoWindow3D bool
 	// Subs3D is what becomes of the subtitles: kept as they are, drawn
 	// once for a player to place in 3D itself (Subs3DOff, the default);
 	// drawn into both halves of the frame at the depth the disc gives them,

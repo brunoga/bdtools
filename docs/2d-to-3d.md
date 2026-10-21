@@ -278,7 +278,9 @@ What that teaches:
 7. **Like a stereographer**:
    - glass and reflections in layers (see [Measured so far](#measured-so-far));
    - floating windows (black masks moving at the picture's sides), where
-     something in front of the screen meets the frame's edge;
+     something in front of the screen meets the frame's edge (done:
+     `--3d-window`, the strip as wide as the disparity at that edge,
+     widening 2 pixels a frame and narrowing 0.5);
    - subtitles placed just in front of what they cover (done: the lower
      half's nearest, followed at once nearer and slowly farther, as a
      disc's offset sequence for `--subs-3d` and `--burn-subs`);

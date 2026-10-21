@@ -85,7 +85,11 @@ func (o Options) to3DKey() [3]float64 {
 	if !o.To3D {
 		return [3]float64{}
 	}
-	return [3]float64{1, o.Depth3D, o.Screen3D}
+	w := 1.0
+	if o.NoWindow3D {
+		w = 2
+	}
+	return [3]float64{w, o.Depth3D, o.Screen3D}
 }
 
 // shape3D is the depth's shape for the options.
@@ -116,6 +120,7 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 			return p, err
 		}
 		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D())}
+		r.conv.conv.NoWindow = r.Opts.NoWindow3D
 		s := r.Opts.shape3D()
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
 			100*s.Scale, 100*s.Offset)
@@ -126,6 +131,7 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		return p, fmt.Errorf("--to-3d: the depth: %w", err)
 	}
 	l, rr := stereo.Pair(f, d)
+	r.conv.conv.Window(l, rr, d)
 	if r.depth != nil && r.timeline != nil {
 		// the subtitles' depth, as a disc's offset sequence 0 gives it
 		t := subtitleOffset(d, f.Width)

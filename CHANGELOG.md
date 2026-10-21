@@ -23,6 +23,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
   of the made 3D picture beneath them (an offset sequence made from its
   depth), not at the screen behind what comes out of it.
+- `--to-3d` puts a floating window where something in front of the screen
+  meets the picture's left or right edge (`--3d-window`).
 
 ## [0.14.2] - 2026-10-19
 

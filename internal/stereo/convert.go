@@ -18,7 +18,10 @@ type Converter struct {
 	Shaper
 	// Guide snaps the depth's edges to the picture's (DefaultGuide; the
 	// zero Guide leaves the depth as the network gives it, upsampled).
-	Guide           Guide
+	Guide Guide
+	// NoWindow leaves out the floating window (window.go).
+	NoWindow        bool
+	win             window
 	cuts            cutDetector
 	top, bottom     int // the active rows
 	netW, netH      int // the network's input size
@@ -40,7 +43,16 @@ func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
 		return nil, nil, err
 	}
 	left, right = Pair(f, d)
+	c.Window(left, right, d)
 	return left, right, nil
+}
+
+// Window puts the floating window on the pair made of the picture Next
+// gave d for (unless NoWindow).
+func (c *Converter) Window(left, right *mvc.Frame, d []float32) {
+	if !c.NoWindow {
+		c.win.apply(left, right, d, c.top, c.bottom)
+	}
 }
 
 // Next gives the next picture's depth and disparity: depth, the network's
@@ -56,6 +68,7 @@ func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32, err error) {
 		}
 		c.Model.Reset()
 		c.Reset()
+		c.win.reset()
 		c.top, c.bottom = top, bottom
 		c.netW, c.netH = netSize(f.Width, bottom-top)
 	}
