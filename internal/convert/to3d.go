@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/gpu"
@@ -244,10 +245,27 @@ func download(url, file, want string) error {
 
 // DecodeFrames decodes a video's pictures (its first video track, as
 // --compare does) as 8-bit 4:2:0 frames, one after another, for tools
-// that look at the pictures themselves (the 2D to 3D benchmark).
-func DecodeFrames(ctx context.Context, goos string, o Options, path string, fn func(*mvc.Frame) error) error {
+// that look at the pictures themselves (the 2D to 3D benchmark). With
+// keep, only the pictures it keeps (by their time from the first
+// picture) are handed to fn; return ErrDecodeDone from fn to stop early.
+func DecodeFrames(ctx context.Context, goos string, o Options, path string, keep func(time.Duration) bool, fn func(*mvc.Frame) error) error {
 	r := NewRunner(goos, o, func(string, ...any) {})
-	return r.decodeVideo(ctx, path, func(p *gpu.DecodedPicture) error {
+	first, known := int64(0), false
+	err := r.decodeVideo(ctx, path, func(p *gpu.DecodedPicture) error {
+		if !known {
+			first, known = p.PTS, true
+		}
+		if keep != nil && !keep(ticks90k(p.PTS-first)) {
+			return nil
+		}
 		return fn(pictureFrame8(picture{gpu: p, pts: p.PTS}))
 	})
+	if errors.Is(err, ErrDecodeDone) {
+		return nil
+	}
+	return err
 }
+
+// ErrDecodeDone, from DecodeFrames' fn, stops the decode without an
+// error.
+var ErrDecodeDone = errors.New("decode done")

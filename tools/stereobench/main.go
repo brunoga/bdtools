@@ -30,6 +30,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -39,6 +40,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/convert"
 	"github.com/brunoga/bdtools/internal/depth"
@@ -79,6 +81,7 @@ func main() {
 	every := flag.Int("every", 4, "measure one picture in this many")
 	model := flag.String("model", "", "the depth network's checkpoint (default: --to-3d's, in the user's cache)")
 	csvPath := flag.String("csv", "", "also write the clips' measures to this CSV file")
+	framesPath := flag.String("frames", "", "write each measured picture's features and its fit to the disc to this CSV file (the grading's training data)")
 	flag.IntVar(&guide.Radius, "guide-radius", stereo.DefaultGuide.Radius, "the depth's edge filter's radius (0: off)")
 	flag.Float64Var(&guide.Eps, "guide-eps", stereo.DefaultGuide.Eps, "the depth's edge filter's regularisation")
 	flag.Float64Var(&shape.Budget, "budget", 0.019, "with -scale 0: each picture's depth range normalised to this budget (a fraction of the width)")
@@ -106,14 +109,30 @@ func main() {
 		m.Use(g)
 		fmt.Fprintln(os.Stderr, "stereobench: the depth on", g.Name())
 	}
+	if *framesPath != "" {
+		f, err := os.Create(*framesPath) //nolint:gosec // the operator's path
+		if err != nil {
+			fail(err)
+		}
+		framesOut = csv.NewWriter(f)
+		_ = framesOut.Write(featureHead)
+		defer func() {
+			framesOut.Flush()
+			if err := errors.Join(framesOut.Error(), f.Close()); err != nil {
+				fail(err)
+			}
+		}()
+	}
 	var all []clipResult
 	for _, clip := range flag.Args() {
 		res, err := bench(m, clip, max(*every, 1))
 		if err != nil {
 			fail(fmt.Errorf("%s: %w", clip, err))
 		}
-		report(res)
-		all = append(all, res)
+		if !strings.Contains(clip, "@") {
+			report(res[0])
+		}
+		all = append(all, res...)
 	}
 	if len(all) > 1 {
 		report(mean(all))
@@ -125,107 +144,218 @@ func main() {
 	}
 }
 
-func bench(m *depth.Model, clip string, every int) (clipResult, error) {
-	res := clipResult{name: strings.TrimSuffix(filepath.Base(clip), filepath.Ext(clip)),
-		psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
-	conv := stereo.NewConverter(m, shape)
-	conv.Guide = guide
-	scorers := map[string]*vmaf.Scorer{}
-	var discD, oursD []float32
-	var sums struct {
+// window is a stretch of a file to measure, as a clip of its own.
+type window struct{ start, end time.Duration }
+
+// parseClip reads a clip argument: a file, or file@START+DUR[,START+DUR...]
+// for stretches of it (one decode of the file for them all).
+func parseClip(arg string) (string, []window, error) {
+	path, spec, ok := strings.Cut(arg, "@")
+	if !ok {
+		return arg, nil, nil
+	}
+	var ws []window
+	for _, w := range strings.Split(spec, ",") {
+		st, du, ok := strings.Cut(w, "+")
+		if !ok {
+			return "", nil, fmt.Errorf("%q: a window is START+DURATION", w)
+		}
+		a, err := time.ParseDuration(st)
+		if err != nil {
+			return "", nil, err
+		}
+		d, err := time.ParseDuration(du)
+		if err != nil {
+			return "", nil, err
+		}
+		ws = append(ws, window{a, a + d})
+	}
+	slices.SortFunc(ws, func(x, y window) int { return int(x.start - y.start) })
+	return path, ws, nil
+}
+
+// bench measures a clip argument: a result for the file, or for each of
+// its windows.
+func bench(m *depth.Model, arg string, every int) ([]clipResult, error) {
+	path, ws, err := parseClip(arg)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	o := convert.DefaultOptions()
+	o.TempDir = os.TempDir()
+	if ws == nil {
+		cb := newClipBench(m, name, every)
+		err := convert.DecodeFrames(context.Background(), runtime.GOOS, o, path, nil, cb.frame)
+		if err != nil {
+			return nil, err
+		}
+		r, err := cb.finish()
+		return []clipResult{r}, err
+	}
+	var out []clipResult
+	cur := -1
+	var cb *clipBench
+	at := func(t time.Duration) int {
+		for i, w := range ws {
+			if t >= w.start && t < w.end {
+				return i
+			}
+		}
+		return -1
+	}
+	done := func() error {
+		if cb == nil {
+			return nil
+		}
+		r, err := cb.finish()
+		if err != nil {
+			return fmt.Errorf("%s: %w", cb.res.name, err)
+		}
+		report(r)
+		out = append(out, r)
+		cb = nil
+		return nil
+	}
+	var t time.Duration
+	keep := func(d time.Duration) bool {
+		t = d
+		return at(d) >= 0 || d >= ws[len(ws)-1].end
+	}
+	err = convert.DecodeFrames(context.Background(), runtime.GOOS, o, path, keep, func(sbs *mvc.Frame) error {
+		i := at(t)
+		if i < 0 {
+			return convert.ErrDecodeDone // past the last window
+		}
+		if i != cur {
+			if err := done(); err != nil {
+				return err
+			}
+			cur = i
+			w := ws[i]
+			cb = newClipBench(m, fmt.Sprintf("%s@%s", name, w.start), every)
+		}
+		return cb.frame(sbs)
+	})
+	if err != nil {
+		return out, err
+	}
+	return out, done()
+}
+
+// clipBench is a clip's measures as its pictures come.
+type clipBench struct {
+	res     clipResult
+	conv    *stereo.Converter
+	every   int
+	scorers map[string]*vmaf.Scorer
+	discD   []float32
+	oursD   []float32
+	sums    struct {
 		matched, corr, epe, bad2 float64
 		epeCurve, bad2Curve      float64
 		mse, holeMSE, holeN      map[string]float64
 		n                        map[string]float64
 	}
-	sums.mse, sums.holeMSE, sums.holeN, sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
 	// the measured pictures, rendered once all are in (the clip's fit
 	// needs them all)
-	type record struct {
-		left, right     *mvc.Frame
-		raw, disp, full []float32
-		dm              *stereo.Disparity
-		hr              []float32
-		a, b            float64
-		med             float32
-		top, bottom, k  int
-	}
-	var recs []record
-	var gl struct{ n, sx, sy, sxx, sxy float64 }
-	k := 0
-	o := convert.DefaultOptions()
-	o.TempDir = os.TempDir()
-	err := convert.DecodeFrames(context.Background(), runtime.GOOS, o, clip, func(sbs *mvc.Frame) error {
-		left, right := split(sbs)
-		raw, disp, err := conv.Next(left)
-		if err != nil {
-			return err
-		}
-		if k++; (k-1)%every != 0 {
-			return nil
-		}
-		top, bottom := stereo.Bars(left)
-		w := left.Width
-		dm := stereo.Match(left, right)
-		hr := halfDepth(raw, w, left.Height)
-		a, b, corr, matched := fit(dm, hr, top/2, bottom/2)
-		if matched < 0.05 {
-			return nil // nothing to measure on (a black picture)
-		}
-		res.frames++
-		sums.matched += matched
-		sums.corr += corr
-		var e, bad, n float64
-		for i, ok := range dm.Valid {
-			if y := i / dm.W; !ok || y < top/2 || y >= bottom/2 || math.IsNaN(float64(hr[i])) {
-				continue
-			}
-			d := math.Abs(a*float64(hr[i]) + b - float64(dm.D[i]))
-			e += d
-			if d > 2 {
-				bad++
-			}
-			n++
-			discD = append(discD, dm.D[i])
-		}
-		sums.epe += e / n
-		sums.bad2 += bad / n
-		ec, bc := curveError(dm, hr, top/2, bottom/2)
-		sums.epeCurve += ec
-		sums.bad2Curve += bc
-		for y := top; y < bottom; y += 2 {
-			for x := 0; x < w; x += 2 {
-				oursD = append(oursD, disp[y*w+x])
-			}
-		}
+	recs []record
+	gl   struct{ n, sx, sy, sxx, sxy float64 }
+	k    int
+}
 
-		med := median(slices.Clone(discD[len(discD)-int(n):]))
-		recs = append(recs, record{left: left, right: right, raw: raw, disp: disp, full: discDisparity(dm, w, left.Height),
-			dm: dm, hr: hr, a: a, b: b, med: med, top: top, bottom: bottom, k: k - 1})
-		for y := top / 2; y < bottom/2; y++ {
-			for x := range dm.W {
-				if i := y*dm.W + x; dm.Valid[i] && !math.IsNaN(float64(hr[i])) {
-					X, Y := float64(hr[i]), float64(dm.D[i])
-					gl.n++
-					gl.sx += X
-					gl.sy += Y
-					gl.sxx += X * X
-					gl.sxy += X * Y
-				}
+type record struct {
+	left, right     *mvc.Frame
+	raw, disp, full []float32
+	dm              *stereo.Disparity
+	hr              []float32
+	a, b            float64
+	med             float32
+	top, bottom, k  int
+}
+
+func newClipBench(m *depth.Model, name string, every int) *clipBench {
+	c := &clipBench{every: every, scorers: map[string]*vmaf.Scorer{}}
+	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
+	c.conv = stereo.NewConverter(m, shape)
+	c.conv.Guide = guide
+	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
+	return c
+}
+
+func (c *clipBench) frame(sbs *mvc.Frame) error {
+	left, right := split(sbs)
+	raw, disp, err := c.conv.Next(left)
+	if err != nil {
+		return err
+	}
+	if c.k++; (c.k-1)%c.every != 0 {
+		return nil
+	}
+	top, bottom := stereo.Bars(left)
+	w := left.Width
+	dm := stereo.Match(left, right)
+	hr := halfDepth(raw, w, left.Height)
+	a, b, corr, matched := fit(dm, hr, top/2, bottom/2)
+	if matched < 0.05 {
+		return nil // nothing to measure on (a black picture)
+	}
+	c.res.frames++
+	c.sums.matched += matched
+	c.sums.corr += corr
+	var e, bad, n float64
+	for i, ok := range dm.Valid {
+		if y := i / dm.W; !ok || y < top/2 || y >= bottom/2 || math.IsNaN(float64(hr[i])) {
+			continue
+		}
+		d := math.Abs(a*float64(hr[i]) + b - float64(dm.D[i]))
+		e += d
+		if d > 2 {
+			bad++
+		}
+		n++
+		c.discD = append(c.discD, dm.D[i])
+	}
+	c.sums.epe += e / n
+	c.sums.bad2 += bad / n
+	ec, bc := curveError(dm, hr, top/2, bottom/2)
+	c.sums.epeCurve += ec
+	c.sums.bad2Curve += bc
+	for y := top; y < bottom; y += 2 {
+		for x := 0; x < w; x += 2 {
+			c.oursD = append(c.oursD, disp[y*w+x])
+		}
+	}
+	med := median(slices.Clone(c.discD[len(c.discD)-int(n):]))
+	if framesOut != nil {
+		writeFeatures(c.res.name, c.k-1, left, raw, dm, hr, a, b, corr, matched, top, bottom)
+	}
+	c.recs = append(c.recs, record{left: left, right: right, raw: raw, disp: disp, full: discDisparity(dm, w, left.Height),
+		dm: dm, hr: hr, a: a, b: b, med: med, top: top, bottom: bottom, k: c.k - 1})
+	for y := top / 2; y < bottom/2; y++ {
+		for x := range dm.W {
+			if i := y*dm.W + x; dm.Valid[i] && !math.IsNaN(float64(hr[i])) {
+				X, Y := float64(hr[i]), float64(dm.D[i])
+				c.gl.n++
+				c.gl.sx += X
+				c.gl.sy += Y
+				c.gl.sxx += X * X
+				c.gl.sxy += X * Y
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return res, err
 	}
+	return nil
+}
+
+func (c *clipBench) finish() (clipResult, error) {
+	res, sums, gl := c.res, &c.sums, &c.gl
 	if res.frames == 0 {
 		return res, fmt.Errorf("no pictures measured")
 	}
 	// the clip's one scale and offset, for "clip"
 	ca := (gl.sxy - gl.sx*gl.sy/gl.n) / max(gl.sxx-gl.sx*gl.sx/gl.n, 1e-12)
 	cb := (gl.sy - ca*gl.sx) / gl.n
-	for _, r := range recs {
+	for _, r := range c.recs {
 		left, right, w := r.left, r.right, r.left.Width
 		affine := func(a, b float64) []float32 {
 			out := make([]float32, len(r.raw))
@@ -278,13 +408,13 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 			sums.n[name] += cnt
 			sums.holeMSE[name] += hse
 			sums.holeN[name] += hn
-			sc := scorers[name]
+			sc := c.scorers[name]
 			if sc == nil {
 				var err error
 				if sc, err = vmaf.NewScorer(left.Height); err != nil {
 					return res, err
 				}
-				scorers[name] = sc
+				c.scorers[name] = sc
 			}
 			sc.Add(luma(right), luma(eye))
 		}
@@ -296,7 +426,7 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 	}
 	res.clipA, res.clipB = ca, cb
 	var rawS []float32
-	for _, r := range recs {
+	for _, r := range c.recs {
 		for i := 0; i < len(r.raw); i += 97 {
 			if !math.IsNaN(float64(r.raw[i])) {
 				rawS = append(rawS, r.raw[i])
@@ -307,17 +437,18 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 	f := float64(res.frames)
 	res.matched, res.corr, res.epe, res.bad2 = sums.matched/f, sums.corr/f, sums.epe/f, sums.bad2/f
 	res.epeCurve, res.bad2Curve = sums.epeCurve/f, sums.bad2Curve/f
-	res.disc, res.ours = percentiles(discD), percentiles(oursD)
+	res.disc, res.ours = percentiles(c.discD), percentiles(c.oursD)
 	for _, name := range methods {
 		res.psnr[name] = psnr(sums.mse[name] / sums.n[name])
 		res.holePSNR[name] = psnr(sums.holeMSE[name] / max(sums.holeN[name], 1))
 		res.holes[name] = sums.holeN[name] / sums.n[name]
 		var v []float64
-		for _, sc := range scorers[name].Scores() {
+		for _, sc := range c.scorers[name].Scores() {
 			v = append(v, sc.VMAF)
 		}
 		res.vmaf[name] = vmaf.Pool(v).Mean
 	}
+	c.recs = nil
 	return res, nil
 }
 
