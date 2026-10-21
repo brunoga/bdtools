@@ -383,6 +383,7 @@ scheduler such as pipeliner retry it.
 | `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
 | `--3d-depth` | `1` | With `--to-3d`: the depth's strength, 1 the 3D discs' |
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
+| `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |
 | `--depth-model` | the small model | With `--to-3d`: a Video Depth Anything checkpoint (`.pth`) to use instead |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
@@ -465,7 +466,10 @@ bdtools --input "Film (2020).mkv" --output "Film (2020) 3D.mkv" --to-3d --layout
 The depth is the 3D discs' by default (measured on native and
 studio-converted ones: the farthest about 0.75% of the width behind the
 screen, the nearest up to about 1% in front); `--3d-depth` scales it,
-`--3d-screen` moves it nearer or farther. With `--subs-3d` (or
+`--3d-screen` moves it nearer or farther. Where something in front of the screen meets the
+picture's left or right edge, a floating window (a black strip down that
+side of one eye, as wide as its disparity) puts the edge in front of it
+(`--3d-window=false` leaves it out). With `--subs-3d` (or
 `--burn-subs`) the subtitles sit just in front of the picture beneath them,
 nearer at once when it comes nearer, farther slowly. Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
