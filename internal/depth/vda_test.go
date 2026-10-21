@@ -1,10 +1,13 @@
 package depth
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"testing"
+
+	"github.com/brunoga/bdtools/internal/cuda"
 
 	"github.com/brunoga/bdtools/internal/nn"
 )
@@ -94,6 +97,77 @@ func BenchmarkFrame(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	x := nn.New(3, 518, 924)
+	for i := range x.Data {
+		x.Data[i] = float32(i%97) / 97
+	}
+	m.Frame(x)
+	b.ResetTimer()
+	for range b.N {
+		m.Frame(x)
+	}
+}
+
+// gpu is a GPU backend for a test, or a skip without one.
+func gpu(tb testing.TB) *nn.GPU {
+	tb.Helper()
+	g, err := nn.NewGPU()
+	if errors.Is(err, cuda.ErrUnavailable) {
+		tb.Skip(err)
+	}
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(g.Close)
+	return g
+}
+
+// The small random model on the GPU: PyTorch's depth too.
+func TestTinyModelOnTheGPU(t *testing.T) {
+	g := gpu(t)
+	m, err := Load("testdata/tiny.pth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io, err := nn.LoadPTH("testdata/tiny-io.pth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Use(g)
+	stream(t, m, io, 1e-4)
+}
+
+// The published model on the GPU, against PyTorch's on film frames.
+func TestSmallModelOnTheGPU(t *testing.T) {
+	wf, rf := os.Getenv("VDA_WEIGHTS"), os.Getenv("VDA_REF")
+	if wf == "" || rf == "" {
+		t.Skip("VDA_WEIGHTS or VDA_REF unset")
+	}
+	g := gpu(t)
+	m, err := Load(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io, err := nn.LoadPTH(rf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Use(g)
+	stream(t, m, io, 1e-3)
+}
+
+// BenchmarkFrameGPU is BenchmarkFrame on the GPU.
+func BenchmarkFrameGPU(b *testing.B) {
+	wf := os.Getenv("VDA_WEIGHTS")
+	if wf == "" {
+		b.Skip("VDA_WEIGHTS unset")
+	}
+	g := gpu(b)
+	m, err := Load(wf)
+	if err != nil {
+		b.Fatal(err)
+	}
+	m.Use(g)
 	x := nn.New(3, 518, 924)
 	for i := range x.Data {
 		x.Data[i] = float32(i%97) / 97

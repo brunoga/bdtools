@@ -34,15 +34,20 @@ func NewConverter(m *depth.Model, shape Shape) *Converter {
 func (c *Converter) Cuts() int { return c.cutsHit }
 
 // Convert gives the pair for the next picture (8-bit 4:2:0).
-func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame) {
-	_, d := c.Next(f)
-	return Pair(f, d)
+func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
+	_, d, err := c.Next(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	left, right = Pair(f, d)
+	return left, right, nil
 }
 
 // Next gives the next picture's depth and disparity: depth, the network's
 // (larger nearer, in its own units), NaN in the letterbox bars; disparity,
-// shaped from it (zero in the bars), in pixels, as Pair takes it.
-func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32) {
+// shaped from it (zero in the bars), in pixels, as Pair takes it. The
+// error is the depth model's backend's (a GPU's).
+func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32, err error) {
 	top, bottom := bars(f)
 	cut := c.cuts.next(f)
 	if c.frames == 0 || cut || top != c.top || bottom != c.bottom {
@@ -63,13 +68,16 @@ func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32) {
 	}
 	if ah := bottom - top; ah >= 28 {
 		x := netInput(f, top, bottom, c.netW, c.netH)
-		dm := c.Model.Frame(x)
+		dm, err := c.Model.FrameErr(x)
+		if err != nil {
+			return nil, nil, err
+		}
 		up := nn.Bilinear(dm.Reshape(1, c.netH, c.netW), ah, w)
 		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
 		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
 	}
-	return depth, disparity
+	return depth, disparity, nil
 }
 
 // Bars finds a picture's letterbox bars: its active rows are [top,

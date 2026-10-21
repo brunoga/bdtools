@@ -74,7 +74,10 @@ func TestPreview(t *testing.T) {
 	sort.Strings(files)
 	var l, r *mvc.Frame
 	for _, f := range files {
-		l, r = c.Convert(readPPM(t, f))
+		var err error
+		if l, r, err = c.Convert(readPPM(t, f)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	w, h := l.Width, l.Height
 	sbs := image.NewRGBA(image.Rect(0, 0, w, h/2))
