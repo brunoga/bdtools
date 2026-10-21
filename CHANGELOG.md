@@ -12,8 +12,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Anything Small (Apache-2.0), run in Go from its published checkpoint
   (downloaded once), the eyes made from it, the nearer covering the
   farther and what an eye sees behind an edge filled from the background
-  side. `--3d-depth` and `--3d-screen` set the depth (by default the 3D
-  discs': 1.9% of the width, the screen a little nearer than the middle), `--depth-model` another
+  side. `--3d-depth` and `--3d-screen` scale the depth and move it
+  nearer or farther (by default it is the 3D discs', as measured on them), `--depth-model` another
   checkpoint. Letterbox bars stay at the screen, cuts start the depth
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or

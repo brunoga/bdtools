@@ -13,13 +13,15 @@
 //     and the share of pixels off by more than 2 pixels;
 //   - grading: the disc's disparity range (5th percentile, median, 95th)
 //     beside the conversion's (its default shape, unfitted);
-//   - the right eye, made from the left eye for four disparities, against
+//   - the right eye, made from the left eye for five disparities, against
 //     the disc's: PSNR (luma, the active area less the sides), PSNR in the
 //     holes alone (what the left eye did not see, filled) and VMAF. The
-//     four: none at all, flat at the disc's median ("flat"); the disc's own,
+//     five: none at all, flat at the disc's median ("flat"); the disc's own,
 //     measured ("disc": what the renderer and filler do with perfect
 //     depth); the network's fitted ("fitted": the depth's shape); the
-//     conversion's ("ours": shape and grading as they are).
+//     conversion's ("ours": shape and grading as they are). "clip" is the
+//     network's fitted once for the whole clip, not a picture at a time:
+//     what a grading that only follows shots could reach.
 //
 // Every picture goes through the depth network (it is temporal); one in
 // every few is measured.
@@ -51,7 +53,7 @@ import (
 // nor the conversion.
 const margin = 64
 
-var methods = []string{"flat", "disc", "fitted", "ours"}
+var methods = []string{"flat", "disc", "fitted", "clip", "ours"}
 
 var (
 	guide   stereo.Guide
@@ -69,6 +71,8 @@ type clipResult struct {
 	disc, ours           [3]float64 // p5, median, p95 disparity
 	psnr, holePSNR, vmaf map[string]float64
 	holes                map[string]float64 // the share of the area filled
+	clipA, clipB         float64            // the clip's fit: disparity = a depth + b
+	raw                  [3]float64         // the network's depth, p5, median, p95
 }
 
 func main() {
@@ -77,8 +81,10 @@ func main() {
 	csvPath := flag.String("csv", "", "also write the clips' measures to this CSV file")
 	flag.IntVar(&guide.Radius, "guide-radius", stereo.DefaultGuide.Radius, "the depth's edge filter's radius (0: off)")
 	flag.Float64Var(&guide.Eps, "guide-eps", stereo.DefaultGuide.Eps, "the depth's edge filter's regularisation")
-	flag.Float64Var(&shape.Budget, "budget", stereo.DefaultShape.Budget, "the conversion's depth budget (a fraction of the width)")
-	flag.Float64Var(&shape.Screen, "screen", stereo.DefaultShape.Screen, "the screen's place in the depth range (0 far, 1 near)")
+	flag.Float64Var(&shape.Budget, "budget", 0.019, "with -scale 0: each picture's depth range normalised to this budget (a fraction of the width)")
+	flag.Float64Var(&shape.Screen, "screen", 0.57, "with -scale 0: the screen's place in that range (0 far, 1 near)")
+	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width); 0: normalised a picture at a time")
+	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.Parse()
 	if flag.NArg() == 0 {
@@ -133,6 +139,19 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 		n                        map[string]float64
 	}
 	sums.mse, sums.holeMSE, sums.holeN, sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
+	// the measured pictures, rendered once all are in (the clip's fit
+	// needs them all)
+	type record struct {
+		left, right     *mvc.Frame
+		raw, disp, full []float32
+		dm              *stereo.Disparity
+		hr              []float32
+		a, b            float64
+		med             float32
+		top, bottom, k  int
+	}
+	var recs []record
+	var gl struct{ n, sx, sy, sxx, sxy float64 }
 	k := 0
 	o := convert.DefaultOptions()
 	o.TempDir = os.TempDir()
@@ -180,25 +199,70 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 			}
 		}
 
-		full := discDisparity(dm, w, left.Height)
 		med := median(slices.Clone(discD[len(discD)-int(n):]))
-		fitted := make([]float32, len(raw))
-		flat := make([]float32, len(raw))
-		for i, v := range raw {
+		recs = append(recs, record{left: left, right: right, raw: raw, disp: disp, full: discDisparity(dm, w, left.Height),
+			dm: dm, hr: hr, a: a, b: b, med: med, top: top, bottom: bottom, k: k - 1})
+		for y := top / 2; y < bottom/2; y++ {
+			for x := range dm.W {
+				if i := y*dm.W + x; dm.Valid[i] && !math.IsNaN(float64(hr[i])) {
+					X, Y := float64(hr[i]), float64(dm.D[i])
+					gl.n++
+					gl.sx += X
+					gl.sy += Y
+					gl.sxx += X * X
+					gl.sxy += X * Y
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return res, err
+	}
+	if res.frames == 0 {
+		return res, fmt.Errorf("no pictures measured")
+	}
+	// the clip's one scale and offset, for "clip"
+	ca := (gl.sxy - gl.sx*gl.sy/gl.n) / max(gl.sxx-gl.sx*gl.sx/gl.n, 1e-12)
+	cb := (gl.sy - ca*gl.sx) / gl.n
+	for _, r := range recs {
+		left, right, w := r.left, r.right, r.left.Width
+		affine := func(a, b float64) []float32 {
+			out := make([]float32, len(r.raw))
+			for i, v := range r.raw {
+				if !math.IsNaN(float64(v)) {
+					out[i] = float32(a*float64(v) + b)
+				}
+			}
+			return out
+		}
+		flat := make([]float32, len(r.raw))
+		for i, v := range r.raw {
 			if !math.IsNaN(float64(v)) {
-				fitted[i] = float32(a*float64(v) + b)
-				flat[i] = med
+				flat[i] = r.med
 			}
 		}
 		var fittedEye *mvc.Frame
 		for _, name := range methods {
-			d := map[string][]float32{"flat": flat, "disc": full, "fitted": fitted, "ours": disp}[name]
+			var d []float32
+			switch name {
+			case "flat":
+				d = flat
+			case "disc":
+				d = r.full
+			case "fitted":
+				d = affine(r.a, r.b)
+			case "clip":
+				d = affine(ca, cb)
+			case "ours":
+				d = r.disp
+			}
 			eye, holes := stereo.Render(left, d, -1)
 			if name == "fitted" {
 				fittedEye = eye
 			}
 			var se, hse, hn, cnt float64
-			for y := top; y < bottom; y++ {
+			for y := r.top; y < r.bottom; y++ {
 				for x := margin; x < w-margin; x++ {
 					i := y*w + x
 					diff := float64(eye.Y[i]) - float64(right.Y[y*right.StrideY+x])
@@ -218,23 +282,28 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 			if sc == nil {
 				var err error
 				if sc, err = vmaf.NewScorer(left.Height); err != nil {
-					return err
+					return res, err
 				}
 				scorers[name] = sc
 			}
 			sc.Add(luma(right), luma(eye))
 		}
 		if dumpDir != "" {
-			return dump(filepath.Join(dumpDir, fmt.Sprintf("%s-%04d.png", res.name, k-1)), left, right, fittedEye, dm, hr, a, b)
+			if err := dump(filepath.Join(dumpDir, fmt.Sprintf("%s-%04d.png", res.name, r.k)), left, right, fittedEye, r.dm, r.hr, r.a, r.b); err != nil {
+				return res, err
+			}
 		}
-		return nil
-	})
-	if err != nil {
-		return res, err
 	}
-	if res.frames == 0 {
-		return res, fmt.Errorf("no pictures measured")
+	res.clipA, res.clipB = ca, cb
+	var rawS []float32
+	for _, r := range recs {
+		for i := 0; i < len(r.raw); i += 97 {
+			if !math.IsNaN(float64(r.raw[i])) {
+				rawS = append(rawS, r.raw[i])
+			}
+		}
 	}
+	res.raw = percentiles(rawS)
 	f := float64(res.frames)
 	res.matched, res.corr, res.epe, res.bad2 = sums.matched/f, sums.corr/f, sums.epe/f, sums.bad2/f
 	res.epeCurve, res.bad2Curve = sums.epeCurve/f, sums.bad2Curve/f
@@ -504,6 +573,10 @@ func report(r clipResult) {
 	fmt.Printf("       after fitting a curve: %.2f px, %.1f%% off by more than 2 px\n", r.epeCurve, 100*r.bad2Curve)
 	fmt.Printf("disparity p5/median/p95: disc %.1f / %.1f / %.1f px, ours %.1f / %.1f / %.1f px\n",
 		r.disc[0], r.disc[1], r.disc[2], r.ours[0], r.ours[1], r.ours[2])
+	if r.clipA != 0 {
+		fmt.Printf("network depth p5/median/p95 %.3f / %.3f / %.3f; the clip's fit: disparity = %.2f depth %+.2f px\n",
+			r.raw[0], r.raw[1], r.raw[2], r.clipA, r.clipB)
+	}
 	fmt.Printf("%-8s %7s %7s %6s %7s\n", "right", "PSNR", "holes", "area", "VMAF")
 	for _, m := range methods {
 		fmt.Printf("%-8s %7.2f %7.2f %5.1f%% %7.2f\n", m, r.psnr[m], r.holePSNR[m], 100*r.holes[m], r.vmaf[m])

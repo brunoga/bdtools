@@ -15,13 +15,21 @@ type Shape struct {
 	// and 1 the nearest: what is nearer comes out of it, what is farther
 	// goes behind.
 	Screen float64
+	// Scale, when not zero, maps the network's depth to disparity as it
+	// is, not normalised a picture at a time: Scale times the depth plus
+	// Offset, as fractions of the width (Budget and Screen unused).
+	Scale, Offset float64
 }
 
 // DefaultShape is the 3D discs' depth (native and studio-converted ones,
-// measured by tools/stereobench): 1.9% of the width across the range,
-// the screen a little nearer than its middle (1.1% behind it, 0.8% in
-// front).
-var DefaultShape = Shape{Budget: 0.019, Screen: 0.57}
+// measured by tools/stereobench): the network's depth taken as it is,
+// 0.12% of the width a unit of it, the farthest 0.75% behind the screen.
+// A fit of the discs' disparity by the network's depth over a whole clip
+// finds about that on every clip (0.06% to 0.19% a unit, offsets -1.4% to
+// +0.1%), and the network's depth is steady from picture to picture, so
+// normalising each picture's range (Budget and Screen) only loses: 1.6 dB
+// of the made right eye against the disc's.
+var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 
 // Shaper turns a stream's depth maps into disparity: each map's range (its
 // 5th to 95th percentile) normalised to 0..1 (what lies beyond kept to a
@@ -44,6 +52,18 @@ const smoothing = 0.15
 // Disparity is the disparity of a depth map (larger nearer, as the depth
 // network gives it), in pixels of a picture width wide.
 func (s *Shaper) Disparity(depth []float32, width int) []float32 {
+	if s.Shape.Scale != 0 {
+		out := make([]float32, len(depth))
+		a, b := float32(s.Shape.Scale*float64(width)), float32(s.Shape.Offset*float64(width))
+		lim := float32(0.04 * float64(width))
+		const chunk = 1 << 16
+		rows((len(depth)+chunk-1)/chunk, func(k int) {
+			for i := k * chunk; i < min((k+1)*chunk, len(depth)); i++ {
+				out[i] = min(max(a*depth[i]+b, -lim), lim)
+			}
+		})
+		return out
+	}
 	sample := make([]float32, 0, len(depth)/61+1)
 	for i := 0; i < len(depth); i += 61 { // a prime step: no column pattern
 		sample = append(sample, depth[i])
