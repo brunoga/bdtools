@@ -279,7 +279,9 @@ What that teaches:
    - glass and reflections in layers (see [Measured so far](#measured-so-far));
    - floating windows (black masks moving at the picture's sides), where
      something in front of the screen meets the frame's edge;
-   - subtitles placed just in front of what they cover;
+   - subtitles placed just in front of what they cover (done: the lower
+     half's nearest, followed at once nearer and slowly farther, as a
+     disc's offset sequence for `--subs-3d` and `--burn-subs`);
    - screens, captions and graphics in the picture kept flat.
 8. **Depth graded as the discs are**: a small model, learnt from the
    native and studio-converted discs, of the depth budget, the screen's

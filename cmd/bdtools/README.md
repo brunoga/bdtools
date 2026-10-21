@@ -465,7 +465,9 @@ bdtools --input "Film (2020).mkv" --output "Film (2020) 3D.mkv" --to-3d --layout
 The depth is the 3D discs' by default (measured on native and
 studio-converted ones: the farthest about 0.75% of the width behind the
 screen, the nearest up to about 1% in front); `--3d-depth` scales it,
-`--3d-screen` moves it nearer or farther. Letterbox
+`--3d-screen` moves it nearer or farther. With `--subs-3d` (or
+`--burn-subs`) the subtitles sit just in front of the picture beneath them,
+nearer at once when it comes nearer, farther slowly. Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
 tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
 when there is one (CUDA, through the driver alone: a 1080p film converts

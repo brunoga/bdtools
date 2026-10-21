@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/brunoga/bdtools/internal/depth"
@@ -31,9 +33,39 @@ const (
 	vdaSmallFile   = "video_depth_anything_vits.pth"
 )
 
-// to3DState is a conversion's converter.
+// to3DState is a conversion's converter, and its subtitles' depth.
 type to3DState struct {
 	conv *stereo.Converter
+	subs float64 // the subtitles' offset now, in pixels
+}
+
+// subsFall is how the subtitles' depth follows the picture's farther:
+// slowly (pixels a frame), so they do not shake; nearer, it follows at
+// once (they are never behind what is in front of them).
+const subsFall = 0.2
+
+// subtitleOffset is where a subtitle over a picture of disparity d (w
+// wide) should sit, as an offset (pixels each eye moves, positive toward
+// the viewer): just in front of the nearest of the lower half of the
+// picture, where subtitles are (its 99th percentile, the odd pixel left
+// out), at the screen when all of it is behind.
+func subtitleOffset(d []float32, w int) float64 {
+	h := len(d) / w
+	var near []float32
+	for y := h / 2; y < h; y += 4 {
+		for x := 0; x < w; x += 4 {
+			near = append(near, d[y*w+x])
+		}
+	}
+	if len(near) == 0 {
+		return 0
+	}
+	slices.Sort(near)
+	p := float64(near[len(near)-1-len(near)/100])
+	if p <= 0 {
+		return 0
+	}
+	return p/2 + 1
 }
 
 // useTo3D turns a 2D source into a 3D conversion when --to-3d asks.
@@ -88,9 +120,23 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
 			100*s.Scale, 100*s.Offset)
 	}
-	l, rr, err := r.conv.conv.Convert(pictureFrame8(p))
+	f := pictureFrame8(p)
+	_, d, err := r.conv.conv.Next(f)
 	if err != nil {
 		return p, fmt.Errorf("--to-3d: the depth: %w", err)
+	}
+	l, rr := stereo.Pair(f, d)
+	if r.depth != nil && r.timeline != nil {
+		// the subtitles' depth, as a disc's offset sequence 0 gives it
+		t := subtitleOffset(d, f.Width)
+		s := &r.conv.subs
+		if t > *s {
+			*s = t
+		} else {
+			*s = max(t, *s-subsFall)
+		}
+		v := int8(min(math.Ceil(*s), 127))
+		r.depth.add(r.timeline(p.pts), offsetGOP{pts: p.pts, offsets: [][]int8{{v}}})
 	}
 	l.PTS, rr.PTS = p.pts, p.pts
 	return picture{stereo: &mvc.StereoFrame{Base: l, Dependent: rr}, pts: p.pts}, nil

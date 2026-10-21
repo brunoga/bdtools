@@ -20,6 +20,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the toolkit, kernels compiled to PTX ahead of time): a 1080p film
   converts at about 27 pictures a second on an RTX 5090; on the CPU, about
   one.
+- `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
+  of the made 3D picture beneath them (an offset sequence made from its
+  depth), not at the screen behind what comes out of it.
 
 ## [0.14.2] - 2026-10-19
 
