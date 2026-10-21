@@ -60,11 +60,10 @@ func (o Options) to3DKey() [3]float64 {
 func (o Options) shape3D() stereo.Shape {
 	s := stereo.DefaultShape
 	if o.Depth3D > 0 {
-		s.Budget = o.Depth3D / 100
+		s.Scale *= o.Depth3D
+		s.Offset *= o.Depth3D
 	}
-	if o.Screen3D > 0 {
-		s.Screen = o.Screen3D
-	}
+	s.Offset += o.Screen3D / 100
 	return s
 }
 
@@ -86,8 +85,8 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		}
 		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D())}
 		s := r.Opts.shape3D()
-		r.Report.Report("--to-3d: depth %.1f%% of the width, the screen at %.2f of it (%.1f%% behind, %.1f%% in front)",
-			100*s.Budget, s.Screen, 100*s.Budget*s.Screen, 100*s.Budget*(1-s.Screen))
+		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
+			100*s.Scale, 100*s.Offset)
 	}
 	l, rr, err := r.conv.conv.Convert(pictureFrame8(p))
 	if err != nil {

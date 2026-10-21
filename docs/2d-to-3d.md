@@ -199,8 +199,10 @@ disc's:
 | no depth (flat) | 27.4 | 34 | the floor |
 | the disc's own depth | 36.0 | 80 | the renderer and filler, given perfect depth |
 | our depth, scaled per picture to the disc's | 30.1 | 43 | the depth's shape |
+| our depth, scaled once for the whole clip | 28.6 | 34 | what following shots alone could reach |
 | our conversion (first defaults) | 24.1 | 13 | the shape and the grading |
-| our conversion (the discs' grading) | 25.3 | 16 | the defaults now |
+| each picture's range normalised to the discs' | 25.3 | 16 | |
+| the depth as it is, mapped as the discs map it | 26.9 | 26 | the defaults now |
 
 What that teaches:
 
@@ -209,7 +211,14 @@ What that teaches:
 - **The grading was too far behind the screen.** The discs spread their
   depth about the screen (5th to 95th percentile -21 to +16 px at 1920,
   the median -4); the first defaults (-40 to +13, median -24) cost 1.2 dB.
-  The defaults are now the discs': 1.9% of the width, the screen at 0.57.
+- **Normalising each picture's depth range only loses.** The network's
+  depth is steady from picture to picture and its scale close to the
+  discs': fitted over a whole clip, the discs' disparity is 0.06% to 0.19%
+  of the width a unit of it on every clip. Taken as it is (0.12% a unit,
+  the farthest 0.75% behind the screen), the made right eye gains 1.6 dB
+  and 10 VMAF; on the four glass clips, held out of that choice, 0.9 dB
+  and 3 VMAF. What is left to the per-picture fit (3 dB) is the depth's
+  shape within each picture, and the shots' own grading.
 - **A curve fits better than a line.** Our depth fitted to the disc's by
   any rising curve is 2.9 px off, by a line 3.9: the discs' grading is
   not a scale and an offset, which is what milestone 8 is to learn.
