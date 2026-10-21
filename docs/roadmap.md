@@ -92,6 +92,7 @@ Measurement:
 9. Control features: size targets, trimming, presets, batch.
 10. Quality metrics in Go.
 11. An AV1 encoder in Go.
+12. 2D to 3D conversion: a video depth network in Go, views made from it, every 3D layout out (see [2d-to-3d.md](2d-to-3d.md)).
 
 ## Status
 
@@ -109,6 +110,7 @@ Measurement:
 | 9. Control features | Trimming (`--start`, `--end`, `--duration`), device presets (`--for`), a target size (`--video-size`) and batches (`--input` a directory, `--watch`) done |
 | 10. Quality metrics in Go | Done: VMAF (libvmaf's integer VIF, ADM, motion and its v0.6.1 models), PSNR and float SSIM, the same numbers as libvmaf's tool; `--compare` |
 | 11. AV1 encoder | Done for now: `--encoder builtin --codec av1`, every stream decoded bit-exact by libdav1d in the tests. Key frames -4.5% BD-rate (PSNR-Y) against SVT-AV1 preset 4 `tune=1` on six 1080p disc frames; 120-picture clips +5.7% (Blade Runner 2049, Frozen II), +2.8% at `--preset veryslow` (loop restoration, OBMC, every compound mode, all seven references, temporal motion vectors, local warped motion, masked compound, inter-intra, a temporal filter and model, one tile a picture); about 0.46 s a 1080p picture on 24 cores (SVT-AV1 preset 4: 0.04 s). See [AV1: next steps](#av1-next-steps) |
+| 12. 2D to 3D | Started: the plan in [2d-to-3d.md](2d-to-3d.md); `internal/nn` reads PyTorch checkpoints as they are and has the layers of Video Depth Anything (each checked against PyTorch) |
 
 ## AV1: next steps
 
