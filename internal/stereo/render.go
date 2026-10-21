@@ -44,8 +44,7 @@ func Render(f *mvc.Frame, d []float32, sign float32) (eye *mvc.Frame, holes []bo
 	out := newFrame(w, h)
 	out.PTS = f.PTS
 	holes = make([]bool, w*h)
-	rows(h+2*ch, func(r int) {
-		var rs rowScratch
+	scratchRows(h+2*ch, func(r int, rs *rowScratch) {
 		switch {
 		case r < h:
 			rs.render(f.Y[r*f.StrideY:r*f.StrideY+w], d[r*w:(r+1)*w], sign, out.Y[r*w:(r+1)*w])
@@ -62,7 +61,10 @@ func Render(f *mvc.Frame, d []float32, sign float32) (eye *mvc.Frame, holes []bo
 			// the chroma row's disparity: its luma row's, every other
 			// sample, halved (the plane is half as wide)
 			lr := min(2*c, h-1)
-			dc := make([]float32, cw)
+			if cap(rs.dc) < cw {
+				rs.dc = make([]float32, cw)
+			}
+			dc := rs.dc[:cw]
 			for x := range dc {
 				dc[x] = d[lr*w+min(2*x, w-1)] / 2
 			}
@@ -70,6 +72,33 @@ func Render(f *mvc.Frame, d []float32, sign float32) (eye *mvc.Frame, holes []bo
 		}
 	})
 	return out, holes
+}
+
+// scratchRows runs f for each row over the CPUs, four rows at a time,
+// each worker with its own scratch.
+func scratchRows(n int, f func(r int, s *rowScratch)) {
+	workers := min(runtime.GOMAXPROCS(0), n)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	next := 0
+	for range workers {
+		wg.Go(func() {
+			var s rowScratch
+			for {
+				mu.Lock()
+				r := next
+				next += 4
+				mu.Unlock()
+				if r >= n {
+					return
+				}
+				for i := r; i < min(r+4, n); i++ {
+					f(i, &s)
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 // rows runs f for each row over the CPUs.
@@ -96,8 +125,8 @@ func rows(n int, f func(r int)) {
 }
 
 type rowScratch struct {
-	pos, z, v []float32
-	set, seen []bool // seen: set before the holes were filled
+	pos, z, v, dc []float32
+	set, seen     []bool // seen: set before the holes were filled
 }
 
 // render shifts src by sign*d into out: each pair of neighbours is a

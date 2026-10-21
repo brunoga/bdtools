@@ -249,8 +249,14 @@ What that teaches:
    - other tools (iw3, ...) run on the same clips, for a yardstick.
 
    Every later milestone is kept only where this says it helps.
-4. **The GPU backend**: the depth network on CUDA (through purego, as
-   NVENC), a two-hour film's depth in under half an hour.
+4. **The GPU backend** (first step done): the depth network on CUDA
+   (`internal/cuda`, the driver API through purego; `internal/nn`'s GPU
+   backend, kernels.cu compiled to PTX ahead of time), the same depth as
+   PyTorch's within 1e-3: 25 ms a 1080p frame on an RTX 5090, 50 times
+   the CPU, and a film converts at about 27 frames a second. Still to do:
+   tensor cores (TF32 or half precision) and fused attention, the eyes
+   rendered on the GPU, the depth of one frame made while the last is
+   rendered; a two-hour film's depth in under half an hour.
 5. **Depth edges**: the network's soft depth edges snapped to the
    picture's (an edge-aware filter guided by the full-resolution picture),
    against halos and cardboard cut-outs.

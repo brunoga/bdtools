@@ -15,8 +15,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   side. `--3d-depth` and `--3d-screen` set the depth (by default the 3D
   discs': 1.9% of the width, the screen a little nearer than the middle), `--depth-model` another
   checkpoint. Letterbox bars stay at the screen, cuts start the depth
-  afresh, an HDR source is tone mapped. About a second a 1080p picture on
-  the CPU for now.
+  afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
+  when there is one (`internal/cuda`: the CUDA driver API without cgo or
+  the toolkit, kernels compiled to PTX ahead of time): a 1080p film
+  converts at about 27 pictures a second on an RTX 5090; on the CPU, about
+  one.
 
 ## [0.14.2] - 2026-10-19
 

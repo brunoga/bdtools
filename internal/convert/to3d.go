@@ -18,6 +18,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -88,7 +89,10 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		r.Report.Report("--to-3d: depth %.1f%% of the width, the screen at %.2f of it (%.1f%% behind, %.1f%% in front)",
 			100*s.Budget, s.Screen, 100*s.Budget*s.Screen, 100*s.Budget*(1-s.Screen))
 	}
-	l, rr := r.conv.conv.Convert(pictureFrame8(p))
+	l, rr, err := r.conv.conv.Convert(pictureFrame8(p))
+	if err != nil {
+		return p, fmt.Errorf("--to-3d: the depth: %w", err)
+	}
 	l.PTS, rr.PTS = p.pts, p.pts
 	return picture{stereo: &mvc.StereoFrame{Base: l, Dependent: rr}, pts: p.pts}, nil
 }
@@ -117,10 +121,25 @@ func pictureFrame8(p picture) *mvc.Frame {
 	return f
 }
 
-// depthModel loads the depth network: --depth-model's checkpoint, else
-// Video Depth Anything Small's, downloaded into the user's cache the first
-// time (checked against its known digest).
+// depthModel loads the depth network (on the GPU when there is a CUDA
+// one, else on the CPU): --depth-model's checkpoint, else Video Depth
+// Anything Small's, downloaded into the user's cache the first time
+// (checked against its known digest).
 func (r *Runner) depthModel() (*depth.Model, error) {
+	m, err := r.loadDepthModel()
+	if err != nil {
+		return nil, err
+	}
+	if g, err := nn.NewGPU(); err == nil {
+		m.Use(g)
+		r.Report.Report("--to-3d: the depth on the GPU (%s)", g.Name())
+	} else {
+		r.Report.Report("--to-3d: the depth on the CPU (slow: no CUDA GPU, %v)", err)
+	}
+	return m, nil
+}
+
+func (r *Runner) loadDepthModel() (*depth.Model, error) {
 	if f := r.Opts.DepthModel; f != "" {
 		return depth.Load(f)
 	}

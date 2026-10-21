@@ -44,8 +44,8 @@ const smoothing = 0.15
 // Disparity is the disparity of a depth map (larger nearer, as the depth
 // network gives it), in pixels of a picture width wide.
 func (s *Shaper) Disparity(depth []float32, width int) []float32 {
-	sample := make([]float32, 0, len(depth)/16+1)
-	for i := 0; i < len(depth); i += 16 {
+	sample := make([]float32, 0, len(depth)/61+1)
+	for i := 0; i < len(depth); i += 61 { // a prime step: no column pattern
 		sample = append(sample, depth[i])
 	}
 	slices.Sort(sample)
@@ -60,9 +60,14 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 	span := math.Max(s.hi-s.lo, 1e-6)
 	budget := s.Shape.Budget * float64(width)
 	out := make([]float32, len(depth))
-	for i, v := range depth {
-		n := math.Min(math.Max((float64(v)-s.lo)/span, -0.25), 1.25)
-		out[i] = float32(budget * (n - s.Shape.Screen))
-	}
+	lo32, inv := float32(s.lo), float32(1/span)
+	b, screen := float32(budget), float32(s.Shape.Screen)
+	const chunk = 1 << 16
+	rows((len(depth)+chunk-1)/chunk, func(k int) {
+		for i := k * chunk; i < min((k+1)*chunk, len(depth)); i++ {
+			n := min(max((depth[i]-lo32)*inv, -0.25), 1.25)
+			out[i] = b * (n - screen)
+		}
+	})
 	return out
 }

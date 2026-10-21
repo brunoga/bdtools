@@ -7,10 +7,12 @@ package nn
 
 import "fmt"
 
-// Tensor is a dense float32 array of a shape.
+// Tensor is a dense float32 array of a shape: in Data, or on a GPU (a
+// GPU backend's tensors; Data nil).
 type Tensor struct {
 	Shape []int
 	Data  []float32
+	dev   *devBuf
 }
 
 // New is a zeroed tensor of a shape.
@@ -47,16 +49,18 @@ func (t *Tensor) Reshape(shape ...int) *Tensor {
 		}
 		known *= d
 	}
+	n := Numel(t.Shape)
 	if infer >= 0 {
-		s[infer] = len(t.Data) / known
+		s[infer] = n / known
 	}
-	if Numel(s) != len(t.Data) {
+	if Numel(s) != n {
 		panic(fmt.Sprintf("nn: reshape %v to %v", t.Shape, shape))
 	}
-	return &Tensor{Shape: s, Data: t.Data}
+	return &Tensor{Shape: s, Data: t.Data, dev: t.dev}
 }
 
-// Clone is a copy of the tensor.
+// Clone is a copy of the tensor (in memory: a GPU tensor's is its
+// backend's Clone).
 func (t *Tensor) Clone() *Tensor {
 	return &Tensor{Shape: append([]int(nil), t.Shape...), Data: append([]float32(nil), t.Data...)}
 }

@@ -40,6 +40,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/convert"
 	"github.com/brunoga/bdtools/internal/depth"
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/internal/vmaf"
 	"github.com/brunoga/bdtools/mvc"
@@ -95,6 +96,10 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	if g, err := nn.NewGPU(); err == nil {
+		m.Use(g)
+		fmt.Fprintln(os.Stderr, "stereobench: the depth on", g.Name())
+	}
 	var all []clipResult
 	for _, clip := range flag.Args() {
 		res, err := bench(m, clip, max(*every, 1))
@@ -133,7 +138,10 @@ func bench(m *depth.Model, clip string, every int) (clipResult, error) {
 	o.TempDir = os.TempDir()
 	err := convert.DecodeFrames(context.Background(), runtime.GOOS, o, clip, func(sbs *mvc.Frame) error {
 		left, right := split(sbs)
-		raw, disp := conv.Next(left)
+		raw, disp, err := conv.Next(left)
+		if err != nil {
+			return err
+		}
 		if k++; (k-1)%every != 0 {
 			return nil
 		}

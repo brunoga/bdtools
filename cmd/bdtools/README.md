@@ -466,8 +466,10 @@ The depth is the 3D discs' by default (measured on native and
 studio-converted ones): 1.9% of the width across the depth's range, 1.1%
 behind the screen and 0.8% in front of it (`--3d-depth`, `--3d-screen`). Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
-tone mapped (the 3D is 8-bit). It is slow for now: about a second a 1080p
-picture on 24 cores, the depth network's (a GPU path is to come). Hair,
+tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
+when there is one (CUDA, through the driver alone: a 1080p film converts
+at about 27 pictures a second on an RTX 5090, faster than it plays), else
+on the CPU (about a second a picture on 24 cores). Hair,
 glass, smoke and reflections, and things on screens in the picture, get
 one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
 

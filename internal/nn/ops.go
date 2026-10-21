@@ -312,9 +312,12 @@ func Bilinear(x *Tensor, oh, ow int) *Tensor {
 		return float64(in-1) / float64(out-1)
 	}
 	ry, rx := ratio(h, oh), ratio(w, ow)
-	parallel(c, func(ci int) {
+	const band = 16 // output rows a job
+	bands := (oh + band - 1) / band
+	parallel(c*bands, func(job int) {
+		ci, b := job/bands, job%bands
 		src, dst := x.Data[ci*h*w:(ci+1)*h*w], y.Data[ci*oh*ow:(ci+1)*oh*ow]
-		for oy := range oh {
+		for oy := b * band; oy < min(b*band+band, oh); oy++ {
 			fy := float64(oy) * ry
 			y0 := min(int(fy), h-1)
 			y1 := min(y0+1, h-1)
