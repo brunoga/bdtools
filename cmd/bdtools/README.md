@@ -381,8 +381,8 @@ scheduler such as pipeliner retry it.
 | `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
 | `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
 | `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
-| `--3d-depth` | `3` | With `--to-3d`: the depth in all, in percent of the width |
-| `--3d-screen` | `0.7` | With `--to-3d`: where the screen sits in the depth, 0 the farthest, 1 the nearest |
+| `--3d-depth` | `1.9` | With `--to-3d`: the depth in all, in percent of the width |
+| `--3d-screen` | `0.57` | With `--to-3d`: where the screen sits in the depth, 0 the farthest, 1 the nearest |
 | `--depth-model` | the small model | With `--to-3d`: a Video Depth Anything checkpoint (`.pth`) to use instead |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
@@ -462,8 +462,9 @@ bdtools --input "Film (2020).mkv" --output "Film (2020) 3D FSBS.mkv" --to-3d
 bdtools --input "Film (2020).mkv" --output "Film (2020) 3D.mkv" --to-3d --layout mvc
 ```
 
-The depth is gentle by default: 3% of the width in all, 2.1% behind the
-screen and 0.9% in front of it (`--3d-depth`, `--3d-screen`). Letterbox
+The depth is the 3D discs' by default (measured on native and
+studio-converted ones): 1.9% of the width across the depth's range, 1.1%
+behind the screen and 0.8% in front of it (`--3d-depth`, `--3d-screen`). Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
 tone mapped (the 3D is 8-bit). It is slow for now: about a second a 1080p
 picture on 24 cores, the depth network's (a GPU path is to come). Hair,

@@ -5,6 +5,7 @@ package convert
 // source's are, in any of the 3D layouts.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/brunoga/bdtools/internal/depth"
+	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -168,4 +170,14 @@ func download(url, file, want string) error {
 		return err
 	}
 	return os.Rename(part, file)
+}
+
+// DecodeFrames decodes a video's pictures (its first video track, as
+// --compare does) as 8-bit 4:2:0 frames, one after another, for tools
+// that look at the pictures themselves (the 2D to 3D benchmark).
+func DecodeFrames(ctx context.Context, goos string, o Options, path string, fn func(*mvc.Frame) error) error {
+	r := NewRunner(goos, o, func(string, ...any) {})
+	return r.decodeVideo(ctx, path, func(p *gpu.DecodedPicture) error {
+		return fn(pictureFrame8(picture{gpu: p, pts: p.PTS}))
+	})
 }
