@@ -32,6 +32,14 @@ func (c *Converter) Cuts() int { return c.cutsHit }
 
 // Convert gives the pair for the next picture (8-bit 4:2:0).
 func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame) {
+	_, d := c.Next(f)
+	return Pair(f, d)
+}
+
+// Next gives the next picture's depth and disparity: depth, the network's
+// (larger nearer, in its own units), NaN in the letterbox bars; disparity,
+// shaped from it (zero in the bars), in pixels, as Pair takes it.
+func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32) {
 	top, bottom := bars(f)
 	cut := c.cuts.next(f)
 	if c.frames == 0 || cut || top != c.top || bottom != c.bottom {
@@ -45,16 +53,24 @@ func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame) {
 	}
 	c.frames++
 	w, h := f.Width, f.Height
-	d := make([]float32, w*h)
+	depth = make([]float32, w*h)
+	disparity = make([]float32, w*h)
+	for i := range depth {
+		depth[i] = float32(math.NaN())
+	}
 	if ah := bottom - top; ah >= 28 {
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm := c.Model.Frame(x)
 		up := nn.Bilinear(dm.Reshape(1, c.netH, c.netW), ah, w)
-		disp := c.Disparity(up.Data, w)
-		copy(d[top*w:bottom*w], disp)
+		copy(depth[top*w:bottom*w], up.Data)
+		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
 	}
-	return Pair(f, d)
+	return depth, disparity
 }
+
+// Bars finds a picture's letterbox bars: its active rows are [top,
+// bottom).
+func Bars(f *mvc.Frame) (top, bottom int) { return bars(f) }
 
 // netSize is the network's input for an active area: 518 on the shorter
 // side (less for an area wider than 16:9, as the reference does to bound

@@ -23,7 +23,9 @@ const gapPixels = 1.5
 // nearer than the screen, the left eye's view of a point that far right
 // of the right eye's).
 func Pair(f *mvc.Frame, d []float32) (left, right *mvc.Frame) {
-	return render(f, d, 0.5), render(f, d, -0.5)
+	left, _ = Render(f, d, 0.5)
+	right, _ = Render(f, d, -0.5)
+	return left, right
 }
 
 func newFrame(w, h int) *mvc.Frame {
@@ -32,17 +34,24 @@ func newFrame(w, h int) *mvc.Frame {
 		StrideY: w, StrideC: cw, Width: w, Height: h, PTS: -1}
 }
 
-// render is one eye: each pixel moved by sign times its disparity.
-func render(f *mvc.Frame, d []float32, sign float32) *mvc.Frame {
+// Render is one eye: each pixel of f moved by sign times its disparity d
+// (0.5 the left eye of a pair f is the middle of, -1 the right eye of a
+// pair f is the left eye of); holes says which of its luma pixels were
+// filled, seen by no pixel of f.
+func Render(f *mvc.Frame, d []float32, sign float32) (eye *mvc.Frame, holes []bool) {
 	w, h := f.Width, f.Height
 	cw, ch := (w+1)/2, (h+1)/2
 	out := newFrame(w, h)
 	out.PTS = f.PTS
+	holes = make([]bool, w*h)
 	rows(h+2*ch, func(r int) {
 		var rs rowScratch
 		switch {
 		case r < h:
 			rs.render(f.Y[r*f.StrideY:r*f.StrideY+w], d[r*w:(r+1)*w], sign, out.Y[r*w:(r+1)*w])
+			for x, s := range rs.seen {
+				holes[r*w+x] = !s
+			}
 		default:
 			c := r - h
 			plane, outPlane := f.Cb, out.Cb
@@ -60,7 +69,7 @@ func render(f *mvc.Frame, d []float32, sign float32) *mvc.Frame {
 			rs.render(plane[c*f.StrideC:c*f.StrideC+cw], dc, sign, outPlane[c*cw:(c+1)*cw])
 		}
 	})
-	return out
+	return out, holes
 }
 
 // rows runs f for each row over the CPUs.
@@ -88,7 +97,7 @@ func rows(n int, f func(r int)) {
 
 type rowScratch struct {
 	pos, z, v []float32
-	set       []bool
+	set, seen []bool // seen: set before the holes were filled
 }
 
 // render shifts src by sign*d into out: each pair of neighbours is a
@@ -132,6 +141,11 @@ func (s *rowScratch) render(src []byte, d []float32, sign float32, out []byte) {
 		}
 	}
 	put(int(math.Round(float64(pos[w-1]))), float32(src[w-1]), d[w-1])
+	if cap(s.seen) < w {
+		s.seen = make([]bool, w)
+	}
+	s.seen = s.seen[:w]
+	copy(s.seen, set)
 	fillHoles(v, z, set)
 	for X := range w {
 		out[X] = byte(min(max(v[X]+0.5, 0), 255))
