@@ -94,29 +94,7 @@ func Conv2d(x, w, b *Tensor, stride, pad int) *Tensor {
 				cb.col = make([]float32, k*nb)
 			}
 			col := cb.col[:k*nb]
-			for ci := range c {
-				for i := range kh {
-					for j := range kw {
-						row := col[((ci*kh+i)*kw+j)*nb : ((ci*kh+i)*kw+j+1)*nb]
-						for yy := y0; yy < y1; yy++ {
-							out := row[(yy-y0)*wo : (yy-y0+1)*wo]
-							sy := yy*stride - pad + i
-							if sy < 0 || sy >= h {
-								clear(out)
-								continue
-							}
-							src := x.Data[(ci*h+sy)*wd : (ci*h+sy+1)*wd]
-							for xx := range out {
-								if sx := xx*stride - pad + j; sx >= 0 && sx < wd {
-									out[xx] = src[sx]
-								} else {
-									out[xx] = 0
-								}
-							}
-						}
-					}
-				}
-			}
+			im2colBand(col, x, kh, kw, stride, pad, wo, y0, y1)
 			packBInto(&cb.pb, col, nb, 1, k, nb)
 			mulPacked(y.Data[y0*wo:], ho*wo, w.Data, k, 1, &cb.pb, o)
 		})
@@ -130,6 +108,37 @@ func Conv2d(x, w, b *Tensor, stride, pad int) *Tensor {
 		})
 	}
 	return y
+}
+
+// im2colBand lays out the kh x kw neighbourhoods of x [C, H, W] (zero
+// beyond its edges) for the output rows [y0, y1) of a convolution wo wide:
+// C*kh*kw rows of (y1-y0)*wo.
+func im2colBand(col []float32, x *Tensor, kh, kw, stride, pad, wo, y0, y1 int) {
+	c, h, wd := x.Dim(0), x.Dim(1), x.Dim(2)
+	nb := (y1 - y0) * wo
+	for ci := range c {
+		for i := range kh {
+			for j := range kw {
+				row := col[((ci*kh+i)*kw+j)*nb : ((ci*kh+i)*kw+j+1)*nb]
+				for yy := y0; yy < y1; yy++ {
+					out := row[(yy-y0)*wo : (yy-y0+1)*wo]
+					sy := yy*stride - pad + i
+					if sy < 0 || sy >= h {
+						clear(out)
+						continue
+					}
+					src := x.Data[(ci*h+sy)*wd : (ci*h+sy+1)*wd]
+					for xx := range out {
+						if sx := xx*stride - pad + j; sx >= 0 && sx < wd {
+							out[xx] = src[sx]
+						} else {
+							out[xx] = 0
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // ConvTranspose2dK is nn.ConvTranspose2d on x [C, H, W] for a kernel as

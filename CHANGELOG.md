@@ -25,6 +25,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   depth), not at the screen behind what comes out of it.
 - `--to-3d` puts a floating window where something in front of the screen
   meets the picture's left or right edge (`--3d-window`).
+- `--3d-refine` corrects `--to-3d`'s depth by a small network learnt from
+  real 3D pairs (on held-out discs the made right eye 0.5 to 1 dB nearer
+  theirs); no weights ship, `tools/depthtrain` learns them from the
+  user's own 3D films (`tools/stereobench -samples`), in Go on the CPU.
 
 ## [0.14.2] - 2026-10-19
 

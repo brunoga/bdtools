@@ -203,6 +203,8 @@ disc's:
 | our conversion (first defaults) | 24.1 | 13 | the shape and the grading |
 | each picture's range normalised to the discs' | 25.3 | 16 | |
 | the depth as it is, mapped as the discs map it | 26.9 | 26 | the defaults now |
+| refined (`--3d-refine`), scaled per picture to the disc's | 31.0 | 49 | the refined depth's shape |
+| refined, mapped as the discs map it | 27.5 | 30 | `--3d-refine`'s defaults |
 
 What that teaches:
 
@@ -251,6 +253,19 @@ What that teaches:
   mapping (6.1 px held out, both). What is left: the screen's place is a
   setting (`--3d-screen`), and the grading within a film is the depth's
   shape, not its scale.
+- **A learnt refinement corrects the depth's shape.** A small U-Net (300k
+  weights: `internal/stereo/refinenet.go`), from the picture and the
+  network's depth at half size to a correction of the depth, trained in
+  Go (`tools/depthtrain`) on 3,774 pictures of the 27 films, the loss
+  what is left of the disc's disparity after fitting it a picture at a
+  time (so each film's grading does not count). On the benchmark's six
+  films, which it never saw: the depth's error after fitting 7.9 to 6.9
+  px, its correlation with the disc's 0.79 to 0.83, the right eye from it
+  fitted per picture 30.2 to 31.0 dB (VMAF 44 to 49). Mapped by the
+  discs' mapping re-found for it (0.10% a unit, not 0.12%), the
+  conversion's own right eye 26.9 to 27.5 dB (VMAF 26 to 30), and on the
+  glass clips, held out of that choice, 25.7 to 26.8 (VMAF 27 to 33).
+  It costs about 10 ms a picture.
 - **The matcher** trusts a match only where the picture has texture:
   without that, space and night skies matched the grain, which two
   cameras do not share.
@@ -307,11 +322,13 @@ What that teaches:
    makers' choice, and within a film the features add nothing to the
    fixed mapping. A rising curve in place of the line (the depth's shape)
    is what is left of this.
-9. **A learnt refinement**: a small network, trained on the discs' real
-   pairs (in PyTorch, offline; run here as the depth network is), from the
-   picture and its depth to the right eye: depth errors corrected, holes
-   filled. The training tool ships; weights learnt from commercial films
-   may not (their law is unsettled), so each user trains on their own.
+9. **A learnt refinement** (done for the depth: `--3d-refine`, see
+   [Measured so far](#measured-so-far)): a small network, trained in Go
+   on the discs' real pairs, from the picture and its depth to a
+   corrected depth. The training tool ships; weights learnt from
+   commercial films do not (their law is unsettled), so each user trains
+   on their own. Next: filling the holes by it too, and a larger network
+   on the GPU.
 10. **Blu-ray 3D authoring**: `--output film.iso` (or a folder) for MVC,
     checked on a disc player.
 
@@ -325,5 +342,10 @@ What that teaches:
   CUDA. AMD/Intel (Vulkan) and Apple (Metal) GPUs come later, if wanted.
 - **The default depth.** Conservative (behind the screen, little out of it)
   or bolder; it can be a preset (`--3d-depth gentle|normal|strong`).
+- **Shipping refinement weights.** `--3d-refine`'s weights are learnt
+  from commercial 3D films; bdtools ships none, and each user makes
+  their own (three hours on a CPU, from their own discs). Bundling them
+  (1.2 MB) would make the gain everyone's by default, if you judge that
+  acceptable.
 - **Blu-ray authoring.** Needed if a disc player is a target; it is a
   piece of its own (milestone 6), separate from the conversion.

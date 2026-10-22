@@ -79,6 +79,9 @@ func New(w map[string]*nn.Tensor) (*Model, error) {
 	return m, nil
 }
 
+// Backend is the backend the model runs on.
+func (m *Model) Backend() nn.Backend { return m.be }
+
 // Use runs the model on a backend (nn.CPU at first; an nn.GPU, say): the
 // weights go there as they are needed. It starts a new stream.
 func (m *Model) Use(be nn.Backend) {
