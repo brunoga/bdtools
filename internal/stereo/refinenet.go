@@ -2,6 +2,8 @@ package stereo
 
 import (
 	"bufio"
+	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -73,6 +75,22 @@ func (l RefineLayer) Shape() []int {
 
 const refineMagic = "BDRF1"
 
+// The built-in weights: learnt by tools/depthtrain (12 passes, batch 8,
+// rate 1e-3) from 3,774 pictures of 27 3D films, the benchmark's six held
+// out (docs/2d-to-3d.md).
+//
+//go:embed refine.bin
+var builtinRefine []byte
+
+// BuiltinRefine is the built-in refinement weights.
+func BuiltinRefine() *RefineWeights {
+	rw, err := DecodeRefine(bytes.NewReader(builtinRefine))
+	if err != nil {
+		panic("stereo: the built-in refinement weights: " + err.Error())
+	}
+	return rw
+}
+
 // ReadRefine reads refinement weights (as WriteTo writes them).
 func ReadRefine(path string) (*RefineWeights, error) {
 	f, err := os.Open(path) //nolint:gosec // the user's file
@@ -80,16 +98,24 @@ func ReadRefine(path string) (*RefineWeights, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	r := bufio.NewReader(f)
+	rw, err := DecodeRefine(bufio.NewReader(f))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return rw, nil
+}
+
+// DecodeRefine reads refinement weights from r.
+func DecodeRefine(r io.Reader) (*RefineWeights, error) {
 	magic := make([]byte, len(refineMagic))
 	if _, err := io.ReadFull(r, magic); err != nil || string(magic) != refineMagic {
-		return nil, fmt.Errorf("%s: not depth refinement weights", path)
+		return nil, errors.New("not depth refinement weights")
 	}
 	rw := &RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
 	for _, l := range RefineLayers {
 		w, b := nn.New(l.Shape()...), nn.New(l.Out)
 		if err := errors.Join(binary.Read(r, binary.LittleEndian, w.Data), binary.Read(r, binary.LittleEndian, b.Data)); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return nil, err
 		}
 		rw.W[l.Name], rw.B[l.Name] = w, b
 	}

@@ -202,9 +202,9 @@ disc's:
 | our depth, scaled once for the whole clip | 28.6 | 34 | what following shots alone could reach |
 | our conversion (first defaults) | 24.1 | 13 | the shape and the grading |
 | each picture's range normalised to the discs' | 25.3 | 16 | |
-| the depth as it is, mapped as the discs map it | 26.9 | 26 | the defaults now |
+| the depth as it is, mapped as the discs map it | 26.9 | 26 | `--3d-refine none` |
 | refined (`--3d-refine`), scaled per picture to the disc's | 31.0 | 49 | the refined depth's shape |
-| refined, mapped as the discs map it | 27.5 | 30 | `--3d-refine`'s defaults |
+| refined, mapped as the discs map it | 27.5 | 30 | the defaults now |
 
 What that teaches:
 
@@ -325,9 +325,8 @@ What that teaches:
 9. **A learnt refinement** (done for the depth: `--3d-refine`, see
    [Measured so far](#measured-so-far)): a small network, trained in Go
    on the discs' real pairs, from the picture and its depth to a
-   corrected depth. The training tool ships; weights learnt from
-   commercial films do not (their law is unsettled), so each user trains
-   on their own. Next: filling the holes by it too, and a larger network
+   corrected depth. The weights learnt from 27 films are built in;
+   the training tool ships, for weights of one's own. Next: filling the holes by it too, and a larger network
    on the GPU.
 10. **Blu-ray 3D authoring**: `--output film.iso` (or a folder) for MVC,
     checked on a disc player.
@@ -342,10 +341,8 @@ What that teaches:
   CUDA. AMD/Intel (Vulkan) and Apple (Metal) GPUs come later, if wanted.
 - **The default depth.** Conservative (behind the screen, little out of it)
   or bolder; it can be a preset (`--3d-depth gentle|normal|strong`).
-- **Shipping refinement weights.** `--3d-refine`'s weights are learnt
-  from commercial 3D films; bdtools ships none, and each user makes
-  their own (three hours on a CPU, from their own discs). Bundling them
-  (1.2 MB) would make the gain everyone's by default, if you judge that
-  acceptable.
+- **Shipping refinement weights** (decided: built in). They are learnt
+  from commercial 3D films; `--3d-refine none` leaves them out, and
+  anyone may learn their own.
 - **Blu-ray authoring.** Needed if a disc player is a target; it is a
   piece of its own (milestone 6), separate from the conversion.

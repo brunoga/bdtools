@@ -160,9 +160,10 @@ type Options struct {
 	// side of one eye that put the picture's edge in front of what comes
 	// out of the screen there.
 	NoWindow3D bool
-	// Refine3D names depth refinement weights (tools/depthtrain's, learnt
-	// from the user's own 3D discs) to correct the depth's shape with; the
-	// depth is then graded as stereo.RefinedShape grades it.
+	// Refine3D is the depth refinement's weights, which correct the
+	// depth's shape (graded then as stereo.RefinedShape grades it): the
+	// built-in ones ("", the default), none ("none"), or a file of
+	// tools/depthtrain's.
 	Refine3D string
 	// Subs3D is what becomes of the subtitles: kept as they are, drawn
 	// once for a player to place in 3D itself (Subs3DOff, the default);

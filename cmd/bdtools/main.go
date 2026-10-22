@@ -93,7 +93,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		to3D     = fs.Bool("to-3d", false, "make a 2D source 3D: its depth estimated by a video depth network (Video Depth Anything Small, downloaded once, or --depth-model's), the two eyes made from it, out in the --layout asked for")
 		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network's checkpoint (a Video Depth Anything .pth; default: the small model, downloaded to the cache the first time)")
 		depth3D  = fs.Float64("3d-depth", 1, "with --to-3d: the depth's strength, 1 the 3D discs' (more is stronger, and harder on the eyes)")
-		refine3D = fs.String("3d-refine", "", "with --to-3d: depth refinement weights to correct the depth's shape with (learnt from your own 3D discs by tools/depthtrain)")
+		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: none for no refinement, or a file of tools/depthtrain's (default: the built-in weights)")
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")
 		screen3D = fs.Float64("3d-screen", 0, "with --to-3d: moves the whole depth nearer (positive: more out of the screen) or farther, in percent of the picture's width")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")

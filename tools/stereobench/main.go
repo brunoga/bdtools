@@ -89,13 +89,23 @@ func main() {
 	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width); 0: normalised a picture at a time")
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
-	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's)")
+	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by stereo.RefinedShape unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	flag.Parse()
 	if refinePath != "" {
-		var err error
-		if refine, err = stereo.ReadRefine(refinePath); err != nil {
-			fail(err)
+		if refinePath == "builtin" {
+			refine = stereo.BuiltinRefine()
+		} else {
+			var err error
+			if refine, err = stereo.ReadRefine(refinePath); err != nil {
+				fail(err)
+			}
+		}
+		// the refined depth's mapping, unless one is asked for
+		set := map[string]bool{}
+		flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+		if !set["scale"] && !set["offset"] {
+			shape.Scale, shape.Offset = stereo.RefinedShape.Scale, stereo.RefinedShape.Offset
 		}
 	}
 	if flag.NArg() == 0 {
