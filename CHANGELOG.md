@@ -18,9 +18,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or
   the toolkit, kernels compiled to PTX ahead of time): a 1080p film
-  converts at about 17 pictures a second on an RTX 5090 (21 without the
-  refinement below); on the CPU, about
-  one.
+  converts at about 28 pictures a second on an RTX 5090 (33 without the
+  refinement below; the GPU's depth of a picture beside the CPU's work on
+  the one before); on the CPU, about one.
 - `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
   of the made 3D picture beneath them (an offset sequence made from its
   depth), not at the screen behind what comes out of it.

@@ -155,7 +155,8 @@ func RefineInput(y, cb, cr []byte, stride int, depth []float32, w, h int) (x *nn
 	mean = s / n
 	sd = math.Sqrt(max(ss/n-mean*mean, 1e-12))
 	x = nn.New(4, ph, pw)
-	for r := range ph {
+	m32, inv := float32(mean), float32(1/sd)
+	rows(ph, func(r int) {
 		sr := min(r, h-1)
 		for c := range pw {
 			sc := min(c, w-1)
@@ -163,9 +164,9 @@ func RefineInput(y, cb, cr []byte, stride int, depth []float32, w, h int) (x *nn
 			x.Data[i] = (float32(y[sr*stride+sc])-16)/219 - 0.5
 			x.Data[ph*pw+i] = (float32(cb[sr*stride+sc]) - 128) / 112
 			x.Data[2*ph*pw+i] = (float32(cr[sr*stride+sc]) - 128) / 112
-			x.Data[3*ph*pw+i] = float32((float64(depth[sr*w+sc]) - mean) / sd)
+			x.Data[3*ph*pw+i] = (depth[sr*w+sc] - m32) * inv
 		}
-	}
+	})
 	return x, mean, sd
 }
 

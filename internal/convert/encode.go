@@ -167,52 +167,8 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		}
 		return r.work.add(seg)
 	}
-	decErr := src.run(func(sf picture) error {
-		if keep != nil && !keep(sf.pts) {
-			skipped++
-			return nil
-		}
-		if sk, ok := sink.(interface{ skips(int64) bool }); ok && sk.skips(sf.pts) {
-			skipped++ // a copied left eye starts at its first IDR picture
-			return nil
-		}
-		if r.Opts.Crop.Auto {
-			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
-			r.Opts.Crop = Crop{}
-		}
-		if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
-			// the stereo pictures are 8-bit: an HDR source is made SDR first
-			r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
-			r.Opts.ToneMap = true
-		}
-		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
-			w, h, _ := sf.size()
-			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
-			if err != nil {
-				return err
-			}
-			if r.Opts.ToneMap {
-				if err := r.setupToneMap(t, sf, src); err != nil {
-					return err
-				}
-			}
-			r.xform = t
-			if d := t.describe(); d != "" {
-				r.Report.Report("%s", d)
-			}
-		}
-		if r.xform != nil {
-			var err error
-			if sf, err = r.xform.apply(sf); err != nil {
-				return err
-			}
-		}
-		if r.to3D {
-			var err error
-			if sf, err = r.convert3D(sf); err != nil {
-				return err
-			}
-		}
+	// post is what follows a picture's making: its encoding.
+	post := func(sf picture) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -317,7 +273,73 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		inSegment++
 		prog.frame(n - skip)
 		return nil
+	}
+	var stages *stagePipe
+	if r.to3D {
+		stages = newStagePipe()
+	}
+	decErr := src.run(func(sf picture) error {
+		if keep != nil && !keep(sf.pts) {
+			skipped++
+			return nil
+		}
+		if sk, ok := sink.(interface{ skips(int64) bool }); ok && sk.skips(sf.pts) {
+			skipped++ // a copied left eye starts at its first IDR picture
+			return nil
+		}
+		if r.Opts.Crop.Auto {
+			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
+			r.Opts.Crop = Crop{}
+		}
+		if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
+			// the stereo pictures are 8-bit: an HDR source is made SDR first
+			r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
+			r.Opts.ToneMap = true
+		}
+		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
+			w, h, _ := sf.size()
+			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
+			if err != nil {
+				return err
+			}
+			if r.Opts.ToneMap {
+				if err := r.setupToneMap(t, sf, src); err != nil {
+					return err
+				}
+			}
+			r.xform = t
+			if d := t.describe(); d != "" {
+				r.Report.Report("%s", d)
+			}
+		}
+		if r.xform != nil {
+			var err error
+			if sf, err = r.xform.apply(sf); err != nil {
+				return err
+			}
+		}
+		if r.to3D {
+			// the depth now, the eyes and the rest beside the next
+			// picture's depth
+			finish, err := r.convert3D(sf)
+			if err != nil {
+				return err
+			}
+			return stages.push(func() error {
+				sf, err := finish()
+				if err != nil {
+					return err
+				}
+				return post(sf)
+			})
+		}
+		return post(sf)
 	})
+	if stages != nil {
+		if err := stages.close(); decErr == nil {
+			decErr = err
+		}
+	}
 	if decErr == nil && open {
 		decErr = finishSegment()
 	}
