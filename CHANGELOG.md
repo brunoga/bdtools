@@ -32,6 +32,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
 
+### Fixed
+
+- `--2d --remux` of a 3D Matroska file (both views in its one video track)
+  copied the dependent view's NAL units too: the copy holds the base view
+  alone now.
+
 ## [0.14.2] - 2026-10-19
 
 ### Fixed
