@@ -127,12 +127,14 @@ func hdrPicture(p picture) bool {
 	return len(p.rpu) > 0
 }
 
-// convert3D makes a picture a stereo pair.
-func (r *Runner) convert3D(p picture) (picture, error) {
+// convert3D makes a picture a stereo pair: its depth now (on the GPU),
+// the rest (the eyes) by the function it gives, which may run beside the
+// next picture's depth. The functions must be called in order.
+func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 	if r.conv == nil {
 		m, err := r.depthModel()
 		if err != nil {
-			return p, err
+			return nil, err
 		}
 		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D())}
 		r.conv.conv.NoWindow = r.Opts.NoWindow3D
@@ -144,7 +146,7 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		default:
 			w, err := stereo.ReadRefine(f)
 			if err != nil {
-				return p, fmt.Errorf("--3d-refine: %w", err)
+				return nil, fmt.Errorf("--3d-refine: %w", err)
 			}
 			r.conv.conv.Refine = w
 			r.Report.Report("--to-3d: the depth refined by %s", f)
@@ -154,10 +156,17 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 			100*s.Scale, 100*s.Offset)
 	}
 	f := pictureFrame8(p)
-	_, d, err := r.conv.conv.Next(f)
+	e, err := r.conv.conv.Estimate(f)
 	if err != nil {
-		return p, fmt.Errorf("--to-3d: the depth: %w", err)
+		return nil, fmt.Errorf("--to-3d: the depth: %w", err)
 	}
+	return func() (picture, error) { return r.pair3D(p, f, e), nil }, nil
+}
+
+// pair3D is the rest of convert3D: the picture's depth shaped, the eyes
+// made from it.
+func (r *Runner) pair3D(p picture, f *mvc.Frame, e *stereo.Estimate) picture {
+	_, d := r.conv.conv.Shape(e)
 	l, rr := stereo.Pair(f, d)
 	r.conv.conv.Window(l, rr, d)
 	if r.depth != nil && r.timeline != nil {
@@ -173,7 +182,7 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		r.depth.add(r.timeline(p.pts), offsetGOP{pts: p.pts, offsets: [][]int8{{v}}})
 	}
 	l.PTS, rr.PTS = p.pts, p.pts
-	return picture{stereo: &mvc.StereoFrame{Base: l, Dependent: rr}, pts: p.pts}, nil
+	return picture{stereo: &mvc.StereoFrame{Base: l, Dependent: rr}, pts: p.pts}
 }
 
 // pictureFrame8 copies a picture (NV12, P010 or planar) as an 8-bit 4:2:0 frame.

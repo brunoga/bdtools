@@ -476,7 +476,7 @@ nearer at once when it comes nearer, farther slowly. Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
 tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
 when there is one (CUDA, through the driver alone: a 1080p film converts
-at about 17 pictures a second on an RTX 5090, 21 with `--3d-refine none`), else
+at about 28 pictures a second on an RTX 5090, 33 with `--3d-refine none`), else
 on the CPU (about a second a picture on 24 cores). Hair,
 glass, smoke and reflections, and things on screens in the picture, get
 one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).

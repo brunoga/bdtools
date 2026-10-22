@@ -27,7 +27,9 @@ type Converter struct {
 	refineOn        *RefineWeights // Refine's weights on that backend
 	win             window
 	cuts            cutDetector
-	top, bottom     int // the active rows
+	top, bottom     int // the active rows (Estimate's)
+	shapeTop        int // the active rows of the picture Shape did last
+	shapeBottom     int
 	netW, netH      int // the network's input size
 	frames, cutsHit int
 }
@@ -52,59 +54,105 @@ func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
 }
 
 // Window puts the floating window on the pair made of the picture Next
-// gave d for (unless NoWindow).
+// (or Shape) gave d for last (unless NoWindow).
 func (c *Converter) Window(left, right *mvc.Frame, d []float32) {
 	if !c.NoWindow {
-		c.win.apply(left, right, d, c.top, c.bottom)
+		c.win.apply(left, right, d, c.shapeTop, c.shapeBottom)
 	}
 }
 
 // Next gives the next picture's depth and disparity: depth, the network's
 // (larger nearer, in its own units), NaN in the letterbox bars; disparity,
 // shaped from it (zero in the bars), in pixels, as Pair takes it. The
-// error is the depth model's backend's (a GPU's).
+// error is the depth model's backend's (a GPU's). It is Estimate then
+// Shape.
 func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32, err error) {
+	e, err := c.Estimate(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	depth, disparity = c.Shape(e)
+	return depth, disparity, nil
+}
+
+// An Estimate is a picture's depth as the network (and the refinement)
+// give it, at their size: Estimate's work, on the depth model's backend,
+// the pictures one after the other; Shape's, on the CPU, may run beside
+// the next picture's Estimate.
+type Estimate struct {
+	f           *mvc.Frame
+	top, bottom int
+	d           *nn.Tensor // [1, h, w] of the active rows (nil: none)
+	fresh       bool       // a new shot: the shaping starts afresh
+}
+
+// Estimate is the first half of Next: the picture's depth, by the
+// network and the refinement.
+func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) {
 	top, bottom := bars(f)
 	cut := c.cuts.next(f)
+	e := &Estimate{f: f, top: top, bottom: bottom}
 	if c.frames == 0 || cut || top != c.top || bottom != c.bottom {
 		if c.frames > 0 && cut {
 			c.cutsHit++
 		}
 		c.Model.Reset()
-		c.Reset()
-		c.win.reset()
+		e.fresh = true
 		c.top, c.bottom = top, bottom
 		c.netW, c.netH = netSize(f.Width, bottom-top)
 	}
 	c.frames++
-	w, h := f.Width, f.Height
-	depth = make([]float32, w*h)
-	disparity = make([]float32, w*h)
-	for i := range depth {
-		depth[i] = float32(math.NaN())
-	}
 	if ah := bottom - top; ah >= 28 {
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm, err := c.Model.FrameErr(x)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		up := nn.Bilinear(dm.Reshape(1, c.netH, c.netW), ah, w)
+		e.d = dm.Reshape(1, c.netH, c.netW)
 		if c.Refine != nil {
-			if err := c.refine(up.Data, f, top, bottom); err != nil {
-				return nil, nil, err
+			if e.d, err = c.refine(e.d, f, top, bottom); err != nil {
+				return nil, err
 			}
 		}
+	}
+	return e, nil
+}
+
+// Shape is the second half of Next: an Estimate's depth upsampled to the
+// picture and shaped into disparity. The Estimates must come in order.
+func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
+	if e.fresh {
+		c.Reset()
+		c.win.reset()
+	}
+	f, top, bottom := e.f, e.top, e.bottom
+	c.shapeTop, c.shapeBottom = top, bottom
+	w, h := f.Width, f.Height
+	depth = make([]float32, w*h)
+	disparity = make([]float32, w*h)
+	nan := float32(math.NaN())
+	rows(h, func(y int) {
+		if y < top || y >= bottom || e.d == nil {
+			row := depth[y*w : (y+1)*w]
+			for i := range row {
+				row[i] = nan
+			}
+		}
+	})
+	if e.d != nil {
+		ah := bottom - top
+		up := nn.Bilinear(e.d, ah, w)
 		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
 		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
 	}
-	return depth, disparity, nil
+	return depth, disparity
 }
 
-// refine corrects the depth of the active rows [top, bottom) of f (w x
-// ah, in place) by the refinement, at half the picture's size.
-func (c *Converter) refine(depth []float32, f *mvc.Frame, top, bottom int) error {
+// refine corrects the depth dm (the network's, [1, h, w]) of the active
+// rows [top, bottom) of f by the refinement, at half the picture's size:
+// the corrected depth, [1, ah/2, w/2].
+func (c *Converter) refine(dm *nn.Tensor, f *mvc.Frame, top, bottom int) (*nn.Tensor, error) {
 	be := c.Model.Backend()
 	if c.refineOn == nil {
 		c.refineOn = &RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
@@ -118,16 +166,14 @@ func (c *Converter) refine(depth []float32, f *mvc.Frame, top, bottom int) error
 	}
 	w, ah := f.Width, bottom-top
 	hw, hh := w/2, ah/2
+	d := nn.Bilinear(dm, hh, hw).Data
 	sc := f.StrideC // the half-size luma at the chroma's stride
 	y := make([]byte, hh*sc)
-	d := make([]float32, hw*hh)
 	rows(hh, func(r int) {
+		p := f.Y[(top+2*r)*f.StrideY:]
+		q := f.Y[(top+2*r+1)*f.StrideY:]
 		for x := range hw {
-			i, j := (2*r)*w+2*x, (2*r+1)*w+2*x
-			d[r*hw+x] = (depth[i] + depth[i+1] + depth[j] + depth[j+1]) / 4
-			p := f.Y[(top+2*r)*f.StrideY+2*x:]
-			q := f.Y[(top+2*r+1)*f.StrideY+2*x:]
-			y[r*sc+x] = byte((int(p[0]) + int(p[1]) + int(q[0]) + int(q[1]) + 2) / 4)
+			y[r*sc+x] = byte((int(p[2*x]) + int(p[2*x+1]) + int(q[2*x]) + int(q[2*x+1]) + 2) / 4)
 		}
 	})
 	co := top / 2 * sc
@@ -135,7 +181,7 @@ func (c *Converter) refine(depth []float32, f *mvc.Frame, top, bottom int) error
 	out, err := be.Download(c.refineOn.Refine(be, be.Upload(x)))
 	be.Release()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// the refined depth put back to the depth's mean and deviation
 	pw := x.Dim(2)
@@ -149,14 +195,12 @@ func (c *Converter) refine(depth []float32, f *mvc.Frame, top, bottom int) error
 	n := float64(hw * hh)
 	m := s / n
 	k := sd / math.Sqrt(max(ss/n-m*m, 1e-12))
-	for r := range hh {
+	rows(hh, func(r int) {
 		for x, v := range out.Data[r*pw : r*pw+hw] {
 			d[r*hw+x] = float32(mean + (float64(v)-m)*k)
 		}
-	}
-	full := nn.Bilinear(&nn.Tensor{Shape: []int{1, hh, hw}, Data: d}, ah, w)
-	copy(depth, full.Data)
-	return nil
+	})
+	return &nn.Tensor{Shape: []int{1, hh, hw}, Data: d}, nil
 }
 
 // Bars finds a picture's letterbox bars: its active rows are [top,
