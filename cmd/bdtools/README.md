@@ -383,7 +383,7 @@ scheduler such as pipeliner retry it.
 | `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
 | `--3d-depth` | `1` | With `--to-3d`: the depth's strength, 1 the 3D discs' |
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
-| `--3d-refine` | — | With `--to-3d`: depth refinement weights (learnt from your own 3D discs by `tools/depthtrain`) to correct the depth's shape with — see [2D to 3D](#2d-to-3d) |
+| `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
 | `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |
 | `--depth-model` | the small model | With `--to-3d`: a Video Depth Anything checkpoint (`.pth`) to use instead |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
@@ -472,15 +472,22 @@ picture's left or right edge, a floating window (a black strip down that
 side of one eye, as wide as its disparity) puts the edge in front of it
 (`--3d-window=false` leaves it out). With `--subs-3d` (or
 `--burn-subs`) the subtitles sit just in front of the picture beneath them,
-nearer at once when it comes nearer, farther slowly.
+nearer at once when it comes nearer, farther slowly. Letterbox
+bars stay at the screen; each cut starts the depth afresh; an HDR source is
+tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
+when there is one (CUDA, through the driver alone: a 1080p film converts
+at about 17 pictures a second on an RTX 5090, 21 with `--3d-refine none`), else
+on the CPU (about a second a picture on 24 cores). Hair,
+glass, smoke and reflections, and things on screens in the picture, get
+one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
 
-`--3d-refine weights.bin` corrects the depth's shape by a small network
-learnt from real 3D pairs: on 3D discs it was not trained on, the made
-right eye comes 0.5 to 1 dB nearer the disc's (VMAF 26 to 30, and 27 to
-33 on glass and reflections). No weights come with bdtools (they would be
-learnt from commercial films); make your own from 3D films you have, in
-full side by side (made by bdtools from your discs), with the tools in
-this repository:
+The depth is refined by a small network learnt from real 3D pairs (27
+native and studio-converted films): on 3D discs it was not trained on,
+the made right eye comes 0.5 to 1 dB nearer the disc's (VMAF 26 to 30,
+and 27 to 33 on glass and reflections). `--3d-refine none` leaves the
+depth as the depth network gives it; `--3d-refine weights.bin` uses
+weights of your own, learnt from 3D films you have, in full side by side
+(made by bdtools from your discs), with the tools in this repository:
 
 ```sh
 go build -o stereobench ./tools/stereobench
@@ -491,16 +498,9 @@ stereobench -every 4 -samples val "Film Z 3D FSBS.mkv@15m+4s,45m+4s"
 depthtrain -train samples -val val -out refine.bin -epochs 12 -batch 8
 ```
 
-About 3,800 pictures from 27 films, 3 hours on 24 cores, made the weights
-measured above; `depthtrain` reports the depth's error on the validation
-pictures (a film it did not train on) each pass. Letterbox
-bars stay at the screen; each cut starts the depth afresh; an HDR source is
-tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
-when there is one (CUDA, through the driver alone: a 1080p film converts
-at about 27 pictures a second on an RTX 5090, faster than it plays), else
-on the CPU (about a second a picture on 24 cores). Hair,
-glass, smoke and reflections, and things on screens in the picture, get
-one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
+About 3,800 pictures from 27 films, 3 hours on 24 cores, made the
+built-in weights; `depthtrain` reports the depth's error on the
+validation pictures (a film it did not train on) each pass.
 
 ### MVC output
 
