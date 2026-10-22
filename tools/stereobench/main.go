@@ -144,6 +144,9 @@ func main() {
 	}
 }
 
+// errNothing says a clip had no picture to measure.
+var errNothing = errors.New("no pictures measured")
+
 // window is a stretch of a file to measure, as a clip of its own.
 type window struct{ start, end time.Duration }
 
@@ -209,6 +212,11 @@ func bench(m *depth.Model, arg string, every int) ([]clipResult, error) {
 			return nil
 		}
 		r, err := cb.finish()
+		if errors.Is(err, errNothing) {
+			fmt.Fprintf(os.Stderr, "stereobench: %s: nothing to measure, left out\n", cb.res.name)
+			cb = nil
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", cb.res.name, err)
 		}
@@ -350,7 +358,7 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 func (c *clipBench) finish() (clipResult, error) {
 	res, sums, gl := c.res, &c.sums, &c.gl
 	if res.frames == 0 {
-		return res, fmt.Errorf("no pictures measured")
+		return res, errNothing
 	}
 	// the clip's one scale and offset, for "clip"
 	ca := (gl.sxy - gl.sx*gl.sy/gl.n) / max(gl.sxx-gl.sx*gl.sx/gl.n, 1e-12)

@@ -236,6 +236,21 @@ What that teaches:
   seen through the glass and what is reflected, each its own depth, each
   rendered and the two added. The matcher first needs to find two depths
   in a region, so the benchmark can measure it.
+- **A grading learnt from the discs does not generalise.** The discs'
+  grading of 27 more films (eight 3-second stretches of each, every sixth
+  picture: `stereobench -frames`, `tools/gradefit`) was fitted by a ridge
+  regression on each picture's features (its depth's percentiles and
+  layout, its brightness). Scored with each film left out, it seemed to
+  win (6.5 px off against the fixed mapping's 8.5), but on the
+  benchmark's six films it lost (10.8 against 8.5; 26.1 dB against 26.9).
+  The gain was the training films' place behind the screen, not the
+  features: a film's median sits anywhere from 18 px behind the screen
+  (Pacific Rim: Uprising) to 3 px in front (Hugo, Life of Pi, Titanic),
+  a choice of its makers that its pictures do not tell. With each film's
+  own offset taken out, the features predict no better than the fixed
+  mapping (6.1 px held out, both). What is left: the screen's place is a
+  setting (`--3d-screen`), and the grading within a film is the depth's
+  shape, not its scale.
 - **The matcher** trusts a match only where the picture has texture:
   without that, space and night skies matched the grain, which two
   cameras do not share.
@@ -285,10 +300,13 @@ What that teaches:
      half's nearest, followed at once nearer and slowly farther, as a
      disc's offset sequence for `--subs-3d` and `--burn-subs`);
    - screens, captions and graphics in the picture kept flat.
-8. **Depth graded as the discs are**: a small model, learnt from the
-   native and studio-converted discs, of the depth budget, the screen's
-   place and its moves within a shot and across cuts, in place of fixed
-   numbers.
+8. **Depth graded as the discs are** (tried; no gain): a regression of
+   each picture's scale and offset on its features, learnt from 27 films,
+   lost on the benchmark's held-out films (see [Measured so
+   far](#measured-so-far)): a film's place about the screen is its
+   makers' choice, and within a film the features add nothing to the
+   fixed mapping. A rising curve in place of the line (the depth's shape)
+   is what is left of this.
 9. **A learnt refinement**: a small network, trained on the discs' real
    pairs (in PyTorch, offline; run here as the depth network is), from the
    picture and its depth to the right eye: depth errors corrected, holes
