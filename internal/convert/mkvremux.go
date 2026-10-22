@@ -78,6 +78,11 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 			writeErr = err
 			break
 		}
+		if codec == CodecH264 && r.flat {
+			// A 3D Matroska file's track holds both views' NAL units: the
+			// base view's alone.
+			base = baseView(base)
+		}
 		if len(base) == 0 {
 			continue
 		}
@@ -147,6 +152,24 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 		r.Report.Report("kept Dolby Vision profile 7: the enhancement layer on %d pictures, the RPU on %d", merged, rpus)
 	}
 	return r.mux(ctx, []string{path}, extras, chapters)
+}
+
+// baseView is an H.264 access unit without MVC's NAL units (the prefixes,
+// the subset SPS and the dependent view's slices): its base view, as a 2D
+// decoder reads it. One without them is returned as it is.
+func baseView(au []byte) []byte {
+	if !hasNAL(au, 14) && !hasNAL(au, 15) && !hasNAL(au, 20) {
+		return au
+	}
+	out := make([]byte, 0, len(au))
+	for _, n := range annexBNALs(au) {
+		if len(n) == 0 || n[0]&0x1f == 14 || n[0]&0x1f == 15 || n[0]&0x1f == 20 {
+			continue
+		}
+		out = append(out, 0, 0, 0, 1)
+		out = append(out, n...)
+	}
+	return out
 }
 
 // randomAccess reports whether an access unit can start decoding: an IDR

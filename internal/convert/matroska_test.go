@@ -337,3 +337,44 @@ func TestMatroskaVC1AndACM(t *testing.T) {
 		t.Error("float audio taken for PCM")
 	}
 }
+
+// --2d --remux of a 3D Matroska file (both views in its one video track)
+// keeps the base view alone: no MVC NAL units in the copy.
+func TestMatroskaRemux2DDropsTheDependentView(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "Film.mkv")
+	o := DefaultOptions()
+	o.Input, o.Output, o.Remux, o.TwoD, o.TempDir = mvcMatroska(t), out, true, true, t.TempDir()
+	if err := NewRunner(CurrentGOOS, o, nil).Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(out) //nolint:gosec // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	rd, err := mkv.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pictures := 0
+	for {
+		p, err := rd.Next()
+		if err != nil {
+			break
+		}
+		if p.Track != rd.Tracks[0].Number {
+			continue
+		}
+		pictures++
+		for b := p.Data; len(b) >= 5; {
+			n := int(b[0])<<24 | int(b[1])<<16 | int(b[2])<<8 | int(b[3])
+			if typ := b[4] & 0x1f; typ == 14 || typ == 15 || typ == 20 {
+				t.Fatalf("picture %d holds an MVC NAL unit (type %d)", pictures, typ)
+			}
+			b = b[min(4+n, len(b)):]
+		}
+	}
+	if pictures == 0 {
+		t.Fatal("no pictures copied")
+	}
+}
