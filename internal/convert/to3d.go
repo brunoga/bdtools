@@ -93,9 +93,20 @@ func (o Options) to3DKey() [3]float64 {
 	return [3]float64{w, o.Depth3D, o.Screen3D}
 }
 
+// refine3DKey is the refinement's weights, for resuming.
+func (o Options) refine3DKey() string {
+	if !o.To3D {
+		return ""
+	}
+	return o.Refine3D
+}
+
 // shape3D is the depth's shape for the options.
 func (o Options) shape3D() stereo.Shape {
 	s := stereo.DefaultShape
+	if o.Refine3D != "" {
+		s = stereo.RefinedShape
+	}
 	if o.Depth3D > 0 {
 		s.Scale *= o.Depth3D
 		s.Offset *= o.Depth3D
@@ -122,6 +133,14 @@ func (r *Runner) convert3D(p picture) (picture, error) {
 		}
 		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D())}
 		r.conv.conv.NoWindow = r.Opts.NoWindow3D
+		if f := r.Opts.Refine3D; f != "" {
+			w, err := stereo.ReadRefine(f)
+			if err != nil {
+				return p, fmt.Errorf("--3d-refine: %w", err)
+			}
+			r.conv.conv.Refine = w
+			r.Report.Report("--to-3d: the depth refined by %s", f)
+		}
 		s := r.Opts.shape3D()
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
 			100*s.Scale, 100*s.Offset)

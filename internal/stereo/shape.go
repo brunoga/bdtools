@@ -31,6 +31,14 @@ type Shape struct {
 // of the made right eye against the disc's.
 var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 
+// RefinedShape is DefaultShape for a refined depth (Converter.Refine):
+// found as DefaultShape was, on the benchmark's twelve clips, with weights
+// learnt from 27 other films (the made right eye 27.5 dB and VMAF 29.5
+// against the discs', DefaultShape's on the depth as it is 26.9 and 25.7;
+// on the four glass clips, held out of the choice, 26.8 and 33.4 against
+// 25.7 and 26.8).
+var RefinedShape = Shape{Scale: 0.0010, Offset: -0.0075}
+
 // Shaper turns a stream's depth maps into disparity: each map's range (its
 // 5th to 95th percentile) normalised to 0..1 (what lies beyond kept to a
 // quarter of the range more), the

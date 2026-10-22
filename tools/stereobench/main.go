@@ -89,7 +89,15 @@ func main() {
 	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width); 0: normalised a picture at a time")
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
+	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's)")
+	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	flag.Parse()
+	if refinePath != "" {
+		var err error
+		if refine, err = stereo.ReadRefine(refinePath); err != nil {
+			fail(err)
+		}
+	}
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: stereobench [-every N] [-model FILE] [-csv FILE] CLIP...")
 		os.Exit(2)
@@ -287,6 +295,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
 	c.conv = stereo.NewConverter(m, shape)
 	c.conv.Guide = guide
+	c.conv.Refine = refine
 	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
 	return c
 }
@@ -335,6 +344,11 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 		}
 	}
 	med := median(slices.Clone(c.discD[len(c.discD)-int(n):]))
+	if samplesDir != "" {
+		if err := writeSample(c.res.name, c.k-1, left, dm, hr, top, bottom); err != nil {
+			return err
+		}
+	}
 	if framesOut != nil {
 		writeFeatures(c.res.name, c.k-1, left, raw, dm, hr, a, b, corr, matched, top, bottom)
 	}

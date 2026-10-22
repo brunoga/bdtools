@@ -20,7 +20,11 @@ type Converter struct {
 	// zero Guide leaves the depth as the network gives it, upsampled).
 	Guide Guide
 	// NoWindow leaves out the floating window (window.go).
-	NoWindow        bool
+	NoWindow bool
+	// Refine, when not nil, corrects the depth's shape (refinenet.go), on
+	// the depth model's backend.
+	Refine          *RefineWeights
+	refineOn        *RefineWeights // Refine's weights on that backend
 	win             window
 	cuts            cutDetector
 	top, bottom     int // the active rows
@@ -86,11 +90,73 @@ func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32, err error) {
 			return nil, nil, err
 		}
 		up := nn.Bilinear(dm.Reshape(1, c.netH, c.netW), ah, w)
+		if c.Refine != nil {
+			if err := c.refine(up.Data, f, top, bottom); err != nil {
+				return nil, nil, err
+			}
+		}
 		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
 		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
 	}
 	return depth, disparity, nil
+}
+
+// refine corrects the depth of the active rows [top, bottom) of f (w x
+// ah, in place) by the refinement, at half the picture's size.
+func (c *Converter) refine(depth []float32, f *mvc.Frame, top, bottom int) error {
+	be := c.Model.Backend()
+	if c.refineOn == nil {
+		c.refineOn = &RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+		for _, l := range RefineLayers {
+			for _, p := range []struct{ to, from map[string]*nn.Tensor }{{c.refineOn.W, c.Refine.W}, {c.refineOn.B, c.Refine.B}} {
+				t := be.Upload(p.from[l.Name])
+				be.Keep(t)
+				p.to[l.Name] = t
+			}
+		}
+	}
+	w, ah := f.Width, bottom-top
+	hw, hh := w/2, ah/2
+	sc := f.StrideC // the half-size luma at the chroma's stride
+	y := make([]byte, hh*sc)
+	d := make([]float32, hw*hh)
+	rows(hh, func(r int) {
+		for x := range hw {
+			i, j := (2*r)*w+2*x, (2*r+1)*w+2*x
+			d[r*hw+x] = (depth[i] + depth[i+1] + depth[j] + depth[j+1]) / 4
+			p := f.Y[(top+2*r)*f.StrideY+2*x:]
+			q := f.Y[(top+2*r+1)*f.StrideY+2*x:]
+			y[r*sc+x] = byte((int(p[0]) + int(p[1]) + int(q[0]) + int(q[1]) + 2) / 4)
+		}
+	})
+	co := top / 2 * sc
+	x, mean, sd := RefineInput(y, f.Cb[co:], f.Cr[co:], sc, d, hw, hh)
+	out, err := be.Download(c.refineOn.Refine(be, be.Upload(x)))
+	be.Release()
+	if err != nil {
+		return err
+	}
+	// the refined depth put back to the depth's mean and deviation
+	pw := x.Dim(2)
+	var s, ss float64
+	for r := range hh {
+		for _, v := range out.Data[r*pw : r*pw+hw] {
+			s += float64(v)
+			ss += float64(v) * float64(v)
+		}
+	}
+	n := float64(hw * hh)
+	m := s / n
+	k := sd / math.Sqrt(max(ss/n-m*m, 1e-12))
+	for r := range hh {
+		for x, v := range out.Data[r*pw : r*pw+hw] {
+			d[r*hw+x] = float32(mean + (float64(v)-m)*k)
+		}
+	}
+	full := nn.Bilinear(&nn.Tensor{Shape: []int{1, hh, hw}, Data: d}, ah, w)
+	copy(depth, full.Data)
+	return nil
 }
 
 // Bars finds a picture's letterbox bars: its active rows are [top,
