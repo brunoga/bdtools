@@ -90,4 +90,7 @@ func TestGPUHalfProducts(t *testing.T) {
 	check("3x3 convolution", Conv2d(img, w3, b3, 2, 1), g.Conv2d(g.Upload(img), g.Upload(w3), g.Upload(b3), 2, 1))
 	q, k, v := rnd(150, 128), rnd(170, 128), rnd(170, 128)
 	check("attention", Attention(q, k, v, 2, 0.125), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 2, 0.125))
+	// a vision transformer's: six heads of 64, many tiles of keys
+	q, k, v = rnd(333, 384), rnd(333, 384), rnd(333, 384)
+	check("attention of six heads", Attention(q, k, v, 6, 0.125), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 6, 0.125))
 }

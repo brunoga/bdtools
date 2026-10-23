@@ -172,13 +172,17 @@ So the GPU backend is not optional for this to be practical, and a CPU-only
 machine converts overnight.
 
 Measured on the RTX 5090, a 1080p film: the small network 25 ms a picture
-in single precision, 16.5 on the tensor cores (Base 49 and 32; Large 122,
-single precision only); the whole conversion (NVENC) 42 pictures a second
+in single precision, 10.4 on the tensor cores with attention in one pass
+(Base 49 and 19.7; Large 122, single precision only); the whole conversion (NVENC) 42 pictures a second
 refined, 44 not: a two-hour film in about 70 minutes. The picture goes to
 the GPU as it is decoded and the depth comes back: the networks' inputs
 (the picture resized and made RGB for the network, the half-size picture
 and standardised depth for the refinement) and the refined depth's
-renormalisation are kernels, the same values as the CPU's. The CPU's
+renormalisation are kernels, the same values as the CPU's. On the tensor
+cores attention is one kernel a layer (flash attention: the keys and values
+a tile at a time, the softmax kept running, the scores never stored: 6.1 ms
+a picture down to 1.3) and layer normalisation a warp a row in single
+precision (double is slow on consumer GPUs: 2.4 ms down to 0.4). The CPU's
 rendering of the eyes now sets the pace.
 
 ## How good: measured, not guessed
@@ -339,9 +343,9 @@ What that teaches:
    PyTorch's within 1e-3: 25 ms a 1080p frame on an RTX 5090, 50 times
    the CPU. Since: the depth of one frame made while the last is
    rendered, the tensor cores (16.5 ms), the networks' inputs made on the
-   GPU; a film converts at about 42 frames a second. Still to do: the
-   eyes rendered on the GPU (the CPU's rendering now sets the pace) and
-   fused attention.
+   GPU, attention in one pass (10.4 ms); a film converts at about 42
+   frames a second. Still to do: the eyes rendered on the GPU (the CPU's
+   rendering now sets the pace).
 5. **Depth edges**: the network's soft depth edges snapped to the
    picture's (an edge-aware filter guided by the full-resolution picture),
    against halos and cardboard cut-outs.

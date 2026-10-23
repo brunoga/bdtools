@@ -189,7 +189,7 @@ func TestPublishedModelOnTheGPUInHalf(t *testing.T) {
 		}
 		rms := math.Sqrt(sq/float64(len(want.Data))) / peak
 		worst := compare(got, want)
-		// measured: 2.4e-4 and 9.3e-3 (single precision: 2e-5 at worst)
+		// measured: 2.4e-4 and 1.2e-2 (single precision: 2e-5 at worst)
 		if rms > 1e-3 || worst > 2e-2 {
 			t.Errorf("frame %d: off by %.3g of the peak (root mean square), %.3g at worst", i, rms, worst)
 		}
