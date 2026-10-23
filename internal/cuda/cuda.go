@@ -247,6 +247,25 @@ func (c *Context) Download(dst []float32, src *Buffer) error {
 	})
 }
 
+// DownloadBytes copies the start of src to dst (once the kernels before
+// have run).
+func (c *Context) DownloadBytes(dst []byte, src *Buffer) error {
+	if len(dst) == 0 {
+		return nil
+	}
+	if len(dst) > src.Size {
+		return fmt.Errorf("cuda: download of %d bytes from a buffer of %d", len(dst), src.Size)
+	}
+	return c.do(func() error {
+		r := call(c.a.cuMemcpyDtoH, uintptr(unsafe.Pointer(&dst[0])), src.ptr, uintptr(len(dst)))
+		runtime.KeepAlive(dst)
+		if r != 0 {
+			return c.err("cuMemcpyDtoH", r)
+		}
+		return nil
+	})
+}
+
 // Copy copies n bytes from src (at byte offset so) to dst (at do).
 func (c *Context) Copy(dst *Buffer, do int, src *Buffer, so, n int) error {
 	if n == 0 {
