@@ -65,8 +65,8 @@ func NewGPU() (*GPU, error) {
 	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]spare{}}
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
-		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "net_input", "moments", "refine_input", "renorm", "attention_tc",
-		"disparity", "eyes"} {
+		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "gemm_nn_tc_64", "gemm_nt_tc_64", "conv2d_tc_64",
+		"net_input", "moments", "refine_input", "renorm", "attention_tc", "disparity", "eyes"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -203,11 +203,12 @@ func (g *GPU) drop(gone func(spare) bool) {
 // kernels.cu), batch times.
 func (g *GPU) gemm(kernel string, m, n, k int, a uintptr, lda, sa int, b uintptr, ldb, sb int, c uintptr, ldc, sc int,
 	alpha float32, bias uintptr, biasMode, batch int) {
-	grid := cuda.Dim{X: (n + 127) / 128, Y: (m + 127) / 128, Z: batch}
+	grid, block := cuda.Dim{X: (n + 127) / 128, Y: (m + 127) / 128, Z: batch}, cuda.Dim{X: 256}
 	if g.Half {
 		kernel += "_tc"
+		grid, block, kernel = g.tiles(grid, m, n, batch, kernel)
 	}
-	g.launch(kernel, grid, cuda.Dim{X: 256}, 0, m, n, k, a, lda, int64(sa), b, ldb, int64(sb), c, ldc, int64(sc),
+	g.launch(kernel, grid, block, 0, m, n, k, a, lda, int64(sa), b, ldb, int64(sb), c, ldc, int64(sc),
 		alpha, bias, biasMode)
 }
 
@@ -216,6 +217,16 @@ func biasMode(b *Tensor, mode int) int {
 		return 0
 	}
 	return mode
+}
+
+// tiles is the tensor cores' grid for an m x n product (batch of them):
+// tiles of 128 x 128 (grid), or of 64 x 64 when those would leave the
+// GPU's multiprocessors short of work (fewer than two blocks each).
+func (g *GPU) tiles(grid cuda.Dim, m, n, batch int, kernel string) (cuda.Dim, cuda.Dim, string) {
+	if grid.X*grid.Y*max(batch, 1) >= 2*g.c.SMs {
+		return grid, cuda.Dim{X: 256}, kernel
+	}
+	return cuda.Dim{X: (n + 63) / 64, Y: (m + 63) / 64, Z: grid.Z}, cuda.Dim{X: 128}, kernel + "_64"
 }
 
 func (g *GPU) Linear(x, w, b *Tensor) *Tensor {
@@ -236,12 +247,13 @@ func (g *GPU) Conv2d(x, w, b *Tensor, stride, pad int) *Tensor {
 		return y
 	}
 	n, k := ho*wo, c*kh*kw
-	grid := cuda.Dim{X: (n + 127) / 128, Y: (o + 127) / 128}
+	grid, block := cuda.Dim{X: (n + 127) / 128, Y: (o + 127) / 128}, cuda.Dim{X: 256}
 	kernel := "conv2d"
 	if g.Half {
 		kernel += "_tc"
+		grid, block, kernel = g.tiles(grid, o, n, 1, kernel)
 	}
-	g.launch(kernel, grid, cuda.Dim{X: 256}, 0, o, n, k, ptr(w), ptr(x), ptr(y), ptr(b), biasMode(b, 2),
+	g.launch(kernel, grid, block, 0, o, n, k, ptr(w), ptr(x), ptr(y), ptr(b), biasMode(b, 2),
 		c, h, wd, kh, kw, stride, pad, wo)
 	return y
 }
