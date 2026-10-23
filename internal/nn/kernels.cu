@@ -375,23 +375,25 @@ __device__ double blockSumD(double v, double *sh) {
 	return t;
 }
 
-// layernorm: a block a row of d.
-extern "C" __global__ void layernorm(int d, const float *x, const float *w, const float *b, float *y, float eps) {
-	__shared__ double sh[32];
-	const float *r = x + (long long)blockIdx.x * d;
-	float *o = y + (long long)blockIdx.x * d;
-	double s = 0;
-	for (int i = threadIdx.x; i < d; i += blockDim.x) s += r[i];
-	double mean = blockSumD(s, sh) / d;
-	double v = 0;
-	for (int i = threadIdx.x; i < d; i += blockDim.x) {
-		double dv = r[i] - mean;
+// layernorm normalises rows of d values, a warp a row (in single
+// precision: double is slow on most GPUs, and a row's two passes in single
+// lose nothing that shows).
+extern "C" __global__ void layernorm(int rows, int d, const float *x, const float *w, const float *b, float *y, float eps) {
+	int row = blockIdx.x * (blockDim.x / 32) + threadIdx.x / 32, lane = threadIdx.x % 32;
+	if (row >= rows) return;
+	const float *r = x + (long long)row * d;
+	float *o = y + (long long)row * d;
+	float s = 0;
+	for (int i = lane; i < d; i += 32) s += r[i];
+	for (int k = 16; k > 0; k /= 2) s += __shfl_xor_sync(0xffffffff, s, k);
+	float mean = s / d, v = 0;
+	for (int i = lane; i < d; i += 32) {
+		float dv = r[i] - mean;
 		v += dv * dv;
 	}
-	double var = blockSumD(v, sh) / d;
-	float inv = (float)(1.0 / sqrt(var + eps));
-	float m = (float)mean;
-	for (int i = threadIdx.x; i < d; i += blockDim.x) o[i] = (r[i] - m) * inv * w[i] + b[i];
+	for (int k = 16; k > 0; k /= 2) v += __shfl_xor_sync(0xffffffff, v, k);
+	float inv = rsqrtf(v / d + eps);
+	for (int i = lane; i < d; i += 32) o[i] = (r[i] - mean) * inv * w[i] + b[i];
 }
 
 // groupnorm: a block a group of cg channels of per values each.
@@ -698,4 +700,114 @@ extern "C" __global__ void renorm(int w, int h, int pw, const float *out, const 
 		int x = i % w, r = i / w;
 		d[i] = (float)__dadd_rn(mean, __dmul_rn((double)out[(long long)r * pw + x] - m, k));
 	}
+}
+
+// attention_tc is Attention's heads of 64 channels on the tensor cores, in
+// one pass (flash attention): a block 64 queries of a head, a warp 16 of
+// them; the keys and values 64 at a time through shared memory (half
+// precision), the scores' softmax kept running (its maximum and sum a row)
+// so that they are never stored. q [nq, d], k and v [nk, d], out [nq, d].
+extern "C" __global__ void __launch_bounds__(128) attention_tc(int nq, int nk, int d, const float *q, const float *k,
+	const float *v, float *out, float scale) {
+	__shared__ __align__(16) __half Ks[64][72]; // [key][channel]
+	__shared__ __align__(16) __half Vt[64][72]; // [channel][key]
+	const float L2E = 1.4426950408889634f;
+	int warp = threadIdx.x / 32, lane = threadIdx.x % 32, g = lane >> 2, c = lane & 3;
+	int col = blockIdx.y * 64, q0 = blockIdx.x * 64 + warp * 16;
+	auto pack = [](float a, float b) {
+		__half2 h = __floats2half2_rn(a, b);
+		return *(unsigned *)&h;
+	};
+	auto Q = [&](int r, int ch) { return r < nq ? q[(long long)r * d + col + ch] : 0.f; };
+	unsigned qa[4][4];
+#pragma unroll
+	for (int ks = 0; ks < 4; ks++) {
+		int k0 = ks * 16 + 2 * c;
+		qa[ks][0] = pack(Q(q0 + g, k0), Q(q0 + g, k0 + 1));
+		qa[ks][1] = pack(Q(q0 + g + 8, k0), Q(q0 + g + 8, k0 + 1));
+		qa[ks][2] = pack(Q(q0 + g, k0 + 8), Q(q0 + g, k0 + 9));
+		qa[ks][3] = pack(Q(q0 + g + 8, k0 + 8), Q(q0 + g + 8, k0 + 9));
+	}
+	float o[8][4] = {}, m[2] = {-INFINITY, -INFINITY}, l[2] = {0, 0};
+	float sl = scale * L2E;
+	for (int t0 = 0; t0 < nk; t0 += 64) {
+		__syncthreads();
+		for (int i = threadIdx.x; i < 64 * 32; i += 128) {
+			int key = i / 32, ch = 2 * (i % 32), kk = t0 + key;
+			float2 kv = make_float2(0, 0), vv = make_float2(0, 0);
+			if (kk < nk) {
+				kv = *(const float2 *)&k[(long long)kk * d + col + ch];
+				vv = *(const float2 *)&v[(long long)kk * d + col + ch];
+			}
+			*(__half2 *)&Ks[key][ch] = __floats2half2_rn(kv.x, kv.y);
+			Vt[ch][key] = __float2half_rn(vv.x);
+			Vt[ch + 1][key] = __float2half_rn(vv.y);
+		}
+		__syncthreads();
+		float s[8][4] = {};
+#pragma unroll
+		for (int nt = 0; nt < 8; nt++)
+#pragma unroll
+			for (int ks = 0; ks < 4; ks++) {
+				unsigned b[2] = {*(const unsigned *)&Ks[nt * 8 + g][ks * 16 + 2 * c],
+					*(const unsigned *)&Ks[nt * 8 + g][ks * 16 + 2 * c + 8]};
+				mma16816(s[nt], qa[ks], b);
+			}
+		float mx[2] = {-INFINITY, -INFINITY};
+#pragma unroll
+		for (int nt = 0; nt < 8; nt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) {
+				int key = t0 + nt * 8 + 2 * c + (e & 1);
+				s[nt][e] = key < nk ? s[nt][e] * sl : -INFINITY;
+				mx[e >> 1] = fmaxf(mx[e >> 1], s[nt][e]);
+			}
+		float corr[2];
+#pragma unroll
+		for (int r = 0; r < 2; r++) {
+			mx[r] = fmaxf(mx[r], __shfl_xor_sync(0xffffffff, mx[r], 1));
+			mx[r] = fmaxf(mx[r], __shfl_xor_sync(0xffffffff, mx[r], 2));
+			float mn = fmaxf(m[r], mx[r]);
+			corr[r] = exp2f(m[r] - mn);
+			m[r] = mn;
+			l[r] *= corr[r];
+		}
+#pragma unroll
+		for (int dt = 0; dt < 8; dt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) o[dt][e] *= corr[e >> 1];
+#pragma unroll
+		for (int nt = 0; nt < 8; nt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) {
+				s[nt][e] = exp2f(s[nt][e] - m[e >> 1]);
+				l[e >> 1] += s[nt][e];
+			}
+#pragma unroll
+		for (int j = 0; j < 4; j++) {
+			unsigned a[4] = {pack(s[2 * j][0], s[2 * j][1]), pack(s[2 * j][2], s[2 * j][3]),
+				pack(s[2 * j + 1][0], s[2 * j + 1][1]), pack(s[2 * j + 1][2], s[2 * j + 1][3])};
+#pragma unroll
+			for (int dt = 0; dt < 8; dt++) {
+				unsigned b[2] = {*(const unsigned *)&Vt[dt * 8 + g][j * 16 + 2 * c],
+					*(const unsigned *)&Vt[dt * 8 + g][j * 16 + 2 * c + 8]};
+				mma16816(o[dt], a, b);
+			}
+		}
+	}
+#pragma unroll
+	for (int r = 0; r < 2; r++) {
+		l[r] += __shfl_xor_sync(0xffffffff, l[r], 1);
+		l[r] += __shfl_xor_sync(0xffffffff, l[r], 2);
+	}
+#pragma unroll
+	for (int dt = 0; dt < 8; dt++)
+#pragma unroll
+		for (int r = 0; r < 2; r++) {
+			int row = q0 + g + 8 * r;
+			if (row < nq) {
+				*(float2 *)&out[(long long)row * d + col + dt * 8 + 2 * c] =
+					make_float2(o[dt][2 * r] / l[r], o[dt][2 * r + 1] / l[r]);
+			}
+		}
 }

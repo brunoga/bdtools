@@ -65,7 +65,7 @@ func NewGPU() (*GPU, error) {
 	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]spare{}}
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
-		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "net_input", "moments", "refine_input", "renorm"} {
+		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "net_input", "moments", "refine_input", "renorm", "attention_tc"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -257,7 +257,8 @@ func (g *GPU) ConvTranspose2dK(x, w, b *Tensor) *Tensor {
 func (g *GPU) LayerNorm(x, w, b *Tensor, eps float32) *Tensor {
 	d := x.Dim(-1)
 	y := g.tensor(x.Shape...)
-	g.launch("layernorm", cuda.Dim{X: Numel(x.Shape) / d}, cuda.Dim{X: 256}, 0, d, ptr(x), ptr(w), ptr(b), ptr(y), eps)
+	rows := Numel(x.Shape) / d
+	g.launch("layernorm", cuda.Dim{X: (rows + 7) / 8}, cuda.Dim{X: 256}, 0, rows, d, ptr(x), ptr(w), ptr(b), ptr(y), eps)
 	return y
 }
 
@@ -299,8 +300,14 @@ func (g *GPU) Clone(x *Tensor) *Tensor {
 func (g *GPU) Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
 	nq, nk, d := q.Dim(0), k.Dim(0), q.Dim(1)
 	hd := d / heads
-	scores := g.tensor(heads, nq, nk)
 	out := g.tensor(nq, d)
+	if g.Half && hd == 64 && (ptr(q)|ptr(k)|ptr(v))%8 == 0 {
+		// in one pass on the tensor cores, the scores never stored
+		g.launch("attention_tc", cuda.Dim{X: (nq + 63) / 64, Y: heads}, cuda.Dim{X: 128}, 0,
+			nq, nk, d, ptr(q), ptr(k), ptr(v), ptr(out), scale)
+		return out
+	}
+	scores := g.tensor(heads, nq, nk)
 	g.gemm("gemm_nt", nq, nk, hd, ptr(q), d, hd, ptr(k), d, hd, ptr(scores), nk, nq*nk, 1, 0, 0, heads)
 	g.launch("softmax", cuda.Dim{X: heads * nq}, cuda.Dim{X: 256}, 0, nk, ptr(scores), scale)
 	g.gemm("gemm_nn", nq, hd, nk, ptr(scores), nk, nq*nk, ptr(v), d, hd, ptr(out), d, hd, 1, 0, 0, heads)
