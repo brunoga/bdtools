@@ -34,6 +34,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
 
+- `--to-3d` fills what one eye sees and the other did not (behind an
+  edge) with the background's edge carried across, not its texture
+  mirrored: measured on the 3D discs' own depth, 1.8 dB nearer their
+  right eyes in those places and VMAF 0.6 higher (no ghost of the edge).
+
 - `--depth-model base` and `large`: Video Depth Anything's bigger
   networks (downloaded once; licensed CC-BY-NC-4.0, for non-commercial use
   only), each with its own mapping of depth to disparity. Measured, they

@@ -337,8 +337,9 @@ What that teaches:
    Small from its published checkpoint, the same depth as PyTorch's
    (within 1e-3 on film frames).
 2. **A first conversion** (done): `--to-3d`, cut detection, depth shaped
-   into disparity, the eyes rendered nearer over farther, holes mirrored
-   from the background, every 3D layout out.
+   into disparity, the eyes rendered nearer over farther, holes filled
+   from the background (its edge carried across: measured better than its
+   texture mirrored), every 3D layout out.
 3. **The benchmark**: `bdtools 3d-bench` on clips of native 3D discs. The
    left eye converted, its made right eye compared with the disc's:
    - disparity: the made one against the one measured between the real

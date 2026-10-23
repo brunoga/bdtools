@@ -181,9 +181,13 @@ func (s *rowScratch) render(src []byte, d []float32, sign float32, out []byte) {
 	}
 }
 
-// fillHoles fills the runs of unset targets from their farther side: its
-// texture mirrored across the hole's edge (continued, not one pixel
-// smeared); at the row's ends, from the side there is.
+// fillHoles fills the runs of unset targets from their farther side, its
+// last pixel carried across (at the row's ends, from the side there is).
+// Measured against the 3D discs' own right eyes (tools/stereobench, their
+// disparity, the holes 6% of the picture) it beats the farther side's
+// texture mirrored across the hole: 29.8 -> 31.6 dB in the holes, VMAF
+// 80.4 -> 81.0 (the glass clips 85.5 -> 86.2): a mirror repeats the
+// edges near the hole, which the eye and VMAF read as ghosts.
 func fillHoles(v, z []float32, set []bool) {
 	w := len(v)
 	for x := 0; x < w; {
@@ -197,30 +201,17 @@ func fillHoles(v, z []float32, set []bool) {
 		}
 		b := x // the hole is [a, b)
 		left, right := a-1, b
-		useRight := false
+		src := left
 		switch {
 		case left < 0 && right >= w:
 			continue // nothing set in the row
 		case left < 0:
-			useRight = true
+			src = right
 		case right >= w:
-			useRight = false
-		default:
-			useRight = z[right] < z[left] //nolint:gosec // both within the row here: the farther side
+		case z[right] < z[left]: //nolint:gosec // both within the row here: the farther side
+			src = right
 		}
 		for X := a; X < b; X++ {
-			var src int
-			if useRight {
-				src = min(right+(b-1-X), w-1)
-				for src > right && !set[src] {
-					src--
-				}
-			} else {
-				src = max(left-(X-a), 0)
-				for src < left && !set[src] {
-					src++
-				}
-			}
 			v[X], z[X] = v[src], z[src]
 		}
 		for X := a; X < b; X++ {

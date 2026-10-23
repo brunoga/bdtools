@@ -868,8 +868,8 @@ extern "C" __global__ void disparity(int w, int h, int top, int bottom, float a,
 // stereo.Render does a row at a time: each pair of neighbours a segment,
 // rasterised into the targets it covers (the nearer winning), a segment
 // stretched more than gap pixels left open, the holes filled from their
-// farther side, mirrored. A thread a row: the luma's h rows, then Cb's
-// and Cr's ch, the left eye's (sign +0.5) then the right's (-0.5). out is
+// farther side, its last pixel carried across. A thread a row: the luma's
+// h rows, then Cb's and Cr's ch, the left eye's (sign +0.5) then the right's (-0.5). out is
 // both eyes' planes packed (rows w and cw apart); z and v scratch, a
 // row's values nrows apart.
 extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, const unsigned char *cb,
@@ -964,19 +964,8 @@ extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, co
 		} else {
 			useRight = Z(right) < Z(left);
 		}
+		int s = useRight ? right : left;
 		for (int X = a0; X < b0; X++) {
-			int s;
-			if (useRight) {
-				s = min(right + (b0 - 1 - X), n - 1);
-				while (s > right && Z(s) == -INFINITY) {
-					s--;
-				}
-			} else {
-				s = max(left - (X - a0), 0);
-				while (s < left && Z(s) == -INFINITY) {
-					s++;
-				}
-			}
 			V(X) = V(s);
 			Z(X) = Z(s);
 		}
@@ -1127,19 +1116,8 @@ extern "C" __global__ void eyes_warp(int w, int h, const unsigned char *Y, int s
 			} else {
 				useRight = Z(right) < Z(left);
 			}
+			int s = useRight ? right : left;
 			for (int X = a0; X < b0; X++) {
-				int s;
-				if (useRight) {
-					s = min(right + (b0 - 1 - X), n - 1);
-					while (s > right && Z(s) == -INFINITY) {
-						s--;
-					}
-				} else {
-					s = max(left - (X - a0), 0);
-					while (s < left && Z(s) == -INFINITY) {
-						s++;
-					}
-				}
 				V(X) = V(s);
 				Z(X) = Z(s);
 			}
