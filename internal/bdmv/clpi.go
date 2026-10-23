@@ -18,6 +18,9 @@ type ClipStream struct {
 	// sampling_frequency (1 48 kHz, 4 96 kHz, 5 192 kHz, 12 192 kHz with a
 	// 48 kHz core, 14 96 kHz with a 48 kHz core). Zero when not given.
 	Format, Rate byte
+	// Aspect is a video stream's aspect_ratio (2 4:3, 3 16:9), for
+	// writing; not read.
+	Aspect byte
 }
 
 // ParseCLPI reads the streams of a clip info (.clpi) file: the program's

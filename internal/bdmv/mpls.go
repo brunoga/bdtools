@@ -1,6 +1,7 @@
 // Package bdmv reads the structure of a Blu-ray disc: the playlists that make
 // up its titles, and the stream files they refer to, from a BDMV directory or
-// directly out of a UDF disc image.
+// directly out of a UDF disc image. It writes them too (write.go), for a
+// disc of one film.
 package bdmv
 
 import (
@@ -86,6 +87,9 @@ type PlayItem struct {
 	// DependentPID is the dependent view's PID from the STN_table_SS, or 0
 	// when the playlist does not say (Blu-ray uses 0x1012).
 	DependentPID uint16
+	// OffsetSequences is how many offset sequences the MVC stream's offset
+	// metadata carries (the STN_table_SS's number_of_offset_sequences).
+	OffsetSequences int
 }
 
 // Duration is how long the item plays.
@@ -554,7 +558,8 @@ func (p *Playlist) parseSTNSS(c *cursor) {
 		}
 		c.pos = es + el
 		c.skip(int(c.u8())) // stream_attributes
-		c.skip(2)           // reserved, number_of_offset_sequences
+		c.skip(1)
+		it.OffsetSequences = int(c.u8())
 		for k := range it.Streams {
 			s := &it.Streams[k]
 			if s.Kind != 2 || c.pos+2 > end {
