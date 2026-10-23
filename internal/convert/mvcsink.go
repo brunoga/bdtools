@@ -126,6 +126,16 @@ func mvcDepQP(crf int) int { return min(max(crf+3, 0), 51) }
 // mvcX264Args are x264's settings for a left eye an MVC decoder plays as a
 // Blu-ray's: no weighted prediction (players' MVC decoders garble it), no
 // B-frames as references, a Blu-ray level and buffer.
+// mvcKeyint is the left eye's longest GOP: a second for a disc (Blu-ray's
+// limit, which its players' random access counts on), 250 pictures
+// otherwise.
+func mvcKeyint(o Options, num, den int) int {
+	if IsDiscImage(o.Output) && num > 0 && den > 0 {
+		return (num + den - 1) / den
+	}
+	return 250
+}
+
 func mvcX264Args(o Options) []string {
 	argv := []string{
 		"--demuxer", "y4m",
@@ -186,7 +196,7 @@ func (s *mvcSink) start(path string, first picture, num, den int) error {
 	case s.builtin:
 		pr, pw := io.Pipe()
 		o := s.r.Opts
-		bo := mvc.BaseOptions{Width: w, Height: h, QP: o.CRF, Keyint: 250, BFrames: 3, Level: 41, FPSNum: num, FPSDen: den, AQ: o.AQ}
+		bo := mvc.BaseOptions{Width: w, Height: h, QP: o.CRF, Keyint: mvcKeyint(o, num, den), BFrames: 3, Level: 41, FPSNum: num, FPSDen: den, AQ: o.AQ}
 		if c := o.Color; c != nil {
 			bo.Color = &mvc.ColorInfo{Primaries: c.Primaries, Transfer: c.Transfer, Matrix: c.Matrix, FullRange: c.FullRange}
 		}
@@ -200,7 +210,11 @@ func (s *mvcSink) start(path string, first picture, num, den int) error {
 		go s.pump()
 		out = pr
 	case s.bin != "":
-		s.cmd = exec.CommandContext(s.ctx, s.bin, mvcX264Args(s.r.Opts)...) //nolint:gosec // bin came from LookPath
+		args := mvcX264Args(s.r.Opts)
+		if IsDiscImage(s.r.Opts.Output) {
+			args = append([]string{"--keyint", fmt.Sprint(mvcKeyint(s.r.Opts, num, den))}, args...)
+		}
+		s.cmd = exec.CommandContext(s.ctx, s.bin, args...) //nolint:gosec // bin came from LookPath
 		if s.stdin, err = s.cmd.StdinPipe(); err != nil {
 			return s.fail(err)
 		}

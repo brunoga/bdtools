@@ -40,7 +40,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as an SSIF, with the clip infos, a playlist with the chapters and a
   title that plays it, in a UDF 2.50 file system. Players read it as a
   pressed disc (Kodi and CoreELEC as an ISO; a disc player burned to a
-  BD-R). The subtitles are at the screen for now.
+  BD-R). The subtitles' depth goes with them, as a disc's offset metadata
+  in the dependent view (the made 3D picture's, or a 3D disc's own); the
+  left eye's GOPs are a second at most, as a disc's must be.
 - `--to-3d` fills what one eye sees and the other did not (behind an
   edge) with the background's edge carried across, not its texture
   mirrored: measured on the 3D discs' own depth, 1.8 dB nearer their
