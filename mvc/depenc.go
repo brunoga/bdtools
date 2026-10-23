@@ -165,6 +165,10 @@ type depJob struct {
 	list    [2][]*picture // the references (dec's), held until coded
 	bslice  bool
 	needs   *depJob // the reference picture before it: fed to dec before this is coded
+	// vecs are a reference picture's vectors once coded, the next
+	// pictures' search starting points
+	vecs    [3][]mv
+	from    [3][]mv // the reference before's vecs, given at its start
 	coded   bool    // nothing (more) to code
 	started bool
 	done    chan struct{}
@@ -411,6 +415,14 @@ func (dw *DepWriter) start() {
 		}
 		j.started = true
 		dw.resolveRefs(j)
+		if j.needs != nil {
+			j.from = j.needs.vecs
+			if j.pic != nil && j.pic.refIdc != 0 {
+				// the pictures before it, in order, have all been given
+				// them: the reference before's vectors are done with
+				j.needs.vecs = [3][]mv{}
+			}
+		}
 		go dw.code(j)
 	}
 }
@@ -488,9 +500,20 @@ func (dw *DepWriter) code(j *depJob) {
 	pic := j.pic
 	c.src = *j.ds
 	c.aq = dw.AQ
+	// the picture's kind first: its quantiser's lambda depends on it
+	c.bslice, c.list = j.bslice, j.list
 	c.planQP(dw.qp)
 	c.tag = int(j.base.poc)
-	c.bslice, c.list = j.bslice, j.list
+	// the search starts from the vectors of the reference picture before
+	// it (coded already), whichever coder did it: the same every run
+	for k := range c.prev {
+		if j.from[k] != nil {
+			copy(c.prev[k], j.from[k])
+		} else {
+			clear(c.prev[k])
+		}
+	}
+	j.from = [3][]mv{}
 	for _, l := range c.list {
 		for _, r := range l {
 			r.waitRows(r.mbH) // decoded in full before predicting from it
@@ -498,6 +521,11 @@ func (dw *DepWriter) code(j *depJob) {
 		}
 	}
 	j.out = dw.appendDepSlice(j.out, pic, c, j.hd)
+	if pic.refIdc != 0 {
+		for k := range c.prev {
+			j.vecs[k] = append([]mv(nil), c.prev[k]...)
+		}
+	}
 	dw.coders <- c
 	for _, l := range j.list {
 		for _, r := range l {
