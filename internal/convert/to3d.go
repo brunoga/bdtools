@@ -51,6 +51,10 @@ var depthNets = map[string]depthNet{
 type to3DState struct {
 	conv *stereo.Converter
 	subs float64 // the subtitles' offset now, in pixels
+	// the picture whose depth is under way
+	pend      *stereo.Pending
+	pendPic   picture
+	pendFrame *mvc.Frame
 }
 
 // subsFall is how the subtitles' depth follows the picture's farther:
@@ -140,9 +144,11 @@ func hdrPicture(p picture) bool {
 	return len(p.rpu) > 0
 }
 
-// convert3D makes a picture a stereo pair: its depth now (on the GPU),
-// the rest (the eyes) by the function it gives, which may run beside the
-// next picture's depth. The functions must be called in order.
+// convert3D makes a picture a stereo pair: its depth begun now (on the
+// GPU, beside the next picture's decoding), the rest (the eyes) by a
+// function, which may run beside the next picture's depth. It gives the
+// picture before's function (nil for the first), once that one's depth is
+// made; wait3D gives the last's. The functions must be called in order.
 func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 	if r.conv == nil {
 		m, err := r.depthModel()
@@ -169,7 +175,23 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 			100*s.Scale, 100*s.Offset)
 	}
 	f := pictureFrame8(p)
-	e, err := r.conv.conv.Estimate(f)
+	before, err := r.wait3D()
+	if err != nil {
+		return nil, err
+	}
+	r.conv.pend, r.conv.pendPic, r.conv.pendFrame = r.conv.conv.Start(f), p, f
+	return before, nil
+}
+
+// wait3D is the rest of the picture convert3D began last, once its depth
+// is made (nil when there is none).
+func (r *Runner) wait3D() (func() (picture, error), error) {
+	if r.conv == nil || r.conv.pend == nil {
+		return nil, nil
+	}
+	e, err := r.conv.pend.Wait()
+	p, f := r.conv.pendPic, r.conv.pendFrame
+	r.conv.pend, r.conv.pendPic, r.conv.pendFrame = nil, picture{}, nil
 	if err != nil {
 		return nil, fmt.Errorf("--to-3d: the depth: %w", err)
 	}

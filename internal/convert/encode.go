@@ -278,6 +278,19 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	if r.to3D {
 		stages = newStagePipe()
 	}
+	// push3D queues a picture's rest (convert3D's) for the stages
+	push3D := func(finish func() (picture, error)) error {
+		if finish == nil {
+			return nil
+		}
+		return stages.push(func() error {
+			sf, err := finish()
+			if err != nil {
+				return err
+			}
+			return post(sf)
+		})
+	}
 	decErr := src.run(func(sf picture) error {
 		if keep != nil && !keep(sf.pts) {
 			skipped++
@@ -325,17 +338,17 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			if err != nil {
 				return err
 			}
-			return stages.push(func() error {
-				sf, err := finish()
-				if err != nil {
-					return err
-				}
-				return post(sf)
-			})
+			return push3D(finish)
 		}
 		return post(sf)
 	})
 	if stages != nil {
+		// the last picture's depth
+		if finish, err := r.wait3D(); decErr == nil {
+			if decErr = err; err == nil {
+				decErr = push3D(finish)
+			}
+		}
 		if err := stages.close(); decErr == nil {
 			decErr = err
 		}
