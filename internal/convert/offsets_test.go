@@ -3,6 +3,7 @@ package convert
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -164,5 +165,45 @@ func TestOFMDWritten(t *testing.T) {
 	}
 	if p[0] != 6 || p[1] != 37 || p[at+6] != 0xa0 {
 		t.Errorf("SEI %x, nesting type %d, sequences byte %#x", p[0], p[1], p[at+6])
+	}
+}
+
+// A stream's GOPs are counted by their pictures' first slices, a new one
+// at each IDR picture, across files and reads.
+func TestGOPLengths(t *testing.T) {
+	sc := []byte{0, 0, 0, 1}
+	pic := func(idr bool, slices int) []byte {
+		var b []byte
+		for i := range slices {
+			typ, first := byte(1), byte(0x80)
+			if idr {
+				typ = 5
+			}
+			if i > 0 {
+				first = 0x40 // first_mb_in_slice 1: not the first
+			}
+			b = append(append(b, sc...), 0x60|typ, first, 0x11)
+			b = append(append(b, sc...), 0x74, 0x80, 0x22) // a dependent view slice
+		}
+		return b
+	}
+	var a, b []byte
+	a = append(a, pic(true, 2)...)
+	for range 5 {
+		a = append(a, pic(false, 3)...)
+	}
+	b = append(b, pic(true, 1)...)
+	b = append(b, pic(false, 1)...)
+	dir := t.TempDir()
+	pa, pb := dir+"/a.264", dir+"/b.264"
+	if err := os.WriteFile(pa, a, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pb, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := gopLengths([]string{pa, pb})
+	if err != nil || !reflect.DeepEqual(got, []int{6, 2}) {
+		t.Errorf("GOPs %v, %v; want [6 2]", got, err)
 	}
 }

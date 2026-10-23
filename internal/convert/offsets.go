@@ -1,10 +1,17 @@
 package convert
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/binary"
+	"errors"
+	"io"
+	"os"
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/brunoga/bdtools/internal/mkv"
 )
 
 // A Blu-ray 3D sets the depth of its subtitles and menus with offset
@@ -392,4 +399,98 @@ func escapeRBSP(b []byte) []byte {
 		}
 	}
 	return out
+}
+
+// gopLengths is the pictures of each GOP of an H.264 (or MVC) stream in
+// files, in order: the base view's pictures (their first slices) from one
+// IDR picture to the next.
+func gopLengths(paths []string) ([]int, error) {
+	var out []int
+	carry := []byte{}
+	for _, p := range paths {
+		f, err := os.Open(p) //nolint:gosec // our work directory
+		if err != nil {
+			return nil, err
+		}
+		r := bufio.NewReaderSize(f, 1<<20)
+		buf := make([]byte, 1<<20)
+		for {
+			n, err := r.Read(buf)
+			b := append(carry, buf[:n]...)
+			// NAL units by start code: the byte after, and the next
+			last := 0
+			for i := 0; i+4 < len(b); i++ {
+				if b[i] != 0 || b[i+1] != 0 || b[i+2] != 1 {
+					continue
+				}
+				t := b[i+3] & 0x1f
+				if (t == 1 || t == 5) && b[i+4]&0x80 != 0 { // first_mb_in_slice 0: a picture's first slice
+					if t == 5 || len(out) == 0 {
+						out = append(out, 0)
+					}
+					out[len(out)-1]++
+				}
+				last = i + 3
+			}
+			// keep a few bytes for a start code across the read
+			keep := max(last, len(b)-4)
+			carry = append(carry[:0], b[keep:]...)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				_ = f.Close()
+				return nil, err
+			}
+		}
+		_ = f.Close()
+	}
+	return out, nil
+}
+
+// ofmdSource puts offset metadata into an MVC video source's frames, a
+// GOP's in its IDR access unit after the dependent view delimiter (where a
+// player reading MVC from Matroska, as from a disc, finds it).
+type ofmdSource struct {
+	*mkv.VideoSource
+	r      *Runner
+	gops   []int // each GOP's pictures
+	k      int   // the next GOP
+	frame  time.Duration
+	seqs   int
+	rate   byte
+	placed int // GOPs given metadata
+}
+
+func (s *ofmdSource) Next() (mkv.Frame, error) {
+	f, err := s.VideoSource.Next()
+	if err != nil || !f.Keyframe || s.k >= len(s.gops) {
+		return f, err
+	}
+	n := min(s.gops[s.k], 255)
+	s.k++
+	offsets := make([][]int8, s.seqs)
+	for q := range offsets {
+		offsets[q] = make([]int8, n)
+		for i := range n {
+			offsets[q][i] = int8(min(max(s.r.depth.offset(q, f.PTS+time.Duration(i)*s.frame), -127), 127)) //nolint:gosec // clamped
+		}
+	}
+	sei := ofmdNAL(ticks90(f.PTS), s.rate, offsets)
+	var out []byte
+	inserted := false
+	for _, nal := range lengthPrefixed(f.Data) {
+		out = binary.BigEndian.AppendUint32(out, uint32(len(nal))) //nolint:gosec // a NAL unit's length
+		out = append(out, nal...)
+		if !inserted && len(nal) > 0 && nal[0]&0x1f == 24 {
+			out = binary.BigEndian.AppendUint32(out, uint32(len(sei))) //nolint:gosec // its length
+			out = append(out, sei...)
+			inserted = true
+		}
+	}
+	if inserted {
+		f.Data = out
+		s.placed++
+	}
+	return f, nil
 }

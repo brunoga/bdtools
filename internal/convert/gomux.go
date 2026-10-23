@@ -110,6 +110,19 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		r.depth.sort()
 	}
 	sources := []mkv.Source{v}
+	if mvcOut && r.depth != nil {
+		// the subtitles' depth, as a disc's offset metadata in the video
+		gops, err := gopLengths(video)
+		if err != nil {
+			return fmt.Errorf("muxing: %w", err)
+		}
+		_, rate, _ := discVideoFormat(1080, num, den)
+		src := &ofmdSource{VideoSource: v, r: r, gops: gops, frame: r.depth.frame, seqs: r.depth.sequences(), rate: rate}
+		sources[0] = src
+		defer func() {
+			r.Report.Report("3D subtitles: their depth in the video's %d GOPs, as a disc carries it", src.placed)
+		}()
+	}
 	var timed []timedAudio
 	firstAudio, firstSubs := true, true
 	defAudio, defSubs := defaultExtras(extras, r.Opts.DefaultAudio, r.Opts.DefaultSubs)

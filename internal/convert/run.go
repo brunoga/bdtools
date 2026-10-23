@@ -264,7 +264,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	r.timeline = g.timeline
 	// the subtitles' depth: for drawing them in 3D, or a disc's offset
 	// metadata
-	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat || IsDiscImage(r.Opts.Output) {
+	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat || IsDiscImage(r.Opts.Output) || r.Opts.Layout == LayoutMVC {
 		r.depth = &depthMap{}
 		g.depth = r.depth
 		r.offsetSequence = func(t Track) int { return src.offsetSequence(uint16(t.ID)) } //nolint:gosec // a PID
