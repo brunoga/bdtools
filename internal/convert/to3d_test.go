@@ -3,6 +3,7 @@ package convert
 import (
 	"context"
 	"fmt"
+	"github.com/brunoga/bdtools/internal/stereo"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +83,7 @@ func TestSubtitleOffset(t *testing.T) {
 	for i := range d {
 		d[i] = -6
 	}
-	if o := subtitleOffset(d, w); o != 0 {
+	if o := subtitleOffset(stereo.SamplesOf(d, w, h, 0, h).Low); o != 0 {
 		t.Errorf("all behind: offset %g, want 0 (the screen)", o)
 	}
 	for y := h / 2; y < h; y++ {
@@ -93,7 +94,7 @@ func TestSubtitleOffset(t *testing.T) {
 	for x := range w {
 		d[x] = 40 // nearer still, but at the top
 	}
-	if o := subtitleOffset(d, w); o != 6 {
+	if o := subtitleOffset(stereo.SamplesOf(d, w, h, 0, h).Low); o != 6 {
 		t.Errorf("offset %g, want 6 (half of 10, plus 1)", o)
 	}
 }

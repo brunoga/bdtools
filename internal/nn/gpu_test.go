@@ -97,3 +97,45 @@ func TestGPUHalfProducts(t *testing.T) {
 	q, k, v = rnd(333, 384), rnd(333, 384), rnd(333, 384)
 	check("attention of six heads", Attention(q, k, v, 6, 0.125), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 6, 0.125))
 }
+
+func TestGPUTemporalAttention(t *testing.T) {
+	g, err := NewGPU()
+	if errors.Is(err, cuda.ErrUnavailable) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(9, 10))
+	rnd := func(shape ...int) *Tensor {
+		x := New(shape...)
+		for i := range x.Data {
+			x.Data[i] = float32(r.NormFloat64())
+		}
+		return x
+	}
+	// heads of 8 (a warp's shuffles) and of 12 (a block's shared memory)
+	for _, c := range []struct{ d, c, heads, t int }{{37, 64, 8, 5}, {29, 48, 4, 7}, {9, 128, 8, 32}} {
+		q, peQ, peK, peV := rnd(c.d, c.c), rnd(c.c), rnd(c.t, c.c), rnd(c.t, c.c)
+		ks, vs := make([]*Tensor, c.t), make([]*Tensor, c.t)
+		gks, gvs := make([]*Tensor, c.t), make([]*Tensor, c.t)
+		for f := range c.t {
+			ks[f], vs[f] = rnd(c.d, c.c), rnd(c.d, c.c)
+			gks[f], gvs[f] = g.Upload(ks[f]), g.Upload(vs[f])
+		}
+		want := CPU.TemporalAttention(q, peQ, peK, peV, ks, vs, c.heads, 0.3)
+		got, err := g.Download(g.TemporalAttention(g.Upload(q), g.Upload(peQ), g.Upload(peK), g.Upload(peV), gks, gvs, c.heads, 0.3))
+		g.Release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var worst float64
+		for i, v := range want.Data {
+			worst = max(worst, math.Abs(float64(got.Data[i]-v)))
+		}
+		if worst > 1e-4 {
+			t.Errorf("%v: the GPU's %.3g off the CPU's", c, worst)
+		}
+	}
+}

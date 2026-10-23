@@ -131,3 +131,15 @@ func (g *GPU) DownloadBytes(dst []byte, t *Tensor) error {
 	}
 	return g.c.DownloadBytes(dst, t.dev.a.buf)
 }
+
+// Samples gathers what of a w x h disparity d (whose active rows are
+// [top, bottom)) the floating window and the subtitles read: its side
+// strips edge wide on every other active row, the left's then the
+// right's, then every fourth row and column of its lower half.
+func (g *GPU) Samples(d *Tensor, w, h, top, bottom, edge int) *Tensor {
+	n := 2*((bottom-top+1)/2)*edge + (h-h/2+3)/4*((w+3)/4)
+	out := g.tensor(n)
+	gr, bl := each(n)
+	g.launch("disp_samples", gr, bl, 0, w, h, top, bottom, edge, ptr(d), ptr(out))
+	return out
+}

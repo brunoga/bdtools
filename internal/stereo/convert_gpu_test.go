@@ -229,3 +229,35 @@ func BenchmarkEyesOnTheGPU(b *testing.B) {
 		g.Release()
 	}
 }
+
+func TestSamplesOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(11, 12))
+	for _, c := range []struct{ w, h, top, bottom int }{{200, 120, 11, 111}, {203, 61, 0, 61}, {1920, 1080, 138, 942}} {
+		d := nn.New(c.h, c.w)
+		for i := range d.Data {
+			d.Data[i] = r.Float32()*40 - 10
+		}
+		want := SamplesOf(d.Data, c.w, c.h, c.top, c.bottom)
+		got, err := g.Download(g.Samples(g.Upload(d), c.w, c.h, c.top, c.bottom, sampleEdge(c.w)))
+		g.Release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(want.Left) + len(want.Right) + len(want.Low); len(got.Data) != n {
+			t.Fatalf("%v: %d samples, want %d", c, len(got.Data), n)
+		}
+		s := samplesSplit(got.Data, c.w, c.top, c.bottom)
+		for _, p := range [][2][]float32{{s.Left, want.Left}, {s.Right, want.Right}, {s.Low, want.Low}} {
+			for i, v := range p[1] {
+				if p[0][i] != v {
+					t.Fatalf("%v: sample %d the GPU's %v, the CPU's %v", c, i, p[0][i], v)
+				}
+			}
+		}
+	}
+}

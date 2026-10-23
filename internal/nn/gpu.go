@@ -66,7 +66,7 @@ func NewGPU() (*GPU, error) {
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
 		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "gemm_nn_tc_64", "gemm_nt_tc_64", "conv2d_tc_64",
-		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp"} {
+		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -399,6 +399,12 @@ func (g *GPU) TemporalAttention(q, peQ, peK, peV *Tensor, ks, vs []*Tensor, head
 		addrs[f], addrs[maxFrames+f] = uint64(ptr(ks[f])), uint64(ptr(vs[f])) //nolint:gosec // G602: f < t <= maxFrames
 	}
 	out := g.tensor(d, c)
+	if hd := c / heads; c%32 == 0 && c <= 256 && hd <= 32 && hd&(hd-1) == 0 {
+		per := 256 / c
+		g.launch("temporal_warp", cuda.Dim{X: (d + per - 1) / per}, cuda.Dim{X: per * c}, 0, d, c, hd, t, ptr(q), ptr(peQ),
+			addrs, ptr(peK), ptr(peV), scale, ptr(out))
+		return out
+	}
 	shared := 4 * (c + heads*t)
 	g.launch("temporal", cuda.Dim{X: d}, cuda.Dim{X: c}, shared, d, c, c/heads, t, ptr(q), ptr(peQ),
 		addrs, ptr(peK), ptr(peV), scale, ptr(out))
