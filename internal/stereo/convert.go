@@ -267,7 +267,7 @@ func eyeFrames(buf []byte, f *mvc.Frame) (left, right *mvc.Frame) {
 	w, h := f.Width, f.Height
 	cw, ch := (w+1)/2, (h+1)/2
 	eye := func(b []byte) *mvc.Frame {
-		return &mvc.Frame{Y: b[:w*h:w*h], Cb: b[w*h : w*h+cw*ch : w*h+cw*ch], Cr: b[w*h+cw*ch : w*h+2*cw*ch],
+		return &mvc.Frame{Y: b[: w*h : w*h], Cb: b[w*h : w*h+cw*ch : w*h+cw*ch], Cr: b[w*h+cw*ch : w*h+2*cw*ch],
 			StrideY: w, StrideC: cw, Width: w, Height: h, PTS: f.PTS}
 	}
 	n := len(buf) / 2
