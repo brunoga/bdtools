@@ -108,9 +108,9 @@ convert in hours, not days.
 | MVC MKV | H.264 MVC, 1080p | CoreELEC (Kodi) frame packed |
 | Blu-ray 3D | H.264 MVC in a disc structure | Blu-ray 3D players, from a burned disc or an ISO |
 
-All but the last exist as layouts today (`--layout full`, `half`, `ou`,
-`half-ou`, `mvc`), with `--scale` for 1080p. The Blu-ray 3D one needs a
-new piece: writing a disc, not only reading one.
+Each is there: the layouts as `--layout full`, `half`, `ou`, `half-ou`
+and `mvc`, with `--scale` for 1080p; the Blu-ray 3D as `--output
+film.iso`, a disc image with the film's MVC in it.
 
 - **What that takes:** BDMV with its index, movie object and clip files; a
   playlist with the 3D stream table; the base and dependent views in their
@@ -155,7 +155,7 @@ new piece: writing a disc, not only reading one.
    GPU.
 5. **The command**: `--to-3d` on a 2D source, with every layout; subtitles
    placed by depth; HDR handled.
-6. **Blu-ray 3D authoring**: `--output film.iso` (or a folder) for MVC.
+6. **Blu-ray 3D authoring** (done): `--output film.iso` for MVC.
 
 ## How fast
 
@@ -391,8 +391,15 @@ What that teaches:
    corrected depth. The weights learnt from 27 films are built in;
    the training tool ships, for weights of one's own. Next: filling the holes by it too, and a larger network
    on the GPU.
-10. **Blu-ray 3D authoring**: `--output film.iso` (or a folder) for MVC,
-    checked on a disc player.
+10. **Blu-ray 3D authoring** (first step done): `--output film.iso`, a
+    Blu-ray 3D image: the playlist and clip infos tsMuxeR's byte for byte
+    for the same facts (`internal/bdmv`), the clips' transport streams
+    sent earliest deadline first within their decoders' buffers, the two
+    views interleaved into an SSIF in a UDF 2.50 file system
+    (`internal/udf`) laid out as a pressed disc's; read by libbluray
+    (Kodi's) whole, the disc carrying the encoded stream's every NAL unit.
+    Still to do: checked on a disc player, the subtitles' 3D (offset
+    metadata in the dependent view), a 2D disc.
 
 ## Decisions for you
 

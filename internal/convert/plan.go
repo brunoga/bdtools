@@ -462,9 +462,11 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--layout mvhevc writes an MP4 or QuickTime file: the output must be a .mp4 or .mov (got %q)", ext)
 		}
 	case o.Layout == LayoutMVC && !o.TwoD:
-		if ext != ".mkv" {
-			return fmt.Errorf("--layout mvc writes Matroska: the output must be a .mkv (got %q)", ext)
+		if ext != ".mkv" && ext != ".iso" {
+			return fmt.Errorf("--layout mvc writes Matroska or a Blu-ray 3D disc image: the output must be a .mkv or .iso (got %q)", ext)
 		}
+	case ext == ".iso":
+		return fmt.Errorf("a .iso output is a Blu-ray 3D disc: its video MVC (--layout mvc, the default for it), from a 3D source or --to-3d")
 	case ext != ".mkv" && ext != ".mp4" && ext != ".mov":
 		return fmt.Errorf("output must be a .mkv, .mp4 or .mov (got %q)", ext)
 	}

@@ -27,6 +27,9 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 	if isMP4Output(r.Opts.Output) {
 		return r.muxMP4(ctx, video, extras)
 	}
+	if IsDiscImage(r.Opts.Output) {
+		return r.muxBluray(ctx, video, extras, chapters)
+	}
 	num, den := r.fpsNum, r.fpsDen
 	if num <= 0 {
 		num, den = 24000, 1001
