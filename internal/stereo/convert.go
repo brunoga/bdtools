@@ -131,7 +131,8 @@ func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) {
 }
 
 // Shape is the second half of Next: an Estimate's depth upsampled to the
-// picture and shaped into disparity. The Estimates must come in order.
+// picture and shaped into disparity. The Estimates must come in order;
+// one whose eyes the GPU made has no depth to shape and goes to Eyes.
 func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 	if e.fresh {
 		c.Reset()
@@ -241,8 +242,11 @@ func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, lim)
 		eyes = g.Eyes(p, disp, gapPixels)
 	}
-	out, err := g.Download(d)
-	if err == nil && eyes != nil {
+	var out *nn.Tensor
+	var err error
+	if eyes == nil {
+		out, err = g.Download(d)
+	} else {
 		buf := make([]byte, nn.EyesSize(f.Width, f.Height))
 		var dt *nn.Tensor
 		if err = g.DownloadBytes(buf, eyes); err == nil {

@@ -50,8 +50,10 @@ func (g *GPU) NetInput(p *Picture, top, ah, nw, nh int) *Tensor {
 // float64s, in a tensor of four float32s): x's rows rows of cols values,
 // stride apart.
 func (g *GPU) Moments(x *Tensor, rows, cols, stride int) *Tensor {
-	m := g.tensor(4)
-	g.launch("moments", cuda.Dim{X: 1}, cuda.Dim{X: 1024}, 0, rows, cols, stride, ptr(x), ptr(m))
+	const parts = 128 // kernels.cu's MOMENT_PARTS
+	part, m := g.tensor(2*parts*2), g.tensor(4)
+	g.launch("moments_part", cuda.Dim{X: parts}, cuda.Dim{X: 256}, 0, rows, cols, stride, ptr(x), ptr(part))
+	g.launch("moments_sum", cuda.Dim{X: 1}, cuda.Dim{X: parts}, 0, ptr(part), ptr(m))
 	return m
 }
 
@@ -97,8 +99,15 @@ func (g *GPU) Eyes(p *Picture, d *Tensor, gap float32) *Tensor {
 	n := EyesSize(p.w, p.h)
 	out := g.tensor((n + 3) / 4)
 	rows := 2 * (p.h + 2*((p.h+1)/2))
-	z, v := g.tensor(rows, p.w), g.tensor(rows, p.w)
 	base := ptr(p.buf)
+	const shared = 48 << 10 // a block's shared memory, without asking for more
+	if per := min(4, shared/(8*p.w)); per > 0 {
+		// a warp a row, the row's targets in shared memory
+		g.launch("eyes_warp", cuda.Dim{X: (rows + per - 1) / per}, cuda.Dim{X: 32 * per}, 8*p.w*per, p.w, p.h, base, p.strideY,
+			base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), per)
+		return out
+	}
+	z, v := g.tensor(rows, p.w), g.tensor(rows, p.w)
 	g.launch("eyes", cuda.Dim{X: (rows + 63) / 64}, cuda.Dim{X: 64}, 0, p.w, p.h, base, p.strideY,
 		base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), ptr(z), ptr(v))
 	return out
