@@ -151,7 +151,7 @@ type Options struct {
 	// video depth network, DepthModel's weights, or Video Depth Anything
 	// Small's, downloaded once), the two eyes made from it, and the pair
 	// put out in the layout asked for, as a 3D source's would be. Depth3D
-	// scales the depth (0: 1, the 3D discs'); Screen3D moves the whole of
+	// scales the depth (0: DefaultDepth3D); Screen3D moves the whole of
 	// it nearer (positive) or farther, in percent of the width.
 	To3D              bool
 	DepthModel        string
@@ -364,7 +364,7 @@ func (o Options) Validate(goos string) error {
 		case o.TwoD:
 			return fmt.Errorf("--to-3d and --2d ask for opposite things")
 		case o.Depth3D < 0 || o.Depth3D > 5:
-			return fmt.Errorf("--3d-depth scales the depth, 0 to 5, 1 the 3D discs' (got %g)", o.Depth3D)
+			return fmt.Errorf("--3d-depth scales the depth, 0 to 5, 1 the depth that scores best against the 3D discs' (got %g)", o.Depth3D)
 		case o.Screen3D < -5 || o.Screen3D > 5:
 			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
 		}

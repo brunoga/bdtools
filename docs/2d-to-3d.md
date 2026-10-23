@@ -411,8 +411,11 @@ What that teaches:
 - **GPU first or CPU first.** The plan writes the CPU path first (to check
   correctness against PyTorch, and for machines without NVIDIA), then
   CUDA. AMD/Intel (Vulkan) and Apple (Metal) GPUs come later, if wanted.
-- **The default depth.** Conservative (behind the screen, little out of it)
-  or bolder; it can be a preset (`--3d-depth gentle|normal|strong`).
+- **The default depth** (decided: 1.5). `--3d-depth 1` is the depth that
+  scores best against the discs' right eyes; the discs' own disparity
+  spans 1.7 to 2.2 times it (Furiosa, Avatar: Fire and Ash), as a score
+  punishes misplaced depth more than too little. The default is 1.5 times
+  it; `--3d-depth 1` gives the scored best back.
 - **Shipping refinement weights** (decided: built in). They are learnt
   from commercial 3D films; `--3d-refine none` leaves them out, and
   anyone may learn their own.
