@@ -65,7 +65,7 @@ func NewGPU() (*GPU, error) {
 	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]spare{}}
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
-		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc"} {
+		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "net_input", "moments", "refine_input", "renorm"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err

@@ -584,3 +584,118 @@ extern "C" __global__ void temporal(int d, int c, int hd, int t, const float *q,
 	}
 	out[(long long)p * c + i] = o;
 }
+
+// The picture ops: a decoded picture's 8-bit planes as the depth network
+// and its refinement take them, as stereo's netInput and RefineInput make
+// them on the CPU (the products and sums rounded one by one, unfused, as
+// Go does).
+
+// sample8 is a plane's sample at (fx, fy), bilinearly; the plane pw x ph,
+// its rows stride apart.
+static __device__ float sample8(const unsigned char *p, int stride, int pw, int ph, double fx, double fy) {
+	int x0 = (int)fx, y0 = (int)fy;
+	int x1 = min(x0 + 1, pw - 1), y1 = min(y0 + 1, ph - 1);
+	float ax = (float)(fx - x0), ay = (float)(fy - y0);
+	const unsigned char *r0 = p + (long long)y0 * stride, *r1 = p + (long long)y1 * stride;
+	float t = __fadd_rn(__fmul_rn(r0[x0], 1 - ax), __fmul_rn(r0[x1], ax));
+	float b = __fadd_rn(__fmul_rn(r1[x0], 1 - ax), __fmul_rn(r1[x1], ax));
+	return __fadd_rn(__fmul_rn(t, 1 - ay), __fmul_rn(b, ay));
+}
+
+// net_input is the active rows [top, top+ah) of a w x h picture (its
+// planes Y and, at half size, cb and cr) as the depth network takes them:
+// RGB (BT.709, limited range), resized bilinearly to nw x nh, normalised by
+// ImageNet's mean and deviation, [3, nh, nw].
+extern "C" __global__ void net_input(int w, int h, int top, int ah, int nw, int nh, const unsigned char *Y, int sy,
+	const unsigned char *cb, const unsigned char *cr, int sc, float *x) {
+	const float mean[3] = {0.485f, 0.456f, 0.406f}, sd[3] = {0.229f, 0.224f, 0.225f};
+	int cw = (w + 1) / 2, ch = (h + 1) / 2;
+	EACH((long long)nw * nh) {
+		int ox = i % nw, oy = i / nw;
+		double fy = fmax((oy + 0.5) * ah / nh - 0.5, 0.0) + top;
+		double fyc = fmax((fy + 0.5) / 2 - 0.5, 0.0);
+		double fx = fmax((ox + 0.5) * w / nw - 0.5, 0.0);
+		double fxc = fmax((fx + 0.5) / 2 - 0.5, 0.0);
+		float yv = __fmul_rn(1.164f, sample8(Y, sy, w, h, fx, fy) - 16);
+		float u = sample8(cb, sc, cw, ch, fxc, fyc) - 128;
+		float v = sample8(cr, sc, cw, ch, fxc, fyc) - 128;
+		float rgb[3] = {
+			__fadd_rn(yv, __fmul_rn(1.793f, v)),
+			__fadd_rn(__fadd_rn(yv, -__fmul_rn(0.213f, u)), -__fmul_rn(0.533f, v)),
+			__fadd_rn(yv, __fmul_rn(2.112f, u)),
+		};
+		for (int c = 0; c < 3; c++) {
+			float t = fminf(fmaxf(rgb[c] / 255, 0), 1);
+			x[((long long)c * nh + oy) * nw + ox] = (t - mean[c]) / sd[c];
+		}
+	}
+}
+
+// moments sums x's values and their squares (rows of cols, stride apart)
+// into out[0] and out[1]; one block of 1024 threads.
+extern "C" __global__ void __launch_bounds__(1024) moments(int rows, int cols, int stride, const float *x, double *out) {
+	__shared__ double s[1024], ss[1024];
+	double a = 0, b = 0;
+	for (long long i = threadIdx.x; i < (long long)rows * cols; i += blockDim.x) {
+		double v = x[(i / cols) * stride + i % cols];
+		a += v;
+		b = __dadd_rn(b, __dmul_rn(v, v));
+	}
+	s[threadIdx.x] = a;
+	ss[threadIdx.x] = b;
+	__syncthreads();
+	for (int n = blockDim.x / 2; n > 0; n /= 2) {
+		if (threadIdx.x < n) {
+			s[threadIdx.x] += s[threadIdx.x + n];
+			ss[threadIdx.x] += ss[threadIdx.x + n];
+		}
+		__syncthreads();
+	}
+	if (threadIdx.x == 0) {
+		out[0] = s[0];
+		out[1] = ss[0];
+	}
+}
+
+// meanSD is the mean and deviation of n values from their moments.
+static __device__ void meanSD(const double *mom, double n, double *mean, double *sd) {
+	*mean = mom[0] / n;
+	*sd = sqrt(fmax(mom[1] / n - __dmul_rn(*mean, *mean), 1e-12));
+}
+
+// refine_input is the refinement's input, [4, ph, pw]: the active rows'
+// Y (its 2x2 averages; Y from the first active row), cb and cr (from the
+// first active row's), all w x h, and the depth d (w x h) standardised by
+// its moments mom; the sides padded to pw x ph by repeating the last row
+// and column.
+extern "C" __global__ void refine_input(int w, int h, int pw, int ph, const unsigned char *Y, int sy,
+	const unsigned char *cb, const unsigned char *cr, int sc, const float *d, const double *mom, float *x) {
+	double mean, sd;
+	meanSD(mom, (double)w * h, &mean, &sd);
+	float m32 = (float)mean, inv = (float)(1 / sd);
+	long long plane = (long long)pw * ph;
+	EACH(plane) {
+		int c = i % pw, r = i / pw;
+		int sr = min(r, h - 1), sx = min(c, w - 1);
+		const unsigned char *p = Y + (long long)(2 * sr) * sy + 2 * sx, *q = p + sy;
+		int yb = (p[0] + p[1] + q[0] + q[1] + 2) / 4;
+		x[i] = ((float)yb - 16) / 219 - 0.5f;
+		x[plane + i] = ((float)cb[(long long)sr * sc + sx] - 128) / 112;
+		x[2 * plane + i] = ((float)cr[(long long)sr * sc + sx] - 128) / 112;
+		x[3 * plane + i] = (d[(long long)sr * w + sx] - m32) * inv;
+	}
+}
+
+// renorm is the refinement's output (w x h of rows pw apart, its moments
+// got) put back to the depth's mean and deviation (from its moments
+// want): d, w x h.
+extern "C" __global__ void renorm(int w, int h, int pw, const float *out, const double *want, const double *got, float *d) {
+	double mean, sd, m, s;
+	meanSD(want, (double)w * h, &mean, &sd);
+	meanSD(got, (double)w * h, &m, &s);
+	double k = sd / s;
+	EACH((long long)w * h) {
+		int x = i % w, r = i / w;
+		d[i] = (float)__dadd_rn(mean, __dmul_rn((double)out[(long long)r * pw + x] - m, k));
+	}
+}
