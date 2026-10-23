@@ -117,7 +117,9 @@ func (p *Pending) Wait() (*Estimate, error) {
 func (c *Converter) Start(f *mvc.Frame) *Pending { return c.start(f, true) }
 
 // estimate is Estimate, the eyes made on a GPU only if asked.
-func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) { return c.start(f, eyes).Wait() }
+func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) {
+	return c.start(f, eyes).Wait()
+}
 
 // start is Start, the eyes made on a GPU only if asked.
 func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
