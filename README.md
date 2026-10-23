@@ -24,6 +24,7 @@ bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv" \
         --codec h265 --audio-lang eng --audio-best --subs-lang eng
 bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --codec h265   # HDR10/DV kept
 bdtools --remux --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"       # no re-encode
+bdtools --input "Furiosa (2024).mkv" --output "Furiosa (2024) 3D.iso" --to-3d    # a Blu-ray 3D made
 ```
 
 More in [bdtools' common tasks](cmd/bdtools/README.md#common-tasks).

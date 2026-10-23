@@ -34,6 +34,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
 
+- `--output film.iso`: a Blu-ray 3D disc image of a 3D film (a 3D disc
+  re-encoded, or `--to-3d`): its MVC video in a disc's two clips (the base
+  view's with the audio and subtitles, the dependent view's), interleaved
+  as an SSIF, with the clip infos, a playlist with the chapters and a
+  title that plays it, in a UDF 2.50 file system. Players read it as a
+  pressed disc (Kodi and CoreELEC as an ISO; a disc player burned to a
+  BD-R). The subtitles are at the screen for now.
 - `--to-3d` fills what one eye sees and the other did not (behind an
   edge) with the background's edge carried across, not its texture
   mirrored: measured on the 3D discs' own depth, 1.8 dB nearer their

@@ -60,7 +60,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		dryRun   = fs.Bool("dry-run", false, "print the commands that would run, without running them")
 		input    = fs.String("input", "", "source: a .iso disc image, a BDMV directory, an .m2ts, a .mpls playlist, an MKV or MP4; or a directory of them (a batch, into --output a directory)")
 		playlst  = fs.String("playlist", "", "the title to read from a disc image or folder, by playlist (e.g. 00800), instead of the one the playlists suggest")
-		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC)")
+		output   = fs.String("output", "", "destination .mkv (or .m2ts, .ts: a --remux keeping a 3D disc's MVC; .iso: a Blu-ray 3D disc image)")
 		tempDir  = fs.String("temp", "", "scratch directory for the audio, subtitles and encoded video (default: alongside the output)")
 		spFOV    = fs.Float64("spatial-fov", 90, "--layout mvhevc: the horizontal field of view of each eye's picture, in degrees, as the file states it")
 		spBase   = fs.Float64("spatial-baseline", 63, "--layout mvhevc: the distance between the two cameras, in millimetres, as the file states it (Apple's Photos marks a file spatial only with it or a disparity)")
@@ -216,6 +216,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if convert.IsDiscImage(*output) && !given["layout"] {
+		*layout = string(convert.LayoutMVC) // a Blu-ray 3D disc's
+	}
 	cod := convert.Codec(*codec)
 	if convert.Layout(*layout) == convert.LayoutMVC && !given["codec"] {
 		cod = convert.CodecH264 // MVC is H.264's
