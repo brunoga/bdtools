@@ -277,6 +277,17 @@ func (m *depthMap) offsetLocked(seq int, t time.Duration) int {
 }
 
 // sort orders the GOPs by time, as they may arrive out of order.
+// sequences is how many offset sequences the map has (at least one).
+func (m *depthMap) sequences() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 1
+	for _, g := range m.gops {
+		n = max(n, len(g.offsets))
+	}
+	return n
+}
+
 func (m *depthMap) sort() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -318,4 +329,67 @@ func (r *bitReader) ue() int {
 		}
 	}
 	return 1<<zeros - 1 + r.bits(zeros)
+}
+
+// ofmdNAL is a GOP's offset metadata as a disc's dependent view carries
+// it: an SEI NAL unit, an MVC scalable nesting message (all of the access
+// unit's views) holding the user_data_unregistered message. pts is the
+// GOP's first displayed frame's (90 kHz), rate its frame_rate code,
+// offsets[seq][frame] in pixels (positive toward the viewer).
+func ofmdNAL(pts int64, rate byte, offsets [][]int8) []byte {
+	frames := 0
+	if len(offsets) > 0 {
+		frames = len(offsets[0])
+	}
+	p := append(append([]byte(nil), ofmdUUID...), "OFMD"...)
+	v := uint64(pts) & (1<<33 - 1) //nolint:gosec // 33 bits
+	p = append(p, 0x80|rate&0x0f, byte(v>>30)&7, 0x80|byte(v>>23)&0x7f, byte(v>>15), 0x80|byte(v>>8)&0x7f, byte(v),
+		0x80|byte(len(offsets))&0x3f, byte(frames), 0x80, 0) //nolint:gosec // up to 32 sequences
+	for _, row := range offsets {
+		for _, o := range row {
+			if o > 0 {
+				p = append(p, byte(o)&0x7f) //nolint:gosec // 7 bits
+			} else {
+				p = append(p, 0x80|byte(-int(o))&0x7f) //nolint:gosec // behind the screen
+			}
+		}
+	}
+	nested := append(seiHeader(5, len(p)), p...)
+	msg := append([]byte{0x40}, nested...) // all the access unit's views
+	sei := append(append([]byte{0x06}, seiHeader(37, len(msg))...), msg...)
+	sei = append(sei, 0x80) // rbsp trailing bits
+	return escapeRBSP(sei)
+}
+
+// seiHeader is an SEI message's type and size.
+func seiHeader(typ, size int) []byte {
+	var b []byte
+	for ; typ >= 255; typ -= 255 {
+		b = append(b, 0xff)
+	}
+	b = append(b, byte(typ))
+	for ; size >= 255; size -= 255 {
+		b = append(b, 0xff)
+	}
+	return append(b, byte(size))
+}
+
+// escapeRBSP adds emulation prevention bytes to a NAL unit (its header
+// first).
+func escapeRBSP(b []byte) []byte {
+	out := make([]byte, 0, len(b)+len(b)/64)
+	zeros := 0
+	for i, c := range b {
+		if i > 0 && zeros >= 2 && c <= 3 {
+			out = append(out, 3)
+			zeros = 0
+		}
+		out = append(out, c)
+		if c == 0 {
+			zeros++
+		} else {
+			zeros = 0
+		}
+	}
+	return out
 }

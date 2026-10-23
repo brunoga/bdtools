@@ -2,6 +2,7 @@ package convert
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -137,5 +138,31 @@ func TestDepthMap(t *testing.T) {
 	var none *depthMap
 	if none.offset(0, time.Second) != 0 {
 		t.Error("no map, yet an offset")
+	}
+}
+
+// Offset metadata written reads back, and is laid out as a disc's.
+func TestOFMDWritten(t *testing.T) {
+	offsets := [][]int8{{0, 5, -3, 127}, {-127, 0, 0, 1}}
+	nal := ofmdNAL(1048560, 1, offsets)
+	g, ok := parseOffsetMetadata(append([]byte{0, 0, 0, 1}, nal...))
+	if !ok || g.pts != 1048560 || len(g.offsets) != 2 {
+		t.Fatalf("read back as %+v, %v", g, ok)
+	}
+	for s := range offsets {
+		for f, o := range offsets[s] {
+			if g.offsets[s][f] != o {
+				t.Fatalf("sequence %d frame %d: %d, want %d", s, f, g.offsets[s][f], o)
+			}
+		}
+	}
+	// a disc's: 0x81 (rate 1), the PTS, 0xa0 for 32 sequences, frames, 80 00
+	p := unescapeRBSP(ofmdNAL(1048560, 1, make([][]int8, 32)))
+	at := bytes.Index(p, []byte("OFMD")) + 4
+	if got := fmt.Sprintf("%x", p[at:at+6]); got != "8100801ffff0" {
+		t.Errorf("header %s, a disc's 8100801ffff0", got)
+	}
+	if p[0] != 6 || p[1] != 37 || p[at+6] != 0xa0 {
+		t.Errorf("SEI %x, nesting type %d, sequences byte %#x", p[0], p[1], p[at+6])
 	}
 }

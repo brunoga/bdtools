@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,7 +68,12 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 			c()
 		}
 	}()
-	baseVideo, lastPTS, height, err := r.discVideo(video, num, den, false, &closers)
+	if r.depth != nil {
+		r.depth.frame = time.Duration(int64(time.Second) * int64(den) / int64(num))
+		r.depth.sort()
+	}
+	gops := &discGOPs{}
+	baseVideo, lastPTS, height, err := r.discVideo(video, num, den, false, gops, &closers)
 	if err != nil {
 		return err
 	}
@@ -76,7 +83,7 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 	}
 	base := &bdmv.ClipMux{Rate: rateBase, Streams: []*bdmv.MuxStream{{PID: pidBaseVideo, Coding: bdmv.CodingAVC,
 		Format: format, Rate: rate, Aspect: 3, Buffer: 4 << 20, Next: baseVideo}}}
-	audio, pgs, err := r.discExtras(extras, &closers)
+	audio, pgs, pgSeqs, err := r.discExtras(extras, &closers)
 	if err != nil {
 		return err
 	}
@@ -90,7 +97,12 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 		return err
 	}
 	// the dependent view's clip: the right eye
-	depVideo, _, _, err := r.discVideo(video, num, den, true, &closers)
+	gops.count()
+	if r.depth != nil {
+		gops.rate, gops.seqs = rate, r.depth.sequences()
+		r.Report.Report("3D subtitles: the depth of %d offset sequence(s) in the dependent view, a GOP at a time", gops.seqs)
+	}
+	depVideo, _, _, err := r.discVideo(video, num, den, true, gops, &closers)
 	if err != nil {
 		return err
 	}
@@ -126,7 +138,7 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 	depClip := &bdmv.Clip{Dependent: true, RecordingRate: rateDep / 8, Packets: dep.Packets, PCRPID: 0x1001, Start: in, End: out,
 		Streams: clipStreams(dep.Streams), EPPID: pidDepVideo, EP: dep.EP, Extents: spns(depCuts)}
 	item := bdmv.PlayItem{Clip: "00000", Codec: "M2TS", ConnectionCondition: 1, InTime: in, OutTime: out,
-		DependentPID: pidDepVideo, OffsetSequences: 1}
+		DependentPID: pidDepVideo, OffsetSequences: max(gops.seqs, 1)}
 	for _, s := range base.Streams {
 		kind := bdmv.KindAudio
 		switch s.Coding {
@@ -135,8 +147,12 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 		case bdmv.CodingPGS:
 			kind = bdmv.KindPG
 		}
+		seq := -1
+		if kind == bdmv.KindPG && gops.seqs > 0 {
+			seq = min(max(pgSeqs[s.PID], 0), gops.seqs-1)
+		}
 		item.Streams = append(item.Streams, bdmv.Stream{Kind: kind, EntryType: 1, PID: s.PID, Coding: s.Coding,
-			Format: s.Format, Rate: s.Rate, Lang: s.Lang, OffsetSequence: -1})
+			Format: s.Format, Rate: s.Rate, Lang: s.Lang, OffsetSequence: seq})
 	}
 	pl := &bdmv.Playlist{Items: []bdmv.PlayItem{item},
 		SubPaths: []bdmv.SubPath{{Type: bdmv.SubPathMVC, Items: []bdmv.SubPlayItem{{Clip: "00001", Codec: "M2TS",
@@ -189,7 +205,7 @@ func muxClip(c *bdmv.ClipMux, path string, start int64) error {
 // views (the dependent's when dep), their times on the clips' timeline
 // less discStart; last is set, once read, to the last picture's. It
 // gives the picture's height too.
-func (r *Runner) discVideo(video []string, num, den int, dep bool, closers *[]func()) (func() (bdmv.MuxFrame, error), *int64, int, error) {
+func (r *Runner) discVideo(video []string, num, den int, dep bool, gops *discGOPs, closers *[]func()) (func() (bdmv.MuxFrame, error), *int64, int, error) {
 	vr, closeVideo, err := openSegments(video)
 	if err != nil {
 		return nil, nil, 0, err
@@ -209,8 +225,16 @@ func (r *Runner) discVideo(video []string, num, den int, dep bool, closers *[]fu
 		*last = max(*last, pts)
 		base, dv := splitMVC(lengthPrefixed(f.Data))
 		data := base
-		if dep {
+		if !dep {
+			gops.pts = append(gops.pts, pts)
+			if f.Keyframe {
+				gops.keys = append(gops.keys, pts)
+			}
+		} else {
 			data = dv
+			if f.Keyframe && gops.seqs > 0 {
+				data = r.withOffsets(data, gops, pts, f.PTS, time.Duration(int64(time.Second)*int64(den)/int64(num)))
+			}
 		}
 		return bdmv.MuxFrame{PTS: pts, DTS: dts, Data: data, Key: f.Keyframe}, nil
 	}, last, v.Track().Height, nil
@@ -272,7 +296,8 @@ func splitMVC(nals [][]byte) (base, dep []byte) {
 }
 
 // discExtras is the audio and subtitle streams of the base view's clip.
-func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bdmv.MuxStream, err error) {
+func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bdmv.MuxStream, pgSeqs map[uint16]int, err error) {
+	pgSeqs = map[uint16]int{}
 	open := func(path string) (*os.File, error) {
 		f, err := os.Open(path) //nolint:gosec // our work directory
 		if err == nil {
@@ -292,19 +317,23 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 			}
 			f, err := open(e.path)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			pgs = append(pgs, &bdmv.MuxStream{PID: pidPG + uint16(len(pgs)), Coding: bdmv.CodingPGS, Lang: lang, //nolint:gosec // a few
+			pid := pidPG + uint16(len(pgs)) //nolint:gosec // a few
+			if r.offsetSequence != nil {
+				pgSeqs[pid] = r.offsetSequence(e.track)
+			}
+			pgs = append(pgs, &bdmv.MuxStream{PID: pid, Coding: bdmv.CodingPGS, Lang: lang,
 				Buffer: 1 << 20, Next: pgsSegments(mkv.NewPGSSource(f, lang))})
 			continue
 		}
 		format := audioFormat(e)
 		if format == mkv.WAV || format == mkv.AAC {
-			return nil, nil, fmt.Errorf("blu-ray: audio track %d is %s, which a disc does not carry: --audio-transcode ac3", e.track.ID, e.track.Type)
+			return nil, nil, nil, fmt.Errorf("blu-ray: audio track %d is %s, which a disc does not carry: --audio-transcode ac3", e.track.ID, e.track.Type)
 		}
 		f, err := open(e.path)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		a, err := mkv.NewAudioSource(f, format, false, lang)
 		if err != nil {
@@ -324,16 +353,16 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 			// its AC-3 core interleaved, as a disc carries it
 			cf, err := open(e.path)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			if mkv.HasCore(cf, format) {
 				cf2, err := open(e.path)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, nil, err
 				}
 				core, err := mkv.NewAudioSource(cf2, format, true, lang)
 				if err != nil {
-					return nil, nil, fmt.Errorf("blu-ray: the AC-3 core of track %d: %w", e.track.ID, err)
+					return nil, nil, nil, fmt.Errorf("blu-ray: the AC-3 core of track %d: %w", e.track.ID, err)
 				}
 				core.SetSyncPoints(e.sync)
 				next = interleaveFrames(audioFrames(core), next)
@@ -352,7 +381,7 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 		s.Next = next
 		audio = append(audio, s)
 	}
-	return audio, pgs, nil
+	return audio, pgs, pgSeqs, nil
 }
 
 // presentation is an audio stream's audio_presentation_type.
@@ -547,4 +576,59 @@ func (r *Runner) writeDisc(ctx context.Context, dir string, pl *bdmv.Playlist, b
 		return fmt.Errorf("writing the disc image: %w", err)
 	}
 	return os.Rename(tmp, r.Opts.Output)
+}
+
+// discGOPs is the video's GOPs, found on the first pass over it (the base
+// view's) for the second (the dependent view's, whose first access unit
+// of each carries its subtitles' depth): every picture's presentation
+// time and the key pictures', 90 kHz.
+type discGOPs struct {
+	pts, keys []int64
+	frames    map[int64]int // a GOP's pictures, by its key picture's time
+	rate      byte          // the video's frame_rate code
+	seqs      int           // offset sequences (0: none)
+}
+
+// count finds each GOP's pictures: those shown from its key picture to
+// the next's.
+func (g *discGOPs) count() {
+	slices.Sort(g.pts)
+	slices.Sort(g.keys)
+	g.frames = map[int64]int{}
+	for i, k := range g.keys {
+		end := int64(math.MaxInt64)
+		if i+1 < len(g.keys) {
+			end = g.keys[i+1]
+		}
+		a, _ := slices.BinarySearch(g.pts, k)
+		b, _ := slices.BinarySearch(g.pts, end)
+		g.frames[k] = b - a
+	}
+}
+
+// withOffsets puts the GOP's offset metadata (a GOP of g starting at pts,
+// at on the output's timeline) into a dependent view access unit, after
+// its delimiter.
+func (r *Runner) withOffsets(au []byte, g *discGOPs, pts int64, at, frame time.Duration) []byte {
+	n := min(g.frames[pts], 255)
+	if n <= 0 {
+		return au
+	}
+	offsets := make([][]int8, g.seqs)
+	for s := range offsets {
+		offsets[s] = make([]int8, n)
+		for i := range n {
+			offsets[s][i] = int8(min(max(r.depth.offset(s, at+time.Duration(i)*frame), -127), 127)) //nolint:gosec // clamped
+		}
+	}
+	sei := ofmdNAL(pts+discStart, g.rate, offsets)
+	// after the dependent view delimiter (after the MVC parameter sets)
+	var out []byte
+	for _, n := range annexBNALs(au) {
+		out = append(append(out, 0, 0, 0, 1), n...)
+		if len(n) > 0 && n[0]&0x1f == 24 {
+			out = append(append(out, 0, 0, 0, 1), sei...)
+		}
+	}
+	return out
 }

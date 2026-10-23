@@ -893,7 +893,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	g.trim = r.Opts.Trim
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }
-	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat {
+	// the subtitles' depth: for drawing them in 3D, or a disc's offset
+	// metadata
+	if r.Opts.Subs3D.threeD() || r.Opts.BurnSubs != 0 && !r.flat || IsDiscImage(r.Opts.Output) {
 		r.depth = &depthMap{}
 		g.depth = r.depth
 		// A Matroska file does not say which offset sequence a subtitle

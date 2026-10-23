@@ -398,8 +398,10 @@ What that teaches:
     views interleaved into an SSIF in a UDF 2.50 file system
     (`internal/udf`) laid out as a pressed disc's; read by libbluray
     (Kodi's) whole, the disc carrying the encoded stream's every NAL unit.
-    Still to do: checked on a disc player, the subtitles' 3D (offset
-    metadata in the dependent view), a 2D disc.
+    The subtitles' depth as a disc's offset metadata (an MVC scalable
+    nesting SEI in each GOP's first dependent view access unit, its layout
+    a commercial disc's byte for byte). Still to do: checked on a disc
+    player, a 2D disc, the offset metadata in an MVC Matroska file too.
 
 ## Decisions for you
 
