@@ -163,6 +163,21 @@ func TestMuxClip(t *testing.T) {
 			}
 		}
 	}
+	// and none more than a second ahead
+	for pid, fs := range map[uint16][]MuxFrame{0x1011: video, 0x1100: audio} {
+		k := -1
+		for i := range int(c.Packets) {
+			p := b[i*192:]
+			if uint16(p[5]&0x1f)<<8|uint16(p[6]) != pid || p[5]&0x40 == 0 {
+				continue
+			}
+			k++
+			ats := start + (int64(p[0]&0x3f)<<24|int64(p[1])<<16|int64(p[2])<<8|int64(p[3])-start)&(1<<30-1)
+			if lead := (fs[k].DTS+shift)*300 - ats; lead > maxLead {
+				t.Fatalf("%#x: frame %d %d ms ahead of its decoding", pid, k, lead/27000)
+			}
+		}
+	}
 	if c.First != shift || c.Last != shift+240*3754 {
 		t.Errorf("presented from %d to %d", c.First, c.Last)
 	}

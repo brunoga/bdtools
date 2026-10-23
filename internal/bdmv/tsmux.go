@@ -18,7 +18,8 @@ import (
 //
 // Each clip's packets are sent earliest deadline first: the next packet
 // is the one of the frame decoded soonest, among the streams whose
-// decoder buffer has room for it, at no more than the clip's rate; a PCR
+// decoder buffer has room for it (and no more than a second ahead), at
+// no more than the clip's rate; a PCR
 // goes every 50 ms and the PAT, PMT and SIT every 100 ms, as tsMuxeR's do.
 
 // MuxFrame is one frame of a stream: a video access unit, an audio frame,
@@ -78,6 +79,11 @@ const (
 	// Preload is how far ahead of the first frame's decoding a clip's
 	// first packet arrives.
 	Preload = 27_000_000 / 2
+	// maxLead is how far ahead of its decoding a frame may arrive, whatever
+	// room its buffer has: a low-rate stream (a dependent view) would
+	// otherwise run tens of seconds ahead, which a player reading the two
+	// clips interleaved does not expect.
+	maxLead = 27_000_000
 )
 
 // sitSection is the clip's SIT: a partial transport stream descriptor
@@ -213,9 +219,15 @@ func (c *ClipMux) mux(start, shift int64) error {
 			continue
 		}
 		var pick *stream
-		var wake int64 = -1 // when a full buffer empties some
+		var wake int64 = -1 // when a full buffer empties some, or a frame may go
 		for _, s := range ss {
 			if s.done {
+				continue
+			}
+			if early := s.dts - maxLead; t < early {
+				if wake < 0 || early < wake {
+					wake = early
+				}
 				continue
 			}
 			if s.inBuf+184 > s.Buffer {
