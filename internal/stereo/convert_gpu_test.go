@@ -140,10 +140,16 @@ func TestEyesOnTheGPU(t *testing.T) {
 			nd[i] += 25
 		}
 	}
+	// rows too wide for shared memory: a thread a row
+	wide := randomPicture(r, 6200, 9)
+	wd := make([]float32, wide.Width*wide.Height)
+	for i := range wd {
+		wd[i] = float32(math.Sin(float64(i%wide.Width)/7)*20) + r.Float32()
+	}
 	for _, c := range []struct {
 		f *mvc.Frame
 		d []float32
-	}{{sq, sqd}, {noisy, nd}} {
+	}{{sq, sqd}, {noisy, nd}, {wide, wd}} {
 		f := c.f
 		wl, wr := Pair(f, c.d)
 		p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)

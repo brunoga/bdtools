@@ -649,22 +649,45 @@ extern "C" __global__ void net_input(int w, int h, int top, int ah, int nw, int 
 }
 
 // moments sums x's values and their squares (rows of cols, stride apart)
-// into out[0] and out[1]; one block of 1024 threads.
-extern "C" __global__ void __launch_bounds__(1024) moments(int rows, int cols, int stride, const float *x, double *out) {
-	__shared__ double s[1024], ss[1024];
-	double a = 0, b = 0;
-	for (long long i = threadIdx.x; i < (long long)rows * cols; i += blockDim.x) {
-		double v = x[(i / cols) * stride + i % cols];
+// into out[0] and out[1], in two passes for any size, the same sums every
+// time: momentsPart's blocks (256 threads) each a share of the values (a
+// thread's few summed in single precision, the block's in double) into
+// part, momentsSum's one block part's nparts into out.
+#define MOMENT_PARTS 128
+extern "C" __global__ void __launch_bounds__(256) moments_part(int rows, int cols, int stride, const float *x, double *part) {
+	__shared__ double s[256], ss[256];
+	long long n = (long long)rows * cols;
+	float a = 0, b = 0;
+	for (long long i = blockIdx.x * 256LL + threadIdx.x; i < n; i += (long long)gridDim.x * 256) {
+		float v = x[(i / cols) * stride + i % cols];
 		a += v;
-		b = __dadd_rn(b, __dmul_rn(v, v));
+		b = __fadd_rn(b, __fmul_rn(v, v));
 	}
 	s[threadIdx.x] = a;
 	ss[threadIdx.x] = b;
 	__syncthreads();
-	for (int n = blockDim.x / 2; n > 0; n /= 2) {
-		if (threadIdx.x < n) {
-			s[threadIdx.x] += s[threadIdx.x + n];
-			ss[threadIdx.x] += ss[threadIdx.x + n];
+	for (int k = 128; k > 0; k /= 2) {
+		if (threadIdx.x < k) {
+			s[threadIdx.x] += s[threadIdx.x + k];
+			ss[threadIdx.x] += ss[threadIdx.x + k];
+		}
+		__syncthreads();
+	}
+	if (threadIdx.x == 0) {
+		part[2 * blockIdx.x] = s[0];
+		part[2 * blockIdx.x + 1] = ss[0];
+	}
+}
+
+extern "C" __global__ void __launch_bounds__(MOMENT_PARTS) moments_sum(const double *part, double *out) {
+	__shared__ double s[MOMENT_PARTS], ss[MOMENT_PARTS];
+	s[threadIdx.x] = part[2 * threadIdx.x];
+	ss[threadIdx.x] = part[2 * threadIdx.x + 1];
+	__syncthreads();
+	for (int k = MOMENT_PARTS / 2; k > 0; k /= 2) {
+		if (threadIdx.x < k) {
+			s[threadIdx.x] += s[threadIdx.x + k];
+			ss[threadIdx.x] += ss[threadIdx.x + k];
 		}
 		__syncthreads();
 	}
@@ -959,6 +982,171 @@ extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, co
 		}
 	}
 	for (int X = 0; X < n; X++) {
+		o[X] = (unsigned char)fminf(fmaxf(V(X) + 0.5f, 0), 255);
+	}
+#undef DISP
+#undef POS
+#undef Z
+#undef V
+}
+
+// eyes_warp is eyes with a warp a row, the row's targets in shared memory
+// (rows rows a block, the dynamic shared memory 8 bytes a target): the
+// lanes rasterise the segments side by side, each target's winner kept by
+// an atomic maximum of its depth (ordered as unsigned) above the
+// segment's order reversed, so that it is the one eyes' loop keeps (the
+// nearest, the first of equals); then its value is computed again from
+// the winning segment, the holes filled by a lane, the row written.
+static __device__ __forceinline__ unsigned orderedF(float f) {
+	unsigned u = __float_as_uint(f);
+	return u & 0x80000000u ? ~u : u | 0x80000000u;
+}
+
+static __device__ __forceinline__ float unorderedF(unsigned u) {
+	return __uint_as_float(u & 0x80000000u ? u & 0x7fffffffu : ~u);
+}
+
+extern "C" __global__ void eyes_warp(int w, int h, const unsigned char *Y, int sy, const unsigned char *cb,
+	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, int rows) {
+	extern __shared__ unsigned long long keys[];
+	int cw = (w + 1) / 2, ch = (h + 1) / 2;
+	int per = h + 2 * ch, nrows = 2 * per;
+	int lane = threadIdx.x % 32, wr = threadIdx.x / 32;
+	int row = blockIdx.x * rows + wr;
+	if (row >= nrows) {
+		return;
+	}
+	unsigned long long *key = keys + (long long)wr * w;
+	int eye = row / per, r = row % per;
+	float sign = eye == 0 ? 0.5f : -0.5f;
+	long long eyeSize = (long long)w * h + 2LL * cw * ch;
+	unsigned char *o = out + eye * eyeSize;
+	const unsigned char *src;
+	const float *dr = 0;
+	int n, lr = 0;
+	bool luma = r < h;
+	if (luma) {
+		src = Y + (long long)r * sy;
+		dr = d + (long long)r * w;
+		o += (long long)r * w;
+		n = w;
+	} else {
+		int c = r - h;
+		const unsigned char *plane = cb;
+		o += (long long)w * h;
+		if (c >= ch) {
+			c -= ch;
+			plane = cr;
+			o += (long long)cw * ch;
+		}
+		src = plane + (long long)c * sc;
+		o += (long long)c * cw;
+		lr = min(2 * c, h - 1);
+		n = cw;
+	}
+#define DISP(x) (luma ? dr[x] : d[(long long)lr * w + min(2 * (x), w - 1)] / 2)
+#define POS(x) __fadd_rn((float)(x), __fmul_rn(sign, DISP(x)))
+	for (int x = lane; x < n; x += 32) {
+		key[x] = 0;
+	}
+	__syncwarp();
+	auto put = [&](int X, float depth, int seq) {
+		if (X < 0 || X >= n) {
+			return;
+		}
+		atomicMax(&key[X], (unsigned long long)orderedF(depth) << 32 | (0xffffffffu - (unsigned)seq));
+	};
+	for (int x = lane; x < n - 1; x += 32) {
+		float p0 = POS(x), p1 = POS(x + 1), d0 = DISP(x), d1 = DISP(x + 1);
+		float lo = fminf(p0, p1), hi = fmaxf(p0, p1);
+		if (hi - lo > gap) {
+			put((int)round((double)p0), d0, x);
+			put((int)round((double)p1), d1, x);
+			continue;
+		}
+		for (int X = (int)ceil((double)lo); (float)X <= hi; X++) {
+			float t = 0;
+			if (p1 != p0) {
+				t = ((float)X - p0) / (p1 - p0);
+			}
+			put(X, __fadd_rn(d0, __fmul_rn(d1 - d0, t)), x);
+		}
+	}
+	if (lane == 0) {
+		put((int)round((double)POS(n - 1)), DISP(n - 1), n - 1);
+	}
+	__syncwarp();
+	// each target's depth and value, in its key's place
+	float *zv = (float *)key; // [2X] depth, [2X+1] value
+	for (int X = lane; X < n; X += 32) {
+		unsigned long long k = key[X];
+		float z = -INFINITY, v = 0;
+		if (k != 0) {
+			int x = 0xffffffffu - (unsigned)k;
+			z = unorderedF((unsigned)(k >> 32));
+			if (x == n - 1) {
+				v = src[n - 1];
+			} else {
+				float p0 = POS(x), p1 = POS(x + 1), a = src[x], b = src[x + 1];
+				float lo = fminf(p0, p1), hi = fmaxf(p0, p1);
+				if (hi - lo > gap) {
+					v = X == (int)round((double)p0) ? a : b;
+				} else {
+					float t = 0;
+					if (p1 != p0) {
+						t = ((float)X - p0) / (p1 - p0);
+					}
+					v = __fadd_rn(a, __fmul_rn(b - a, t));
+				}
+			}
+		}
+		zv[2 * X] = z;
+		zv[2 * X + 1] = v;
+	}
+	__syncwarp();
+#define Z(x) zv[2 * (x)]
+#define V(x) zv[2 * (x) + 1]
+	if (lane == 0) {
+		for (int x = 0; x < n;) {
+			if (Z(x) != -INFINITY) {
+				x++;
+				continue;
+			}
+			int a0 = x;
+			while (x < n && Z(x) == -INFINITY) {
+				x++;
+			}
+			int b0 = x, left = a0 - 1, right = b0;
+			bool useRight;
+			if (left < 0 && right >= n) {
+				continue;
+			} else if (left < 0) {
+				useRight = true;
+			} else if (right >= n) {
+				useRight = false;
+			} else {
+				useRight = Z(right) < Z(left);
+			}
+			for (int X = a0; X < b0; X++) {
+				int s;
+				if (useRight) {
+					s = min(right + (b0 - 1 - X), n - 1);
+					while (s > right && Z(s) == -INFINITY) {
+						s--;
+					}
+				} else {
+					s = max(left - (X - a0), 0);
+					while (s < left && Z(s) == -INFINITY) {
+						s++;
+					}
+				}
+				V(X) = V(s);
+				Z(X) = Z(s);
+			}
+		}
+	}
+	__syncwarp();
+	for (int X = lane; X < n; X += 32) {
 		o[X] = (unsigned char)fminf(fmaxf(V(X) + 0.5f, 0), 255);
 	}
 #undef DISP
