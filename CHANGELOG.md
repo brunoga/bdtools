@@ -13,7 +13,7 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (downloaded once), the eyes made from it, the nearer covering the
   farther and what an eye sees behind an edge filled from the background
   side. `--3d-depth` and `--3d-screen` scale the depth and move it
-  nearer or farther (by default it is the 3D discs', as measured on them), `--depth-model` another
+  nearer or farther (by default 1.5 times the depth that scores best against the 3D discs', which spread theirs about twice as wide), `--depth-model` another
   checkpoint. Letterbox bars stay at the screen, cuts start the depth
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or

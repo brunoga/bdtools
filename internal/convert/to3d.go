@@ -101,7 +101,23 @@ func (o Options) to3DKey() [3]float64 {
 	if o.NoWindow3D {
 		w = 2
 	}
-	return [3]float64{w, o.Depth3D, o.Screen3D}
+	return [3]float64{w, o.depth3D(), o.Screen3D}
+}
+
+// DefaultDepth3D is --3d-depth's default: half again the depth that scores
+// best against the 3D discs' (stereo.ShapeFor's). The discs' disparity
+// spans 1.7 to 2.2 times that one's (5th to 95th percentile, on two films
+// held out of its choice): a score against the disc's right eye punishes
+// depth in the wrong place more than too little of it, so its best is
+// flatter than the discs.
+const DefaultDepth3D = 1.5
+
+// depth3D is the depth's strength asked for, DefaultDepth3D when not.
+func (o Options) depth3D() float64 {
+	if o.Depth3D > 0 {
+		return o.Depth3D
+	}
+	return DefaultDepth3D
 }
 
 // refineNone is Refine3D's for no refinement.
@@ -127,10 +143,8 @@ func (o Options) refine3DKey() string {
 // (its own scale of depth: depth.Model.Size).
 func (o Options) shape3D(size string) stereo.Shape {
 	s := stereo.ShapeFor(size, o.Refine3D != refineNone)
-	if o.Depth3D > 0 {
-		s.Scale *= o.Depth3D
-		s.Offset *= o.Depth3D
-	}
+	s.Scale *= o.depth3D()
+	s.Offset *= o.depth3D()
 	s.Offset += o.Screen3D / 100
 	return s
 }
