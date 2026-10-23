@@ -13,7 +13,7 @@ import (
 func randomPicture(r *rand.Rand, w, h int) *mvc.Frame {
 	f := &mvc.Frame{Width: w, Height: h, StrideY: w + 16, StrideC: w/2 + 8}
 	f.Y = make([]byte, f.StrideY*h)
-	f.Cb, f.Cr = make([]byte, f.StrideC*h/2), make([]byte, f.StrideC*h/2)
+	f.Cb, f.Cr = make([]byte, f.StrideC*((h+1)/2)), make([]byte, f.StrideC*((h+1)/2))
 	for _, p := range [][]byte{f.Y, f.Cb, f.Cr} {
 		for i := range p {
 			p[i] = byte(16 + r.IntN(220))
@@ -118,5 +118,108 @@ func TestRefineOnTheGPUFromThePicture(t *testing.T) {
 	}
 	if off := worstOff(got.Data, want.Data); off > 1e-3 {
 		t.Errorf("the GPU's refined depth %.2g off the CPU's", off)
+	}
+}
+
+func TestEyesOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(7, 8))
+	sq, sqd := scene(101, 47)
+	noisy := randomPicture(r, 203, 61)
+	// smooth slopes, steps both ways (holes and fold-overs) and the
+	// row's ends pushed out
+	nd := make([]float32, noisy.Width*noisy.Height)
+	for i := range nd {
+		x, y := i%noisy.Width, i/noisy.Width
+		nd[i] = float32(math.Sin(float64(x)/9+float64(y)/5)*12) + r.Float32()
+		if (x/23)%3 == 1 {
+			nd[i] += 25
+		}
+	}
+	for _, c := range []struct {
+		f *mvc.Frame
+		d []float32
+	}{{sq, sqd}, {noisy, nd}} {
+		f := c.f
+		wl, wr := Pair(f, c.d)
+		p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
+		buf := make([]byte, nn.EyesSize(f.Width, f.Height))
+		err := g.DownloadBytes(buf, g.Eyes(p, g.Upload(&nn.Tensor{Shape: []int{f.Height, f.Width}, Data: c.d}), gapPixels))
+		g.Release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		gl, gr := eyeFrames(buf, f)
+		for _, e := range []struct {
+			name      string
+			got, want *mvc.Frame
+		}{{"left", gl, wl}, {"right", gr, wr}} {
+			for pl, ps := range [][2][]byte{{e.got.Y, e.want.Y}, {e.got.Cb, e.want.Cb}, {e.got.Cr, e.want.Cr}} {
+				for i, v := range ps[1] {
+					if ps[0][i] != v {
+						t.Fatalf("%dx%d, the %s eye's plane %d, sample %d: the GPU's %d, the CPU's %d",
+							f.Width, f.Height, e.name, pl, i, ps[0][i], v)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDisparityOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(9, 10))
+	w, h, top, bottom := 64, 40, 5, 33
+	up := nn.New(1, bottom-top, w)
+	for i := range up.Data {
+		up.Data[i] = r.Float32() * 80
+	}
+	s := Shaper{Shape: RefinedShape}
+	want := s.Disparity(up.Data, w)
+	ww := float64(w)
+	got, err := g.Download(g.Disparity(g.Upload(up), w, h, top, bottom, float32(s.Shape.Scale*ww), float32(s.Shape.Offset*ww), float32(0.04*ww)))
+	g.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, v := range got.Data {
+		y := i / w
+		exp := float32(0)
+		if y >= top && y < bottom {
+			exp = want[i-top*w]
+		}
+		if v != exp {
+			t.Fatalf("value %d: the GPU's %v, the CPU's %v", i, v, exp)
+		}
+	}
+}
+
+func BenchmarkEyesOnTheGPU(b *testing.B) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		b.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(7, 8))
+	f := randomPicture(r, 1920, 1080)
+	d := nn.New(1080, 1920)
+	for i := range d.Data {
+		d.Data[i] = float32(math.Sin(float64(i%1920)/40)*15) - 3
+	}
+	buf := make([]byte, nn.EyesSize(f.Width, f.Height))
+	for b.Loop() {
+		p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
+		if err := g.DownloadBytes(buf, g.Eyes(p, g.Upload(d), gapPixels)); err != nil {
+			b.Fatal(err)
+		}
+		g.Release()
 	}
 }

@@ -67,7 +67,7 @@ func (c *Converter) Window(left, right *mvc.Frame, d []float32) {
 // error is the depth model's backend's (a GPU's). It is Estimate then
 // Shape.
 func (c *Converter) Next(f *mvc.Frame) (depth, disparity []float32, err error) {
-	e, err := c.Estimate(f)
+	e, err := c.estimate(f, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -84,11 +84,17 @@ type Estimate struct {
 	top, bottom int
 	d           *nn.Tensor // [1, h, w] of the active rows (nil: none)
 	fresh       bool       // a new shot: the shaping starts afresh
+	left, right *mvc.Frame // the eyes, when the GPU made them
+	disp        []float32  // the disparity they were made with
 }
 
 // Estimate is the first half of Next: the picture's depth, by the
-// network and the refinement.
-func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) {
+// network and the refinement; on a GPU, the eyes too when it can make
+// them (Eyes gives them).
+func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) { return c.estimate(f, true) }
+
+// estimate is Estimate, the eyes made on a GPU only if asked.
+func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) {
 	top, bottom := bars(f)
 	cut := c.cuts.next(f)
 	e := &Estimate{f: f, top: top, bottom: bottom}
@@ -104,11 +110,9 @@ func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) {
 	c.frames++
 	if ah := bottom - top; ah >= 28 {
 		if g, ok := c.Model.Backend().(*nn.GPU); ok {
-			d, err := c.estimateGPU(g, f, top, bottom)
-			if err != nil {
+			if err := c.estimateGPU(g, e, eyes && c.gpuEyes()); err != nil {
 				return nil, err
 			}
-			e.d = d
 			return e, nil
 		}
 		x := netInput(f, top, bottom, c.netW, c.netH)
@@ -220,16 +224,71 @@ func (c *Converter) uploadRefine(be nn.Backend) {
 // refines: the picture goes to the GPU, the depth comes back, and what
 // is between (the network's input, the refinement's, its output put back
 // to the depth's mean and deviation) is the GPU's, as netInput, refine
-// and RefineInput do it on the CPU.
-func (c *Converter) estimateGPU(g *nn.GPU, f *mvc.Frame, top, bottom int) (*nn.Tensor, error) {
+// and RefineInput do it on the CPU. When the eyes' making needs nothing
+// of the pictures before (gpuEyes), the GPU makes them too, as Shape and
+// Pair would, when asked (makeEyes).
+func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
+	f, top, bottom := e.f, e.top, e.bottom
 	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
 	d := c.Model.Infer(g.NetInput(p, top, bottom-top, c.netW, c.netH))
 	if c.Refine != nil {
 		d = c.refineGPU(g, p, d, top, bottom)
 	}
+	var eyes, disp *nn.Tensor
+	if makeEyes {
+		w := float64(f.Width)
+		a, b, lim := float32(c.Shaper.Shape.Scale*w), float32(c.Shaper.Shape.Offset*w), float32(0.04*w)
+		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, lim)
+		eyes = g.Eyes(p, disp, gapPixels)
+	}
 	out, err := g.Download(d)
+	if err == nil && eyes != nil {
+		buf := make([]byte, nn.EyesSize(f.Width, f.Height))
+		var dt *nn.Tensor
+		if err = g.DownloadBytes(buf, eyes); err == nil {
+			dt, err = g.Download(disp)
+		}
+		if err == nil {
+			e.left, e.right = eyeFrames(buf, f)
+			e.disp = dt.Data
+		}
+	}
 	g.Release()
-	return out, err
+	e.d = out
+	return err
+}
+
+// gpuEyes reports whether Estimate makes the eyes on a GPU: when the
+// disparity is the depth's as it is (Shape.Scale), the depth unguided.
+func (c *Converter) gpuEyes() bool { return c.Shaper.Shape.Scale != 0 && c.Guide.Radius <= 0 }
+
+// eyeFrames is the two eyes of f in buf (nn.GPU.Eyes').
+func eyeFrames(buf []byte, f *mvc.Frame) (left, right *mvc.Frame) {
+	w, h := f.Width, f.Height
+	cw, ch := (w+1)/2, (h+1)/2
+	eye := func(b []byte) *mvc.Frame {
+		return &mvc.Frame{Y: b[:w*h:w*h], Cb: b[w*h : w*h+cw*ch : w*h+cw*ch], Cr: b[w*h+cw*ch : w*h+2*cw*ch],
+			StrideY: w, StrideC: cw, Width: w, Height: h, PTS: f.PTS}
+	}
+	n := len(buf) / 2
+	return eye(buf[:n:n]), eye(buf[n:])
+}
+
+// Eyes is Shape and Pair of an Estimate (the GPU's, when it made them):
+// the picture's two eyes and their disparity. The Estimates must come in
+// order.
+func (c *Converter) Eyes(e *Estimate) (left, right *mvc.Frame, disparity []float32) {
+	if e.left == nil {
+		_, d := c.Shape(e)
+		left, right = Pair(e.f, d)
+		return left, right, d
+	}
+	if e.fresh {
+		c.Reset()
+		c.win.reset()
+	}
+	c.shapeTop, c.shapeBottom = e.top, e.bottom
+	return e.left, e.right, e.disp
 }
 
 // refineGPU is refine on a GPU, the picture p and the depth dm there.

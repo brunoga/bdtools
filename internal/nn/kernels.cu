@@ -811,3 +811,143 @@ extern "C" __global__ void __launch_bounds__(128) attention_tc(int nq, int nk, i
 			}
 		}
 }
+
+// disparity is the depth's disparity, a w x h picture's: rows [top,
+// bottom) a times the depth up (w a row, from top) plus b, kept within
+// lim either way; the other rows 0.
+extern "C" __global__ void disparity(int w, int h, int top, int bottom, float a, float b, float lim, const float *up, float *d) {
+	EACH((long long)w * h) {
+		int r = i / w;
+		float v = 0;
+		if (r >= top && r < bottom) {
+			v = fminf(fmaxf(__fadd_rn(__fmul_rn(a, up[i - (long long)top * w]), b), -lim), lim);
+		}
+		d[i] = v;
+	}
+}
+
+// eyes renders a picture's two eyes for its disparity d (w x h), as
+// stereo.Render does a row at a time: each pair of neighbours a segment,
+// rasterised into the targets it covers (the nearer winning), a segment
+// stretched more than gap pixels left open, the holes filled from their
+// farther side, mirrored. A thread a row: the luma's h rows, then Cb's
+// and Cr's ch, the left eye's (sign +0.5) then the right's (-0.5). out is
+// both eyes' planes packed (rows w and cw apart); z and v scratch, a
+// row's values nrows apart.
+extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, const unsigned char *cb,
+	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, float *zs, float *vs) {
+	int cw = (w + 1) / 2, ch = (h + 1) / 2;
+	int per = h + 2 * ch, nrows = 2 * per;
+	int row = blockIdx.x * blockDim.x + threadIdx.x;
+	if (row >= nrows) {
+		return;
+	}
+	int eye = row / per, r = row % per;
+	float sign = eye == 0 ? 0.5f : -0.5f;
+	long long eyeSize = (long long)w * h + 2LL * cw * ch;
+	unsigned char *o = out + eye * eyeSize;
+	const unsigned char *src;
+	const float *dr = 0;
+	int n, lr = 0;
+	bool luma = r < h;
+	if (luma) {
+		src = Y + (long long)r * sy;
+		dr = d + (long long)r * w;
+		o += (long long)r * w;
+		n = w;
+	} else {
+		int c = r - h;
+		const unsigned char *plane = cb;
+		o += (long long)w * h;
+		if (c >= ch) {
+			c -= ch;
+			plane = cr;
+			o += (long long)cw * ch;
+		}
+		src = plane + (long long)c * sc;
+		o += (long long)c * cw;
+		lr = min(2 * c, h - 1);
+		n = cw;
+	}
+	float *z = zs + row, *v = vs + row;
+#define DISP(x) (luma ? dr[x] : d[(long long)lr * w + min(2 * (x), w - 1)] / 2)
+#define POS(x) __fadd_rn((float)(x), __fmul_rn(sign, DISP(x)))
+#define Z(x) z[(long long)(x) * nrows]
+#define V(x) v[(long long)(x) * nrows]
+	for (int x = 0; x < n; x++) {
+		Z(x) = -INFINITY;
+	}
+	auto put = [&](int X, float val, float depth) {
+		if (X < 0 || X >= n || depth <= Z(X)) {
+			return;
+		}
+		Z(X) = depth;
+		V(X) = val;
+	};
+	float p1 = POS(0), d1 = DISP(0), b = src[0];
+	for (int x = 0; x < n - 1; x++) {
+		float p0 = p1, d0 = d1, a = b;
+		p1 = POS(x + 1);
+		d1 = DISP(x + 1);
+		b = src[x + 1];
+		float lo = fminf(p0, p1), hi = fmaxf(p0, p1);
+		if (hi - lo > gap) {
+			put((int)round((double)p0), a, d0);
+			put((int)round((double)p1), b, d1);
+			continue;
+		}
+		for (int X = (int)ceil((double)lo); (float)X <= hi; X++) {
+			float t = 0;
+			if (p1 != p0) {
+				t = ((float)X - p0) / (p1 - p0);
+			}
+			put(X, __fadd_rn(a, __fmul_rn(b - a, t)), __fadd_rn(d0, __fmul_rn(d1 - d0, t)));
+		}
+	}
+	put((int)round((double)p1), b, d1);
+	// the holes (z still -inf: nothing landed), from their farther side
+	for (int x = 0; x < n;) {
+		if (Z(x) != -INFINITY) {
+			x++;
+			continue;
+		}
+		int a0 = x;
+		while (x < n && Z(x) == -INFINITY) {
+			x++;
+		}
+		int b0 = x, left = a0 - 1, right = b0;
+		bool useRight;
+		if (left < 0 && right >= n) {
+			continue;
+		} else if (left < 0) {
+			useRight = true;
+		} else if (right >= n) {
+			useRight = false;
+		} else {
+			useRight = Z(right) < Z(left);
+		}
+		for (int X = a0; X < b0; X++) {
+			int s;
+			if (useRight) {
+				s = min(right + (b0 - 1 - X), n - 1);
+				while (s > right && Z(s) == -INFINITY) {
+					s--;
+				}
+			} else {
+				s = max(left - (X - a0), 0);
+				while (s < left && Z(s) == -INFINITY) {
+					s++;
+				}
+			}
+			V(X) = V(s);
+			Z(X) = Z(s);
+		}
+	}
+	for (int X = 0; X < n; X++) {
+		o[X] = (unsigned char)fminf(fmaxf(V(X) + 0.5f, 0), 255);
+	}
+#undef DISP
+#undef POS
+#undef Z
+#undef V
+}

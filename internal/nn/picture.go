@@ -78,3 +78,47 @@ func (g *GPU) Renorm(out *Tensor, w, h, pw int, want, got *Tensor) *Tensor {
 	g.launch("renorm", gr, bl, 0, w, h, pw, ptr(out), ptr(want), ptr(got), ptr(d))
 	return d
 }
+
+// Disparity is the disparity of a w x h picture from the depth up of its
+// rows [top, bottom) (w a row): a times the depth plus b, kept within lim
+// either way; the other rows 0. [h, w].
+func (g *GPU) Disparity(up *Tensor, w, h, top, bottom int, a, b, lim float32) *Tensor {
+	d := g.tensor(h, w)
+	gr, bl := each(w * h)
+	g.launch("disparity", gr, bl, 0, w, h, top, bottom, a, b, lim, ptr(up), ptr(d))
+	return d
+}
+
+// Eyes renders the picture's two eyes for its disparity d [h, w], as
+// stereo.Pair does (gap its stereo.gapPixels): EyesSize bytes, the left
+// eye's Y, Cb and Cr planes then the right's, their rows w and (w+1)/2
+// apart.
+func (g *GPU) Eyes(p *Picture, d *Tensor, gap float32) *Tensor {
+	n := EyesSize(p.w, p.h)
+	out := g.tensor((n + 3) / 4)
+	rows := 2 * (p.h + 2*((p.h+1)/2))
+	z, v := g.tensor(rows, p.w), g.tensor(rows, p.w)
+	base := ptr(p.buf)
+	g.launch("eyes", cuda.Dim{X: (rows + 63) / 64}, cuda.Dim{X: 64}, 0, p.w, p.h, base, p.strideY,
+		base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), ptr(z), ptr(v))
+	return out
+}
+
+// EyesSize is the bytes of a w x h picture's two eyes (Eyes').
+func EyesSize(w, h int) int {
+	cw, ch := (w+1)/2, (h+1)/2
+	return 2 * (w*h + 2*cw*ch)
+}
+
+// DownloadBytes copies the start of the GPU's tensor t to dst (waiting
+// for the ops before to have run).
+func (g *GPU) DownloadBytes(dst []byte, t *Tensor) error {
+	if g.err != nil {
+		return g.err
+	}
+	if err := g.c.Sync(); err != nil {
+		g.fail(err)
+		return err
+	}
+	return g.c.DownloadBytes(dst, t.dev.a.buf)
+}

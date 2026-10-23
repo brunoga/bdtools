@@ -185,8 +185,7 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 // pair3D is the rest of convert3D: the picture's depth shaped, the eyes
 // made from it.
 func (r *Runner) pair3D(p picture, f *mvc.Frame, e *stereo.Estimate) picture {
-	_, d := r.conv.conv.Shape(e)
-	l, rr := stereo.Pair(f, d)
+	l, rr, d := r.conv.conv.Eyes(e)
 	r.conv.conv.Window(l, rr, d)
 	if r.depth != nil && r.timeline != nil {
 		// the subtitles' depth, as a disc's offset sequence 0 gives it
