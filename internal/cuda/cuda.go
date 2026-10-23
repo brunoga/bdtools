@@ -191,6 +191,24 @@ func (c *Context) Upload(dst *Buffer, src []float32) error {
 	})
 }
 
+// UploadBytes copies src to dst at byte offset off.
+func (c *Context) UploadBytes(dst *Buffer, off int, src []byte) error {
+	if len(src) == 0 {
+		return nil
+	}
+	if off < 0 || off+len(src) > dst.Size {
+		return fmt.Errorf("cuda: upload of %d bytes at %d to a buffer of %d", len(src), off, dst.Size)
+	}
+	return c.do(func() error {
+		r := call(c.a.cuMemcpyHtoD, dst.ptr+uintptr(off), uintptr(unsafe.Pointer(&src[0])), uintptr(len(src)))
+		runtime.KeepAlive(src)
+		if r != 0 {
+			return c.err("cuMemcpyHtoD", r)
+		}
+		return nil
+	})
+}
+
 // UploadU64 copies 64-bit values (device addresses, say) to the start of
 // dst.
 func (c *Context) UploadU64(dst *Buffer, src []uint64) error {

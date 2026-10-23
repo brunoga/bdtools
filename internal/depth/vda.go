@@ -188,8 +188,20 @@ func (m *Model) Frame(x *nn.Tensor) *nn.Tensor {
 // FrameErr is Frame, the backend's failure an error.
 func (m *Model) FrameErr(x *nn.Tensor) (*nn.Tensor, error) {
 	h, w := x.Dim(1), x.Dim(2)
+	out, err := m.be.Download(m.Infer(m.be.Upload(x)))
+	m.be.Release()
+	if err != nil {
+		return nil, err
+	}
+	return out.Reshape(h, w), nil
+}
+
+// Infer is Frame on the backend: x the backend's tensor, the depth [1, H,
+// W] the backend's, the intermediates not released.
+func (m *Model) Infer(x *nn.Tensor) *nn.Tensor {
+	h, w := x.Dim(1), x.Dim(2)
 	ph, pw := h/patch, w/patch
-	feats := m.encode(m.be.Upload(x), ph, pw)
+	feats := m.encode(x, ph, pw)
 	var win [][8]kv
 	if m.n > 0 {
 		// the window: the first two frames' states and the last
@@ -215,13 +227,7 @@ func (m *Model) FrameErr(x *nn.Tensor) (*nn.Tensor, error) {
 		m.drop(gone)
 	}
 	m.n++
-	d = m.be.ReLU(m.be.Bilinear(d, h, w))
-	out, err := m.be.Download(d)
-	m.be.Release()
-	if err != nil {
-		return nil, err
-	}
-	return out.Reshape(h, w), nil
+	return m.be.ReLU(m.be.Bilinear(d, h, w))
 }
 
 // drop frees a frame's states no longer in the cache.

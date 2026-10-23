@@ -173,8 +173,13 @@ machine converts overnight.
 
 Measured on the RTX 5090, a 1080p film: the small network 25 ms a picture
 in single precision, 16.5 on the tensor cores (Base 49 and 32; Large 122,
-single precision only); the whole conversion (NVENC) 35 pictures a second
-refined, 43 not: a two-hour film in about 80 minutes.
+single precision only); the whole conversion (NVENC) 42 pictures a second
+refined, 44 not: a two-hour film in about 70 minutes. The picture goes to
+the GPU as it is decoded and the depth comes back: the networks' inputs
+(the picture resized and made RGB for the network, the half-size picture
+and standardised depth for the refinement) and the refined depth's
+renormalisation are kernels, the same values as the CPU's. The CPU's
+rendering of the eyes now sets the pace.
 
 ## How good: measured, not guessed
 
@@ -332,10 +337,11 @@ What that teaches:
    (`internal/cuda`, the driver API through purego; `internal/nn`'s GPU
    backend, kernels.cu compiled to PTX ahead of time), the same depth as
    PyTorch's within 1e-3: 25 ms a 1080p frame on an RTX 5090, 50 times
-   the CPU, and a film converts at about 27 frames a second. Still to do:
-   tensor cores (TF32 or half precision) and fused attention, the eyes
-   rendered on the GPU, the depth of one frame made while the last is
-   rendered; a two-hour film's depth in under half an hour.
+   the CPU. Since: the depth of one frame made while the last is
+   rendered, the tensor cores (16.5 ms), the networks' inputs made on the
+   GPU; a film converts at about 42 frames a second. Still to do: the
+   eyes rendered on the GPU (the CPU's rendering now sets the pace) and
+   fused attention.
 5. **Depth edges**: the network's soft depth edges snapped to the
    picture's (an edge-aware filter guided by the full-resolution picture),
    against halos and cardboard cut-outs.

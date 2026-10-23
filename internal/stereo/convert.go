@@ -103,6 +103,14 @@ func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) {
 	}
 	c.frames++
 	if ah := bottom - top; ah >= 28 {
+		if g, ok := c.Model.Backend().(*nn.GPU); ok {
+			d, err := c.estimateGPU(g, f, top, bottom)
+			if err != nil {
+				return nil, err
+			}
+			e.d = d
+			return e, nil
+		}
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm, err := c.Model.FrameErr(x)
 		if err != nil {
@@ -110,7 +118,7 @@ func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) {
 		}
 		e.d = dm.Reshape(1, c.netH, c.netW)
 		if c.Refine != nil {
-			if e.d, err = c.refine(e.d, f, top, bottom); err != nil {
+			if e.d, err = c.refine(c.Model.Backend(), e.d, f, top, bottom); err != nil {
 				return nil, err
 			}
 		}
@@ -150,20 +158,10 @@ func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 }
 
 // refine corrects the depth dm (the network's, [1, h, w]) of the active
-// rows [top, bottom) of f by the refinement, at half the picture's size:
-// the corrected depth, [1, ah/2, w/2].
-func (c *Converter) refine(dm *nn.Tensor, f *mvc.Frame, top, bottom int) (*nn.Tensor, error) {
-	be := c.Model.Backend()
-	if c.refineOn == nil {
-		c.refineOn = &RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
-		for _, l := range RefineLayers {
-			for _, p := range []struct{ to, from map[string]*nn.Tensor }{{c.refineOn.W, c.Refine.W}, {c.refineOn.B, c.Refine.B}} {
-				t := be.Upload(p.from[l.Name])
-				be.Keep(t)
-				p.to[l.Name] = t
-			}
-		}
-	}
+// rows [top, bottom) of f by the refinement on be, at half the picture's
+// size: the corrected depth, [1, ah/2, w/2].
+func (c *Converter) refine(be nn.Backend, dm *nn.Tensor, f *mvc.Frame, top, bottom int) (*nn.Tensor, error) {
+	c.uploadRefine(be)
 	w, ah := f.Width, bottom-top
 	hw, hh := w/2, ah/2
 	d := nn.Bilinear(dm, hh, hw).Data
@@ -201,6 +199,48 @@ func (c *Converter) refine(dm *nn.Tensor, f *mvc.Frame, top, bottom int) (*nn.Te
 		}
 	})
 	return &nn.Tensor{Shape: []int{1, hh, hw}, Data: d}, nil
+}
+
+// uploadRefine puts the refinement's weights on the backend, once.
+func (c *Converter) uploadRefine(be nn.Backend) {
+	if c.refineOn != nil {
+		return
+	}
+	c.refineOn = &RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+	for _, l := range RefineLayers {
+		for _, p := range []struct{ to, from map[string]*nn.Tensor }{{c.refineOn.W, c.Refine.W}, {c.refineOn.B, c.Refine.B}} {
+			t := be.Upload(p.from[l.Name])
+			be.Keep(t)
+			p.to[l.Name] = t
+		}
+	}
+}
+
+// estimateGPU is Estimate's depth on a GPU, refined if the converter
+// refines: the picture goes to the GPU, the depth comes back, and what
+// is between (the network's input, the refinement's, its output put back
+// to the depth's mean and deviation) is the GPU's, as netInput, refine
+// and RefineInput do it on the CPU.
+func (c *Converter) estimateGPU(g *nn.GPU, f *mvc.Frame, top, bottom int) (*nn.Tensor, error) {
+	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
+	d := c.Model.Infer(g.NetInput(p, top, bottom-top, c.netW, c.netH))
+	if c.Refine != nil {
+		d = c.refineGPU(g, p, d, top, bottom)
+	}
+	out, err := g.Download(d)
+	g.Release()
+	return out, err
+}
+
+// refineGPU is refine on a GPU, the picture p and the depth dm there.
+func (c *Converter) refineGPU(g *nn.GPU, p *nn.Picture, dm *nn.Tensor, top, bottom int) *nn.Tensor {
+	c.uploadRefine(g)
+	hw, hh := p.Width()/2, (bottom-top)/2
+	pw, ph := pad8(hw), pad8(hh)
+	d := g.Bilinear(dm, hh, hw)
+	want := g.Moments(d, hh, hw, hw)
+	out := c.refineOn.Refine(g, g.RefineInput(p, top, d, want, hw, hh, pw, ph))
+	return g.Renorm(out, hw, hh, pw, want, g.Moments(out, hh, hw, pw))
 }
 
 // Bars finds a picture's letterbox bars: its active rows are [top,
