@@ -32,25 +32,18 @@ type window struct {
 // reset starts a new shot.
 func (w *window) reset() { w.primed = false }
 
-// apply masks the strips of a pair for its disparity d over the active
-// rows [top, bottom).
-func (w *window) apply(l, r *mvc.Frame, d []float32, top, bottom int) {
+// apply masks the strips of a pair for its disparity's samples s (sorted
+// in place).
+func (w *window) apply(l, r *mvc.Frame, s *Samples) {
 	width := l.Width
-	edge := max(1, int(windowEdge*float64(width)))
-	need := func(x0, x1 int) float64 {
-		var near []float32
-		for y := top; y < bottom; y += 2 {
-			for x := x0; x < x1; x++ {
-				near = append(near, d[y*width+x])
-			}
-		}
+	need := func(near []float32) float64 {
 		if len(near) == 0 {
 			return 0
 		}
 		slices.Sort(near)
 		return math.Max(float64(near[len(near)-1-len(near)/50]), 0)
 	}
-	nl, nr := need(0, edge), need(width-edge, width)
+	nl, nr := need(s.Left), need(s.Right)
 	follow := func(cur, target float64) float64 {
 		if !w.primed {
 			return target

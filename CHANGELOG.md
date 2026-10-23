@@ -18,7 +18,7 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or
   the toolkit, kernels compiled to PTX ahead of time): a 1080p film
-  converts at about 90 pictures a second on an RTX 5090 (100 without the
+  converts at about 100 pictures a second on an RTX 5090 (110 without the
   refinement below; the GPU's depth of a picture beside the CPU's work on
   the one before, the network on the tensor cores with attention in one
   pass, the networks' inputs and the eyes made on the GPU); on the CPU,

@@ -22,7 +22,7 @@ func TestFloatingWindow(t *testing.T) {
 		l.Y[i], r.Y[i] = 200, 200
 	}
 	var win window
-	win.apply(l, r, d, 0, h)
+	win.apply(l, r, SamplesOf(d, w, h, 0, h))
 	for x := range 12 {
 		if want := byte(200); x < 9 {
 			want = 16
@@ -39,7 +39,7 @@ func TestFloatingWindow(t *testing.T) {
 	for i := range d {
 		d[i] = -4
 	}
-	win.apply(l, r, d, 0, h)
+	win.apply(l, r, SamplesOf(d, w, h, 0, h))
 	if win.left != 9-windowFall {
 		t.Errorf("the strip went to %g at once, want it narrowing by %g", win.left, windowFall)
 	}

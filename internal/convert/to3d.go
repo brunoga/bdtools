@@ -58,24 +58,18 @@ type to3DState struct {
 // once (they are never behind what is in front of them).
 const subsFall = 0.2
 
-// subtitleOffset is where a subtitle over a picture of disparity d (w
-// wide) should sit, as an offset (pixels each eye moves, positive toward
-// the viewer): just in front of the nearest of the lower half of the
-// picture, where subtitles are (its 99th percentile, the odd pixel left
-// out), at the screen when all of it is behind.
-func subtitleOffset(d []float32, w int) float64 {
-	h := len(d) / w
-	var near []float32
-	for y := h / 2; y < h; y += 4 {
-		for x := 0; x < w; x += 4 {
-			near = append(near, d[y*w+x])
-		}
-	}
-	if len(near) == 0 {
+// subtitleOffset is where a subtitle over a picture should sit, as an
+// offset (pixels each eye moves, positive toward the viewer), from its
+// disparity's samples of the lower half, where subtitles are (low, sorted
+// in place): just in front of the nearest of them (their 99th
+// percentile, the odd pixel left out), at the screen when all of it is
+// behind.
+func subtitleOffset(low []float32) float64 {
+	if len(low) == 0 {
 		return 0
 	}
-	slices.Sort(near)
-	p := float64(near[len(near)-1-len(near)/100])
+	slices.Sort(low)
+	p := float64(low[len(low)-1-len(low)/100])
 	if p <= 0 {
 		return 0
 	}
@@ -185,18 +179,18 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 // pair3D is the rest of convert3D: the picture's depth shaped, the eyes
 // made from it.
 func (r *Runner) pair3D(p picture, f *mvc.Frame, e *stereo.Estimate) picture {
-	l, rr, d := r.conv.conv.Eyes(e)
-	r.conv.conv.Window(l, rr, d)
+	l, rr, s := r.conv.conv.Eyes(e)
+	r.conv.conv.Window(l, rr, s)
 	if r.depth != nil && r.timeline != nil {
 		// the subtitles' depth, as a disc's offset sequence 0 gives it
-		t := subtitleOffset(d, f.Width)
-		s := &r.conv.subs
-		if t > *s {
-			*s = t
+		t := subtitleOffset(s.Low)
+		sub := &r.conv.subs
+		if t > *sub {
+			*sub = t
 		} else {
-			*s = max(t, *s-subsFall)
+			*sub = max(t, *sub-subsFall)
 		}
-		v := int8(min(math.Ceil(*s), 127))
+		v := int8(min(math.Ceil(*sub), 127))
 		r.depth.add(r.timeline(p.pts), offsetGOP{pts: p.pts, offsets: [][]int8{{v}}})
 	}
 	l.PTS, rr.PTS = p.pts, p.pts

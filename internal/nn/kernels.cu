@@ -1154,3 +1154,68 @@ extern "C" __global__ void eyes_warp(int w, int h, const unsigned char *Y, int s
 #undef Z
 #undef V
 }
+
+// disp_samples gathers what of a w x h disparity d the floating window and
+// the subtitles read (stereo.Samples): the side strips edge wide on every
+// other row from top to bottom, the left's then the right's, then every
+// fourth row and column of the lower half.
+extern "C" __global__ void disp_samples(int w, int h, int top, int bottom, int edge, const float *d, float *out) {
+	long long ns = (long long)((bottom - top + 1) / 2) * edge;
+	int low = h / 2, nc = (w + 3) / 4;
+	long long nl = (long long)((h - low + 3) / 4) * nc;
+	EACH(2 * ns + nl) {
+		if (i < 2 * ns) {
+			long long j = i < ns ? i : i - ns;
+			int r = j / edge, x = j % edge + (i < ns ? 0 : w - edge);
+			out[i] = d[(long long)(top + 2 * r) * w + x];
+		} else {
+			long long j = i - 2 * ns;
+			int r = j / nc, x = (j % nc) * 4;
+			out[i] = d[(long long)(low + 4 * r) * w + x];
+		}
+	}
+}
+
+// temporal_warp is temporal for heads of hd channels, hd a power of two
+// up to 32 and c a multiple of 32: a thread a channel, 256 / c positions a
+// block, each head's products summed across its lanes by shuffles, its
+// scores and their softmax kept in every lane of it; no shared memory.
+extern "C" __global__ void __launch_bounds__(256) temporal_warp(int d, int c, int hd, int t, const float *q,
+	const float *peQ, frames fr, const float *peK, const float *peV, float scale, float *out) {
+	int per = blockDim.x / c;
+	int p = blockIdx.x * per + threadIdx.x / c, i = threadIdx.x % c;
+	if (p >= d) {
+		return; // a whole head's lanes alike: c is a multiple of 32
+	}
+	long long at = (long long)p * c + i;
+	float qi = q[at] + peQ[i];
+	float s[MAXFRAMES];
+	float m = -INFINITY;
+#pragma unroll
+	for (int f = 0; f < MAXFRAMES; f++) {
+		if (f < t) {
+			float v = qi * (fr.k[f][at] + peK[f * c + i]);
+			for (int o = hd / 2; o > 0; o /= 2) {
+				v += __shfl_xor_sync(0xffffffff, v, o);
+			}
+			s[f] = v * scale;
+			m = fmaxf(m, s[f]);
+		}
+	}
+	float sum = 0;
+#pragma unroll
+	for (int f = 0; f < MAXFRAMES; f++) {
+		if (f < t) {
+			s[f] = __expf(s[f] - m);
+			sum += s[f];
+		}
+	}
+	float o = 0;
+#pragma unroll
+	for (int f = 0; f < MAXFRAMES; f++) {
+		if (f < t) {
+			o += s[f] / sum * (fr.v[f][at] + peV[f * c + i]);
+		}
+	}
+	out[at] = o;
+}

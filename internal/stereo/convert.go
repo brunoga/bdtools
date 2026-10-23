@@ -49,15 +49,15 @@ func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
 		return nil, nil, err
 	}
 	left, right = Pair(f, d)
-	c.Window(left, right, d)
+	c.Window(left, right, SamplesOf(d, f.Width, f.Height, c.shapeTop, c.shapeBottom))
 	return left, right, nil
 }
 
-// Window puts the floating window on the pair made of the picture Next
-// (or Shape) gave d for last (unless NoWindow).
-func (c *Converter) Window(left, right *mvc.Frame, d []float32) {
+// Window puts the floating window on the pair made of the picture Next,
+// Shape or Eyes did last, for its disparity's samples s (unless NoWindow).
+func (c *Converter) Window(left, right *mvc.Frame, s *Samples) {
 	if !c.NoWindow {
-		c.win.apply(left, right, d, c.shapeTop, c.shapeBottom)
+		c.win.apply(left, right, s)
 	}
 }
 
@@ -85,7 +85,7 @@ type Estimate struct {
 	d           *nn.Tensor // [1, h, w] of the active rows (nil: none)
 	fresh       bool       // a new shot: the shaping starts afresh
 	left, right *mvc.Frame // the eyes, when the GPU made them
-	disp        []float32  // the disparity they were made with
+	samples     *Samples   // of the disparity they were made with
 }
 
 // Estimate is the first half of Next: the picture's depth, by the
@@ -241,6 +241,7 @@ func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
 		a, b, lim := float32(c.Shaper.Shape.Scale*w), float32(c.Shaper.Shape.Offset*w), float32(0.04*w)
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, lim)
 		eyes = g.Eyes(p, disp, gapPixels)
+		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}
 	var out *nn.Tensor
 	var err error
@@ -254,7 +255,7 @@ func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
 		}
 		if err == nil {
 			e.left, e.right = eyeFrames(buf, f)
-			e.disp = dt.Data
+			e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
 		}
 	}
 	g.Release()
@@ -279,20 +280,20 @@ func eyeFrames(buf []byte, f *mvc.Frame) (left, right *mvc.Frame) {
 }
 
 // Eyes is Shape and Pair of an Estimate (the GPU's, when it made them):
-// the picture's two eyes and their disparity. The Estimates must come in
-// order.
-func (c *Converter) Eyes(e *Estimate) (left, right *mvc.Frame, disparity []float32) {
+// the picture's two eyes and their disparity's samples. The Estimates
+// must come in order.
+func (c *Converter) Eyes(e *Estimate) (left, right *mvc.Frame, s *Samples) {
 	if e.left == nil {
 		_, d := c.Shape(e)
 		left, right = Pair(e.f, d)
-		return left, right, d
+		return left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
 	}
 	if e.fresh {
 		c.Reset()
 		c.win.reset()
 	}
 	c.shapeTop, c.shapeBottom = e.top, e.bottom
-	return e.left, e.right, e.disp
+	return e.left, e.right, e.samples
 }
 
 // refineGPU is refine on a GPU, the picture p and the depth dm there.
