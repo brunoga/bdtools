@@ -91,10 +91,36 @@ type Estimate struct {
 // Estimate is the first half of Next: the picture's depth, by the
 // network and the refinement; on a GPU, the eyes too when it can make
 // them (Eyes gives them).
-func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) { return c.estimate(f, true) }
+func (c *Converter) Estimate(f *mvc.Frame) (*Estimate, error) { return c.Start(f).Wait() }
+
+// Pending is an Estimate under way (Start's): Wait gives it.
+type Pending struct {
+	e    *Estimate
+	err  error
+	rest func() error // the GPU's part still to wait for
+}
+
+// Wait gives the Estimate once made.
+func (p *Pending) Wait() (*Estimate, error) {
+	if p.rest != nil {
+		p.err, p.rest = p.rest(), nil
+	}
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.e, nil
+}
+
+// Start is Estimate begun: on a GPU, its work queued and not waited for,
+// so that the caller's own (the next picture's decoding) runs beside it.
+// One at a time: the next Start after this one's Wait.
+func (c *Converter) Start(f *mvc.Frame) *Pending { return c.start(f, true) }
 
 // estimate is Estimate, the eyes made on a GPU only if asked.
-func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) {
+func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) { return c.start(f, eyes).Wait() }
+
+// start is Start, the eyes made on a GPU only if asked.
+func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 	top, bottom := bars(f)
 	cut := c.cuts.next(f)
 	e := &Estimate{f: f, top: top, bottom: bottom}
@@ -110,24 +136,21 @@ func (c *Converter) estimate(f *mvc.Frame, eyes bool) (*Estimate, error) {
 	c.frames++
 	if ah := bottom - top; ah >= 28 {
 		if g, ok := c.Model.Backend().(*nn.GPU); ok {
-			if err := c.estimateGPU(g, e, eyes && c.gpuEyes()); err != nil {
-				return nil, err
-			}
-			return e, nil
+			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes())}
 		}
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm, err := c.Model.FrameErr(x)
 		if err != nil {
-			return nil, err
+			return &Pending{err: err}
 		}
 		e.d = dm.Reshape(1, c.netH, c.netW)
 		if c.Refine != nil {
 			if e.d, err = c.refine(c.Model.Backend(), e.d, f, top, bottom); err != nil {
-				return nil, err
+				return &Pending{err: err}
 			}
 		}
 	}
-	return e, nil
+	return &Pending{e: e}
 }
 
 // Shape is the second half of Next: an Estimate's depth upsampled to the
@@ -221,14 +244,15 @@ func (c *Converter) uploadRefine(be nn.Backend) {
 	}
 }
 
-// estimateGPU is Estimate's depth on a GPU, refined if the converter
+// startGPU is Estimate's depth on a GPU, refined if the converter
 // refines: the picture goes to the GPU, the depth comes back, and what
 // is between (the network's input, the refinement's, its output put back
 // to the depth's mean and deviation) is the GPU's, as netInput, refine
 // and RefineInput do it on the CPU. When the eyes' making needs nothing
 // of the pictures before (gpuEyes), the GPU makes them too, as Shape and
-// Pair would, when asked (makeEyes).
-func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
+// Pair would, when asked (makeEyes). The work is queued; the function it
+// gives waits for it and takes its results.
+func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error {
 	f, top, bottom := e.f, e.top, e.bottom
 	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
 	d := c.Model.Infer(g.NetInput(p, top, bottom-top, c.netW, c.netH))
@@ -243,24 +267,26 @@ func (c *Converter) estimateGPU(g *nn.GPU, e *Estimate, makeEyes bool) error {
 		eyes = g.Eyes(p, disp, gapPixels)
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}
-	var out *nn.Tensor
-	var err error
-	if eyes == nil {
-		out, err = g.Download(d)
-	} else {
-		buf := make([]byte, nn.EyesSize(f.Width, f.Height))
-		var dt *nn.Tensor
-		if err = g.DownloadBytes(buf, eyes); err == nil {
-			dt, err = g.Download(disp)
+	return func() error {
+		var out *nn.Tensor
+		var err error
+		if eyes == nil {
+			out, err = g.Download(d)
+		} else {
+			buf := make([]byte, nn.EyesSize(f.Width, f.Height))
+			var dt *nn.Tensor
+			if err = g.DownloadBytes(buf, eyes); err == nil {
+				dt, err = g.Download(disp)
+			}
+			if err == nil {
+				e.left, e.right = eyeFrames(buf, f)
+				e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
+			}
 		}
-		if err == nil {
-			e.left, e.right = eyeFrames(buf, f)
-			e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
-		}
+		g.Release()
+		e.d = out
+		return err
 	}
-	g.Release()
-	e.d = out
-	return err
 }
 
 // gpuEyes reports whether Estimate makes the eyes on a GPU: when the

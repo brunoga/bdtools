@@ -174,8 +174,8 @@ machine converts overnight.
 Measured on the RTX 5090, a 1080p film: the small network 25 ms a picture
 in single precision, 7.2 on the tensor cores with attention in one pass
 (Base 49 and 14.2; Large 122, single precision only); the whole conversion
-(NVENC, its pace once started) 101 pictures a second refined, 113 not: a
-two-hour film in under half an hour. The picture goes to the GPU as it is
+(NVENC, its pace once started) 112 pictures a second refined, 124 not: a
+two-hour film in about 25 minutes. The picture goes to the GPU as it is
 decoded and comes back as its two eyes and their disparity: the
 networks' inputs (the picture resized and made RGB for the network, the
 half-size picture and standardised depth for the refinement), the
@@ -185,7 +185,9 @@ an atomic maximum of its depth and its segment's order: the CPU's
 arithmetic and choices to the bit) are kernels, and the depth's mean and
 deviation are summed over the whole GPU, not one block of it. Of the
 disparity only what the floating window and the subtitles read comes
-back (its side strips and a grid of its lower half: a tenth of it). On the
+back (its side strips and a grid of its lower half: a tenth of it). A
+picture's work is queued on the GPU and the next picture decoded and
+copied meanwhile, before waiting for it. On the
 tensor cores attention is one kernel a layer (flash attention: the keys
 and values a tile at a time, the softmax kept running, the scores never
 stored: 6.1 ms a picture down to 1.3) and layer normalisation a warp a
@@ -354,7 +356,7 @@ What that teaches:
    the CPU. Since: the depth of one frame made while the last is
    rendered, the tensor cores (16.5 ms), the networks' inputs made on the
    GPU, attention in one pass, the eyes rendered on the GPU, tiles fitted
-   to the GPU (7.2 ms); a film converts at about 100 frames a second. Still to do: the matrix
+   to the GPU (7.2 ms); a film converts at about 110 frames a second. Still to do: the matrix
    products' tiles fitted to the GPU (they run at a tenth of its rate).
 5. **Depth edges**: the network's soft depth edges snapped to the
    picture's (an edge-aware filter guided by the full-resolution picture),
