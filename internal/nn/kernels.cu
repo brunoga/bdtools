@@ -224,20 +224,26 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 	float ra[16], rb[16];
 	int ar = tid / 2, ak = (tid % 2) * 16;
 	int bj = tid % BT, bk = (tid / BT) * 16;
+	// rows of K contiguous are read four at a time when aligned
+	bool vecA = lda % 4 == 0 && ((size_t)A & 15) == 0, vecB = ldb % 4 == 0 && ((size_t)B & 15) == 0;
+	auto row16 = [&](const float *p, bool ok, bool vec, int k, float *r) {
+#pragma unroll
+		for (int q = 0; q < 16; q += 4) {
+			if (ok && vec && k + q + 3 < K) {
+				float4 v = *(const float4 *)&p[k + q];
+				r[q] = v.x, r[q + 1] = v.y, r[q + 2] = v.z, r[q + 3] = v.w;
+			} else {
+#pragma unroll
+				for (int e = 0; e < 4; e++) r[q + e] = ok && k + q + e < K ? p[k + q + e] : 0.f;
+			}
+		}
+	};
 	auto load = [&](int k0) {
 		int i = i0 + ar;
-#pragma unroll
-		for (int q = 0; q < 16; q++) {
-			int k = k0 + ak + q;
-			ra[q] = (i < M && k < K) ? A[(long long)i * lda + k] : 0.f;
-		}
+		row16(A + (long long)min(i, M - 1) * lda, i < M, vecA, k0 + ak, ra);
 		if (MODE == B_T) {
 			int j = j0 + ar;
-#pragma unroll
-			for (int q = 0; q < 16; q++) {
-				int k = k0 + ak + q;
-				rb[q] = (j < N && k < K) ? B[(long long)j * ldb + k] : 0.f;
-			}
+			row16(B + (long long)min(j, N - 1) * ldb, j < N, vecB, k0 + ak, rb);
 		} else if (MODE == B_N) {
 			int j = j0 + bj;
 #pragma unroll

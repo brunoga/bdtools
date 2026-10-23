@@ -221,9 +221,10 @@ func biasMode(b *Tensor, mode int) int {
 
 // tiles is the tensor cores' grid for an m x n product (batch of them):
 // tiles of 128 x 128 (grid), or of 64 x 64 when those would leave the
-// GPU's multiprocessors short of work (fewer than two blocks each).
+// GPU's multiprocessors short of work (fewer than two blocks each) or
+// half empty (m at most 64).
 func (g *GPU) tiles(grid cuda.Dim, m, n, batch int, kernel string) (cuda.Dim, cuda.Dim, string) {
-	if grid.X*grid.Y*max(batch, 1) >= 2*g.c.SMs {
+	if m > 64 && grid.X*grid.Y*max(batch, 1) >= 2*g.c.SMs {
 		return grid, cuda.Dim{X: 256}, kernel
 	}
 	return cuda.Dim{X: (n + 63) / 64, Y: (m + 63) / 64, Z: grid.Z}, cuda.Dim{X: 128}, kernel + "_64"
