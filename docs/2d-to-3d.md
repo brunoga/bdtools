@@ -186,8 +186,8 @@ and values a tile at a time, the softmax kept running, the scores never
 stored: 6.1 ms a picture down to 1.3) and layer normalisation a warp a
 row in single precision (double is slow on consumer GPUs: 2.4 ms down to
 0.4); a product whose tiles of 128 would leave multiprocessors idle runs
-in tiles of 64. The GPU's work now sets the pace (15.4 ms a picture refined, the
-CPU's 4.9), the network's matrix products most of it.
+in tiles of 64. The GPU's work sets the pace (the CPU's is a third of
+it), the network's matrix products most of it.
 
 ## How good: measured, not guessed
 
