@@ -247,9 +247,10 @@ func (r *Runner) resumeKey() (string, error) {
 		VideoSize int64      `json:",omitempty"`
 		To3D      [3]float64 `json:",omitempty"`
 		Refine3D  string     `json:",omitempty"`
+		Model3D   string     `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
 		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ(), o.Crop, o.Scale, o.ToneMap, o.Trim, o.VideoSize,
-		o.to3DKey(), o.refine3DKey()}) // as resolved: a default may change
+		o.to3DKey(), o.refine3DKey(), o.depthModelKey()}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}

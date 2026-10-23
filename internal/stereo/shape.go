@@ -39,6 +39,39 @@ var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 // 25.7 and 26.8).
 var RefinedShape = Shape{Scale: 0.0010, Offset: -0.0075}
 
+// The shapes of the other networks' depth (depth.Model.Size), each its
+// own scale, found as RefinedShape was. Base's depth refined (the weights
+// learnt on Small's) on the twelve clips: depth correlation 0.859 against
+// Small's 0.832; the made right eye 27.7 dB and VMAF 30.4 (Small's 27.5
+// and 29.5), on the glass clips 26.6 and 31.9 (26.8 and 33.4). Base's
+// depth as it is: 27.3 and 26.2, the best of three scales tried. Large's is Small's scaled
+// by the ratio of their depth's fits to the discs' (155: untuned; Large's
+// depth measured no better than Base's).
+var (
+	BaseShape         = Shape{Scale: 0.00026, Offset: -0.0075}
+	BaseRefinedShape  = Shape{Scale: 0.00022, Offset: -0.0065}
+	LargeShape        = Shape{Scale: DefaultShape.Scale / 155, Offset: DefaultShape.Offset}
+	LargeRefinedShape = Shape{Scale: RefinedShape.Scale / 155, Offset: RefinedShape.Offset}
+)
+
+// ShapeFor is the shape of a network's depth (by depth.Model.Size), refined
+// or not.
+func ShapeFor(size string, refined bool) Shape {
+	pick := func(plain, ref Shape) Shape {
+		if refined {
+			return ref
+		}
+		return plain
+	}
+	switch size {
+	case "base":
+		return pick(BaseShape, BaseRefinedShape)
+	case "large":
+		return pick(LargeShape, LargeRefinedShape)
+	}
+	return pick(DefaultShape, RefinedShape)
+}
+
 // Shaper turns a stream's depth maps into disparity: each map's range (its
 // 5th to 95th percentile) normalised to 0..1 (what lies beyond kept to a
 // quarter of the range more), the

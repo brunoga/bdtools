@@ -91,7 +91,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		subsLng  = fs.String("subs-lang", "", "keep only subtitles in these languages, e.g. eng, or none for no subtitles (default: every track)")
 		subsCdc  = fs.String("subs-codec", "", "keep only subtitles matching these codecs, e.g. pgs (default: every track)")
 		to3D     = fs.Bool("to-3d", false, "make a 2D source 3D: its depth estimated by a video depth network (Video Depth Anything Small, downloaded once, or --depth-model's), the two eyes made from it, out in the --layout asked for")
-		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network's checkpoint (a Video Depth Anything .pth; default: the small model, downloaded to the cache the first time)")
+		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network: small (the default), base or large (Video Depth Anything's, downloaded to the cache the first time; base and large are for non-commercial use only), or a checkpoint (.pth)")
 		depth3D  = fs.Float64("3d-depth", 1, "with --to-3d: the depth's strength, 1 the 3D discs' (more is stronger, and harder on the eyes)")
 		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: none for no refinement, or a file of tools/depthtrain's (default: the built-in weights)")
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")

@@ -138,7 +138,7 @@ func TestTinyModelOnTheGPU(t *testing.T) {
 }
 
 // The published model on the GPU, against PyTorch's on film frames.
-func TestSmallModelOnTheGPU(t *testing.T) {
+func TestPublishedModelOnTheGPU(t *testing.T) {
 	wf, rf := os.Getenv("VDA_WEIGHTS"), os.Getenv("VDA_REF")
 	if wf == "" || rf == "" {
 		t.Skip("VDA_WEIGHTS or VDA_REF unset")
@@ -156,13 +156,55 @@ func TestSmallModelOnTheGPU(t *testing.T) {
 	stream(t, m, io, 1e-3)
 }
 
-// BenchmarkFrameGPU is BenchmarkFrame on the GPU.
+// The published model on the tensor cores (its products' inputs in half
+// precision), against PyTorch's single precision: off by a little
+// everywhere, more at a few pixels.
+func TestPublishedModelOnTheGPUInHalf(t *testing.T) {
+	wf, rf := os.Getenv("VDA_WEIGHTS"), os.Getenv("VDA_REF")
+	if wf == "" || rf == "" {
+		t.Skip("VDA_WEIGHTS or VDA_REF unset")
+	}
+	g := gpu(t)
+	g.Half = true
+	m, err := Load(wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io, err := nn.LoadPTH(rf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Use(g)
+	for i := 0; ; i++ {
+		x, ok := io[fmt.Sprintf("in.%d", i)]
+		if !ok {
+			break
+		}
+		got, want := m.Frame(x), io[fmt.Sprintf("out.%d", i)]
+		var peak, sq float64
+		for j, v := range want.Data {
+			peak = max(peak, math.Abs(float64(v)))
+			d := float64(got.Data[j] - v)
+			sq += d * d
+		}
+		rms := math.Sqrt(sq/float64(len(want.Data))) / peak
+		worst := compare(got, want)
+		// measured: 2.4e-4 and 9.3e-3 (single precision: 2e-5 at worst)
+		if rms > 1e-3 || worst > 2e-2 {
+			t.Errorf("frame %d: off by %.3g of the peak (root mean square), %.3g at worst", i, rms, worst)
+		}
+	}
+}
+
+// BenchmarkFrameGPU is BenchmarkFrame on the GPU (on the tensor cores
+// with VDA_HALF set).
 func BenchmarkFrameGPU(b *testing.B) {
 	wf := os.Getenv("VDA_WEIGHTS")
 	if wf == "" {
 		b.Skip("VDA_WEIGHTS unset")
 	}
 	g := gpu(b)
+	g.Half = os.Getenv("VDA_HALF") != ""
 	m, err := Load(wf)
 	if err != nil {
 		b.Fatal(err)

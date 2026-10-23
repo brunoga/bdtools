@@ -97,3 +97,24 @@ func TestSubtitleOffset(t *testing.T) {
 		t.Errorf("offset %g, want 6 (half of 10, plus 1)", o)
 	}
 }
+
+// Another depth network makes other pictures: an interrupted conversion
+// with one does not resume with another's.
+func TestResumeKeyHasTheDepthModel(t *testing.T) {
+	in := filepath.Join(t.TempDir(), "film.mkv")
+	if err := os.WriteFile(in, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := func(model string) string {
+		o := DefaultOptions()
+		o.Input, o.To3D, o.DepthModel = in, true, model
+		k, err := NewRunner(CurrentGOOS, o, nil).resumeKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	if key("") == key("base") {
+		t.Error("the same resume key for the small and the base network")
+	}
+}
