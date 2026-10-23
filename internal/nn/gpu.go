@@ -27,6 +27,10 @@ type GPU struct {
 	arena []*alloc
 	gen   int // Releases so far
 	err   error
+
+	// Half rounds the matrix products' inputs to half precision, for the
+	// tensor cores (their sums stay single precision).
+	Half bool
 }
 
 // spare is a free buffer and the Release it was given back at.
@@ -60,7 +64,8 @@ func NewGPU() (*GPU, error) {
 	}
 	g := &GPU{c: c, mod: m, k: map[string]*cuda.Kernel{}, free: map[int][]spare{}}
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
-		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal"} {
+		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
+		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -198,6 +203,9 @@ func (g *GPU) drop(gone func(spare) bool) {
 func (g *GPU) gemm(kernel string, m, n, k int, a uintptr, lda, sa int, b uintptr, ldb, sb int, c uintptr, ldc, sc int,
 	alpha float32, bias uintptr, biasMode, batch int) {
 	grid := cuda.Dim{X: (n + 127) / 128, Y: (m + 127) / 128, Z: batch}
+	if g.Half {
+		kernel += "_tc"
+	}
 	g.launch(kernel, grid, cuda.Dim{X: 256}, 0, m, n, k, a, lda, int64(sa), b, ldb, int64(sb), c, ldc, int64(sc),
 		alpha, bias, biasMode)
 }
@@ -228,7 +236,11 @@ func (g *GPU) Conv2d(x, w, b *Tensor, stride, pad int) *Tensor {
 	}
 	n, k := ho*wo, c*kh*kw
 	grid := cuda.Dim{X: (n + 127) / 128, Y: (o + 127) / 128}
-	g.launch("conv2d", grid, cuda.Dim{X: 256}, 0, o, n, k, ptr(w), ptr(x), ptr(y), ptr(b), biasMode(b, 2),
+	kernel := "conv2d"
+	if g.Half {
+		kernel += "_tc"
+	}
+	g.launch(kernel, grid, cuda.Dim{X: 256}, 0, o, n, k, ptr(w), ptr(x), ptr(y), ptr(b), biasMode(b, 2),
 		c, h, wd, kh, kw, stride, pad, wo)
 	return y
 }

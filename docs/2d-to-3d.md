@@ -171,6 +171,11 @@ The depth network dominates: about 100 GFLOP a frame for the small model at
 So the GPU backend is not optional for this to be practical, and a CPU-only
 machine converts overnight.
 
+Measured on the RTX 5090, a 1080p film: the small network 25 ms a picture
+in single precision, 16.5 on the tensor cores (Base 49 and 32; Large 122,
+single precision only); the whole conversion (NVENC) 35 pictures a second
+refined, 43 not: a two-hour film in about 80 minutes.
+
 ## How good: measured, not guessed
 
 The native 3D discs are the ground truth: their left eye is a 2D film whose
@@ -266,6 +271,41 @@ What that teaches:
   conversion's own right eye 26.9 to 27.5 dB (VMAF 26 to 30), and on the
   glass clips, held out of that choice, 25.7 to 26.8 (VMAF 27 to 33).
   It costs about 10 ms a picture.
+- **Whole films the choices never saw.** Furiosa (converted by the
+  studio) and Avatar: Fire and Ash (shot in 3D), each converted whole from
+  its 3D disc's left eye beside the disc's own 3D, and scored on clips
+  through the film (24 and 25 of 4 seconds):
+
+  | | Furiosa | Avatar: Fire and Ash |
+  |---|---|---|
+  | depth correlation, refined (not) | 0.88 (0.89) | 0.73 (0.70) |
+  | right eye, ours, refined (not) | 27.9 / 31 (28.1 / 32) | 24.4 / 25 (24.4 / 25) |
+  | fitted per picture, refined | 31.7 / 56 | 29.9 / 53 |
+  | fitted per clip, refined | 30.2 / 47 | 28.1 / 40 |
+  | flat; the disc's depth | 27.7 / 35; 37.9 / 87 | 26.7 / 42; 33.7 / 83 |
+
+  The depth's shape is close to a studio's (0.88), less to two cameras'
+  (0.73), and the refinement helps the one, costs the other a little. The
+  larger loss is the grading: both films spread their depth much wider
+  than our mapping (5th to 95th percentile 35 and 43 px at 1920, ours 21
+  and 20), which one fit a clip already gets most of (+2.3 and +3.7 dB).
+  A made eye scored against the disc's rewards less depth where the depth
+  is unsure, so these scores alone do not say how much depth looks best.
+- **Bigger networks are not better here.** Video Depth Anything Base and
+  Large (`--depth-model base`, `large`; CC-BY-NC-4.0) run in the same
+  code. On the twelve clips Base's depth correlates better (0.83, refined
+  0.86, against Small's 0.79 and 0.83) and, with its own mapping
+  (`stereo.BaseRefinedShape`), its right eye is 27.7 dB and VMAF 30 (Small
+  27.5, 29.5); but on the glass clips and both whole films it is worse
+  (Furiosa 27.4 / 29 against 27.9 / 31; Avatar 24.1 / 22 against 24.4 /
+  25), at twice the time. Large's depth is no better than Base's (0.80),
+  at five times Small's.
+- **The tensor cores lose nothing measurable.** The network's matrix
+  products with their inputs in half precision (sums in single): the
+  depth 0.02% of its range off PyTorch's (single precision 0.002%), every
+  benchmark measure the same to the second decimal, the network a third
+  faster. Large's activations overflow half precision (NaN on glass), so
+  it keeps single.
 - **The matcher** trusts a match only where the picture has texture:
   without that, space and night skies matched the grain, which two
   cameras do not share.

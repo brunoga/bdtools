@@ -18,9 +18,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or
   the toolkit, kernels compiled to PTX ahead of time): a 1080p film
-  converts at about 28 pictures a second on an RTX 5090 (33 without the
+  converts at about 35 pictures a second on an RTX 5090 (43 without the
   refinement below; the GPU's depth of a picture beside the CPU's work on
-  the one before); on the CPU, about one.
+  the one before, the network's matrix products on the tensor cores); on
+  the CPU, about one.
 - `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
   of the made 3D picture beneath them (an offset sequence made from its
   depth), not at the screen behind what comes out of it.
@@ -32,8 +33,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
 
+- `--depth-model base` and `large`: Video Depth Anything's bigger
+  networks (downloaded once; licensed CC-BY-NC-4.0, for non-commercial use
+  only), each with its own mapping of depth to disparity. Measured, they
+  are not better than the small one on whole films: see docs/2d-to-3d.md.
+
 ### Fixed
 
+- `--to-3d` resumed an interrupted conversion with another
+  `--depth-model`'s pictures: the network is part of what must match now.
 - `--2d --remux` of a 3D Matroska file (both views in its one video track)
   copied the dependent view's NAL units too: the copy holds the base view
   alone now.

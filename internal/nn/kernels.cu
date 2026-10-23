@@ -175,6 +175,171 @@ extern "C" __global__ void __launch_bounds__(256) conv2d(int O, int N, int K, co
 	gemm<B_CONV>(O, N, K, w, K, 0, x, 0, 0, y, N, 0, 1.f, bias, biasMode, cc, ch, cw, kh, kw, stride, pad, wo);
 }
 
+// --- matrix products on the tensor cores --------------------------------
+//
+// The same products (and modes) as gemm's, the tiles' values rounded to
+// half precision on their way into shared memory and summed in single
+// precision by mma.sync (m16n8k16): tiles of 128 x 128 by 256 threads, 8
+// warps of 64 x 32 each, 32 of K a step. The tensors stay float: only the
+// products' inputs are rounded.
+
+#include <cuda_fp16.h>
+
+#define TK 32
+#define TKP (TK + 8) // a shared row's halves, padded off the banks
+
+__device__ __forceinline__ void mma16816(float *c, const unsigned *a, const unsigned *b) {
+	asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+		: "+f"(c[0]), "+f"(c[1]), "+f"(c[2]), "+f"(c[3])
+		: "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
+}
+
+template <int MODE>
+__device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restrict__ A, int lda, long long sA,
+	const float *__restrict__ B, int ldb, long long sB, float *__restrict__ C, int ldc, long long sC,
+	float alpha, const float *__restrict__ bias, int biasMode,
+	int cc, int ch, int cw, int kh, int kw, int stride, int pad, int wo) {
+	// As[m][k], Bs[n][k]: K contiguous, as the fragments read them
+	__shared__ __align__(16) __half As[2][BM][TKP];
+	__shared__ __align__(16) __half Bs[2][BN][TKP];
+	A += blockIdx.z * sA;
+	B += blockIdx.z * sB;
+	C += blockIdx.z * sC;
+	int tid = threadIdx.x, lane = tid % 32, warp = tid / 32;
+	int i0 = blockIdx.y * BM, j0 = blockIdx.x * BN;
+	int wm = (warp / 4) * 64, wn = (warp % 4) * 32;
+	int g = lane / 4, t = lane % 4;
+	float acc[4][4][4];
+#pragma unroll
+	for (int a = 0; a < 4; a++)
+#pragma unroll
+		for (int b = 0; b < 4; b++)
+#pragma unroll
+			for (int c = 0; c < 4; c++) acc[a][b][c] = 0;
+
+	// Each thread loads 16 of A's tile (row tid/2, k (tid%2)*16..+16) and
+	// 16 of B's: for B_T as A's; for B_N and B_CONV column tid%128, k
+	// (tid/128)*16..+16, the warp's columns side by side.
+	float ra[16], rb[16];
+	int ar = tid / 2, ak = (tid % 2) * 16;
+	int bj = tid % 128, bk = (tid / 128) * 16;
+	auto load = [&](int k0) {
+		int i = i0 + ar;
+#pragma unroll
+		for (int q = 0; q < 16; q++) {
+			int k = k0 + ak + q;
+			ra[q] = (i < M && k < K) ? A[(long long)i * lda + k] : 0.f;
+		}
+		if (MODE == B_T) {
+			int j = j0 + ar;
+#pragma unroll
+			for (int q = 0; q < 16; q++) {
+				int k = k0 + ak + q;
+				rb[q] = (j < N && k < K) ? B[(long long)j * ldb + k] : 0.f;
+			}
+		} else if (MODE == B_N) {
+			int j = j0 + bj;
+#pragma unroll
+			for (int q = 0; q < 16; q++) {
+				int k = k0 + bk + q;
+				rb[q] = (j < N && k < K) ? B[(long long)k * ldb + j] : 0.f;
+			}
+		} else {
+			int j = j0 + bj;
+			int oy = j / wo, ox = j % wo;
+			int k = k0 + bk, khw = kh * kw;
+			int ci = k / khw, r = k % khw, ky = r / kw, kx = r % kw;
+#pragma unroll
+			for (int q = 0; q < 16; q++) {
+				float v = 0.f;
+				if (j < N && k + q < K) {
+					int sy = oy * stride - pad + ky, sx = ox * stride - pad + kx;
+					if (sy >= 0 && sy < ch && sx >= 0 && sx < cw) v = B[((long long)ci * ch + sy) * cw + sx];
+				}
+				rb[q] = v;
+				if (++kx == kw) {
+					kx = 0;
+					if (++ky == kh) {
+						ky = 0;
+						ci++;
+					}
+				}
+			}
+		}
+	};
+	auto store = [&](int s) {
+		__half2 *pa = (__half2 *)&As[s][ar][ak];
+#pragma unroll
+		for (int q = 0; q < 8; q++) pa[q] = __floats2half2_rn(ra[2 * q], ra[2 * q + 1]);
+		__half2 *pb = MODE == B_T ? (__half2 *)&Bs[s][ar][ak] : (__half2 *)&Bs[s][bj][bk];
+#pragma unroll
+		for (int q = 0; q < 8; q++) pb[q] = __floats2half2_rn(rb[2 * q], rb[2 * q + 1]);
+	};
+
+	load(0);
+	store(0);
+	__syncthreads();
+	int s = 0;
+	for (int k0 = 0; k0 < K; k0 += TK) {
+		bool more = k0 + TK < K;
+		if (more) load(k0 + TK);
+#pragma unroll
+		for (int kk = 0; kk < TK; kk += 16) {
+			unsigned af[4][4], bf[4][2];
+#pragma unroll
+			for (int mi = 0; mi < 4; mi++) {
+				int r = wm + mi * 16 + g;
+				af[mi][0] = *(const unsigned *)&As[s][r][kk + 2 * t];
+				af[mi][1] = *(const unsigned *)&As[s][r + 8][kk + 2 * t];
+				af[mi][2] = *(const unsigned *)&As[s][r][kk + 2 * t + 8];
+				af[mi][3] = *(const unsigned *)&As[s][r + 8][kk + 2 * t + 8];
+			}
+#pragma unroll
+			for (int ni = 0; ni < 4; ni++) {
+				int c = wn + ni * 8 + g;
+				bf[ni][0] = *(const unsigned *)&Bs[s][c][kk + 2 * t];
+				bf[ni][1] = *(const unsigned *)&Bs[s][c][kk + 2 * t + 8];
+			}
+#pragma unroll
+			for (int mi = 0; mi < 4; mi++)
+#pragma unroll
+				for (int ni = 0; ni < 4; ni++) mma16816(acc[mi][ni], af[mi], bf[ni]);
+		}
+		if (more) store(s ^ 1);
+		__syncthreads();
+		s ^= 1;
+	}
+#pragma unroll
+	for (int mi = 0; mi < 4; mi++)
+#pragma unroll
+		for (int ni = 0; ni < 4; ni++)
+#pragma unroll
+			for (int c = 0; c < 4; c++) {
+				int i = i0 + wm + mi * 16 + g + (c >= 2 ? 8 : 0);
+				int j = j0 + wn + ni * 8 + 2 * t + (c & 1);
+				if (i >= M || j >= N) continue;
+				float v = alpha * acc[mi][ni][c];
+				if (biasMode == 1) v += bias[j];
+				else if (biasMode == 2) v += bias[i];
+				C[(long long)i * ldc + j] = v;
+			}
+}
+
+extern "C" __global__ void __launch_bounds__(256) gemm_nn_tc(int M, int N, int K, const float *A, int lda, long long sA,
+	const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, const float *bias, int biasMode) {
+	gemmTC<B_N>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1);
+}
+
+extern "C" __global__ void __launch_bounds__(256) gemm_nt_tc(int M, int N, int K, const float *A, int lda, long long sA,
+	const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, const float *bias, int biasMode) {
+	gemmTC<B_T>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1);
+}
+
+extern "C" __global__ void __launch_bounds__(256) conv2d_tc(int O, int N, int K, const float *w, const float *x, float *y,
+	const float *bias, int biasMode, int cc, int ch, int cw, int kh, int kw, int stride, int pad, int wo) {
+	gemmTC<B_CONV>(O, N, K, w, K, 0, x, 0, 0, y, N, 0, 1.f, bias, biasMode, cc, ch, cw, kh, kw, stride, pad, wo);
+}
+
 // --- reductions ---------------------------------------------------------
 
 __device__ __forceinline__ float warpSum(float v) {

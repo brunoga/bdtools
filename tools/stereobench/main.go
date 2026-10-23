@@ -80,16 +80,17 @@ type clipResult struct {
 func main() {
 	every := flag.Int("every", 4, "measure one picture in this many")
 	model := flag.String("model", "", "the depth network's checkpoint (default: --to-3d's, in the user's cache)")
+	half := flag.Bool("half", true, "on the GPU, the matrix products' inputs in half precision (the tensor cores), as --to-3d's, unless the model's overflow it")
 	csvPath := flag.String("csv", "", "also write the clips' measures to this CSV file")
 	framesPath := flag.String("frames", "", "write each measured picture's features and its fit to the disc to this CSV file (the grading's training data)")
 	flag.IntVar(&guide.Radius, "guide-radius", stereo.DefaultGuide.Radius, "the depth's edge filter's radius (0: off)")
 	flag.Float64Var(&guide.Eps, "guide-eps", stereo.DefaultGuide.Eps, "the depth's edge filter's regularisation")
 	flag.Float64Var(&shape.Budget, "budget", 0.019, "with -scale 0: each picture's depth range normalised to this budget (a fraction of the width)")
 	flag.Float64Var(&shape.Screen, "screen", 0.57, "with -scale 0: the screen's place in that range (0 far, 1 near)")
-	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width); 0: normalised a picture at a time")
+	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width; by default the network's, stereo.ShapeFor); 0: normalised a picture at a time")
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
-	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by stereo.RefinedShape unless -scale or -offset")
+	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	flag.Parse()
 	if refinePath != "" {
@@ -100,12 +101,6 @@ func main() {
 			if refine, err = stereo.ReadRefine(refinePath); err != nil {
 				fail(err)
 			}
-		}
-		// the refined depth's mapping, unless one is asked for
-		set := map[string]bool{}
-		flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
-		if !set["scale"] && !set["offset"] {
-			shape.Scale, shape.Offset = stereo.RefinedShape.Scale, stereo.RefinedShape.Offset
 		}
 	}
 	if flag.NArg() == 0 {
@@ -123,7 +118,16 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+	// the network's (and the refined depth's) mapping, unless one is asked
+	// for, as --to-3d's
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if !set["scale"] && !set["offset"] {
+		d := stereo.ShapeFor(m.Size(), refine != nil)
+		shape.Scale, shape.Offset = d.Scale, d.Offset
+	}
 	if g, err := nn.NewGPU(); err == nil {
+		g.Half = *half && m.HalfSafe()
 		m.Use(g)
 		fmt.Fprintln(os.Stderr, "stereobench: the depth on", g.Name())
 	}

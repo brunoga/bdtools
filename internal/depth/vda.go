@@ -21,14 +21,16 @@ const (
 	temporalHead = 8  // the temporal attention's heads
 )
 
-// intermediate are the encoder blocks whose outputs the head reads.
-var intermediate = [4]int{2, 5, 8, 11}
+// intermediate are the encoder blocks whose outputs the head reads, by
+// the encoder's depth: Small's (and Base's) 12 blocks, Large's 24.
+var intermediate = map[int][4]int{12: {2, 5, 8, 11}, 24: {4, 11, 17, 23}}
 
 // Model is a loaded Video Depth Anything and its stream's state.
 type Model struct {
-	w     map[string]*nn.Tensor // in memory
-	heads int                   // the encoder's attention heads
-	dim   int                   // its width
+	w      map[string]*nn.Tensor // in memory
+	heads  int                   // the encoder's attention heads
+	dim    int                   // its width
+	blocks int                   // its depth
 
 	be  nn.Backend
 	dw  map[string]*nn.Tensor   // the weights on the backend
@@ -74,10 +76,37 @@ func New(w map[string]*nn.Tensor) (*Model, error) {
 	if dim%hd != 0 {
 		return nil, fmt.Errorf("depth: an encoder %d wide is not in heads of %d", dim, hd)
 	}
-	m := &Model{w: w, heads: dim / hd, dim: dim}
+	blocks := 0
+	for w[fmt.Sprintf("pretrained.blocks.%d.norm1.weight", blocks)] != nil {
+		blocks++
+	}
+	if _, ok := intermediate[blocks]; !ok {
+		return nil, fmt.Errorf("depth: an encoder of %d blocks (Small's 12 and Large's 24 are known)", blocks)
+	}
+	m := &Model{w: w, heads: dim / hd, dim: dim, blocks: blocks}
 	m.Use(nn.CPU)
 	return m, nil
 }
+
+// Size is the model's: "small", "base" or "large" (by its encoder's
+// width; "" for another, the tests' small random ones), each its own
+// scale of depth.
+func (m *Model) Size() string {
+	switch m.dim {
+	case 384:
+		return "small"
+	case 768:
+		return "base"
+	case 1024:
+		return "large"
+	}
+	return ""
+}
+
+// HalfSafe reports whether the model's matrix products may take their
+// inputs in half precision (nn.GPU's Half): Small's and Base's lose
+// nothing measurable; Large's activations overflow it (NaN on glass).
+func (m *Model) HalfSafe() bool { return m.blocks <= 12 }
 
 // Backend is the backend the model runs on.
 func (m *Model) Backend() nn.Backend { return m.be }
@@ -261,7 +290,8 @@ func (m *Model) encode(x *nn.Tensor, ph, pw int) [4]*nn.Tensor {
 	var out [4]*nn.Tensor
 	k := 0
 	hd := d / m.heads
-	for b := range 12 {
+	at := intermediate[m.blocks]
+	for b := range m.blocks {
 		pre := fmt.Sprintf("pretrained.blocks.%d.", b)
 		// x + ls1 * attn(norm1(x))
 		h := be.LayerNorm(tok, m.t(pre+"norm1.weight"), m.t(pre+"norm1.bias"), 1e-6)
@@ -275,7 +305,7 @@ func (m *Model) encode(x *nn.Tensor, ph, pw int) [4]*nn.Tensor {
 		h = be.GELU(be.Linear(h, m.t(pre+"mlp.fc1.weight"), m.opt(pre+"mlp.fc1.bias")))
 		h = be.Linear(h, m.t(pre+"mlp.fc2.weight"), m.opt(pre+"mlp.fc2.bias"))
 		be.AddScaled(tok, h, m.t(pre+"ls2.gamma"))
-		if k < 4 && b == intermediate[k] {
+		if k < 4 && b == at[k] {
 			n := be.LayerNorm(tok, m.t("pretrained.norm.weight"), m.t("pretrained.norm.bias"), 1e-6)
 			out[k] = be.Rows(n, 1)
 			k++

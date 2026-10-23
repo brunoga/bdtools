@@ -26,13 +26,26 @@ import (
 	"github.com/brunoga/bdtools/mvc"
 )
 
-// The depth network used unless --depth-model names another: Video Depth
-// Anything Small (Apache-2.0), its published checkpoint.
-const (
-	vdaSmallURL    = "https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth"
-	vdaSmallSHA256 = "13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609"
-	vdaSmallFile   = "video_depth_anything_vits.pth"
-)
+// depthNet is a published depth network --depth-model names, downloaded
+// into the user's cache the first time (checked against its digest).
+type depthNet struct {
+	name, file, url, sha256, size, licence string
+}
+
+// depthNets are the networks --depth-model names: Video Depth Anything
+// Small (Apache-2.0, the default), and Base and Large, whose licence
+// allows non-commercial use only.
+var depthNets = map[string]depthNet{
+	"small": {"Video Depth Anything Small", "video_depth_anything_vits.pth",
+		"https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth",
+		"13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609", "116 MB", ""},
+	"base": {"Video Depth Anything Base", "video_depth_anything_vitb.pth",
+		"https://huggingface.co/depth-anything/Video-Depth-Anything-Base/resolve/main/video_depth_anything_vitb.pth",
+		"775e578e8f9431ec0496514aa466bd0a1f67c28d0f518267809f35a43c04329b", "458 MB", "CC-BY-NC-4.0"},
+	"large": {"Video Depth Anything Large", "video_depth_anything_vitl.pth",
+		"https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth",
+		"43df27c6b396042ba34ff7b798ab279f64d204d2e86d7a373968f8fa36d0e6fa", "1.5 GB", "CC-BY-NC-4.0"},
+}
 
 // to3DState is a conversion's converter, and its subtitles' depth.
 type to3DState struct {
@@ -96,6 +109,14 @@ func (o Options) to3DKey() [3]float64 {
 // refineNone is Refine3D's for no refinement.
 const refineNone = "none"
 
+// depthModelKey is the depth network, for resuming.
+func (o Options) depthModelKey() string {
+	if !o.To3D {
+		return ""
+	}
+	return o.DepthModel
+}
+
 // refine3DKey is the refinement's weights, for resuming.
 func (o Options) refine3DKey() string {
 	if !o.To3D {
@@ -104,12 +125,10 @@ func (o Options) refine3DKey() string {
 	return o.Refine3D
 }
 
-// shape3D is the depth's shape for the options.
-func (o Options) shape3D() stereo.Shape {
-	s := stereo.DefaultShape
-	if o.Refine3D != refineNone {
-		s = stereo.RefinedShape
-	}
+// shape3D is the depth's shape for the options and the network's size
+// (its own scale of depth: depth.Model.Size).
+func (o Options) shape3D(size string) stereo.Shape {
+	s := stereo.ShapeFor(size, o.Refine3D != refineNone)
 	if o.Depth3D > 0 {
 		s.Scale *= o.Depth3D
 		s.Offset *= o.Depth3D
@@ -136,7 +155,7 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 		if err != nil {
 			return nil, err
 		}
-		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D())}
+		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D(m.Size()))}
 		r.conv.conv.NoWindow = r.Opts.NoWindow3D
 		switch f := r.Opts.Refine3D; f {
 		case refineNone:
@@ -151,7 +170,7 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 			r.conv.conv.Refine = w
 			r.Report.Report("--to-3d: the depth refined by %s", f)
 		}
-		s := r.Opts.shape3D()
+		s := r.Opts.shape3D(m.Size())
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
 			100*s.Scale, 100*s.Offset)
 	}
@@ -219,6 +238,7 @@ func (r *Runner) depthModel() (*depth.Model, error) {
 		return nil, err
 	}
 	if g, err := nn.NewGPU(); err == nil {
+		g.Half = m.HalfSafe() // the tensor cores: a third faster
 		m.Use(g)
 		r.Report.Report("--to-3d: the depth on the GPU (%s)", g.Name())
 	} else {
@@ -228,17 +248,25 @@ func (r *Runner) depthModel() (*depth.Model, error) {
 }
 
 func (r *Runner) loadDepthModel() (*depth.Model, error) {
-	if f := r.Opts.DepthModel; f != "" {
+	f := r.Opts.DepthModel
+	if f == "" {
+		f = "small"
+	}
+	n, ok := depthNets[f]
+	if !ok {
 		return depth.Load(f)
 	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
-		return nil, fmt.Errorf("--to-3d: no cache directory for the depth model (%w): name one with --depth-model", err)
+		return nil, fmt.Errorf("--to-3d: no cache directory for the depth model (%w): name a file with --depth-model", err)
 	}
-	file := filepath.Join(dir, "bdtools", vdaSmallFile)
+	file := filepath.Join(dir, "bdtools", n.file)
+	if n.licence != "" {
+		r.Report.Report("--to-3d: %s is licensed %s: for non-commercial use only", n.name, n.licence)
+	}
 	if _, err := os.Stat(file); err != nil {
-		r.Report.Report("--to-3d: downloading the depth model (Video Depth Anything Small, 116 MB) to %s", file)
-		if err := download(vdaSmallURL, file, vdaSmallSHA256); err != nil {
+		r.Report.Report("--to-3d: downloading the depth model (%s, %s) to %s", n.name, n.size, file)
+		if err := download(n.url, file, n.sha256); err != nil {
 			return nil, fmt.Errorf("--to-3d: the depth model: %w (or name a copy with --depth-model)", err)
 		}
 	}

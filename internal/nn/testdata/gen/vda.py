@@ -3,7 +3,8 @@
 #
 #   python vda.py tiny OUT_WEIGHTS OUT_IO        a small randomly initialised
 #                                                model, 14 frames (CI fixtures)
-#   python vda.py real WEIGHTS FRAMES_DIR OUT_IO the published weights on
+#   python vda.py real WEIGHTS FRAMES_DIR OUT_IO [vits|vitb|vitl]
+#                                                the published weights on
 #                                                frames (PPM files)
 #
 # VDA is the Video-Depth-Anything repository's directory, on sys.path.
@@ -52,7 +53,11 @@ if mode == 'tiny':
     inputs = [torch.randn(3, 28, 42) for _ in range(14)]
     out = sys.argv[3]
 else:
-    m = VideoDepthAnything(encoder='vits', features=64, out_channels=[48, 96, 192, 384])
+    enc = sys.argv[5] if len(sys.argv) > 5 else 'vits'
+    m = VideoDepthAnything(encoder=enc, **{
+        'vits': dict(features=64, out_channels=[48, 96, 192, 384]),
+        'vitb': dict(features=128, out_channels=[96, 192, 384, 768]),
+        'vitl': dict(features=256, out_channels=[256, 512, 1024, 1024])}[enc])
     m.load_state_dict(torch.load(sys.argv[2], map_location='cpu', weights_only=True), strict=True)
     m.eval()
     import cv2

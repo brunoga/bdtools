@@ -385,7 +385,7 @@ scheduler such as pipeliner retry it.
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
 | `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
 | `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |
-| `--depth-model` | the small model | With `--to-3d`: a Video Depth Anything checkpoint (`.pth`) to use instead |
+| `--depth-model` | `small` | With `--to-3d`: the depth network, `small`, `base` or `large` (Video Depth Anything's, downloaded once; `base` and `large` are licensed CC-BY-NC-4.0, for non-commercial use only), or a checkpoint (`.pth`) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
 | `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
@@ -476,7 +476,7 @@ nearer at once when it comes nearer, farther slowly. Letterbox
 bars stay at the screen; each cut starts the depth afresh; an HDR source is
 tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
 when there is one (CUDA, through the driver alone: a 1080p film converts
-at about 28 pictures a second on an RTX 5090, 33 with `--3d-refine none`), else
+at about 35 pictures a second on an RTX 5090, 43 with `--3d-refine none`), else
 on the CPU (about a second a picture on 24 cores). Hair,
 glass, smoke and reflections, and things on screens in the picture, get
 one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
