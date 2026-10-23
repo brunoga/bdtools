@@ -194,24 +194,25 @@ __device__ __forceinline__ void mma16816(float *c, const unsigned *a, const unsi
 		: "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
 }
 
-template <int MODE>
+template <int MODE, int BT>
 __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restrict__ A, int lda, long long sA,
 	const float *__restrict__ B, int ldb, long long sB, float *__restrict__ C, int ldc, long long sC,
 	float alpha, const float *__restrict__ bias, int biasMode,
 	int cc, int ch, int cw, int kh, int kw, int stride, int pad, int wo) {
 	// As[m][k], Bs[n][k]: K contiguous, as the fragments read them
-	__shared__ __align__(16) __half As[2][BM][TKP];
-	__shared__ __align__(16) __half Bs[2][BN][TKP];
+	__shared__ __align__(16) __half As[2][BT][TKP];
+	__shared__ __align__(16) __half Bs[2][BT][TKP];
+	constexpr int WM = BT == 128 ? 64 : 32, MI = WM / 16, WARPS_N = BT / 32;
 	A += blockIdx.z * sA;
 	B += blockIdx.z * sB;
 	C += blockIdx.z * sC;
 	int tid = threadIdx.x, lane = tid % 32, warp = tid / 32;
-	int i0 = blockIdx.y * BM, j0 = blockIdx.x * BN;
-	int wm = (warp / 4) * 64, wn = (warp % 4) * 32;
+	int i0 = blockIdx.y * BT, j0 = blockIdx.x * BT;
+	int wm = (warp / WARPS_N) * WM, wn = (warp % WARPS_N) * 32;
 	int g = lane / 4, t = lane % 4;
-	float acc[4][4][4];
+	float acc[MI][4][4];
 #pragma unroll
-	for (int a = 0; a < 4; a++)
+	for (int a = 0; a < MI; a++)
 #pragma unroll
 		for (int b = 0; b < 4; b++)
 #pragma unroll
@@ -222,7 +223,7 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 	// (tid/128)*16..+16, the warp's columns side by side.
 	float ra[16], rb[16];
 	int ar = tid / 2, ak = (tid % 2) * 16;
-	int bj = tid % 128, bk = (tid / 128) * 16;
+	int bj = tid % BT, bk = (tid / BT) * 16;
 	auto load = [&](int k0) {
 		int i = i0 + ar;
 #pragma unroll
@@ -285,9 +286,9 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 		if (more) load(k0 + TK);
 #pragma unroll
 		for (int kk = 0; kk < TK; kk += 16) {
-			unsigned af[4][4], bf[4][2];
+			unsigned af[MI][4], bf[4][2];
 #pragma unroll
-			for (int mi = 0; mi < 4; mi++) {
+			for (int mi = 0; mi < MI; mi++) {
 				int r = wm + mi * 16 + g;
 				af[mi][0] = *(const unsigned *)&As[s][r][kk + 2 * t];
 				af[mi][1] = *(const unsigned *)&As[s][r + 8][kk + 2 * t];
@@ -301,7 +302,7 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 				bf[ni][1] = *(const unsigned *)&Bs[s][c][kk + 2 * t + 8];
 			}
 #pragma unroll
-			for (int mi = 0; mi < 4; mi++)
+			for (int mi = 0; mi < MI; mi++)
 #pragma unroll
 				for (int ni = 0; ni < 4; ni++) mma16816(acc[mi][ni], af[mi], bf[ni]);
 		}
@@ -310,7 +311,7 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 		s ^= 1;
 	}
 #pragma unroll
-	for (int mi = 0; mi < 4; mi++)
+	for (int mi = 0; mi < MI; mi++)
 #pragma unroll
 		for (int ni = 0; ni < 4; ni++)
 #pragma unroll
@@ -325,20 +326,28 @@ __device__ __forceinline__ void gemmTC(int M, int N, int K, const float *__restr
 			}
 }
 
-extern "C" __global__ void __launch_bounds__(256) gemm_nn_tc(int M, int N, int K, const float *A, int lda, long long sA,
-	const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, const float *bias, int biasMode) {
-	gemmTC<B_N>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1);
-}
+#define TC_KERNELS(SUF, BT, THREADS) \
+	extern "C" __global__ void __launch_bounds__(THREADS) gemm_nn_tc##SUF(int M, int N, int K, const float *A, int lda, \
+		long long sA, const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, \
+		const float *bias, int biasMode) { \
+		gemmTC<B_N, BT>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1); \
+	} \
+	extern "C" __global__ void __launch_bounds__(THREADS) gemm_nt_tc##SUF(int M, int N, int K, const float *A, int lda, \
+		long long sA, const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, \
+		const float *bias, int biasMode) { \
+		gemmTC<B_T, BT>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1); \
+	} \
+	extern "C" __global__ void __launch_bounds__(THREADS) conv2d_tc##SUF(int O, int N, int K, const float *w, \
+		const float *x, float *y, const float *bias, int biasMode, int cc, int ch, int cw, int kh, int kw, int stride, \
+		int pad, int wo) { \
+		gemmTC<B_CONV, BT>(O, N, K, w, K, 0, x, 0, 0, y, N, 0, 1.f, bias, biasMode, cc, ch, cw, kh, kw, stride, pad, wo); \
+	}
 
-extern "C" __global__ void __launch_bounds__(256) gemm_nt_tc(int M, int N, int K, const float *A, int lda, long long sA,
-	const float *B, int ldb, long long sB, float *C, int ldc, long long sC, float alpha, const float *bias, int biasMode) {
-	gemmTC<B_T>(M, N, K, A, lda, sA, B, ldb, sB, C, ldc, sC, alpha, bias, biasMode, 0, 0, 0, 1, 1, 1, 0, 1);
-}
-
-extern "C" __global__ void __launch_bounds__(256) conv2d_tc(int O, int N, int K, const float *w, const float *x, float *y,
-	const float *bias, int biasMode, int cc, int ch, int cw, int kh, int kw, int stride, int pad, int wo) {
-	gemmTC<B_CONV>(O, N, K, w, K, 0, x, 0, 0, y, N, 0, 1.f, bias, biasMode, cc, ch, cw, kh, kw, stride, pad, wo);
-}
+// tiles of 128 x 128 (256 threads, warps of 64 x 32) and, for products too
+// small to fill the GPU with those, of 64 x 64 (128 threads, warps of 32 x
+// 32)
+TC_KERNELS(, 128, 256)
+TC_KERNELS(_64, 64, 128)
 
 // --- reductions ---------------------------------------------------------
 

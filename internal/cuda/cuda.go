@@ -29,7 +29,7 @@ type api struct {
 	cuLaunchKernel                                         uintptr
 	cuMemAlloc, cuMemFree, cuMemcpyHtoD, cuMemcpyDtoH      uintptr
 	cuMemcpyDtoD, cuMemsetD32                              uintptr
-	cuGetErrorString                                       uintptr
+	cuGetErrorString, cuDeviceGetAttribute                 uintptr
 }
 
 var (
@@ -52,6 +52,7 @@ func load() (*api, error) {
 		}{
 			{&a.cuInit, "cuInit"}, {&a.cuDeviceGet, "cuDeviceGet"}, {&a.cuDeviceGetName, "cuDeviceGetName"},
 			{&a.cuDeviceTotalMem, "cuDeviceTotalMem_v2"},
+			{&a.cuDeviceGetAttribute, "cuDeviceGetAttribute"},
 			{&a.cuCtxCreate, "cuCtxCreate_v2"}, {&a.cuCtxDestroy, "cuCtxDestroy_v2"},
 			{&a.cuCtxPush, "cuCtxPushCurrent_v2"}, {&a.cuCtxPop, "cuCtxPopCurrent_v2"},
 			{&a.cuCtxSynchronize, "cuCtxSynchronize"},
@@ -82,6 +83,7 @@ type Context struct {
 	ctx  uintptr
 	Name string // the GPU's
 	Mem  int64  // its memory, in bytes
+	SMs  int    // its multiprocessors
 }
 
 // New makes a context on the first GPU.
@@ -102,6 +104,11 @@ func New() (*Context, error) {
 	var mem uint64
 	if call(a.cuDeviceTotalMem, uintptr(unsafe.Pointer(&mem)), uintptr(dev)) == 0 {
 		c.Mem = int64(mem) //nolint:gosec // a GPU's memory
+	}
+	var sms int32
+	const multiprocessors = 16 // CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT
+	if call(a.cuDeviceGetAttribute, uintptr(unsafe.Pointer(&sms)), multiprocessors, uintptr(dev)) == 0 {
+		c.SMs = int(sms)
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

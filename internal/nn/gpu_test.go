@@ -84,6 +84,9 @@ func TestGPUHalfProducts(t *testing.T) {
 	}
 	x, w, b := rnd(301, 200), rnd(97, 200), rnd(97)
 	check("linear", Linear(x, w, b), g.Linear(g.Upload(x), g.Upload(w), g.Upload(b)))
+	// big enough for the tiles of 128 (the small ones are of 64)
+	x, w, b = rnd(2600, 96), rnd(2400, 96), rnd(2400)
+	check("big linear", Linear(x, w, b), g.Linear(g.Upload(x), g.Upload(w), g.Upload(b)))
 	img, w1, b1 := rnd(70, 23, 41), rnd(33, 70, 1, 1), rnd(33)
 	check("1x1 convolution", Conv2d(img, w1, b1, 1, 0), g.Conv2d(g.Upload(img), g.Upload(w1), g.Upload(b1), 1, 0))
 	w3, b3 := rnd(45, 70, 3, 3), rnd(45)

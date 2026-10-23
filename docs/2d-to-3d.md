@@ -172,10 +172,10 @@ So the GPU backend is not optional for this to be practical, and a CPU-only
 machine converts overnight.
 
 Measured on the RTX 5090, a 1080p film: the small network 25 ms a picture
-in single precision, 10.4 on the tensor cores with attention in one pass
+in single precision, 8.9 on the tensor cores with attention in one pass
 (Base 49 and 19.7; Large 122, single precision only); the whole conversion
-(NVENC, its pace once started) 60 pictures a second refined, 69 not: a
-two-hour film in about 50 minutes. The picture goes to the GPU as it is
+(NVENC, its pace once started) 65 pictures a second refined, 74 not: a
+two-hour film in about 45 minutes. The picture goes to the GPU as it is
 decoded and comes back as its two eyes and their disparity: the
 networks' inputs (the picture resized and made RGB for the network, the
 half-size picture and standardised depth for the refinement), the
@@ -185,8 +185,9 @@ tensor cores attention is one kernel a layer (flash attention: the keys
 and values a tile at a time, the softmax kept running, the scores never
 stored: 6.1 ms a picture down to 1.3) and layer normalisation a warp a
 row in single precision (double is slow on consumer GPUs: 2.4 ms down to
-0.4). The GPU's work now sets the pace (15.4 ms a picture refined, the
-CPU's 4.9), the network's matrix products most of it.
+0.4); a product whose tiles of 128 would leave multiprocessors idle runs
+in tiles of 64. The GPU's work sets the pace (the CPU's is a third of
+it), the network's matrix products most of it.
 
 ## How good: measured, not guessed
 
@@ -346,8 +347,8 @@ What that teaches:
    PyTorch's within 1e-3: 25 ms a 1080p frame on an RTX 5090, 50 times
    the CPU. Since: the depth of one frame made while the last is
    rendered, the tensor cores (16.5 ms), the networks' inputs made on the
-   GPU, attention in one pass (10.4 ms), the eyes rendered on the GPU; a
-   film converts at about 60 frames a second. Still to do: the matrix
+   GPU, attention in one pass, the eyes rendered on the GPU, tiles fitted
+   to the GPU (8.9 ms); a film converts at about 65 frames a second. Still to do: the matrix
    products' tiles fitted to the GPU (they run at a tenth of its rate).
 5. **Depth edges**: the network's soft depth edges snapped to the
    picture's (an edge-aware filter guided by the full-resolution picture),
