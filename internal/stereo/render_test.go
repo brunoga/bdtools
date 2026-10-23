@@ -79,9 +79,9 @@ func TestFillHolesFromTheBackground(t *testing.T) {
 	z := []float32{-5, -5, -5, 0, 0, 0, 20, 20} // left far, right near
 	set := []bool{true, true, true, false, false, false, true, true}
 	fillHoles(v, z, set)
-	for i, want := range []float32{1, 2, 3, 3, 2, 1, 9, 9} {
+	for i, want := range []float32{1, 2, 3, 3, 3, 3, 9, 9} {
 		if v[i] != want {
-			t.Fatalf("filled %v, want the left side mirrored", v)
+			t.Fatalf("filled %v, want the left side's edge carried across", v)
 		}
 	}
 }
