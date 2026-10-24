@@ -8,14 +8,16 @@ func TestShapeFor(t *testing.T) {
 	for _, c := range []struct {
 		size    string
 		refined bool
+		tuned   bool
 		want    Shape
 	}{
-		{"small", false, DefaultShape}, {"small", true, RefinedShape}, {"", true, RefinedShape},
-		{"base", false, BaseShape}, {"base", true, BaseRefinedShape},
-		{"large", false, LargeShape}, {"large", true, LargeRefinedShape},
+		{"small", false, false, DefaultShape}, {"small", true, false, RefinedShape}, {"", true, false, RefinedShape},
+		{"small", false, true, TunedShape}, {"small", true, true, TunedShape},
+		{"base", false, false, BaseShape}, {"base", true, false, BaseRefinedShape}, {"base", false, true, BaseShape},
+		{"large", false, false, LargeShape}, {"large", true, false, LargeRefinedShape},
 	} {
-		if got := ShapeFor(c.size, c.refined); got != c.want {
-			t.Errorf("ShapeFor(%q, %v) = %+v, want %+v", c.size, c.refined, got, c.want)
+		if got := ShapeFor(c.size, c.refined, c.tuned); got != c.want {
+			t.Errorf("ShapeFor(%q, %v, %v) = %+v, want %+v", c.size, c.refined, c.tuned, got, c.want)
 		}
 	}
 }

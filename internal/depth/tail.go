@@ -2,6 +2,8 @@ package depth
 
 import (
 	"bufio"
+	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -30,6 +32,23 @@ var TailNames = []string{
 }
 
 const tailMagic = "BDTL1"
+
+// The built-in tail, for Video Depth Anything Small: learnt by
+// tools/depthtrain -tail (6 passes, batch 4, rate 1e-4) from 7,423
+// pictures of 53 3D films, the benchmark's held out (docs/2d-to-3d.md).
+//
+//go:embed tail.bin
+var builtinTail []byte
+
+// BuiltinTail is the built-in tail's weights (SetTail's), for Video
+// Depth Anything Small.
+func BuiltinTail() map[string]*nn.Tensor {
+	w, err := DecodeTail(bytes.NewReader(builtinTail))
+	if err != nil {
+		panic("depth: the built-in tail: " + err.Error())
+	}
+	return w
+}
 
 // WriteTail writes a tail's weights: the magic, their count, then each
 // one's name (its length, uint32, then its bytes), its dimensions (their

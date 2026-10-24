@@ -230,7 +230,9 @@ disc's:
 | each picture's range normalised to the discs' | 25.3 | 16 | |
 | the depth as it is, mapped as the discs map it | 26.9 | 26 | `--3d-refine none` |
 | refined (`--3d-refine`), scaled per picture to the disc's | 31.0 | 49 | the refined depth's shape |
-| refined, mapped as the discs map it | 27.5 | 30 | the defaults now |
+| refined, mapped as the discs map it | 27.5 | 30 | `--3d-tune none` |
+| tuned (`--3d-tune`), scaled per picture to the disc's | 31.3 | 51 | the tuned depth's shape |
+| tuned, mapped as the discs map it | 27.3 | 30 | the defaults now |
 
 What that teaches:
 
@@ -300,6 +302,30 @@ What that teaches:
   way (correlation 0.881 to 0.885), Avatar: Fire and Ash 24.39 to 24.40.
   Those weights are built in. More pictures of the same kind help
   little: what is left is not what the films show.
+- **Tuning the depth network itself does more.** The network's last
+  stages (the DPT head's two finest fusion blocks and its output
+  convolutions, 36 of its tensors; the encoder and the temporal modules
+  kept), learnt anew from the same 7,423 pictures (`tools/depthtrain
+  -tail`, from the inputs `tools/stereobench -samples` records, on the
+  GPU in 25 minutes), the loss the refinement's plus a term keeping each
+  picture's depth's mean and spread the network's. The validation error
+  after fitting 7.9 to 6.35 px (the refinement's 6.80). Its depth wants
+  its own mapping (`stereo.TunedShape`: 0.12% a unit, the farthest 0.90%
+  behind the screen), re-found on the twelve clips as before; the
+  refinement learnt on the old depth only loses on it, so it stays off.
+  Against the refined depth, the right eye's PSNR / VMAF:
+
+  | | refined | tuned |
+  |---|---|---|
+  | the twelve clips (the mapping chosen on them; one picture in 8) | 27.36 / 31.0 | 27.31 / 30.0 |
+  | the four glass clips | 26.94 / 34.6 | 27.79 / 41.9 |
+  | Furiosa | 27.88 / 31.3 | 28.57 / 34.9 |
+  | Avatar: Fire and Ash | 24.40 / 25.3 | 24.46 / 25.5 |
+  | depth correlation (twelve, glass, Furiosa, Avatar) | .834 .768 .885 .730 | .848 .791 .877 .752 |
+
+  It wins on every set it was not chosen on, the glass most, and the
+  conversion is faster (no refinement: about 120 pictures a second at
+  1080p on an RTX 5090). Built in and on by default for Small.
 - **Whole films the choices never saw.** Furiosa (converted by the
   studio) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
@@ -396,9 +422,12 @@ What that teaches:
 9. **A learnt refinement** (done for the depth: `--3d-refine`, see
    [Measured so far](#measured-so-far)): a small network, trained in Go
    on the discs' real pairs, from the picture and its depth to a
-   corrected depth. The weights learnt from 53 films are built in;
-   the training tool ships, for weights of one's own. Next: filling the holes by it too, and a larger network
-   on the GPU.
+   corrected depth. Since outdone by tuning the depth network's last
+   stages on the same pairs (`--3d-tune`, built in and the default; the
+   refinement then off). A wider refinement network (4 times the work)
+   gained 0.3 VMAF and lost correlation on Furiosa: not kept. Next: the
+   refinement learnt again on the tuned depth, and more of the network
+   tuned.
 10. **Blu-ray 3D authoring** (first step done): `--output film.iso`, a
     Blu-ray 3D image: the playlist and clip infos tsMuxeR's byte for byte
     for the same facts (`internal/bdmv`), the clips' transport streams
@@ -426,6 +455,7 @@ What that teaches:
   it; `--3d-depth 1` gives the scored best back.
 - **Shipping refinement weights** (decided: built in). They are learnt
   from commercial 3D films; `--3d-refine none` leaves them out, and
-  anyone may learn their own.
+  anyone may learn their own. The tuned network's weights likewise
+  (`--3d-tune none`).
 - **Blu-ray authoring.** Needed if a disc player is a target; it is a
   piece of its own (milestone 6), separate from the conversion.

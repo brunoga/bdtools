@@ -40,6 +40,16 @@ var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 // 25.7 and 26.8).
 var RefinedShape = Shape{Scale: 0.0010, Offset: -0.0075}
 
+// TunedShape is DefaultShape for Small's depth with its tail learnt from
+// the 3D discs (depth.BuiltinTail), found as DefaultShape was, on the
+// benchmark's twelve clips: the made right eye 27.3 dB and VMAF 30.0
+// against the refined depth's 27.4 and 31.0 there, but on the clips held
+// out of the choice better: the four glass clips 27.8 and 41.9 (26.9 and
+// 34.6), two films' 28.6 and 34.9 (27.9 and 31.3) and 24.5 and 25.5 (24.4
+// and 25.3). Refining the tuned depth by weights learnt on the depth as
+// it was loses.
+var TunedShape = Shape{Scale: 0.0012, Offset: -0.0090}
+
 // The shapes of the other networks' depth (depth.Model.Size), each its
 // own scale, found as RefinedShape was. Base's depth refined (the weights
 // learnt on Small's) on the twelve clips: depth correlation 0.859 against
@@ -56,8 +66,11 @@ var (
 )
 
 // ShapeFor is the shape of a network's depth (by depth.Model.Size), refined
-// or not.
-func ShapeFor(size string, refined bool) Shape {
+// or not, tuned (Small's with its tail learnt: TunedShape) or not.
+func ShapeFor(size string, refined, tuned bool) Shape {
+	if tuned && size != "base" && size != "large" {
+		return TunedShape
+	}
 	pick := func(plain, ref Shape) Shape {
 		if refined {
 			return ref
