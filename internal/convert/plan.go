@@ -373,6 +373,17 @@ func (o Options) Validate(goos string) error {
 		case o.Screen3D < -5 || o.Screen3D > 5:
 			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
 		}
+	} else if o.redepthAsked() {
+		switch {
+		case o.Remux:
+			return fmt.Errorf("--3d-depth and --3d-screen make new pictures: they cannot be a --remux")
+		case o.TwoD:
+			return fmt.Errorf("--3d-depth and --3d-screen change a 3D film's depth: --2d leaves it out")
+		case o.Depth3D > 3:
+			return fmt.Errorf("--3d-depth scales a 3D source's depth, above 0 to 3, 1 as it is (got %g)", o.Depth3D)
+		case o.Screen3D < -5 || o.Screen3D > 5:
+			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
+		}
 	}
 	if strings.EqualFold(o.Input, o.Output) {
 		return fmt.Errorf("input and output are the same file")

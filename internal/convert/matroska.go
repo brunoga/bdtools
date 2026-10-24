@@ -868,6 +868,9 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if err := r.useTo3D(threeD(tracks)); err != nil {
 		return err
 	}
+	if err := r.useRedepth(); err != nil {
+		return err
+	}
 	if r.to3D {
 		r.Report.Report("source: 2D, made 3D (its depth estimated), video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	} else if r.framedIn != "" && !r.flat {
@@ -908,6 +911,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		// the conversion gives the subtitles their depth, as sequence 0
 		r.offsetSequence = func(Track) int { return 0 }
 	}
+	r.redepthOffsets(videoWidth(sel.Base))
 	if err := g.start(); err != nil {
 		if g.f != nil {
 			_ = g.f.Close()

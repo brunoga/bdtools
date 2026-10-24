@@ -208,6 +208,9 @@ type depthMap struct {
 	mu    sync.Mutex
 	frame time.Duration // one frame
 	gops  []depthGOP
+	// scale and shift change each offset as it is added (a 3D source's
+	// depth changed: redepthOffsets), when either is set
+	scale, shift float64
 }
 
 type depthGOP struct {
@@ -217,6 +220,16 @@ type depthGOP struct {
 
 // add records a GOP's offsets, its first frame at at.
 func (m *depthMap) add(at time.Duration, g offsetGOP) {
+	if m.scale != 0 || m.shift != 0 {
+		offsets := make([][]int8, len(g.offsets))
+		for i, row := range g.offsets {
+			offsets[i] = make([]int8, len(row))
+			for j, v := range row {
+				offsets[i][j] = redepthOffset(v, m.scale, m.shift)
+			}
+		}
+		g.offsets = offsets
+	}
 	m.mu.Lock()
 	m.gops = append(m.gops, depthGOP{at, g.offsets})
 	m.mu.Unlock()
