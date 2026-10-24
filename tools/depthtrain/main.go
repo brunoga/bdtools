@@ -41,6 +41,7 @@ func main() {
 	batch := flag.Int("batch", 4, "pictures a step")
 	from := flag.String("from", "", "start from these weights")
 	limit := flag.Int("limit", 0, "use at most this many training samples (0: all)")
+	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
 	flag.Parse()
 	train, err := list(*trainDir)
 	if err != nil {
@@ -66,8 +67,17 @@ func main() {
 		m = newModel(r)
 	}
 	opt := newAdam(m)
+	var g *nn.GPU
+	if *useGPU {
+		if g, err = nn.NewGPU(); err == nil {
+			defer g.Close()
+			fmt.Printf("training on %s\n", g.Name())
+		} else {
+			g = nil
+		}
+	}
 	fmt.Printf("%d training pictures, %d validation\n", len(train), len(val))
-	base, refined := validate(m, val)
+	base, refined := validate(m, g, val)
 	fmt.Printf("epoch 0: validation error after fitting %.3f px as the network gives it, %.3f refined\n", base, refined)
 	steps := *epochs * ((len(train) + *batch - 1) / *batch)
 	step := 0
@@ -89,27 +99,38 @@ func main() {
 					batchOf = append(batchOf, s)
 				}
 			}
-			views := make([]*model, len(batchOf))
-			losses := make([]float64, len(batchOf))
-			oks := make([]bool, len(batchOf))
-			var wg sync.WaitGroup
-			for i, s := range batchOf {
-				views[i] = &model{RefineWeights: m.RefineWeights}
-				views[i].zeroGrad()
-				wg.Go(func() { losses[i], oks[i] = views[i].step(s) })
-			}
-			wg.Wait()
 			k := 0
-			for i, v := range views {
-				if !oks[i] {
-					continue
+			if g != nil {
+				// one after the other, into the model's own gradients
+				for _, s := range batchOf {
+					if loss, ok := m.stepGPU(g, s); ok {
+						lossSum += loss
+						n++
+						k++
+					}
 				}
-				lossSum += losses[i]
-				n++
-				k++
-				for _, l := range stereo.RefineLayers {
-					acc(m.gw[l.Name], v.gw[l.Name])
-					acc(m.gb[l.Name], v.gb[l.Name])
+			} else {
+				views := make([]*model, len(batchOf))
+				losses := make([]float64, len(batchOf))
+				oks := make([]bool, len(batchOf))
+				var wg sync.WaitGroup
+				for i, s := range batchOf {
+					views[i] = &model{RefineWeights: m.RefineWeights}
+					views[i].zeroGrad()
+					wg.Go(func() { losses[i], oks[i] = views[i].step(s) })
+				}
+				wg.Wait()
+				for i, v := range views {
+					if !oks[i] {
+						continue
+					}
+					lossSum += losses[i]
+					n++
+					k++
+					for _, l := range stereo.RefineLayers {
+						acc(m.gw[l.Name], v.gw[l.Name])
+						acc(m.gb[l.Name], v.gb[l.Name])
+					}
 				}
 			}
 			if k == 0 {
@@ -123,7 +144,7 @@ func main() {
 				fmt.Printf("  step %d: loss %.4f (%.2f s a picture)\n", step, lossSum/float64(max(n, 1)), time.Since(t0).Seconds()/float64(max(n, 1)))
 			}
 		}
-		base, refined := validate(m, val)
+		base, refined := validate(m, g, val)
 		fmt.Printf("epoch %d: loss %.4f; validation error after fitting %.3f px as the network gives it, %.3f refined (%v)\n",
 			e, lossSum/float64(max(n, 1)), base, refined, time.Since(t0).Round(time.Second))
 		if err := save(m, *out); err != nil {
@@ -274,7 +295,22 @@ func fitError(s *sample, z []float32, pw int) (float64, bool) {
 	return 2 * e / float64(n), true
 }
 
-func validate(m *model, paths []string) (base, refined float64) {
+func validate(m *model, g *nn.GPU, paths []string) (base, refined float64) {
+	var on *stereo.RefineWeights
+	if g != nil {
+		on = &stereo.RefineWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+		for _, l := range stereo.RefineLayers {
+			on.W[l.Name], on.B[l.Name] = g.Upload(m.W[l.Name]), g.Upload(m.B[l.Name])
+			g.Keep(on.W[l.Name])
+			g.Keep(on.B[l.Name])
+		}
+		defer func() {
+			for _, l := range stereo.RefineLayers {
+				g.Free(on.W[l.Name])
+				g.Free(on.B[l.Name])
+			}
+		}()
+	}
 	var n int
 	for s := range prefetch(paths) {
 		if s == nil {
@@ -287,7 +323,16 @@ func validate(m *model, paths []string) (base, refined float64) {
 		if !ok {
 			continue
 		}
-		y := m.Refine(nn.CPU, x)
+		var y *nn.Tensor
+		if g != nil {
+			var err error
+			if y, err = g.Download(on.Refine(g, g.Upload(x))); err != nil {
+				fail(err)
+			}
+			g.Release()
+		} else {
+			y = m.Refine(nn.CPU, x)
+		}
 		e1, _ := fitError(s, y.Data, pw)
 		base += e0
 		refined += e1

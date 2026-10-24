@@ -1197,3 +1197,111 @@ extern "C" __global__ void __launch_bounds__(256) temporal_warp(int d, int c, in
 	}
 	out[at] = o;
 }
+
+// --- gradients, for training (fp32) -------------------------------------
+
+// im2col: x [c, h, w]'s patches as columns, col [c kh kw, ho wo].
+extern "C" __global__ void im2col(int c, int h, int w, int kh, int kw, int stride, int pad, int ho, int wo,
+	const float *x, float *col) {
+	long long n = (long long)ho * wo;
+	EACH((long long)c * kh * kw * n) {
+		long long p = i % n;
+		int k = i / n;
+		int j = k % kw, ii = (k / kw) % kh, ci = k / (kw * kh);
+		int yy = p / wo, xx = p % wo;
+		int sy = yy * stride - pad + ii, sx = xx * stride - pad + j;
+		col[i] = sy >= 0 && sy < h && sx >= 0 && sx < w ? x[((long long)ci * h + sy) * w + sx] : 0.f;
+	}
+}
+
+// col2im: the columns' gradient dcol [c kh kw, ho wo] summed back into
+// the input's, dx [c, h, w] (each input pixel gathering what read it).
+extern "C" __global__ void col2im(int c, int h, int w, int kh, int kw, int stride, int pad, int ho, int wo,
+	const float *dcol, float *dx) {
+	long long n = (long long)ho * wo;
+	EACH((long long)c * h * w) {
+		int x = i % w, y = (i / w) % h, ci = i / ((long long)w * h);
+		float s = 0.f;
+		for (int ii = 0; ii < kh; ii++) {
+			int ty = y + pad - ii;
+			if (ty < 0 || ty % stride) continue;
+			int yy = ty / stride;
+			if (yy >= ho) continue;
+			for (int j = 0; j < kw; j++) {
+				int tx = x + pad - j;
+				if (tx < 0 || tx % stride) continue;
+				int xx = tx / stride;
+				if (xx >= wo) continue;
+				s += dcol[((long long)(ci * kh + ii) * kw + j) * n + (long long)yy * wo + xx];
+			}
+		}
+		dx[i] = s;
+	}
+}
+
+// rowsum: out[r] = the sum of x's row r of n (a block a row).
+extern "C" __global__ void __launch_bounds__(256) rowsum(long long n, const float *x, float *out) {
+	__shared__ float part[256];
+	const float *row = x + blockIdx.x * n;
+	float s = 0.f;
+	for (long long i = threadIdx.x; i < n; i += 256) s += row[i];
+	part[threadIdx.x] = s;
+	__syncthreads();
+	for (int k = 128; k > 0; k >>= 1) {
+		if (threadIdx.x < k) part[threadIdx.x] += part[threadIdx.x + k];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0) out[blockIdx.x] = part[0];
+}
+
+// relu_back: dy zeroed where ReLU's output y is not positive.
+extern "C" __global__ void relu_back(long long n, const float *y, float *dy) {
+	EACH(n) if (y[i] <= 0.f) dy[i] = 0.f;
+}
+
+// convt_bx: convt's gradient at its input: dx [c, h, w] from dy [o, h k,
+// w k] and the weights wt [c, o, k, k].
+extern "C" __global__ void convt_bx(int c, int h, int w, int o, int k, const float *dy, const float *wt, float *dx) {
+	int W = w * k, H = h * k;
+	EACH((long long)c * h * w) {
+		int x = i % w, y = (i / w) % h, ci = i / ((long long)w * h);
+		float s = 0.f;
+		for (int oi = 0; oi < o; oi++)
+			for (int ky = 0; ky < k; ky++)
+				for (int kx = 0; kx < k; kx++)
+					s += wt[((ci * o + oi) * k + ky) * k + kx] * dy[((long long)oi * H + y * k + ky) * W + x * k + kx];
+		dx[i] = s;
+	}
+}
+
+// convt_bw: convt's gradient at its weights, dw [c, o, k, k] (a block a
+// weight): the sum over the input of x times dy where that weight took it.
+extern "C" __global__ void __launch_bounds__(256) convt_bw(int c, int h, int w, int o, int k, const float *x, const float *dy, float *dw) {
+	__shared__ float part[256];
+	int q = blockIdx.x;
+	int kx = q % k, ky = (q / k) % k, oi = (q / (k * k)) % o, ci = q / (k * k * o);
+	int W = w * k, H = h * k;
+	const float *xp = x + (long long)ci * h * w;
+	const float *dp = dy + (long long)oi * H * W;
+	float s = 0.f;
+	for (long long p = threadIdx.x; p < (long long)h * w; p += 256) {
+		int yy = p / w, xx = p % w;
+		s += xp[p] * dp[(long long)(yy * k + ky) * W + xx * k + kx];
+	}
+	part[threadIdx.x] = s;
+	__syncthreads();
+	for (int m = 128; m > 0; m >>= 1) {
+		if (threadIdx.x < m) part[threadIdx.x] += part[threadIdx.x + m];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0) dw[q] = part[0];
+}
+
+// sumparts: out[i] = the sum over s parts of part[p n + i].
+extern "C" __global__ void sumparts(long long n, int s, const float *part, float *out) {
+	EACH(n) {
+		float v = 0.f;
+		for (int p = 0; p < s; p++) v += part[p * n + i];
+		out[i] = v;
+	}
+}

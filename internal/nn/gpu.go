@@ -66,7 +66,8 @@ func NewGPU() (*GPU, error) {
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
 		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "gemm_nn_tc_64", "gemm_nt_tc_64", "conv2d_tc_64",
-		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp"} {
+		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp",
+		"im2col", "col2im", "rowsum", "relu_back", "convt_bx", "convt_bw", "sumparts"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
