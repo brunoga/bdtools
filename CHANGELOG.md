@@ -29,7 +29,7 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--to-3d` puts a floating window where something in front of the screen
   meets the picture's left or right edge (`--3d-window`).
 - `--to-3d`'s depth is corrected by a small network learnt from real 3D
-  pairs (27 films; on held-out discs the made right eye 0.5 to 1 dB
+  pairs (53 films; on held-out discs the made right eye 0.5 to 1 dB
   nearer theirs), its weights built in. `--3d-refine none` leaves it out,
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.

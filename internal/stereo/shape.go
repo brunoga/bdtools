@@ -33,7 +33,8 @@ var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 
 // RefinedShape is DefaultShape for a refined depth (Converter.Refine):
 // found as DefaultShape was, on the benchmark's twelve clips, with weights
-// learnt from 27 other films (the made right eye 27.5 dB and VMAF 29.5
+// learnt from 27 other films (since 53: the same mapping, the same
+// scores or a little better; the made right eye 27.5 dB and VMAF 29.5
 // against the discs', DefaultShape's on the depth as it is 26.9 and 25.7;
 // on the four glass clips, held out of the choice, 26.8 and 33.4 against
 // 25.7 and 26.8).
