@@ -92,6 +92,8 @@ func main() {
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
+	parallaxFlag := flag.String("parallax", "", "the parallax probe: steps (pictures back, e.g. 2,4,8) to measure each picture's motion parallax against, and how much it adds to the network's depth")
+	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.Parse()
 	if refinePath != "" {
@@ -157,6 +159,26 @@ func main() {
 				fail(err)
 			}
 		}()
+	}
+	if *parallaxFlag != "" {
+		var err error
+		if parallaxKs, err = parseKs(*parallaxFlag); err != nil {
+			fail(err)
+		}
+		if *parallaxPath != "" {
+			f, err := os.Create(*parallaxPath) //nolint:gosec // the operator's path
+			if err != nil {
+				fail(err)
+			}
+			parallaxCSV = csv.NewWriter(f)
+			_ = parallaxCSV.Write([]string{"clip", "frame", "k", "median", "p90", "inliers", "covered", "corr_net", "corr_par", "err_net", "err_par", "err_both"})
+			defer func() {
+				parallaxCSV.Flush()
+				if err := errors.Join(parallaxCSV.Error(), f.Close()); err != nil {
+					fail(err)
+				}
+			}()
+		}
 	}
 	var all []clipResult
 	for _, clip := range flag.Args() {
@@ -308,6 +330,10 @@ type clipBench struct {
 	recs []record
 	gl   struct{ n, sx, sy, sxx, sxy float64 }
 	k    int
+	// the parallax probe's: the last pictures' half luma, newest last,
+	// and each step's sums
+	lumas [][]byte
+	par   map[int]*parallaxStats
 }
 
 type record struct {
@@ -339,6 +365,12 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 
 func (c *clipBench) frame(sbs *mvc.Frame) error {
 	left, right := split(sbs)
+	if parallaxKs != nil {
+		c.lumas = append(c.lumas, halfLuma(left))
+		if len(c.lumas) > slices.Max(parallaxKs)+1 {
+			c.lumas = c.lumas[1:]
+		}
+	}
 	c.wantTail, c.tail = c.k%c.every == 0, nil
 	raw, disp, err := c.conv.Next(left)
 	if err != nil {
@@ -382,6 +414,19 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 		}
 	}
 	med := median(slices.Clone(c.discD[len(c.discD)-int(n):]))
+	for _, k := range parallaxKs {
+		if len(c.lumas) <= k {
+			continue
+		}
+		if c.par == nil {
+			c.par = map[int]*parallaxStats{}
+		}
+		if c.par[k] == nil {
+			c.par[k] = &parallaxStats{}
+		}
+		cur, prev := c.lumas[len(c.lumas)-1], c.lumas[len(c.lumas)-1-k]
+		parallaxFrame(c.res.name, c.k-1, k, cur, prev, dm.W, dm.H, dm, hr, top/2, bottom/2, c.par[k])
+	}
 	if samplesDir != "" {
 		if err := writeSample(c.res.name, c.k-1, left, dm, hr, top, bottom); err != nil {
 			return err
@@ -416,6 +461,15 @@ func (c *clipBench) finish() (clipResult, error) {
 	res, sums, gl := c.res, &c.sums, &c.gl
 	if res.frames == 0 {
 		return res, errNothing
+	}
+	for _, k := range parallaxKs {
+		if st := c.par[k]; st != nil && st.moving > 0 {
+			m := float64(st.moving)
+			fmt.Printf("parallax %s k=%d: %d of %d pictures moving; there the error after fitting %.2f px by the network's depth, %.2f by it and the parallax; correlation %.3f network, %.3f parallax\n",
+				res.name, k, st.moving, st.frames, st.errNet/m, st.errBoth/m, st.corrNet/m, st.corrPar/m)
+		} else if st != nil {
+			fmt.Printf("parallax %s k=%d: none of %d pictures moving\n", res.name, k, st.frames)
+		}
 	}
 	// the clip's one scale and offset, for "clip"
 	ca := (gl.sxy - gl.sx*gl.sy/gl.n) / max(gl.sxx-gl.sx*gl.sx/gl.n, 1e-12)
@@ -810,4 +864,17 @@ func writeCSV(path string, all []clipResult) error {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "stereobench:", err)
 	os.Exit(1)
+}
+
+// halfLuma is a picture's luma at half resolution (2x2 means).
+func halfLuma(f *mvc.Frame) []byte {
+	w, h := f.Width/2, f.Height/2
+	out := make([]byte, w*h)
+	for y := range h {
+		a, b := f.Y[2*y*f.StrideY:], f.Y[(2*y+1)*f.StrideY:]
+		for x := range w {
+			out[y*w+x] = byte((int(a[2*x]) + int(a[2*x+1]) + int(b[2*x]) + int(b[2*x+1]) + 2) / 4)
+		}
+	}
+	return out
 }
