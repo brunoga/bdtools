@@ -102,3 +102,38 @@ func TestStepIsRefine(t *testing.T) {
 		t.Errorf("the training pass's loss %v, Refine's %v", got, want/float64(n))
 	}
 }
+
+func TestStepGPUIsStep(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip(err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(9, 10))
+	m := newModel(r)
+	for i := range m.W["out"].Data {
+		m.W["out"].Data[i] = float32(r.NormFloat64() * 0.1)
+	}
+	s := testSample(r)
+	m.zeroGrad()
+	want, _ := m.step(s)
+	cpu := map[string]*nn.Tensor{}
+	for k, v := range m.gw {
+		cpu[k] = v.Clone()
+	}
+	m.zeroGrad()
+	got, ok := m.stepGPU(g, s)
+	if !ok || math.Abs(got-want) > 1e-5*max(1, math.Abs(want)) {
+		t.Fatalf("loss %v (%v), the CPU's %v", got, ok, want)
+	}
+	for _, l := range stereo.RefineLayers {
+		var worst, scale float64
+		for i, v := range cpu[l.Name].Data {
+			worst = max(worst, math.Abs(float64(m.gw[l.Name].Data[i]-v)))
+			scale = max(scale, math.Abs(float64(v)))
+		}
+		if worst > 1e-3*max(scale, 1e-6) {
+			t.Errorf("%s: %g off (largest %g)", l.Name, worst, scale)
+		}
+	}
+}

@@ -78,17 +78,52 @@ func (m *model) step(s *sample) (float64, bool) {
 		}
 		outs[l.Name] = h
 	}
+	g, loss, ok := lossGrad(s, h.Data, z, ph, pw)
+	if !ok {
+		return 0, false
+	}
+	// back
+	skipGrad := map[string]*nn.Tensor{}
+	for i := len(stereo.RefineLayers) - 1; i >= 0; i-- {
+		l := stereo.RefineLayers[i]
+		if sg := skipGrad[l.Name]; sg != nil {
+			acc(g, sg)
+		}
+		if l.Up {
+			g = nn.ReLUBackward(outs[l.Name], g)
+			skipGrad[skipOf[l.Name]] = g.Clone()
+			dx, dw, db := nn.ConvTranspose2dKBackward(ins[l.Name], m.W[l.Name], g)
+			acc(m.gw[l.Name], dw)
+			acc(m.gb[l.Name], db)
+			g = dx
+			continue
+		}
+		if !l.Residual {
+			g = nn.ReLUBackward(outs[l.Name], g)
+		}
+		dx, dw, db := nn.Conv2dBackward(ins[l.Name], m.W[l.Name], g, l.Stride, 1)
+		acc(m.gw[l.Name], dw)
+		acc(m.gb[l.Name], db)
+		g = dx
+	}
+	return loss, true
+}
+
+// lossGrad is the loss of a sample's refined depth, the network's output
+// out plus the standardised depth z (the robust error left after fitting,
+// in half-size pixels), and its gradient at out; ok says it counted.
+func lossGrad(s *sample, out, z []float32, ph, pw int) (g *nn.Tensor, loss float64, ok bool) {
 	y := make([]float32, ph*pw)
-	for i, v := range h.Data {
+	for i, v := range out {
 		y[i] = v + z[i]
 	}
 	// the loss: the mean of sqrt(r^2+1)-1 of the residual r = a y + b - d
 	// after the least-squares fit (a, b)
 	a, b, n := fit(s, y, pw)
 	if n < 100 {
-		return 0, false
+		return nil, 0, false
 	}
-	var loss, my, md float64
+	var my, md float64
 	q := make([]float64, ph*pw) // dL/dr
 	for r := range s.h {
 		for c := range s.w {
@@ -123,7 +158,7 @@ func (m *model) step(s *sample) (float64, bool) {
 		}
 	}
 	sxx = max(sxx, 1e-9)
-	g := nn.New(1, ph, pw)
+	g = nn.New(1, ph, pw)
 	for r := range s.h {
 		for c := range s.w {
 			if d := s.disp[r*s.w+c]; !math.IsNaN(float64(d)) {
@@ -133,31 +168,7 @@ func (m *model) step(s *sample) (float64, bool) {
 			}
 		}
 	}
-	// back
-	skipGrad := map[string]*nn.Tensor{}
-	for i := len(stereo.RefineLayers) - 1; i >= 0; i-- {
-		l := stereo.RefineLayers[i]
-		if sg := skipGrad[l.Name]; sg != nil {
-			acc(g, sg)
-		}
-		if l.Up {
-			g = nn.ReLUBackward(outs[l.Name], g)
-			skipGrad[skipOf[l.Name]] = g.Clone()
-			dx, dw, db := nn.ConvTranspose2dKBackward(ins[l.Name], m.W[l.Name], g)
-			acc(m.gw[l.Name], dw)
-			acc(m.gb[l.Name], db)
-			g = dx
-			continue
-		}
-		if !l.Residual {
-			g = nn.ReLUBackward(outs[l.Name], g)
-		}
-		dx, dw, db := nn.Conv2dBackward(ins[l.Name], m.W[l.Name], g, l.Stride, 1)
-		acc(m.gw[l.Name], dw)
-		acc(m.gb[l.Name], db)
-		g = dx
-	}
-	return loss / float64(n), true
+	return g, loss / float64(n), true
 }
 
 // adam is Adam's state.
@@ -194,4 +205,70 @@ func (o *adam) update(m *model, lr float64, scale float32) {
 		upd(m.W[l.Name].Data, m.gw[l.Name].Data, o.mw[l.Name], o.vw[l.Name])
 		upd(m.B[l.Name].Data, m.gb[l.Name].Data, o.mb[l.Name], o.vb[l.Name])
 	}
+}
+
+// stepGPU is step on the GPU: the same forward and back (in single
+// precision), the loss and its gradient on the CPU between.
+func (m *model) stepGPU(g *nn.GPU, s *sample) (float64, bool) {
+	defer g.Release()
+	x, _, _ := stereo.RefineInput(s.y, s.cb, s.cr, s.w, s.depth, s.w, s.h)
+	ph, pw := x.Dim(1), x.Dim(2)
+	z := x.Data[3*ph*pw:]
+	w, b := map[string]*nn.Tensor{}, map[string]*nn.Tensor{}
+	for _, l := range stereo.RefineLayers {
+		w[l.Name], b[l.Name] = g.Upload(m.W[l.Name]), g.Upload(m.B[l.Name])
+	}
+	ins := map[string]*nn.Tensor{}
+	outs := map[string]*nn.Tensor{}
+	h := g.Upload(x)
+	for _, l := range stereo.RefineLayers {
+		ins[l.Name] = h
+		if l.Up {
+			h = g.ReLU(g.Add(g.ConvTranspose2dK(h, w[l.Name], b[l.Name]), outs[skipOf[l.Name]]))
+		} else {
+			h = g.Conv2d(h, w[l.Name], b[l.Name], l.Stride, 1)
+			if !l.Residual {
+				h = g.ReLU(h)
+			}
+		}
+		outs[l.Name] = h
+	}
+	out, err := g.Download(h)
+	if err != nil {
+		fail(err)
+	}
+	gc, loss, ok := lossGrad(s, out.Data, z, ph, pw)
+	if !ok {
+		return 0, false
+	}
+	gr := g.Upload(gc)
+	down := func(t *nn.Tensor) *nn.Tensor {
+		d, err := g.Download(t)
+		if err != nil {
+			fail(err)
+		}
+		return d
+	}
+	skipGrad := map[string]*nn.Tensor{}
+	for i := len(stereo.RefineLayers) - 1; i >= 0; i-- {
+		l := stereo.RefineLayers[i]
+		if sg := skipGrad[l.Name]; sg != nil {
+			gr = g.Add(gr, sg)
+		}
+		var dx, dw, db *nn.Tensor
+		if l.Up {
+			gr = g.ReLUBackward(outs[l.Name], gr)
+			skipGrad[skipOf[l.Name]] = g.Clone(gr)
+			dx, dw, db = g.ConvTranspose2dKBackward(ins[l.Name], w[l.Name], gr)
+		} else {
+			if !l.Residual {
+				gr = g.ReLUBackward(outs[l.Name], gr)
+			}
+			dx, dw, db = g.Conv2dBackward(ins[l.Name], w[l.Name], gr, l.Stride, 1)
+		}
+		acc(m.gw[l.Name], down(dw))
+		acc(m.gb[l.Name], down(db))
+		gr = dx
+	}
+	return loss, true
 }

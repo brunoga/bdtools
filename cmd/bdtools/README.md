@@ -498,7 +498,8 @@ stereobench -every 4 -samples val "Film Z 3D FSBS.mkv@15m+4s,45m+4s"
 depthtrain -train samples -val val -out refine.bin -epochs 12 -batch 8
 ```
 
-About 7,400 pictures from 53 films, 5 hours on 24 cores, made the
+About 7,400 pictures from 53 films, 5 hours on 24 cores (on an NVIDIA
+GPU, which `depthtrain` uses when there is one, about 45 minutes), made the
 built-in weights; `depthtrain` reports the depth's error on the
 validation pictures (a film it did not train on) each pass.
 
