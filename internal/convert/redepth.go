@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -61,8 +62,18 @@ func (r *Runner) redepthPicture(p picture) picture {
 	if r.Opts.SwapLR {
 		l, rt = rt, l // the base view is the right eye
 	}
+	if !r.redepthTried {
+		// the matching on the GPU when there is one
+		r.redepthTried = true
+		if g, err := nn.NewGPU(); err == nil {
+			r.redepthGPU = g
+			r.Report.Report("3D: the disparity measured on the GPU (%s)", g.Name())
+		} else {
+			r.Report.Report("3D: the disparity measured on the CPU (slow: no CUDA GPU, %v)", err)
+		}
+	}
 	shift := r.Opts.Screen3D / 100 * float64(l.Width)
-	nl, nr := stereo.Redepth(l, rt, float32(r.Opts.redepthK()), float32(shift))
+	nl, nr := stereo.Redepth(r.redepthGPU, l, rt, float32(r.Opts.redepthK()), float32(shift))
 	if r.Opts.SwapLR {
 		nl, nr = nr, nl
 	}
@@ -73,6 +84,14 @@ func (r *Runner) redepthPicture(p picture) picture {
 	}
 	p.stereo = &mvc.StereoFrame{Base: keep(nl, st.Base), Dependent: keep(nr, st.Dependent)}
 	return p
+}
+
+// closeRedepth lets the depth change's GPU go.
+func (r *Runner) closeRedepth() {
+	if r.redepthGPU != nil {
+		r.redepthGPU.Close()
+		r.redepthGPU = nil
+	}
 }
 
 // redepthOffsets has the subtitles' depth follow the picture's: each

@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -18,10 +19,19 @@ import (
 // what neither saw is filled from the farther side, as Pair fills. The
 // shift moves the eyes apart (each half of it), black coming in at the
 // edges. With k 1 the eyes are only shifted.
-func Redepth(l, r *mvc.Frame, k, shift float32) (nl, nr *mvc.Frame) {
+//
+// The matching is on g when it is not nil (MatchBothGPU), else on the CPU.
+func Redepth(g *nn.GPU, l, r *mvc.Frame, k, shift float32) (nl, nr *mvc.Frame) {
 	if k != 1 {
 		w, h := l.Width, l.Height
-		ml, mr := MatchBoth(l, r)
+		var ml, mr *Disparity
+		var err error
+		if g != nil {
+			ml, mr, err = MatchBothGPU(g, l, r)
+		}
+		if g == nil || err != nil {
+			ml, mr = MatchBoth(l, r)
+		}
 		dl, dr := Dense(ml, w, h), Dense(mr, w, h)
 		a := (1 - k) / 2
 		nl = view(l, dl, -a, r, dr, 1-a)

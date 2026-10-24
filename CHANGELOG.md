@@ -48,8 +48,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   edge taken from the other camera (so less depth than the film's
   invents little; more fills from the farther side, as `--to-3d` does),
   the whole moved nearer or farther by `--3d-screen`, the subtitles'
-  offsets scaled and moved with it. On the CPU for now: about 3 pictures
-  a second.
+  offsets scaled and moved with it. The disparity is matched on an NVIDIA
+  GPU when there is one (the CPU's matching, disparity for disparity, 40
+  times faster): a 1080p film at about 31 pictures a second; on the CPU,
+  about 3.
 
 - `--output film.iso`: a Blu-ray 3D disc image of a 3D film (a 3D disc
   re-encoded, or `--to-3d`): its MVC video in a disc's two clips (the base

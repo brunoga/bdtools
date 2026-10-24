@@ -360,7 +360,7 @@ type Dim struct{ X, Y, Z int }
 // Launch queues a kernel: its grid of blocks, each of block threads, with
 // shared bytes of dynamic shared memory. The arguments are *Buffer (its
 // address), uintptr (an address), int (as a 32-bit int), int32, uint32,
-// float32, int64 or []uint64 (a struct of so many 64-bit fields, passed
+// float32, float64, int64 or []uint64 (a struct of so many 64-bit fields, passed
 // by value: device addresses, say), in the kernel's order.
 func (k *Kernel) Launch(grid, block Dim, shared int, args ...any) error {
 	vals := make([]uint64, len(args))
@@ -383,6 +383,8 @@ func (k *Kernel) Launch(grid, block Dim, shared int, args ...any) error {
 			vals[i] = uint64(v)
 		case float32:
 			vals[i] = uint64(math.Float32bits(v))
+		case float64:
+			vals[i] = math.Float64bits(v)
 		case int64:
 			vals[i] = uint64(v) //nolint:gosec // its bits
 		default:

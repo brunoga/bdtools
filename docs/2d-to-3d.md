@@ -457,7 +457,8 @@ What that teaches:
     player, a 2D disc, the offset metadata in an MVC Matroska file too.
 11. **A 3D film's depth changed** (first step done: `--3d-depth` and
     `--3d-screen` on a 3D source, `stereo.Redepth`; the disparity
-    matched on the CPU, about 3 pictures a second, so the GPU's next. On
+    matched on the GPU, the CPU's matching exactly, 8.7 ms a 1080p pair
+    against 340: a film converts at about 31 pictures a second. On
     the benchmark's clips, halving the depth measures 0.46 to 0.50 of the
     disc's disparity after, a quarter less 0.74 to 0.75, the median
     error 0.4 px). The plan: a real 3D disc's

@@ -261,3 +261,53 @@ func TestSamplesOnTheGPU(t *testing.T) {
 		}
 	}
 }
+
+// The GPU's matching is the CPU's, disparity for disparity.
+func TestMatchOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	rnd := rand.New(rand.NewPCG(3, 4)) //nolint:gosec // test data
+	sl, sr, _ := redepthScene(640, 360, 6, 24)
+	for _, pair := range [][2]*mvc.Frame{{sl, sr}, {randomPicture(rnd, 322, 180), randomPicture(rnd, 322, 180)}} {
+		l, r := pair[0], pair[1]
+		wl, wr := MatchBoth(l, r)
+		gl, gr, err := MatchBothGPU(g, l, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			name      string
+			want, got *Disparity
+		}{{"left", wl, gl}, {"right", wr, gr}} {
+			bad, badV := 0, 0
+			for i := range c.want.D {
+				if c.got.D[i] != c.want.D[i] {
+					bad++
+				}
+				if c.got.Valid[i] != c.want.Valid[i] {
+					badV++
+				}
+			}
+			if bad > 0 || badV > 0 {
+				t.Errorf("%dx%d, %s eye: %d disparities and %d sure flags of %d differ", l.Width, l.Height, c.name, bad, badV, len(c.want.D))
+			}
+		}
+	}
+}
+
+func BenchmarkMatchGPU(b *testing.B) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		b.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	l, r, _ := redepthScene(1920, 1080, 6, 24)
+	for b.Loop() {
+		if _, _, err := MatchBothGPU(g, l, r); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
