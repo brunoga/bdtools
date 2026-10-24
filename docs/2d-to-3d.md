@@ -282,7 +282,8 @@ What that teaches:
 - **A learnt refinement corrects the depth's shape.** A small U-Net (300k
   weights: `internal/stereo/refinenet.go`), from the picture and the
   network's depth at half size to a correction of the depth, trained in
-  Go (`tools/depthtrain`) on 3,774 pictures of the 27 films, the loss
+  Go (`tools/depthtrain`) on 3,774 pictures of the 27 films (now 7,423
+  of 53: see below), the loss
   what is left of the disc's disparity after fitting it a picture at a
   time (so each film's grading does not count). On the benchmark's six
   films, which it never saw: the depth's error after fitting 7.9 to 6.9
@@ -291,7 +292,14 @@ What that teaches:
   discs' mapping re-found for it (0.10% a unit, not 0.12%), the
   conversion's own right eye 26.9 to 27.5 dB (VMAF 26 to 30), and on the
   glass clips, held out of that choice, 25.7 to 26.8 (VMAF 27 to 33).
-  It costs about 10 ms a picture.
+  It costs about 10 ms a picture. Learnt again from twice the films (26
+  more official 3D releases; 7,423 pictures), the validation error is
+  6.80 px (6.85), and every score moves a little the right way: the
+  benchmark's right eye 27.46 dB either way (VMAF 29.5 to 29.6), the
+  glass clips 26.8 to 26.9 (VMAF 33.4 to 34.6), Furiosa 27.88 either
+  way (correlation 0.881 to 0.885), Avatar: Fire and Ash 24.39 to 24.40.
+  Those weights are built in. More pictures of the same kind help
+  little: what is left is not what the films show.
 - **Whole films the choices never saw.** Furiosa (converted by the
   studio) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
@@ -388,7 +396,7 @@ What that teaches:
 9. **A learnt refinement** (done for the depth: `--3d-refine`, see
    [Measured so far](#measured-so-far)): a small network, trained in Go
    on the discs' real pairs, from the picture and its depth to a
-   corrected depth. The weights learnt from 27 films are built in;
+   corrected depth. The weights learnt from 53 films are built in;
    the training tool ships, for weights of one's own. Next: filling the holes by it too, and a larger network
    on the GPU.
 10. **Blu-ray 3D authoring** (first step done): `--output film.iso`, a
