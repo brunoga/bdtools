@@ -346,6 +346,22 @@ What that teaches:
   and 20), which one fit a clip already gets most of (+2.3 and +3.7 dB).
   A made eye scored against the disc's rewards less depth where the depth
   is unsure, so these scores alone do not say how much depth looks best.
+- **Motion parallax adds little to the tuned depth.** The network sees
+  the pictures before (its temporal modules), but measures nothing. A
+  probe (`tools/stereobench -parallax 2,4,8`): each picture's optical
+  flow against one 2, 4 or 8 before (pyramidal Lucas-Kanade, kept where
+  forward and backward agree), the camera's rotation and the dominant
+  plane's motion taken out (a homography), what is left read along the
+  lines through the epipole as relative inverse depth. Where the camera
+  moved most (8 pictures apart), the disc's disparity fitted by the
+  network's depth and that parallax together, its weight chosen per
+  picture against the disc (so an upper bound), against the network's
+  depth alone: the twelve clips 2.71 to 2.16 px, Furiosa 2.07 to 1.98,
+  Avatar: Fire and Ash 2.54 to 2.42; the parallax alone correlates 0.3
+  to 0.46 with the disc's (the network 0.82 to 0.95). Moving people,
+  water and smoke break its one assumption, and pans and still shots
+  have none. Not worth fusing as measured; a learnt flow, or the
+  parallax as an input the tail learns to weigh, might be.
 - **Bigger networks are not better here.** Video Depth Anything Base and
   Large (`--depth-model base`, `large`; CC-BY-NC-4.0) run in the same
   code. On the twelve clips Base's depth correlates better (0.83, refined
@@ -439,6 +455,19 @@ What that teaches:
     nesting SEI in each GOP's first dependent view access unit, its layout
     a commercial disc's byte for byte). Still to do: checked on a disc
     player, a 2D disc, the offset metadata in an MVC Matroska file too.
+11. **A 3D film's depth changed** (planned, decided): a real 3D disc's
+    depth moved nearer or farther (one eye shifted against the other:
+    `--3d-screen` for 3D sources) or lessened, everything else kept
+    (audio, subtitles, chapters): the disparity measured between the
+    disc's eyes, scaled, and the eyes made again between the two
+    cameras' views, so both are blended and little is invented; the
+    subtitles' offsets scaled with it. More depth than the disc's (views
+    outside the cameras') after, with the conversion's filling. Needs a
+    disparity measure fit for output, not only for scoring.
+12. **Layered glass** (kept in mind, not now): a reflection and what is
+    seen through the glass separated by their motion, each its own
+    depth. The disc's own single depth already renders the glass clips
+    far better than ours, so a second layer is not the main loss.
 
 ## Decisions for you
 
