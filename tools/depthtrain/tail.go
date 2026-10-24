@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"math/rand/v2"
@@ -338,7 +339,7 @@ func validateTail(g *nn.GPU, tm *tailModel, paths []string) (base, tuned float64
 		if t == nil {
 			continue
 		}
-		e0, ok := fitError(t.sample, t.depth, t.w)
+		e0, ok := fitError(t.sample, t.depth, t.sample.w) // not t.w, the network's input
 		if !ok {
 			continue
 		}
@@ -434,4 +435,59 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 			fail(err)
 		}
 	}
+}
+
+// retune is main's for -retune: each sample of dir written to out with
+// the depth the tail's weights (depth.ReadTail's) give in place of the
+// network's, for a refinement learnt on the tuned depth.
+func retune(tail, dir, out string) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		fail(err)
+	}
+	defer g.Close()
+	w, err := depth.ReadTail(tail)
+	if err != nil {
+		fail(err)
+	}
+	paths, err := list(dir)
+	if err != nil {
+		fail(err)
+	}
+	if err := os.MkdirAll(out, 0o750); err != nil {
+		fail(err)
+	}
+	n, i := 0, -1
+	for t := range prefetchTail(paths) { // in order
+		i++
+		if t == nil {
+			continue
+		}
+		tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}}
+		for nm, x := range w {
+			tp.w[nm] = g.Upload(x)
+		}
+		d, err := g.Download(tp.bilinear(tp.forward(t), t.sample.h, t.sample.w))
+		g.Release()
+		if err != nil {
+			fail(err)
+		}
+		b, err := os.ReadFile(paths[i])
+		if err != nil {
+			fail(err)
+		}
+		// the header (magic, W, H, Top, Bottom), the planes, then the
+		// depth map: its active rows replaced
+		le := binary.LittleEndian
+		pw, ph, top := int(le.Uint32(b[4:])), int(le.Uint32(b[8:])), int(le.Uint32(b[12:]))
+		at := 20 + 3*pw*ph + 4*top*pw
+		for j, v := range d.Data {
+			le.PutUint32(b[at+4*j:], math.Float32bits(v))
+		}
+		if err := os.WriteFile(filepath.Join(out, filepath.Base(paths[i])), b, 0o600); err != nil { //nolint:gosec // the operator's directory
+			fail(err)
+		}
+		n++
+	}
+	fmt.Printf("%d samples retuned into %s\n", n, out)
 }

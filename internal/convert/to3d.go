@@ -139,10 +139,42 @@ func (o Options) refine3DKey() string {
 	return o.Refine3D
 }
 
+// tune3DKey is the depth network's tail, for resuming (the built-in one
+// named by its version, so a conversion begun before it began untuned).
+func (o Options) tune3DKey() string {
+	if !o.To3D {
+		return ""
+	}
+	if o.Tune3D == "" {
+		return "builtin1"
+	}
+	return o.Tune3D
+}
+
+// tuned3D reports whether the network (of its size: depth.Model.Size)
+// takes a tail of its own: Tune3D's file, else the built-in one, which
+// is Small's.
+func (o Options) tuned3D(size string) bool {
+	return o.Tune3D != refineNone && (o.Tune3D != "" || size == "small")
+}
+
+// refine3D is the refinement's weights asked for (Refine3D's), the
+// built-in ones by default unless the network is tuned (whose depth they
+// were not learnt on, and refining it loses), "" for none.
+func (o Options) refine3D(size string) string {
+	switch {
+	case o.Refine3D == refineNone, o.Refine3D == "" && o.tuned3D(size):
+		return ""
+	case o.Refine3D == "":
+		return "builtin"
+	}
+	return o.Refine3D
+}
+
 // shape3D is the depth's shape for the options and the network's size
 // (its own scale of depth: depth.Model.Size).
 func (o Options) shape3D(size string) stereo.Shape {
-	s := stereo.ShapeFor(size, o.Refine3D != refineNone)
+	s := stereo.ShapeFor(size, o.refine3D(size) != "", o.tuned3D(size))
 	s.Scale *= o.depth3D()
 	s.Offset *= o.depth3D()
 	s.Offset += o.Screen3D / 100
@@ -171,9 +203,9 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 		}
 		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D(m.Size()))}
 		r.conv.conv.NoWindow = r.Opts.NoWindow3D
-		switch f := r.Opts.Refine3D; f {
-		case refineNone:
+		switch f := r.Opts.refine3D(m.Size()); f {
 		case "":
+		case "builtin":
 			r.conv.conv.Refine = stereo.BuiltinRefine()
 			r.Report.Report("--to-3d: the depth refined (the built-in weights)")
 		default:
@@ -265,6 +297,23 @@ func (r *Runner) depthModel() (*depth.Model, error) {
 	m, err := r.loadDepthModel()
 	if err != nil {
 		return nil, err
+	}
+	if r.Opts.tuned3D(m.Size()) {
+		if f := r.Opts.Tune3D; f != "" {
+			w, err := depth.ReadTail(f)
+			if err == nil {
+				err = m.SetTail(w)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("--3d-tune: %w", err)
+			}
+			r.Report.Report("--to-3d: the depth network tuned by %s", f)
+		} else {
+			if err := m.SetTail(depth.BuiltinTail()); err != nil {
+				return nil, err
+			}
+			r.Report.Report("--to-3d: the depth network tuned to the 3D discs (the built-in weights)")
+		}
 	}
 	if g, err := nn.NewGPU(); err == nil {
 		g.Half = m.HalfSafe() // the tensor cores: a third faster

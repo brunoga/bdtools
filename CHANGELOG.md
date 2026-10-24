@@ -18,7 +18,7 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   afresh, an HDR source is tone mapped. The depth runs on an NVIDIA GPU
   when there is one (`internal/cuda`: the CUDA driver API without cgo or
   the toolkit, kernels compiled to PTX ahead of time): a 1080p film
-  converts at about 110 pictures a second on an RTX 5090 (120 without the
+  converts at about 120 pictures a second on an RTX 5090 (110 with the
   refinement below; the GPU's depth of a picture beside the CPU's work on
   the one before, the network on the tensor cores with attention in one
   pass, the networks' inputs and the eyes made on the GPU); on the CPU,
@@ -33,6 +33,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   nearer theirs), its weights built in. `--3d-refine none` leaves it out,
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
+- `--to-3d`'s depth network has its last stages learnt anew from the same
+  53 films' real 3D pairs (`--3d-tune`, on by default for the small
+  network; in place of the refinement, which then stays off): on held-out
+  discs the made right eye 0.1 to 0.9 dB nearer theirs and VMAF up to 7
+  higher than the refined depth's, the glass shots most. `--3d-tune none`
+  leaves the network as it is, `--3d-tune FILE` takes weights of one's
+  own (`tools/depthtrain -tail`, on the GPU).
 
 - `--output film.iso`: a Blu-ray 3D disc image of a 3D film (a 3D disc
   re-encoded, or `--to-3d`): its MVC video in a disc's two clips (the base

@@ -92,7 +92,7 @@ func main() {
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
-	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's) in place of the checkpoint's")
+	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.Parse()
 	if refinePath != "" {
 		if refinePath == "builtin" {
@@ -120,7 +120,10 @@ func main() {
 		fail(err)
 	}
 	if *tailPath != "" {
-		w, err := depth.ReadTail(*tailPath)
+		w, err := depth.BuiltinTail(), error(nil)
+		if *tailPath != "builtin" {
+			w, err = depth.ReadTail(*tailPath)
+		}
 		if err == nil {
 			err = m.SetTail(w)
 		}
@@ -133,7 +136,7 @@ func main() {
 	set := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if !set["scale"] && !set["offset"] {
-		d := stereo.ShapeFor(m.Size(), refine != nil)
+		d := stereo.ShapeFor(m.Size(), refine != nil, *tailPath != "")
 		shape.Scale, shape.Offset = d.Scale, d.Offset
 	}
 	if g, err := nn.NewGPU(); err == nil {

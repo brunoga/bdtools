@@ -119,3 +119,34 @@ func TestResumeKeyHasTheDepthModel(t *testing.T) {
 		t.Error("the same resume key for the small and the base network")
 	}
 }
+
+// Small's network is tuned by default, and its depth then not refined
+// (the refinement was learnt on the depth as it was) and graded as tuned
+// depth; another network is neither tuned nor graded so, unless asked.
+func TestTune3DDefaults(t *testing.T) {
+	for _, c := range []struct {
+		tune, refine, size string
+		tuned              bool
+		refined            string
+		shape              stereo.Shape
+	}{
+		{"", "", "small", true, "", stereo.TunedShape},
+		{"none", "", "small", false, "builtin", stereo.RefinedShape},
+		{"", "builtin", "small", true, "builtin", stereo.TunedShape},
+		{"", "none", "small", true, "", stereo.TunedShape},
+		{"none", "none", "small", false, "", stereo.DefaultShape},
+		{"", "", "base", false, "builtin", stereo.BaseRefinedShape},
+		{"t.bin", "", "base", true, "", stereo.BaseShape},
+	} {
+		o := Options{To3D: true, Tune3D: c.tune, Refine3D: c.refine, Depth3D: 1}
+		if got := o.tuned3D(c.size); got != c.tuned {
+			t.Errorf("%+v: tuned %v, want %v", c, got, c.tuned)
+		}
+		if got := o.refine3D(c.size); got != c.refined {
+			t.Errorf("%+v: refined %q, want %q", c, got, c.refined)
+		}
+		if got := o.shape3D(c.size); got != c.shape {
+			t.Errorf("%+v: shape %+v, want %+v", c, got, c.shape)
+		}
+	}
+}

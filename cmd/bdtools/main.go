@@ -93,7 +93,8 @@ func run(argv []string, stdout, stderr *os.File) int {
 		to3D     = fs.Bool("to-3d", false, "make a 2D source 3D: its depth estimated by a video depth network (Video Depth Anything Small, downloaded once, or --depth-model's), the two eyes made from it, out in the --layout asked for")
 		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network: small (the default), base or large (Video Depth Anything's, downloaded to the cache the first time; base and large are for non-commercial use only), or a checkpoint (.pth)")
 		depth3D  = fs.Float64("3d-depth", convert.DefaultDepth3D, "with --to-3d: the depth's strength, 1 the depth that scores best against the 3D discs' right eyes (the discs' own spans about twice it; more is stronger, and harder on the eyes)")
-		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: none for no refinement, or a file of tools/depthtrain's (default: the built-in weights)")
+		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: builtin, none, or a file of tools/depthtrain's (default: the built-in weights when the depth network is not tuned, none when it is)")
+		tune3D   = fs.String("3d-tune", "", "with --to-3d: the depth network's last stages learnt from 3D discs: none for the network as it is, or a file of tools/depthtrain -tail's (default: the built-in ones, for the small network)")
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")
 		screen3D = fs.Float64("3d-screen", 0, "with --to-3d: moves the whole depth nearer (positive: more out of the screen) or farther, in percent of the picture's width")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
@@ -300,7 +301,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	}
 	o.TwoD = *twoD
 	o.To3D, o.DepthModel, o.Depth3D, o.Screen3D = *to3D, *depthMdl, *depth3D, *screen3D
-	o.NoWindow3D, o.Refine3D = !*window3D, *refine3D
+	o.NoWindow3D, o.Refine3D, o.Tune3D = !*window3D, *refine3D, *tune3D
 	o.Decoder = convert.Decoder(*decoder)
 	if o.Decoder == "auto" {
 		o.Decoder = convert.DecoderAuto
