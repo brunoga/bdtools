@@ -1305,3 +1305,28 @@ extern "C" __global__ void sumparts(long long n, int s, const float *part, float
 		out[i] = v;
 	}
 }
+
+// fill: x = v.
+extern "C" __global__ void fill(long long n, float *x, float v) {
+	EACH(n) x[i] = v;
+}
+
+// bilinear_back: bilinear's gradient at its input, dx [c, h, w] (zeroed
+// before) from dy [c, oh, ow], each output's spread back to its four.
+extern "C" __global__ void bilinear_back(int c, int h, int w, int oh, int ow, float ry, float rx, const float *dy, float *dx) {
+	EACH((long long)c * oh * ow) {
+		int ox = i % ow;
+		long long t = i / ow;
+		int oy = t % oh, ci = t / oh;
+		float fy = oy * ry, fx = ox * rx;
+		int y0 = min((int)fy, h - 1), x0 = min((int)fx, w - 1);
+		int y1 = min(y0 + 1, h - 1), x1 = min(x0 + 1, w - 1);
+		float ly = fy - y0, lx = fx - x0;
+		float g = dy[i];
+		float *p = dx + (long long)ci * h * w;
+		atomicAdd(&p[y0 * w + x0], g * (1 - ly) * (1 - lx));
+		atomicAdd(&p[y0 * w + x1], g * (1 - ly) * lx);
+		atomicAdd(&p[y1 * w + x0], g * ly * (1 - lx));
+		atomicAdd(&p[y1 * w + x1], g * ly * lx);
+	}
+}

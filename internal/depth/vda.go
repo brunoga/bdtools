@@ -43,6 +43,19 @@ type Model struct {
 	// place in the window: the projections are linear).
 	cache [][8]kv
 	n     int // the frames done
+
+	// Tap, when set, is given each frame's head inputs to its trainable
+	// tail (TailInput), on the backend: for learning the tail.
+	Tap func(TailInput)
+}
+
+// TailInput is what the head's tail (Tail) takes: the encoder's first two
+// features as maps ([C, ph, pw]: the projections' inputs), and the
+// fusion's third stage after its temporal module ([F, H, W]), with the
+// network's input size (the depth's).
+type TailInput struct {
+	Feat0, Feat1, P3 *nn.Tensor
+	H, W             int
 }
 
 // Load reads a checkpoint (video_depth_anything_vits.pth, or another
@@ -335,8 +348,10 @@ func (m *Model) mapToTokens(x *nn.Tensor) *nn.Tensor {
 func (m *Model) head(feats [4]*nn.Tensor, ph, pw int, win [][8]kv) (*nn.Tensor, [8]kv) {
 	be := m.be
 	var layers [4]*nn.Tensor
+	var maps [4]*nn.Tensor
 	for i, f := range feats {
 		x := m.tokensToMap(f, ph, pw)
+		maps[i] = x
 		x = be.Conv2d(x, m.t(fmt.Sprintf("head.projects.%d.weight", i)), m.t(fmt.Sprintf("head.projects.%d.bias", i)), 1, 0)
 		rw, rb := m.opt(fmt.Sprintf("head.resize_layers.%d.weight", i)), m.opt(fmt.Sprintf("head.resize_layers.%d.bias", i))
 		switch i { // 2 is the identity
@@ -363,6 +378,9 @@ func (m *Model) head(feats [4]*nn.Tensor, ph, pw int, win [][8]kv) (*nn.Tensor, 
 	p3 := m.fusion(3, p4, rn[2], rn[1].Dim(1), rn[1].Dim(2))
 	p3, s = m.temporal(3, p3, column(win, 6), column(win, 7))
 	states[6], states[7] = s[0], s[1]
+	if m.Tap != nil {
+		m.Tap(TailInput{Feat0: maps[0], Feat1: maps[1], P3: p3, H: ph * patch, W: pw * patch})
+	}
 	p2 := m.fusion(2, p3, rn[1], rn[0].Dim(1), rn[0].Dim(2))
 	p1 := m.fusion(1, p2, rn[0], 2*rn[0].Dim(1), 2*rn[0].Dim(2))
 	out := be.Conv2d(p1, m.t("head.scratch.output_conv1.weight"), m.opt("head.scratch.output_conv1.bias"), 1, 1)

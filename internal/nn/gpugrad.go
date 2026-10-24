@@ -50,6 +50,31 @@ func (g *GPU) ReLUBackward(y, dy *Tensor) *Tensor {
 	return dy
 }
 
+// BilinearBackward is the gradient of Bilinear(x, oh, ow) at x ([c, h,
+// w]) given dy, the gradient at its output.
+func (g *GPU) BilinearBackward(dy *Tensor, h, w int) *Tensor {
+	c, oh, ow := dy.Dim(0), dy.Dim(1), dy.Dim(2)
+	dx := g.Zeros(c, h, w)
+	ratio := func(in, out int) float32 {
+		if out <= 1 {
+			return 0
+		}
+		return float32(float64(in-1) / float64(out-1))
+	}
+	gr, bl := each(c * oh * ow)
+	g.launch("bilinear_back", gr, bl, 0, c, h, w, oh, ow, ratio(h, oh), ratio(w, ow), ptr(dy), ptr(dx))
+	return dx
+}
+
+// Zeros is a new tensor of zeros on the GPU.
+func (g *GPU) Zeros(shape ...int) *Tensor {
+	t := g.tensor(shape...)
+	n := Numel(shape)
+	gr, bl := each(n)
+	g.launch("fill", gr, bl, 0, int64(n), ptr(t), float32(0))
+	return t
+}
+
 // rowsum is the sums of x's rows, x seen as rows of its size over rows.
 func (g *GPU) rowsum(x *Tensor, rows int) *Tensor {
 	out := g.tensor(rows)

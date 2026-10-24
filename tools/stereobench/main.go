@@ -92,6 +92,7 @@ func main() {
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
+	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's) in place of the checkpoint's")
 	flag.Parse()
 	if refinePath != "" {
 		if refinePath == "builtin" {
@@ -117,6 +118,15 @@ func main() {
 	m, err := depth.Load(*model)
 	if err != nil {
 		fail(err)
+	}
+	if *tailPath != "" {
+		w, err := depth.ReadTail(*tailPath)
+		if err == nil {
+			err = m.SetTail(w)
+		}
+		if err != nil {
+			fail(err)
+		}
 	}
 	// the network's (and the refined depth's) mapping, unless one is asked
 	// for, as --to-3d's
@@ -279,9 +289,12 @@ type clipBench struct {
 	conv    *stereo.Converter
 	every   int
 	scorers map[string]*vmaf.Scorer
-	discD   []float32
-	oursD   []float32
-	sums    struct {
+	// the depth network's tail inputs of the frame, when it is sampled
+	wantTail bool
+	tail     *tailInput
+	discD    []float32
+	oursD    []float32
+	sums     struct {
 		matched, corr, epe, bad2 float64
 		epeCurve, bad2Curve      float64
 		mse, holeMSE, holeN      map[string]float64
@@ -308,6 +321,13 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c := &clipBench{every: every, scorers: map[string]*vmaf.Scorer{}}
 	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
 	c.conv = stereo.NewConverter(m, shape)
+	if samplesDir != "" {
+		m.Tap = func(t depth.TailInput) {
+			if c.wantTail {
+				c.tail = downloadTail(m.Backend(), t)
+			}
+		}
+	}
 	c.conv.Guide = guide
 	c.conv.Refine = refine
 	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
@@ -316,6 +336,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 
 func (c *clipBench) frame(sbs *mvc.Frame) error {
 	left, right := split(sbs)
+	c.wantTail, c.tail = c.k%c.every == 0, nil
 	raw, disp, err := c.conv.Next(left)
 	if err != nil {
 		return err
@@ -361,6 +382,11 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 	if samplesDir != "" {
 		if err := writeSample(c.res.name, c.k-1, left, dm, hr, top, bottom); err != nil {
 			return err
+		}
+		if c.tail != nil {
+			if err := writeTail(c.res.name, c.k-1, c.tail); err != nil {
+				return err
+			}
 		}
 	}
 	if framesOut != nil {
