@@ -42,7 +42,12 @@ func main() {
 	from := flag.String("from", "", "start from these weights")
 	limit := flag.Int("limit", 0, "use at most this many training samples (0: all)")
 	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
+	tailFrom := flag.String("tail", "", "learn the depth network's tail instead, from this checkpoint (.pth), on the GPU: the samples need their tail inputs (.bht)")
 	flag.Parse()
+	if *tailFrom != "" {
+		trainTail(*tailFrom, *trainDir, *valDir, *out, *epochs, *lr, *batch, *limit)
+		return
+	}
 	train, err := list(*trainDir)
 	if err != nil {
 		fail(err)

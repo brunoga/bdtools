@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/brunoga/bdtools/internal/depth"
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -22,6 +24,50 @@ import (
 //	Y, Cb, Cr   W*H bytes each (Y the 2x2 average, the chroma as it is)
 //	depth       W*H float32, the network's (NaN in the bars)
 //	disparity   W*H float32, the disc's (half-size pixels, NaN unsure)
+
+// With each sample, a file of the depth network's tail inputs for that
+// picture (depth.TailInput; NAME.bht beside NAME.bds), for learning the
+// network's tail:
+//
+//	"BHT1", H, W (uint32: the network's input, its depth's size)
+//	three tensors (Feat0, Feat1, P3), each: ndim (uint32), its dims
+//	(uint32), its values (float32)
+
+// tailInput is a depth.TailInput on the CPU.
+type tailInput struct {
+	t    [3]*nn.Tensor
+	h, w int
+}
+
+func downloadTail(be nn.Backend, t depth.TailInput) *tailInput {
+	out := &tailInput{h: t.H, w: t.W}
+	for i, x := range [3]*nn.Tensor{t.Feat0, t.Feat1, t.P3} {
+		d, err := be.Download(x)
+		if err != nil {
+			fail(err)
+		}
+		out.t[i] = d
+	}
+	return out
+}
+
+func writeTail(clip string, k int, t *tailInput) error {
+	f, err := os.Create(filepath.Join(samplesDir, strings.ReplaceAll(fmt.Sprintf("%s-%06d.bht", clip, k), "/", "_"))) //nolint:gosec // the operator's directory
+	if err != nil {
+		return err
+	}
+	b := bufio.NewWriterSize(f, 1<<20)
+	_, _ = b.WriteString("BHT1")
+	_ = binary.Write(b, binary.LittleEndian, []uint32{uint32(t.h), uint32(t.w)}) //nolint:gosec // picture sizes
+	for _, x := range t.t {
+		_ = binary.Write(b, binary.LittleEndian, uint32(len(x.Shape))) //nolint:gosec // 3
+		for _, d := range x.Shape {
+			_ = binary.Write(b, binary.LittleEndian, uint32(d)) //nolint:gosec // a tensor's size
+		}
+		_ = binary.Write(b, binary.LittleEndian, x.Data)
+	}
+	return errors.Join(b.Flush(), f.Close())
+}
 
 var (
 	samplesDir string

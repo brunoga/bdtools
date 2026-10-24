@@ -52,6 +52,16 @@ func TestGPUGradients(t *testing.T) {
 	near("convt dx", gx, dx)
 	near("convt dw", gw, dw)
 	near("convt db", gb, db)
+	// bilinear: the gradient is the transpose, so <dy, B x> = <B' dy, x>
+	bx, bdy := randTensor(r, 3, 9, 14), randTensor(r, 3, 31, 40)
+	gb2 := g.BilinearBackward(g.Upload(bdy), 9, 14)
+	bd, err := g.Download(gb2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := dotT(bdy, Bilinear(bx, 31, 40)), dotT(bd, bx); math.Abs(a-b) > 1e-3*max(1, math.Abs(a)) {
+		t.Errorf("bilinear: <dy, Bx> %v, <B'dy, x> %v", a, b)
+	}
 	y := ReLU(randTensor(r, 1000))
 	d := randTensor(r, 1000)
 	gd := g.ReLUBackward(g.Upload(y), g.Upload(d))
