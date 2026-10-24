@@ -21,6 +21,19 @@ type Trim struct {
 	Start, End time.Duration // End 0: to the end
 }
 
+// span is how long the part converted plays of a source length long (0
+// when that is not known).
+func (t Trim) span(length time.Duration) time.Duration {
+	if length <= 0 {
+		return 0
+	}
+	end := length
+	if t.End > 0 {
+		end = min(t.End, length)
+	}
+	return max(end-t.Start, 0)
+}
+
 // IsZero reports whether everything is converted.
 func (t Trim) IsZero() bool { return t == Trim{} }
 

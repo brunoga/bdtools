@@ -330,11 +330,11 @@ func (r *Runner) reportTimeline(sources []mkv.Source, spans []mkv.Span) {
 	}
 	r.Report.Report("timeline: %s", strings.Join(parts, ", "))
 	v := spans[0]
-	if r.length > 0 && r.fpsNum > 0 {
+	if want := r.Opts.Trim.span(r.length); want > 0 && r.fpsNum > 0 {
 		frame := time.Duration(int64(time.Second) * int64(r.fpsDen) / int64(r.fpsNum))
-		if d := v.Last + frame - r.length; d > time.Second || d < -time.Second {
+		if d := v.Last + frame - want; d > time.Second || d < -time.Second {
 			r.Report.Report("warning: the picture runs %.3f s but the source plays %.3f s; check it is in step with the sound",
-				(v.Last + frame).Seconds(), r.length.Seconds())
+				(v.Last + frame).Seconds(), want.Seconds())
 		}
 	}
 }

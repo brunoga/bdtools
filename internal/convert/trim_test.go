@@ -115,3 +115,25 @@ func TestRunnerTrims(t *testing.T) {
 		})
 	}
 }
+
+// The part converted plays from its start to its end, or the source's.
+func TestTrimSpan(t *testing.T) {
+	const film = 2 * time.Hour
+	for _, c := range []struct {
+		trim Trim
+		want time.Duration
+	}{
+		{Trim{}, film},
+		{Trim{Start: 30 * time.Minute, End: 31 * time.Minute}, time.Minute},
+		{Trim{Start: 30 * time.Minute}, film - 30*time.Minute},
+		{Trim{Start: 119 * time.Minute, End: 3 * time.Hour}, time.Minute},
+		{Trim{Start: 3 * time.Hour}, 0},
+	} {
+		if got := c.trim.span(film); got != c.want {
+			t.Errorf("%v: %v, want %v", c.trim, got, c.want)
+		}
+	}
+	if (Trim{}).span(0) != 0 {
+		t.Error("an unknown length")
+	}
+}
