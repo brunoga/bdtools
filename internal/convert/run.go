@@ -118,6 +118,8 @@ type Runner struct {
 	framedSwap bool
 	// to3D is a 2D source made 3D (Options.To3D), by conv.
 	to3D bool
+	// redepth is a 3D source's depth changed (redepth.go).
+	redepth bool
 	conv *to3DState
 
 	// Version is bdtools' version, which the files written say made them.
@@ -226,6 +228,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if err := r.useTo3D(threeD(tracks)); err != nil {
 		return err
 	}
+	if err := r.useRedepth(); err != nil {
+		return err
+	}
 	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
 		return r.remuxBuiltin(ctx, src, sel)
 	}
@@ -273,6 +278,7 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		// the conversion gives the subtitles their depth, as sequence 0
 		r.offsetSequence = func(Track) int { return 0 }
 	}
+	r.redepthOffsets(videoWidth(sel.Base))
 	if err := g.start(); err != nil {
 		return err
 	}

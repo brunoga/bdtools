@@ -42,10 +42,18 @@ const (
 // a fraction of a pixel; a match is valid when it is unique and the right
 // eye's match of the pixel it lands on comes back to it.
 func Match(left, right *mvc.Frame) *Disparity {
+	l, _ := MatchBoth(left, right)
+	return l
+}
+
+// MatchBoth is Match and the right eye's disparity too, from the same
+// matching: its pixel x matching the left eye's x+D (the sign Match's
+// has), valid on the same terms.
+func MatchBoth(left, right *mvc.Frame) (l, r *Disparity) {
 	w, h := left.Width/2, left.Height/2
-	lh := half(left)
+	lh, rh := half(left), half(right)
 	lc := census(lh, w, h)
-	rc := census(half(right), w, h)
+	rc := census(rh, w, h)
 	const nd = 2*matchRange + 1
 	cost := make([]uint8, w*h*nd)
 	rows(h, func(y int) {
@@ -64,68 +72,74 @@ func Match(left, right *mvc.Frame) *Disparity {
 	})
 	sum := aggregate(cost, w, h, nd)
 
-	dl := make([]float32, w*h)
-	il := make([]int, w*h)
-	unique := make([]bool, w*h)
-	rows(h, func(y int) {
-		for x := range w {
-			s := sum[(y*w+x)*nd:][:nd]
-			best := 0
-			for i := 1; i < nd; i++ {
-				if s[i] < s[best] {
-					best = i
+	// each eye's best match: the left eye's pixel x at disparity i is the
+	// sums' (x, i); the right eye's x the sums' (x+d, i), d its disparity
+	pick := func(at func(x, y, i int) (uint16, bool)) (d []float32, best []int, unique []bool) {
+		d, best, unique = make([]float32, w*h), make([]int, w*h), make([]bool, w*h)
+		rows(h, func(y int) {
+			var s [nd]uint16
+			for x := range w {
+				for i := range nd {
+					v, ok := at(x, y, i)
+					if !ok {
+						v = math.MaxUint16
+					}
+					s[i] = v
 				}
-			}
-			second := uint16(math.MaxUint16)
-			for i := range nd {
-				if (i < best-1 || i > best+1) && s[i] < second {
-					second = s[i]
+				b := 0
+				for i := 1; i < nd; i++ {
+					if s[i] < s[b] {
+						b = i
+					}
 				}
-			}
-			sub := float64(best)
-			if best > 0 && best < nd-1 {
-				a, b, c := float64(s[best-1]), float64(s[best]), float64(s[best+1])
-				if den := a - 2*b + c; den > 0 {
-					sub += (a - c) / (2 * den)
+				second := uint16(math.MaxUint16)
+				for i := range nd {
+					if (i < b-1 || i > b+1) && s[i] < second {
+						second = s[i]
+					}
 				}
+				sub := float64(b)
+				if b > 0 && b < nd-1 && s[b-1] != math.MaxUint16 && s[b+1] != math.MaxUint16 { //nolint:gosec // b within 1..nd-2 here
+					a, m, c := float64(s[b-1]), float64(s[b]), float64(s[b+1]) //nolint:gosec // as above
+					if den := a - 2*m + c; den > 0 {
+						sub += (a - c) / (2 * den)
+					}
+				}
+				best[y*w+x] = b - matchRange
+				d[y*w+x] = float32(2 * (sub - matchRange))
+				unique[y*w+x] = s[b] != math.MaxUint16 && float64(s[b]) <= matchUniqueness*float64(second)
 			}
-			il[y*w+x] = best - matchRange
-			dl[y*w+x] = float32(2 * (sub - matchRange))
-			unique[y*w+x] = float64(s[best]) <= matchUniqueness*float64(second)
+		})
+		return d, best, unique
+	}
+	dl, il, ul := pick(func(x, y, i int) (uint16, bool) { return sum[(y*w+x)*nd+i], true })
+	dr, ir, ur := pick(func(x, y, i int) (uint16, bool) {
+		xl := x + (i - matchRange)
+		if xl < 0 || xl >= w {
+			return 0, false
 		}
+		return sum[(y*w+xl)*nd+i], true
 	})
-	// the right eye's matches, from the same sums: its pixel x and the left
-	// eye's x+d at disparity d
-	ir := make([]int, w*h)
-	rows(h, func(y int) {
-		for x := range w {
-			best, bestS := 0, uint16(math.MaxUint16)
-			for i := range nd {
-				xl := x + (i - matchRange)
-				if xl < 0 || xl >= w {
+	// valid: unique, textured, and the other eye's match of the pixel it
+	// lands on coming back to it
+	valid := func(best []int, unique []bool, other []int, p []byte, dir int) []bool {
+		v := make([]bool, w*h)
+		for y := censusRadius; y < h-censusRadius; y++ {
+			for x := censusRadius; x < w-censusRadius; x++ {
+				i := y*w + x
+				xo := x + dir*best[i]
+				if !unique[i] || xo < 0 || xo >= w || !textured(p, w, x, y) {
 					continue
 				}
-				if s := sum[(y*w+xl)*nd+i]; s < bestS {
-					best, bestS = i, s
+				if d := best[i] - other[y*w+xo]; d >= -1 && d <= 1 {
+					v[i] = true
 				}
 			}
-			ir[y*w+x] = best - matchRange
 		}
-	})
-	valid := make([]bool, w*h)
-	for y := censusRadius; y < h-censusRadius; y++ {
-		for x := censusRadius; x < w-censusRadius; x++ {
-			i := y*w + x
-			xr := x - il[i]
-			if !unique[i] || xr < 0 || xr >= w || !textured(lh, w, x, y) {
-				continue
-			}
-			if d := il[i] - ir[y*w+xr]; d >= -1 && d <= 1 {
-				valid[i] = true
-			}
-		}
+		return v
 	}
-	return &Disparity{W: w, H: h, D: dl, Valid: valid}
+	return &Disparity{W: w, H: h, D: dl, Valid: valid(il, ul, ir, lh, -1)},
+		&Disparity{W: w, H: h, D: dr, Valid: valid(ir, ur, il, rh, 1)}
 }
 
 // textured reports whether the luma about (x, y), over the census

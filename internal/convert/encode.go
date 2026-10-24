@@ -340,6 +340,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			}
 			return push3D(finish)
 		}
+		if r.redepth {
+			sf = r.redepthPicture(sf)
+		}
 		return post(sf)
 	})
 	if stages != nil {

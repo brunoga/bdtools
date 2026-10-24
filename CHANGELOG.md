@@ -41,6 +41,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   leaves the network as it is, `--3d-tune FILE` takes weights of one's
   own (`tools/depthtrain -tail`, on the GPU).
 
+- `--3d-depth` and `--3d-screen` change a 3D film's depth (a disc, MV-HEVC
+  or a side-by-side or over-under file), everything else kept: each
+  pair's disparity measured between its eyes, each eye made again at
+  the depth asked for from its own camera, what it then sees behind an
+  edge taken from the other camera (so less depth than the film's
+  invents little; more fills from the farther side, as `--to-3d` does),
+  the whole moved nearer or farther by `--3d-screen`, the subtitles'
+  offsets scaled and moved with it. On the CPU for now: about 3 pictures
+  a second.
+
 - `--output film.iso`: a Blu-ray 3D disc image of a 3D film (a 3D disc
   re-encoded, or `--to-3d`): its MVC video in a disc's two clips (the base
   view's with the audio and subtitles, the dependent view's), interleaved
