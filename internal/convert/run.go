@@ -13,6 +13,7 @@ import (
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/hdr"
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -118,9 +119,12 @@ type Runner struct {
 	framedSwap bool
 	// to3D is a 2D source made 3D (Options.To3D), by conv.
 	to3D bool
-	// redepth is a 3D source's depth changed (redepth.go).
-	redepth bool
-	conv *to3DState
+	// redepth is a 3D source's depth changed (redepth.go), its matching
+	// on redepthGPU (when there is one, once redepthTried).
+	redepth      bool
+	redepthTried bool
+	redepthGPU   *nn.GPU
+	conv         *to3DState
 
 	// Version is bdtools' version, which the files written say made them.
 	Version string

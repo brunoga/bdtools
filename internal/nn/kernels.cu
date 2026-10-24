@@ -1330,3 +1330,216 @@ extern "C" __global__ void bilinear_back(int c, int h, int w, int oh, int ow, fl
 		atomicAdd(&p[y1 * w + x1], g * ly * lx);
 	}
 }
+
+// Semi-global matching (stereo.MatchBoth's, the same integers and the
+// same doubles, so the same disparities): the eyes' luma halved, a 5x5
+// census, the costs at 2R+1 disparities, summed along eight paths, each
+// eye's best match, and which are sure.
+
+#define SGM_R 64
+#define SGM_ND (2 * SGM_R + 1)
+#define SGM_CR 2
+#define SGM_CMAX ((2 * SGM_CR + 1) * (2 * SGM_CR + 1) - 1)
+#define SGM_P1 4
+#define SGM_P2 36
+#define SGM_THREADS 160 // SGM_ND rounded up to warps
+
+// sgm_half halves a picture's luma: each 2x2 averaged, rounded.
+extern "C" __global__ void sgm_half(int w, int h, const unsigned char *Y, int sy, unsigned char *out) {
+	EACH((long long)w * h) {
+		int y = i / w, x = i % w;
+		const unsigned char *a = Y + (long long)(2 * y) * sy + 2 * x, *b = a + sy;
+		out[i] = (unsigned char)((a[0] + a[1] + b[0] + b[1] + 2) / 4);
+	}
+}
+
+// sgm_census is each pixel's census, its bits in the window's order (rows
+// then columns, the centre left out), set where darker; clamped edges.
+extern "C" __global__ void sgm_census(int w, int h, const unsigned char *p, unsigned int *out) {
+	EACH((long long)w * h) {
+		int y = i / w, x = i % w;
+		unsigned char c = p[i];
+		unsigned int v = 0;
+		for (int dy = -SGM_CR; dy <= SGM_CR; dy++) {
+			int yy = min(max(y + dy, 0), h - 1);
+			for (int dx = -SGM_CR; dx <= SGM_CR; dx++) {
+				if (dx == 0 && dy == 0) {
+					continue;
+				}
+				int xx = min(max(x + dx, 0), w - 1);
+				v = (v << 1) | (p[yy * w + xx] < c ? 1u : 0u);
+			}
+		}
+		out[i] = v;
+	}
+}
+
+// sgm_cost is the left eye's pixel against the right's at each
+// disparity: the censuses' Hamming distance, the most past the edge.
+extern "C" __global__ void sgm_cost(int w, int h, const unsigned int *lc, const unsigned int *rc, unsigned char *cost) {
+	EACH((long long)w * h * SGM_ND) {
+		long long p = i / SGM_ND;
+		int d = i % SGM_ND, y = p / w, x = p % w;
+		int xr = x - (d - SGM_R);
+		cost[i] = xr < 0 || xr >= w ? SGM_CMAX : __popc(lc[p] ^ rc[(long long)y * w + xr]);
+	}
+}
+
+// sgm_step is one pixel of a path for disparity d (a thread each, the
+// block's SGM_THREADS): out from its cost and the path's pixel before
+// (prev, in shared memory, with its least m), or the cost alone at the
+// path's start.
+__device__ unsigned short sgm_step(int d, unsigned char c, const unsigned short *prev, unsigned short m, bool first) {
+	if (first) {
+		return c;
+	}
+	unsigned short b = min((unsigned short)prev[d], (unsigned short)(m + SGM_P2));
+	if (d > 0) {
+		b = min(b, (unsigned short)(prev[d - 1] + SGM_P1));
+	}
+	if (d < SGM_ND - 1) {
+		b = min(b, (unsigned short)(prev[d + 1] + SGM_P1));
+	}
+	return (unsigned short)(c + b - m);
+}
+
+// sgm_min is the least of v[0..SGM_ND) for the block (every thread).
+__device__ unsigned short sgm_min(const unsigned short *v, unsigned short *scratch) {
+	int t = threadIdx.x;
+	unsigned int m = t < SGM_ND ? v[t] : 0xffff;
+	for (int o = 16; o > 0; o >>= 1) {
+		m = min(m, __shfl_down_sync(0xffffffff, m, o));
+	}
+	if ((t & 31) == 0) {
+		scratch[t >> 5] = m;
+	}
+	__syncthreads();
+	unsigned short r = scratch[0];
+	for (int k = 1; k < SGM_THREADS / 32; k++) {
+		r = min(r, scratch[k]);
+	}
+	__syncthreads();
+	return r;
+}
+
+// sgm_rows adds the two paths along each row to the sums (a block a row,
+// left to right then back).
+extern "C" __global__ void __launch_bounds__(SGM_THREADS) sgm_rows(int w, int h, const unsigned char *cost, unsigned short *sum) {
+	__shared__ unsigned short prev[SGM_ND], scratch[SGM_THREADS / 32];
+	int y = blockIdx.x, d = threadIdx.x;
+	for (int way = 0; way < 2; way++) {
+		int dir = way ? -1 : 1, x = way ? w - 1 : 0;
+		unsigned short m = 0;
+		for (int n = 0; n < w; x += dir, n++) {
+			long long at = ((long long)y * w + x) * SGM_ND;
+			unsigned short out = 0;
+			if (d < SGM_ND) {
+				out = sgm_step(d, cost[at + d], prev, m, n == 0);
+				sum[at + d] += out;
+			}
+			__syncthreads();
+			if (d < SGM_ND) {
+				prev[d] = out;
+			}
+			__syncthreads();
+			m = sgm_min(prev, scratch);
+		}
+	}
+}
+
+// sgm_down adds row y's three paths coming down (or up) the picture,
+// straight and the two diagonals (k 0, 1, 2 from x-1, x, x+1 in the row
+// before), to the sums: a block a pixel of the row, the paths' row
+// before in prev, this row's into cur.
+extern "C" __global__ void __launch_bounds__(SGM_THREADS) sgm_down(int w, int h, int y, int first, const unsigned char *cost,
+	const unsigned short *prev, unsigned short *cur, unsigned short *sum) {
+	__shared__ unsigned short pv[SGM_ND], scratch[SGM_THREADS / 32];
+	int x = blockIdx.x, d = threadIdx.x;
+	long long at = ((long long)y * w + x) * SGM_ND;
+	for (int k = 0; k < 3; k++) {
+		int px = x + k - 1;
+		bool start = first || px < 0 || px >= w;
+		if (!start && d < SGM_ND) {
+			pv[d] = prev[((long long)k * w + px) * SGM_ND + d];
+		}
+		__syncthreads();
+		unsigned short m = start ? 0 : sgm_min(pv, scratch);
+		if (d < SGM_ND) {
+			unsigned short out = sgm_step(d, cost[at + d], pv, m, start);
+			cur[((long long)k * w + x) * SGM_ND + d] = out;
+			sum[at + d] += out;
+		}
+		__syncthreads();
+	}
+}
+
+// sgm_pick is each pixel's best match, for the left eye (right 0: the
+// sums at (x, d)) or the right (right 1: at (x+d, d)): its disparity to
+// a fraction (full resolution pixels), its whole index (in half pixels),
+// and whether it is unique.
+extern "C" __global__ void sgm_pick(int w, int h, int right, const unsigned short *sum, float *disp, int *best, unsigned char *unique) {
+	EACH((long long)w * h) {
+		int y = i / w, x = i % w;
+		unsigned int s[SGM_ND];
+		for (int k = 0; k < SGM_ND; k++) {
+			if (right) {
+				int xl = x + (k - SGM_R);
+				s[k] = xl < 0 || xl >= w ? 0xffff : sum[((long long)y * w + xl) * SGM_ND + k];
+			} else {
+				s[k] = sum[i * SGM_ND + k];
+			}
+		}
+		int b = 0;
+		for (int k = 1; k < SGM_ND; k++) {
+			if (s[k] < s[b]) {
+				b = k;
+			}
+		}
+		unsigned int second = 0xffff;
+		for (int k = 0; k < SGM_ND; k++) {
+			if ((k < b - 1 || k > b + 1) && s[k] < second) {
+				second = s[k];
+			}
+		}
+		double sub = b;
+		if (b > 0 && b < SGM_ND - 1 && s[b - 1] != 0xffff && s[b + 1] != 0xffff) {
+			double a = s[b - 1], m = s[b], c = s[b + 1];
+			double den = a - 2 * m + c;
+			if (den > 0) {
+				sub += (a - c) / (2 * den);
+			}
+		}
+		best[i] = b - SGM_R;
+		disp[i] = (float)(2 * (sub - SGM_R));
+		unique[i] = s[b] != 0xffff && (double)s[b] <= 0.95 * (double)second;
+	}
+}
+
+// sgm_valid is which matches are sure: unique, textured (the luma p's
+// deviation over the census window at least tex), not at the border, and
+// the other eye's match of the pixel landed on (dir -1 for the left eye,
+// 1 for the right) coming back within one.
+extern "C" __global__ void sgm_valid(int w, int h, int dir, const int *best, const unsigned char *unique, const int *other,
+	const unsigned char *p, double tex, unsigned char *valid) {
+	EACH((long long)w * h) {
+		int y = i / w, x = i % w;
+		unsigned char v = 0;
+		if (y >= SGM_CR && y < h - SGM_CR && x >= SGM_CR && x < w - SGM_CR && unique[i]) {
+			int xo = x + dir * best[i];
+			if (xo >= 0 && xo < w) {
+				double s = 0, ss = 0, n = 0;
+				for (int dy = -SGM_CR; dy <= SGM_CR; dy++) {
+					for (int dx = -SGM_CR; dx <= SGM_CR; dx++) {
+						double q = p[(y + dy) * w + x + dx];
+						s += q;
+						ss += q * q;
+						n++;
+					}
+				}
+				int dd = best[i] - other[(long long)y * w + xo];
+				v = ss / n - (s / n) * (s / n) >= tex * tex && dd >= -1 && dd <= 1;
+			}
+		}
+		valid[i] = v;
+	}
+}

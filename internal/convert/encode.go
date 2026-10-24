@@ -130,6 +130,7 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 }
 
 func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep func(int64) bool) ([]string, error) {
+	defer r.closeRedepth()
 	sink, verb, err := r.newSink(ctx, keep)
 	if err != nil {
 		return nil, err

@@ -51,7 +51,7 @@ func redepthScene(w, h int, bg, fg float32) (l, r *mvc.Frame, square func(x, y i
 func TestRedepthHalves(t *testing.T) {
 	const w, h = 640, 360
 	l, r, square := redepthScene(w, h, 6, 24)
-	nl, nr := Redepth(l, r, 0.5, 0)
+	nl, nr := Redepth(nil, l, r, 0.5, 0)
 	dm := Match(nl, nr)
 	var in, out []float64
 	for y := range dm.H {
@@ -94,7 +94,7 @@ func TestRedepthShift(t *testing.T) {
 	for i := range l.Cb {
 		l.Cb[i], l.Cr[i] = 128, 128
 	}
-	nl, nr := Redepth(l, l, 1, 4)
+	nl, nr := Redepth(nil, l, l, 1, 4)
 	if got := nl.Y[3*w+10]; got != byte(4*8) {
 		t.Errorf("the left eye at 10: %d, want %d (moved right 2)", got, 4*8)
 	}
@@ -109,7 +109,7 @@ func TestRedepthShift(t *testing.T) {
 // Depth kept and nothing moved: the eyes as they were.
 func TestRedepthIdentity(t *testing.T) {
 	l, r, _ := redepthScene(128, 64, 4, 10)
-	nl, nr := Redepth(l, r, 1, 0)
+	nl, nr := Redepth(nil, l, r, 1, 0)
 	if !slices.Equal(nl.Y, l.Y) || !slices.Equal(nr.Y, r.Y) || !slices.Equal(nl.Cb, l.Cb) {
 		t.Error("the eyes changed")
 	}
