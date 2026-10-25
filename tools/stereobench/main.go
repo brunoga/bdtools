@@ -75,6 +75,10 @@ type clipResult struct {
 	holes                map[string]float64 // the share of the area filled
 	clipA, clipB         float64            // the clip's fit: disparity = a depth + b
 	raw                  [3]float64         // the network's depth, p5, median, p95
+	// each method's pair measured as a pair (made.go): correlation, error
+	// left, detail, jitter and the share revealed; NaN where not measured
+	pair     map[string][5]float64
+	leftPSNR map[string]float64 // a -made pair's left eye against the clip's
 }
 
 func main() {
@@ -94,8 +98,18 @@ func main() {
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	parallaxFlag := flag.String("parallax", "", "the parallax probe: steps (pictures back, e.g. 2,4,8) to measure each picture's motion parallax against, and how much it adds to the network's depth")
 	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
+	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.Parse()
+	if *madeFlag != "" {
+		var err error
+		if made, err = parseMade(*madeFlag); err != nil {
+			fail(err)
+		}
+		for _, t := range made {
+			methods = append(methods, t.name)
+		}
+	}
 	if refinePath != "" {
 		if refinePath == "builtin" {
 			refine = stereo.BuiltinRefine()
@@ -144,6 +158,7 @@ func main() {
 	if g, err := nn.NewGPU(); err == nil {
 		g.Half = *half && m.HalfSafe()
 		m.Use(g)
+		matchGPU = g
 		fmt.Fprintln(os.Stderr, "stereobench: the depth on", g.Name())
 	}
 	if *framesPath != "" {
@@ -246,12 +261,22 @@ func bench(m *depth.Model, arg string, every int) ([]clipResult, error) {
 	o.TempDir = os.TempDir()
 	if ws == nil {
 		cb := newClipBench(m, name, every)
+		for _, t := range made {
+			pairs, n, err := loadMade(t, name, func(k int) bool { return k%every <= 1 })
+			if err != nil {
+				return nil, fmt.Errorf("-made %s: %w", t.name, err)
+			}
+			cb.made[t.name], cb.madeN[t.name] = pairs, n
+		}
 		err := convert.DecodeFrames(context.Background(), runtime.GOOS, o, path, nil, cb.frame)
 		if err != nil {
 			return nil, err
 		}
 		r, err := cb.finish()
 		return []clipResult{r}, err
+	}
+	if made != nil {
+		return nil, errors.New("-made scores whole clips, not windows")
 	}
 	var out []clipResult
 	cur := -1
@@ -334,6 +359,9 @@ type clipBench struct {
 	// and each step's sums
 	lumas [][]byte
 	par   map[int]*parallaxStats
+	// the -made tools' pairs (by picture number) and how many each has
+	made  map[string]map[int][2]*mvc.Frame
+	madeN map[string]int
 }
 
 type record struct {
@@ -344,11 +372,20 @@ type record struct {
 	a, b            float64
 	med             float32
 	top, bottom, k  int
+	next            *nextRecord // the picture after, for the jitter
+}
+
+// nextRecord is the picture after a measured one.
+type nextRecord struct {
+	left, right *mvc.Frame
+	disp        []float32
+	dm          *stereo.Disparity
 }
 
 func newClipBench(m *depth.Model, name string, every int) *clipBench {
-	c := &clipBench{every: every, scorers: map[string]*vmaf.Scorer{}}
-	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
+	c := &clipBench{every: every, scorers: map[string]*vmaf.Scorer{}, made: map[string]map[int][2]*mvc.Frame{}, madeN: map[string]int{}}
+	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{},
+		pair: map[string][5]float64{}, leftPSNR: map[string]float64{}}
 	c.conv = stereo.NewConverter(m, shape)
 	if samplesDir != "" {
 		m.Tap = func(t depth.TailInput) {
@@ -377,11 +414,15 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 		return err
 	}
 	if c.k++; (c.k-1)%c.every != 0 {
+		if n := len(c.recs); n > 0 && c.recs[n-1].k == c.k-2 {
+			dm, _ := matchBoth(left, right)
+			c.recs[n-1].next = &nextRecord{left: left, right: right, disp: disp, dm: dm}
+		}
 		return nil
 	}
 	top, bottom := stereo.Bars(left)
 	w := left.Width
-	dm := stereo.Match(left, right)
+	dm, _ := matchBoth(left, right)
 	hr := halfDepth(raw, w, left.Height)
 	a, b, corr, matched := fit(dm, hr, top/2, bottom/2)
 	if matched < 0.05 {
@@ -462,6 +503,13 @@ func (c *clipBench) finish() (clipResult, error) {
 	if res.frames == 0 {
 		return res, errNothing
 	}
+	for name, n := range c.madeN {
+		if n != c.k {
+			return res, fmt.Errorf("-made %s: %d pictures, the clip %d", name, n, c.k)
+		}
+	}
+	pairs := map[string]*pairMeasure{}
+	leftSE, leftN := map[string]float64{}, map[string]float64{}
 	for _, k := range parallaxKs {
 		if st := c.par[k]; st != nil && st.moving > 0 {
 			m := float64(st.moving)
@@ -506,7 +554,42 @@ func (c *clipBench) finish() (clipResult, error) {
 			case "ours":
 				d = r.disp
 			}
-			eye, holes := stereo.Render(left, d, -1)
+			var eye *mvc.Frame
+			var holes []bool
+			eyeLeft := left
+			var next0, next1 *mvc.Frame // the pair after, for the jitter
+			if p, ok := c.made[name]; ok {
+				eyeLeft, eye = p[r.k][0], p[r.k][1]
+				holes = make([]bool, len(eye.Y))
+				if q, ok := p[r.k+1]; ok {
+					next0, next1 = q[0], q[1]
+				}
+				for y := r.top; y < r.bottom; y++ {
+					for x := margin; x < w-margin; x++ {
+						diff := float64(eyeLeft.Y[y*eyeLeft.StrideY+x]) - float64(left.Y[y*left.StrideY+x])
+						leftSE[name] += diff * diff
+						leftN[name]++
+					}
+				}
+			} else {
+				eye, holes = stereo.Render(left, d, -1)
+				if name == "ours" && r.next != nil {
+					next0 = r.next.left
+					next1, _ = stereo.Render(r.next.left, r.next.disp, -1)
+				}
+			}
+			if name != "flat" {
+				pm := pairs[name]
+				if pm == nil {
+					pm = &pairMeasure{}
+					pairs[name] = pm
+				}
+				var disc1 *stereo.Disparity
+				if r.next != nil {
+					disc1 = r.next.dm
+				}
+				measurePair(pm, r.dm, disc1, eyeLeft, eye, next0, next1, r.top, r.bottom)
+			}
 			if name == "fitted" {
 				fittedEye = eye
 			}
@@ -566,6 +649,15 @@ func (c *clipBench) finish() (clipResult, error) {
 			v = append(v, sc.VMAF)
 		}
 		res.vmaf[name] = vmaf.Pool(v).Mean
+		nan := math.NaN()
+		res.pair[name] = [5]float64{nan, nan, nan, nan, nan}
+		if pm := pairs[name]; pm != nil {
+			a, b, d, j, rv := pm.means()
+			res.pair[name] = [5]float64{a, b, d, j, rv}
+		}
+		if leftN[name] > 0 {
+			res.leftPSNR[name] = psnr(leftSE[name] / leftN[name])
+		}
 	}
 	c.recs = nil
 	return res, nil
@@ -793,8 +885,33 @@ func percentiles(v []float32) [3]float64 {
 // mean is the clips' measures averaged (the pictures' measures each
 // clip's equally).
 func mean(all []clipResult) clipResult {
-	r := clipResult{name: "mean", psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{}}
+	r := clipResult{name: "mean", psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{},
+		pair: map[string][5]float64{}, leftPSNR: map[string]float64{}}
 	n := float64(len(all))
+	for _, m := range methods {
+		var sum, cnt [5]float64
+		var left, nl float64
+		for _, c := range all {
+			for i, v := range c.pair[m] {
+				if !math.IsNaN(v) {
+					sum[i] += v
+					cnt[i]++
+				}
+			}
+			if v, ok := c.leftPSNR[m]; ok {
+				left += v
+				nl++
+			}
+		}
+		var p [5]float64
+		for i := range p {
+			p[i] = sum[i] / cnt[i] // NaN when none
+		}
+		r.pair[m] = p
+		if nl > 0 {
+			r.leftPSNR[m] = left / nl
+		}
+	}
 	for _, c := range all {
 		r.frames += c.frames
 		r.matched += c.matched / n
@@ -831,6 +948,18 @@ func report(r clipResult) {
 	for _, m := range methods {
 		fmt.Printf("%-8s %7.2f %7.2f %5.1f%% %7.2f\n", m, r.psnr[m], r.holePSNR[m], 100*r.holes[m], r.vmaf[m])
 	}
+	fmt.Printf("%-8s %7s %7s %7s %7s %8s %7s\n", "pair", "corr", "error", "detail", "jitter", "revealed", "left")
+	for _, m := range methods {
+		if m == "flat" {
+			continue
+		}
+		p := r.pair[m]
+		left := "-"
+		if v, ok := r.leftPSNR[m]; ok {
+			left = fmt.Sprintf("%.2f", v)
+		}
+		fmt.Printf("%-8s %7.3f %7.2f %7.3f %7.2f %7.2f%% %7s\n", m, p[0], p[1], p[2], p[3], 100*p[4], left)
+	}
 }
 
 func writeCSV(path string, all []clipResult) error {
@@ -841,7 +970,7 @@ func writeCSV(path string, all []clipResult) error {
 	w := csv.NewWriter(f)
 	head := []string{"clip", "pictures", "matched", "corr", "epe", "bad2", "epe_curve", "bad2_curve", "disc_p5", "disc_p50", "disc_p95", "ours_p5", "ours_p50", "ours_p95"}
 	for _, m := range methods {
-		head = append(head, m+"_psnr", m+"_hole_psnr", m+"_holes", m+"_vmaf")
+		head = append(head, m+"_psnr", m+"_hole_psnr", m+"_holes", m+"_vmaf", m+"_pair_corr", m+"_pair_error", m+"_detail", m+"_jitter", m+"_revealed")
 	}
 	_ = w.Write(head)
 	ff := func(v float64) string { return strconv.FormatFloat(v, 'f', 4, 64) }
@@ -849,7 +978,8 @@ func writeCSV(path string, all []clipResult) error {
 		row := []string{c.name, strconv.Itoa(c.frames), ff(c.matched), ff(c.corr), ff(c.epe), ff(c.bad2), ff(c.epeCurve), ff(c.bad2Curve),
 			ff(c.disc[0]), ff(c.disc[1]), ff(c.disc[2]), ff(c.ours[0]), ff(c.ours[1]), ff(c.ours[2])}
 		for _, m := range methods {
-			row = append(row, ff(c.psnr[m]), ff(c.holePSNR[m]), ff(c.holes[m]), ff(c.vmaf[m]))
+			p := c.pair[m]
+			row = append(row, ff(c.psnr[m]), ff(c.holePSNR[m]), ff(c.holes[m]), ff(c.vmaf[m]), ff(p[0]), ff(p[1]), ff(p[2]), ff(p[3]), ff(p[4]))
 		}
 		_ = w.Write(row)
 	}
