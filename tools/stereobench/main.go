@@ -101,6 +101,7 @@ func main() {
 	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
 	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
+	flag.StringVar(&depthDir, "depth-dir", "", "another network's depth of the clips' left eyes, iw3's export (DIR/CLIP/CLIP/depth/%08d.png), in place of ours in the depth's measures (see depthdir.go)")
 	flag.BoolVar(&keepCredits, "keep-credits", false, "give the credits (stereo.Credits) their depth, not flat")
 	creditsPath := flag.String("credit-features", "", "write each measured picture's credit features (stereo.Credits) to this CSV file")
 	flag.Parse()
@@ -444,6 +445,11 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 	}
 	top, bottom := stereo.Bars(left)
 	w := left.Width
+	if depthDir != "" {
+		if raw, err = otherDepth(c.res.name, c.k-1, w, left.Height, top, bottom); err != nil {
+			return err
+		}
+	}
 	if creditsOut != nil {
 		cf := stereo.Credits(left, top, bottom)
 		fmt.Fprintf(creditsOut, "%s,%d,%.4f,%.4f\n", c.res.name, c.k-1, cf.Dark, cf.Thin)

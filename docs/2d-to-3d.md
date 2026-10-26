@@ -396,6 +396,28 @@ What that teaches:
   (Furiosa 27.4 / 29 against 27.9 / 31; Avatar 24.1 / 22 against 24.4 /
   25), at twice the time. Large's depth is no better than Base's (0.80),
   at five times Small's.
+- **Depth Anything 3 is not better here either.** Other networks' depth
+  of the clips' left eyes (iw3's export, `stereobench -depth-dir`), each
+  picture's fitted to the disc's: correlation and the error left after
+  fitting a curve, the twelve clips (the glass clips):
+
+  | depth | correlation | error | fitted right eye PSNR / VMAF |
+  |---|---|---|---|
+  | ours (Small, tuned) | **0.850** (0.772) | **2.34** (2.76) | **31.29 / 50.7** (29.45 / 53.7) |
+  | Depth Anything 3 Mono Large | 0.815 (0.599) | 2.57 (3.05) | 30.66 / 47.5 (28.95 / 55.0) |
+  | Video Depth Anything Large | 0.795 (0.664) | 2.91 (3.22) | 30.68 / 48.5 (28.50 / 53.2) |
+  | Video Depth Anything Small | 0.785 (0.790) | 2.96 (2.79) | 30.21 / 44.3 (29.06 / 53.4) |
+
+  Untuned Small's agrees with ours before the tuning (0.79), so the
+  export measures as ours does. DA3 leads the others on the films but
+  not the tuned Small, and loses the glass; it is a network of pictures,
+  not of video, and 13 times Small's size.
+- **Soft edges do not pay.** The nearer side of each hole blended into
+  its fill over one or two pixels (an edge's pixels mix the nearer
+  thing with what was behind it), rendered with the disc's own depth:
+  36.31 dB and VMAF 81.0 before, 36.18 / 80.4 over one pixel, 36.02 /
+  79.1 over two (the glass clips 35.43 / 86.2 to 35.26 / 85.5 and 35.04 /
+  84.2); with ours, no change. The discs' own edges are sharp.
 - **The tensor cores lose nothing measurable.** The network's matrix
   products with their inputs in half precision (sums in single): the
   depth 0.02% of its range off PyTorch's (single precision 0.002%), every
