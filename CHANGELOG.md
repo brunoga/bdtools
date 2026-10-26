@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `--scale` and `--tonemap` (and the tone mapping `--to-3d` does for an
+  HDR source) run on an NVIDIA GPU when there is one, to the same pictures
+  as on the CPU: a 4K Dolby Vision film made 3D at 1080p converts at 96
+  pictures a second, from 33 (Dune: Part Two, RTX 5090), its video the
+  same packet for packet.
+
 ## [0.15.0] - 2026-10-26
 
 ### Added

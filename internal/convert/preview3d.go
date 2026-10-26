@@ -52,6 +52,7 @@ func (r *Runner) preview3D(video Track, feed func() (sampleFeed, func(), error))
 		return fmt.Errorf("--3d-preview: %w", err)
 	}
 	defer done()
+	defer r.closeTransform()
 	m, err := r.depthModel()
 	if err != nil {
 		return err

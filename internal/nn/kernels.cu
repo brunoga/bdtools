@@ -1550,3 +1550,186 @@ extern "C" __global__ void sgm_valid(int w, int h, int dir, const int *best, con
 		valid[i] = v;
 	}
 }
+
+// --- scaling and tone mapping (convert's --scale and --tonemap) --------
+//
+// A decoded picture's planes as the decoders give them, NV12 (bytes) or
+// P010 (16 bits, the value in the top ten), Y's rows then the interleaved
+// chroma's pitch bytes apart. The kernels are convert's scale.go and
+// tonemap.go, to the same values: the scaling's sums in integers, the tone
+// mapping's arithmetic rounded op by op as Go's.
+
+__device__ __forceinline__ int pic_sample(const unsigned char *row, int bps, int i) {
+	if (bps == 1) return row[i];
+	return (row[2 * i] | row[2 * i + 1] << 8) >> 6;
+}
+
+__device__ __forceinline__ void pic_store(unsigned char *row, int bps, int i, int v) {
+	if (bps == 1) {
+		row[i] = (unsigned char)v;
+	} else {
+		unsigned int s = (unsigned int)v << 6;
+		row[2 * i] = s & 0xff;
+		row[2 * i + 1] = s >> 8;
+	}
+}
+
+// scale_h is scale.go's hPass over rows rows of src, each ch channels of
+// w samples interleaved: dst's rows outN*ch sums, at tapBits more
+// precision.
+extern "C" __global__ void scale_h(int rows, int w, int ch, int outN, const unsigned char *src, int pitch, int bps,
+	const int *first, const int *wt, int n, int *dst) {
+	int rw = outN * ch;
+	EACH((long long)rows * rw) {
+		int j = i % rw, y = i / rw;
+		int o = j / ch, c = j % ch;
+		const unsigned char *row = src + (long long)y * pitch;
+		int f = first[o];
+		const int *ws = wt + o * n;
+		int acc = 0;
+		for (int k = 0; k < n; k++) acc += ws[k] * pic_sample(row, bps, min(max(f + k, 0), w - 1) * ch + c);
+		dst[i] = acc;
+	}
+}
+
+// scale_v is scale.go's vPass: outH rows of rw values from scale_h's h
+// rows.
+extern "C" __global__ void scale_v(int outH, int rw, int h, const int *rows, const int *first, const int *wt, int n,
+	int maxV, int bps, unsigned char *dst, int pitch) {
+	EACH((long long)outH * rw) {
+		int x = i % rw, y = i / rw;
+		int f = first[y];
+		const int *ws = wt + y * n;
+		long long acc = 0;
+		for (int k = 0; k < n; k++) acc += (long long)ws[k] * rows[(long long)min(max(f + k, 0), h - 1) * rw + x];
+		int v = (int)((acc + (1LL << 27)) >> 28);
+		pic_store(dst + (long long)y * pitch, bps, x, min(max(v, 0), maxV));
+	}
+}
+
+#define TM_LUT 4096
+
+__device__ __forceinline__ float tm_lut(const float *tab, float v) {
+	v = __fmul_rn(fminf(fmaxf(v, 0.f), 1.f), (float)TM_LUT);
+	int i = (int)v;
+	if (i >= TM_LUT) return tab[TM_LUT];
+	float f = __fsub_rn(v, (float)i);
+	return __fadd_rn(tab[i], __fmul_rn(f, __fsub_rn(tab[i + 1], tab[i])));
+}
+
+__device__ double tm_nits_to_pq(double l) {
+	const double m1 = 2610.0 / 16384, m2 = 2523.0 / 4096 * 128;
+	const double c1 = 3424.0 / 4096, c2 = 2413.0 / 4096 * 32, c3 = 2392.0 / 4096 * 32;
+	double y = pow(fmax(l, 0.0) / 10000, m1);
+	return pow(__dadd_rn(c1, __dmul_rn(c2, y)) / __dadd_rn(1, __dmul_rn(c3, y)), m2);
+}
+
+// tm_quant is tonemap.go's q: linear light to BT.1886's code value.
+__device__ __forceinline__ float tm_quant(const float *gamma, float v) {
+	return tm_lut(gamma, (float)sqrt(sqrt((double)fmaxf(v, 0.f))));
+}
+
+// tm_pixel is tonemap.go's pixel: BT.2020 Y'CbCr in, BT.709 Y'CbCr out.
+// luts is toLight, curve and gamma, TM_LUT+1 values each.
+__device__ void tm_pixel(const float *luts, int hlg, float y, float cb, float cr, float *oy, float *ocb, float *ocr) {
+	const float *toLight = luts, *curve = luts + TM_LUT + 1, *gamma = luts + 2 * (TM_LUT + 1);
+	float r = __fadd_rn(y, __fmul_rn(1.4746f, cr));
+	float g = __fsub_rn(__fsub_rn(y, __fmul_rn(0.16455f, cb)), __fmul_rn(0.57135f, cr));
+	float b = __fadd_rn(y, __fmul_rn(1.8814f, cb));
+	float lr = tm_lut(toLight, r), lg = tm_lut(toLight, g), lb = tm_lut(toLight, b);
+	float k;
+	if (hlg) {
+		float ys = __fadd_rn(__fadd_rn(__fmul_rn(0.2627f, lr), __fmul_rn(0.6780f, lg)), __fmul_rn(0.0593f, lb));
+		k = __fmul_rn(1000.f, (float)pow((double)fmaxf(ys, 1e-6f), 0.2));
+		lr = __fmul_rn(lr, k), lg = __fmul_rn(lg, k), lb = __fmul_rn(lb, k);
+		float m = fmaxf(fmaxf(lr, lg), lb);
+		k = __fdiv_rn(tm_lut(curve, (float)tm_nits_to_pq((double)m)), fmaxf(m, 1e-6f));
+	} else {
+		float m = fmaxf(fmaxf(lr, lg), lb);
+		k = __fdiv_rn(tm_lut(curve, fmaxf(fmaxf(r, g), b)), fmaxf(m, 1e-6f));
+	}
+	lr = __fmul_rn(lr, k), lg = __fmul_rn(lg, k), lb = __fmul_rn(lb, k);
+	float r7 = __fsub_rn(__fsub_rn(__fmul_rn(1.6605f, lr), __fmul_rn(0.5876f, lg)), __fmul_rn(0.0728f, lb));
+	float g7 = __fsub_rn(__fadd_rn(__fmul_rn(-0.1246f, lr), __fmul_rn(1.1329f, lg)), __fmul_rn(0.0083f, lb));
+	float b7 = __fadd_rn(__fsub_rn(__fmul_rn(-0.0182f, lr), __fmul_rn(0.1006f, lg)), __fmul_rn(1.1187f, lb));
+	float lum = __fadd_rn(__fadd_rn(__fmul_rn(0.2126f, r7), __fmul_rn(0.7152f, g7)), __fmul_rn(0.0722f, b7));
+	if (lum <= 0) {
+		*oy = 0, *ocb = 0, *ocr = 0;
+		return;
+	}
+	if (lum >= 1) {
+		*oy = 1, *ocb = 0, *ocr = 0;
+		return;
+	}
+	float lo = fminf(fminf(r7, g7), b7);
+	if (lo < 0) {
+		float s = __fdiv_rn(lum, __fsub_rn(lum, lo));
+		r7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(r7, lum), s));
+		g7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(g7, lum), s));
+		b7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(b7, lum), s));
+	}
+	float hi = fmaxf(fmaxf(r7, g7), b7);
+	if (hi > 1) {
+		float s = __fdiv_rn(__fsub_rn(1.f, lum), __fsub_rn(hi, lum));
+		r7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(r7, lum), s));
+		g7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(g7, lum), s));
+		b7 = __fadd_rn(lum, __fmul_rn(__fsub_rn(b7, lum), s));
+	}
+	float rp = tm_quant(gamma, r7), gp = tm_quant(gamma, g7), bp = tm_quant(gamma, b7);
+	float yp = __fadd_rn(__fadd_rn(__fmul_rn(0.2126f, rp), __fmul_rn(0.7152f, gp)), __fmul_rn(0.0722f, bp));
+	*oy = yp;
+	*ocb = __fdiv_rn(__fsub_rn(bp, yp), 1.8556f);
+	*ocr = __fdiv_rn(__fsub_rn(rp, yp), 1.5748f);
+}
+
+// tm_column tone maps the pair of pixels at column x of rows y and y+1
+// (their chroma at the even column at or before x): its Y written when
+// write, the sums of its two Cb and Cr in sum.
+__device__ void tm_column(const float *luts, int hlg, const unsigned char *srcY, const unsigned char *srcC, int pitch,
+	int bps, float yOff, float yRange, float cMid, float cRange, int y, int x, unsigned char *dstY, int opitch,
+	float scale, bool write, float *sumCb, float *sumCr) {
+	const unsigned char *rowC = srcC + (long long)(y / 2) * pitch;
+	int cx = x & ~1;
+	float cb = __fdiv_rn(__fsub_rn((float)pic_sample(rowC, bps, cx), cMid), cRange);
+	float cr = __fdiv_rn(__fsub_rn((float)pic_sample(rowC, bps, cx + 1), cMid), cRange);
+	float top = __fmul_rn(255.f, scale), yBase = __fmul_rn(16.f, scale), yScale = __fmul_rn(219.f, scale);
+	*sumCb = 0, *sumCr = 0;
+	for (int dy = 0; dy < 2; dy++) {
+		float yv = __fdiv_rn(__fsub_rn((float)pic_sample(srcY + (long long)(y + dy) * pitch, bps, x), yOff), yRange);
+		float ny, ncb, ncr;
+		tm_pixel(luts, hlg, yv, cb, cr, &ny, &ncb, &ncr);
+		if (write) {
+			float v = fminf(fmaxf(__fadd_rn(__fadd_rn(yBase, __fmul_rn(yScale, ny)), 0.5f), 0.f), top);
+			pic_store(dstY + (long long)(y + dy) * opitch, bps, x, (int)v);
+		}
+		*sumCb = __fadd_rn(*sumCb, ncb);
+		*sumCr = __fadd_rn(*sumCr, ncr);
+	}
+}
+
+// tonemap is tonemap.go's apply (scale the code values' over 8 bits'): a
+// thread a two-by-two block, its left neighbour's right column tone mapped
+// again for the chroma's [1 2 1].
+extern "C" __global__ void tonemap(int w, int h, const unsigned char *srcY, const unsigned char *srcC, int pitch, int bps,
+	float scale, int full, int hlg, const float *luts, unsigned char *dstY, unsigned char *dstC, int opitch) {
+	float yOff = __fmul_rn(16.f, scale), yRange = __fmul_rn(219.f, scale), cRange = __fmul_rn(224.f, scale);
+	if (full) yOff = 0, yRange = __fmul_rn(255.f, scale), cRange = yRange;
+	float cMid = __fmul_rn(128.f, scale), top = __fmul_rn(255.f, scale), cScale = __fmul_rn(224.f, scale);
+	int pairs = w / 2;
+	EACH((long long)(h / 2) * pairs) {
+		int x = 2 * (int)(i % pairs), y = 2 * (int)(i / pairs);
+		float cb0, cr0, cb1, cr1, pcb, pcr;
+		tm_column(luts, hlg, srcY, srcC, pitch, bps, yOff, yRange, cMid, cRange, y, x, dstY, opitch, scale, true, &cb0, &cr0);
+		tm_column(luts, hlg, srcY, srcC, pitch, bps, yOff, yRange, cMid, cRange, y, x + 1, dstY, opitch, scale, true, &cb1, &cr1);
+		if (x == 0) {
+			pcb = cb0, pcr = cr0;
+		} else {
+			tm_column(luts, hlg, srcY, srcC, pitch, bps, yOff, yRange, cMid, cRange, y, x - 1, dstY, opitch, scale, false, &pcb, &pcr);
+		}
+		float ocb = __fdiv_rn(__fadd_rn(__fadd_rn(pcb, __fmul_rn(2.f, cb0)), cb1), 8.f);
+		float ocr = __fdiv_rn(__fadd_rn(__fadd_rn(pcr, __fmul_rn(2.f, cr0)), cr1), 8.f);
+		unsigned char *rowC = dstC + (long long)(y / 2) * opitch;
+		pic_store(rowC, bps, x, (int)fminf(fmaxf(__fadd_rn(__fadd_rn(cMid, __fmul_rn(cScale, ocb)), 0.5f), 0.f), top));
+		pic_store(rowC, bps, x + 1, (int)fminf(fmaxf(__fadd_rn(__fadd_rn(cMid, __fmul_rn(cScale, ocr)), 0.5f), 0.f), top));
+	}
+}

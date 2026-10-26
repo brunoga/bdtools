@@ -131,6 +131,7 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 
 func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep func(int64) bool) ([]string, error) {
 	defer r.closeRedepth()
+	defer r.closeTransform()
 	sink, verb, err := r.newSink(ctx, keep)
 	if err != nil {
 		return nil, err
@@ -636,9 +637,26 @@ func (r *Runner) transform(sf picture, src pictureSource) (picture, error) {
 		if d := t.describe(); d != "" {
 			r.Report.Report("%s", d)
 		}
+		if t.sc != nil || t.tm != nil {
+			if t.gx = newGPUTransform(t); t.gx != nil {
+				r.Report.Report("%s on the GPU (%s)", t.gx.what(t), t.gx.g.Name())
+			}
+		}
 	}
 	if r.xform == nil {
 		return sf, nil
 	}
-	return r.xform.apply(sf)
+	p, err := r.xform.apply(sf)
+	if e := r.xform.gpuErr; e != nil {
+		r.Report.Report("the picture's scaling and tone mapping on the CPU from here: the GPU failed (%v)", e)
+		r.xform.gpuErr = nil
+	}
+	return p, err
+}
+
+// closeTransform gives back the transform's GPU.
+func (r *Runner) closeTransform() {
+	if r.xform != nil {
+		r.xform.close()
+	}
 }

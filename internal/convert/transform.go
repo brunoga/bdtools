@@ -106,6 +106,8 @@ type picTransform struct {
 	outW, outH int // and scaled
 	sc         *scaler
 	tm         *toneMapper        // --tonemap, for an HDR source
+	gx         *gpuTransform      // sc's and tm's work on the GPU, when there is one
+	gpuErr     error              // why gx stopped, to report
 	flat       gpu.DecodedPicture // a stereo frame's base view as NV12
 }
 
@@ -159,20 +161,43 @@ func (t *picTransform) apply(p picture) (picture, error) {
 	cropped.Y = src.Y[c.Top*src.Pitch+c.Left*bps:]
 	cropped.UV = src.UV[c.Top/2*src.Pitch+c.Left*bps:]
 	out := &cropped
-	if t.sc != nil {
-		out = t.sc.scale(&cropped)
+	if t.tm != nil {
+		t.tm.pictureMeta(p)
+	}
+	onGPU := false
+	if t.gx != nil {
+		if o, err := t.gx.apply(t, &cropped); err == nil {
+			out, onGPU = o, true
+		} else {
+			// the CPU's from here
+			t.gpuErr = err
+			t.gx.close()
+			t.gx = nil
+		}
+	}
+	if !onGPU && t.sc != nil {
+		out = t.sc.scale(out)
+	}
+	if !onGPU && t.tm != nil {
+		out = t.tm.apply(out)
 	}
 	q := p
 	if t.tm != nil {
 		// SDR: no HDR metadata goes on.
-		t.tm.pictureMeta(p)
-		out = t.tm.apply(out)
 		q.rpu, q.hdr10Plus = nil, nil
 	} else if p.rpu != nil {
 		q.rpu = t.reframeRPU(p.rpu)
 	}
 	q.gpu, q.stereo = out, nil
 	return q, nil
+}
+
+// close gives back the GPU, the CPU's work from here.
+func (t *picTransform) close() {
+	if t.gx != nil {
+		t.gx.close()
+		t.gx = nil
+	}
 }
 
 // flatten gives a stereo frame's base view (the MVC decoder's 8-bit
