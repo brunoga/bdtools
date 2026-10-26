@@ -305,32 +305,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
 			r.Opts.Crop = Crop{}
 		}
-		if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
-			// the stereo pictures are 8-bit: an HDR source is made SDR first
-			r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
-			r.Opts.ToneMap = true
-		}
-		if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
-			w, h, _ := sf.size()
-			t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
-			if err != nil {
-				return err
-			}
-			if r.Opts.ToneMap {
-				if err := r.setupToneMap(t, sf, src); err != nil {
-					return err
-				}
-			}
-			r.xform = t
-			if d := t.describe(); d != "" {
-				r.Report.Report("%s", d)
-			}
-		}
-		if r.xform != nil {
-			var err error
-			if sf, err = r.xform.apply(sf); err != nil {
-				return err
-			}
+		var err error
+		if sf, err = r.transform(sf, src); err != nil {
+			return err
 		}
 		if r.to3D {
 			// the depth now, the eyes and the rest beside the next
@@ -633,4 +610,35 @@ func (r *Runner) noteDiscColour(sf picture) {
 	}
 	r.colour = &c
 	r.Opts.Color = &c
+}
+
+// transform is a picture with --crop, --scale and --tonemap applied, the
+// transform readied at the first picture (src their source); --to-3d
+// makes an HDR source SDR.
+func (r *Runner) transform(sf picture, src pictureSource) (picture, error) {
+	if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
+		// the stereo pictures are 8-bit: an HDR source is made SDR first
+		r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
+		r.Opts.ToneMap = true
+	}
+	if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
+		w, h, _ := sf.size()
+		t, err := newPicTransform(r.Opts.Crop, r.Opts.Scale, w, h)
+		if err != nil {
+			return picture{}, err
+		}
+		if r.Opts.ToneMap {
+			if err := r.setupToneMap(t, sf, src); err != nil {
+				return picture{}, err
+			}
+		}
+		r.xform = t
+		if d := t.describe(); d != "" {
+			r.Report.Report("%s", d)
+		}
+	}
+	if r.xform == nil {
+		return sf, nil
+	}
+	return r.xform.apply(sf)
 }

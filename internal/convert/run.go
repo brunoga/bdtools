@@ -268,6 +268,9 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	}
 	r.length = src.duration
 	r.rateNum, r.rateDen = src.frameRate()
+	if r.Opts.Preview3D {
+		return r.preview3D(sel.Base, func() (sampleFeed, func(), error) { return r.discFeed(src, sel) })
+	}
 	g := newGoDemux(src, sel, tmp, r.Report)
 	g.setTrim(r.Opts.Trim)
 	r.timeline = g.timeline

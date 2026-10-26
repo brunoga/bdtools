@@ -135,3 +135,39 @@ func TestGPUFallbackMidStream(t *testing.T) {
 		}
 	}
 }
+
+// An error of the pictures' taker (enough pictures, an encoder's) stops
+// the decoding: it is not the GPU decoder's, which is not replaced.
+func TestGPUFallbackTakerError(t *testing.T) {
+	stop := errors.New("enough")
+	n := 0
+	picture := func(*gpu.DecodedPicture) error {
+		if n++; n == 7 {
+			return stop
+		}
+		return nil
+	}
+	replaced := false
+	g, err := withFallback(gpu.DecodeH264, picture,
+		func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) { return &fakeDecoder{picture: p}, nil },
+		func(p func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
+			replaced = true
+			return &fakeDecoder{picture: p}, nil
+		},
+		func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for pts := range int64(10) {
+		au := auOf([]byte{0x41, 4})
+		if pts == 0 {
+			au = auOf([]byte{0x67, 1}, []byte{0x68, 2}, []byte{0x65, 3})
+		}
+		if err = g.Decode(au, pts); err != nil {
+			break
+		}
+	}
+	if !errors.Is(err, stop) || replaced {
+		t.Errorf("got %v, replaced %v; want the taker's error, the decoder kept", err, replaced)
+	}
+}

@@ -3,13 +3,14 @@ package convert
 import (
 	"context"
 	"fmt"
-	"github.com/brunoga/bdtools/internal/stereo"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brunoga/bdtools/internal/mkv"
+	"github.com/brunoga/bdtools/internal/stereo"
 )
 
 // A 2D source made 3D (--to-3d, the depth by the depth tests' small
@@ -66,6 +67,22 @@ func TestRunnerTo3D(t *testing.T) {
 	}
 	if frames == 0 {
 		t.Error("no pictures")
+	}
+
+	// --3d-preview: stills, at each place every depth, both kinds
+	stills := filepath.Join(work, "stills")
+	p := o
+	p.Output, p.Preview3D = stills, true
+	lines = nil
+	if err := NewRunner(CurrentGOOS, p, report).Run(context.Background()); err != nil {
+		t.Fatalf("--3d-preview: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	names, _ := filepath.Glob(filepath.Join(stills, "*.jpg"))
+	if len(names) == 0 || len(names)%(2*len(previewDepths)) != 0 {
+		t.Errorf("--3d-preview: %d stills: %v", len(names), names)
+	}
+	if fi, err := os.Stat(filepath.Join(stills, "01-0h00m00s-depth1.5-anaglyph.jpg")); err != nil || fi.Size() == 0 {
+		t.Errorf("--3d-preview: %v; made %v", err, names)
 	}
 
 	// a 3D source is refused
@@ -148,5 +165,23 @@ func TestTune3DDefaults(t *testing.T) {
 		if got := o.shape3D(c.size); got != c.shape {
 			t.Errorf("%+v: shape %+v, want %+v", c, got, c.shape)
 		}
+	}
+}
+
+// --3d-preview is --to-3d's, its output a directory.
+func TestPreview3DOptions(t *testing.T) {
+	o := opts("linux", func(o *Options) { o.Preview3D, o.Output = true, "/media/out/stills" })
+	if err := o.Validate("linux"); err == nil {
+		t.Error("--3d-preview without --to-3d taken")
+	}
+	o.To3D = true
+	if err := o.Validate("linux"); err != nil {
+		t.Errorf("--to-3d --3d-preview into a directory: %v", err)
+	}
+}
+
+func TestPreviewClock(t *testing.T) {
+	if got := previewClock(time.Hour + 2*time.Minute + 3*time.Second); got != "1h02m03s" {
+		t.Errorf("got %s", got)
 	}
 }

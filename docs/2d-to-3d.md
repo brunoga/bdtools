@@ -519,6 +519,23 @@ beyond (x) with r the rest of the way, which leaves its slope unchanged
 where the easing starts and never reaches the limit, so the background
 keeps its order and shape instead of being flattened against a wall.
 
+## Previews
+
+`--3d-preview` makes no film but stills of what `--to-3d` would, into
+`--output` as a directory, to choose the depth by before hours of
+conversion. At eight places spread over the film (or over `--start` to
+`--end`), found by their bytes as `--crop auto` finds its places, the
+pictures are decoded from a keyframe on, cropped, scaled and tone
+mapped as the conversion would, and given to the depth network one after
+another; the seventeenth (the network's view of the pictures before it
+settled) is made a pair at `--3d-depth` 1, 1.5, 2 and 2.5, and the depth
+given if it is another. Each pair is written twice, as JPEGs named by
+place, time and depth: full side by side (`-sbs.jpg`, for a headset or a
+3D screen) and red-cyan anaglyph (`-anaglyph.jpg`, for any screen and
+glasses). The window is each still's own, as a cut's first picture's.
+A 4K Dolby Vision film takes about 25 seconds on an RTX 5090, a 1080p
+one about 15.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything
