@@ -452,6 +452,41 @@ six to eight of the eight (its detail 0.003 to 0.04); they, three more
 from the same release group, and seven films no longer in the library
 are left out of training from now on (39 of the 53).
 
+## The credits
+
+The 3D discs put their credits on the screen, flat: ten discs' end
+credits, 4 seconds at 150 and 400 seconds before the end, measured by
+`stereobench`: eight at 0
+disparity within a pixel, Frozen II at a constant -8 px; where there is
+something behind the text (Force Awakens' stars, Life of Pi's drawings)
+it goes behind and the text stays at 0. The depth network gives text no
+such thing: letters at their own depths, the black around them
+something else, the whole 3 to 5 px behind the screen and uneven.
+
+A picture is taken for the credits when, of its active rows, at least
+80% is black (luma 40 or less) and at least 60% of the rest lies in
+runs across a row of at most 24 pixels with black either side, as
+letters' strokes do (`stereo.Credits`, `-credit-features`): the discs'
+credits 0.85 to 0.97 black, 0.69 to 1 thin; the benchmark's and glass
+clips' pictures (Gravity's space among them) at most 0.77 black, 0.32
+thin. Such a picture is made flat, on the screen: at a cut at once,
+within a shot once 24 pictures in a row say so, eased over 12.
+
+| the end credits, 18 clips | right eye PSNR / VMAF |
+|---|---|
+| ours, the credits as any picture | 18.51 / 22.8 |
+| ours, the credits flat | **36.33 / 71.1** |
+| flat at the disc's own median | 40.28 / 88.7 |
+
+Eight discs' credits are matched exactly; Frozen II's lose (19.0 to
+15.0: at -8 px on the disc, we put them at 0). Pictures framed by the
+credits (Hugo's room, Forky) and drawn credits (Incredibles 2's) are not
+taken for credits and keep their depth, which here does worse than flat
+(23.6 against 30.8, 28.0 against 32.0, 15.5 against 22.8): the network
+on pictures that are mostly black, a matter for the depth, not the
+credits. The benchmark's films and the glass clips are unchanged to the
+last decimal.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything

@@ -26,6 +26,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
   of the made 3D picture beneath them (an offset sequence made from its
   depth), not at the screen behind what comes out of it.
+- `--to-3d` makes the credits flat, on the screen, as the 3D discs do:
+  a picture that is mostly black with text-like strokes on it (measured
+  on ten discs' end credits: the made right eye 18.5 dB and VMAF 23
+  against the discs' before, 36.3 dB and 71 now; no film picture of the
+  benchmark taken for credits).
 - `--to-3d` puts a floating window where something in front of the screen
   meets the picture's left or right edge (`--3d-window`).
 - `--to-3d`'s depth is corrected by a small network learnt from real 3D
