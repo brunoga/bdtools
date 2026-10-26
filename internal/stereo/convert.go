@@ -21,11 +21,15 @@ type Converter struct {
 	Guide Guide
 	// NoWindow leaves out the floating window (window.go).
 	NoWindow bool
+	// KeepCredits gives the credits (credits.go) their depth as any
+	// picture's, not flat.
+	KeepCredits bool
 	// Refine, when not nil, corrects the depth's shape (refinenet.go), on
 	// the depth model's backend.
 	Refine          *RefineWeights
 	refineOn        *RefineWeights // Refine's weights on that backend
 	win             window
+	credits         creditState
 	cuts            cutDetector
 	top, bottom     int // the active rows (Estimate's)
 	shapeTop        int // the active rows of the picture Shape did last
@@ -84,6 +88,7 @@ type Estimate struct {
 	top, bottom int
 	d           *nn.Tensor // [1, h, w] of the active rows (nil: none)
 	fresh       bool       // a new shot: the shaping starts afresh
+	factor      float32    // of the disparity: 0 flat (the credits), 1 as shaped
 	left, right *mvc.Frame // the eyes, when the GPU made them
 	samples     *Samples   // of the disparity they were made with
 }
@@ -136,6 +141,10 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 		c.netW, c.netH = netSize(f.Width, bottom-top)
 	}
 	c.frames++
+	e.factor = 1
+	if !c.KeepCredits {
+		e.factor = c.credits.next(Credits(f, top, bottom), e.fresh)
+	}
 	if ah := bottom - top; ah >= 28 {
 		if g, ok := c.Model.Backend().(*nn.GPU); ok {
 			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes())}
@@ -182,7 +191,13 @@ func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 		up := nn.Bilinear(e.d, ah, w)
 		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
-		copy(disparity[top*w:bottom*w], c.Disparity(up.Data, w))
+		d := c.Disparity(up.Data, w)
+		if e.factor != 1 {
+			for i := range d {
+				d[i] *= e.factor
+			}
+		}
+		copy(disparity[top*w:bottom*w], d)
 	}
 	return depth, disparity
 }
@@ -265,6 +280,7 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 	if makeEyes {
 		w := float64(f.Width)
 		a, b, lim := float32(c.Shaper.Shape.Scale*w), float32(c.Shaper.Shape.Offset*w), float32(0.04*w)
+		a, b = a*e.factor, b*e.factor
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, lim)
 		eyes = g.Eyes(p, disp, gapPixels)
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))

@@ -33,6 +33,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -100,7 +101,17 @@ func main() {
 	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
 	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
+	flag.BoolVar(&keepCredits, "keep-credits", false, "give the credits (stereo.Credits) their depth, not flat")
+	creditsPath := flag.String("credit-features", "", "write each measured picture's credit features (stereo.Credits) to this CSV file")
 	flag.Parse()
+	if *creditsPath != "" {
+		f, err := os.Create(*creditsPath)
+		if err != nil {
+			fail(err)
+		}
+		defer func() { _ = f.Close() }()
+		creditsOut = f
+	}
 	if *madeFlag != "" {
 		var err error
 		if made, err = parseMade(*madeFlag); err != nil {
@@ -198,6 +209,10 @@ func main() {
 	var all []clipResult
 	for _, clip := range flag.Args() {
 		res, err := bench(m, clip, max(*every, 1))
+		if errors.Is(err, errNothing) {
+			fmt.Printf("== %s: no pictures measured, left out\n", clip)
+			continue
+		}
 		if err != nil {
 			fail(fmt.Errorf("%s: %w", clip, err))
 		}
@@ -215,6 +230,12 @@ func main() {
 		}
 	}
 }
+
+// creditsOut is -credit-features' file.
+var creditsOut io.Writer
+
+// keepCredits is -keep-credits.
+var keepCredits bool
 
 // errNothing says a clip had no picture to measure.
 var errNothing = errors.New("no pictures measured")
@@ -395,6 +416,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 		}
 	}
 	c.conv.Guide = guide
+	c.conv.KeepCredits = keepCredits
 	c.conv.Refine = refine
 	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
 	return c
@@ -422,6 +444,10 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 	}
 	top, bottom := stereo.Bars(left)
 	w := left.Width
+	if creditsOut != nil {
+		cf := stereo.Credits(left, top, bottom)
+		fmt.Fprintf(creditsOut, "%s,%d,%.4f,%.4f\n", c.res.name, c.k-1, cf.Dark, cf.Thin)
+	}
 	dm, _ := matchBoth(left, right)
 	hr := halfDepth(raw, w, left.Height)
 	a, b, corr, matched := fit(dm, hr, top/2, bottom/2)
