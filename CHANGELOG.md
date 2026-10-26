@@ -30,6 +30,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   what is behind the screen is kept short of the eyes' separation there,
   eased in from 70% of it, so a projector's large screen never asks the
   eyes to turn outwards.
+- `--3d-preview` (with `--to-3d`): no conversion, but stills of it at
+  eight places through the film, each at depths 1, 1.5, 2, 2.5 and the
+  one asked, full side by side and red-cyan anaglyph JPEGs into
+  `--output` as a directory, in seconds.
 - `--to-3d` makes the credits flat, on the screen, as the 3D discs do:
   a picture that is mostly black with text-like strokes on it (measured
   on ten discs' end credits: the made right eye 18.5 dB and VMAF 23
@@ -83,6 +87,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- An error after a picture was decoded (the encoder's, say) was taken for
+  the GPU decoder's, which the decoder here then replaced, decoding the
+  last stretch again; with a Dolby Vision enhancement layer being
+  composed, that crashed. The error now stops the conversion as it is.
 - `--to-3d` resumed an interrupted conversion with another
   `--depth-model`'s pictures: the network is part of what must match now.
 - `--2d --remux` of a 3D Matroska file (both views in its one video track)

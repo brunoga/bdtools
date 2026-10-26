@@ -341,6 +341,23 @@ func (c *Converter) Eyes(e *Estimate) (left, right *mvc.Frame, s *Samples) {
 	return e.left, e.right, e.samples
 }
 
+// Depth is Estimate without the eyes: the picture's depth kept, for
+// Still to shape as often as asked.
+func (c *Converter) Depth(f *mvc.Frame) (*Estimate, error) { return c.estimate(f, false) }
+
+// Still is the pair of a picture's Estimate (Depth's) shaped by s, as a
+// picture on its own (its floating window not eased in from the pictures
+// before). The converter's own shape is left as it was.
+func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
+	keep, fresh := c.Shaper, e.fresh
+	c.Shaper, e.fresh = Shaper{Shape: s}, true
+	_, d := c.Shape(e)
+	c.Shaper, e.fresh = keep, fresh
+	left, right = Pair(e.f, d)
+	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
+	return left, right
+}
+
 // refineGPU is refine on a GPU, the picture p and the depth dm there.
 func (c *Converter) refineGPU(g *nn.GPU, p *nn.Picture, dm *nn.Tensor, top, bottom int) *nn.Tensor {
 	c.uploadRefine(g)

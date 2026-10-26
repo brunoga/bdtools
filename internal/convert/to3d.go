@@ -204,21 +204,11 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 		if err != nil {
 			return nil, err
 		}
-		r.conv = &to3DState{conv: stereo.NewConverter(m, r.Opts.shape3D(m.Size()))}
-		r.conv.conv.NoWindow = r.Opts.NoWindow3D
-		switch f := r.Opts.refine3D(m.Size()); f {
-		case "":
-		case "builtin":
-			r.conv.conv.Refine = stereo.BuiltinRefine()
-			r.Report.Report("--to-3d: the depth refined (the built-in weights)")
-		default:
-			w, err := stereo.ReadRefine(f)
-			if err != nil {
-				return nil, fmt.Errorf("--3d-refine: %w", err)
-			}
-			r.conv.conv.Refine = w
-			r.Report.Report("--to-3d: the depth refined by %s", f)
+		c, err := r.newConverter3D(m, true)
+		if err != nil {
+			return nil, err
 		}
+		r.conv = &to3DState{conv: c}
 		s := r.Opts.shape3D(m.Size())
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
 			100*s.Scale, 100*s.Offset)
@@ -230,6 +220,32 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 	}
 	r.conv.pend, r.conv.pendPic, r.conv.pendFrame = r.conv.conv.Start(f), p, f
 	return before, nil
+}
+
+// newConverter3D is a converter of the depth model m as the options ask,
+// what refines its depth reported when report.
+func (r *Runner) newConverter3D(m *depth.Model, report bool) (*stereo.Converter, error) {
+	c := stereo.NewConverter(m, r.Opts.shape3D(m.Size()))
+	c.NoWindow = r.Opts.NoWindow3D
+	say := func(format string, args ...any) {
+		if report {
+			r.Report.Report(format, args...)
+		}
+	}
+	switch f := r.Opts.refine3D(m.Size()); f {
+	case "":
+	case "builtin":
+		c.Refine = stereo.BuiltinRefine()
+		say("--to-3d: the depth refined (the built-in weights)")
+	default:
+		w, err := stereo.ReadRefine(f)
+		if err != nil {
+			return nil, fmt.Errorf("--3d-refine: %w", err)
+		}
+		c.Refine = w
+		say("--to-3d: the depth refined by %s", f)
+	}
+	return c, nil
 }
 
 // wait3D is the rest of the picture convert3D began last, once its depth

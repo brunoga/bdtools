@@ -254,6 +254,7 @@ type gpuFallback struct {
 	fromIDR bool     // fed starts at an IDR
 	params  [][]byte // the parameter sets seen (H.264, HEVC)
 	replace bool     // on the decoder here now
+	halted  bool     // a picture's taker returned an error: not the decoder's
 }
 
 // maxFallbackAUs is how many access units a GPU decoder may take before
@@ -265,7 +266,7 @@ const maxFallbackAUs = 64
 const maxRestartAUs = 600
 
 func (g *gpuFallback) fall(err error) error {
-	if g.replace || g.open == nil {
+	if g.replace || g.open == nil || g.halted {
 		return err
 	}
 	restart := g.fromIDR && len(g.fed) > 0
@@ -417,7 +418,11 @@ func withFallback(codec gpu.VideoCodec, picture func(*gpu.DecodedPicture) error,
 			g.fed, g.fedPTS = nil, nil
 		}
 		g.shown, g.last = true, p.PTS
-		return picture(p)
+		if err := picture(p); err != nil {
+			g.halted = true
+			return err
+		}
+		return nil
 	}
 	dec, err := open(shown)
 	if err != nil {

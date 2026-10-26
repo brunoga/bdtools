@@ -96,6 +96,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: builtin, none, or a file of tools/depthtrain's (default: the built-in weights when the depth network is not tuned, none when it is)")
 		tune3D   = fs.String("3d-tune", "", "with --to-3d: the depth network's last stages learnt from 3D discs: none for the network as it is, or a file of tools/depthtrain -tail's (default: the built-in ones, for the small network)")
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")
+		preview  = fs.Bool("3d-preview", false, "with --to-3d: no conversion, but stills of its pairs at 8 places through the film, each at a few depths (--3d-depth 1, 1.5, 2, 2.5 and the one given), into --output, a directory: full side-by-side and red-cyan anaglyph JPEGs, in seconds, to choose the depth by")
 		screenSz = fs.Float64("3d-screen-size", 0, "with --to-3d: the screen's diagonal in inches (of a 16:9 picture); what is behind the screen is kept short of the eyes' separation there (63 mm), past which the eyes would have to turn outwards: a large screen's depth eased at the back (0, the default: no limit beyond 4% of the width)")
 		screen3D = fs.Float64("3d-screen", 0, "moves the whole depth nearer (positive: more out of the screen) or farther, in percent of the picture's width: --to-3d's, or a 3D source's (its subtitles moved with it)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
@@ -301,7 +302,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		o.Subs3D = convert.Subs3DOff
 	}
 	o.TwoD = *twoD
-	o.To3D, o.DepthModel, o.Screen3D, o.ScreenSize3D = *to3D, *depthMdl, *screen3D, *screenSz
+	o.To3D, o.DepthModel, o.Screen3D, o.ScreenSize3D, o.Preview3D = *to3D, *depthMdl, *screen3D, *screenSz, *preview
 	if given["3d-depth"] {
 		o.Depth3D = *depth3D // else --to-3d's default, a 3D source's as it is
 	}
@@ -446,6 +447,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 1
 	}
 
+	if o.Preview3D {
+		return 0
+	}
 	final := o.Output
 	if *nameCdc {
 		// Renamed after the fact rather than decided up front, because the
