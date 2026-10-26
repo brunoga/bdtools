@@ -326,8 +326,8 @@ What that teaches:
   It wins on every set it was not chosen on, the glass most, and the
   conversion is faster (no refinement: about 120 pictures a second at
   1080p on an RTX 5090). Built in and on by default for Small.
-- **Whole films the choices never saw.** Furiosa (converted by the
-  studio) and Avatar: Fire and Ash (shot in 3D), each converted whole from
+- **Whole films the choices never saw.** Furiosa (taken for a studio
+  conversion; it is not one, see below) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
   through the film (24 and 25 of 4 seconds):
 
@@ -344,6 +344,16 @@ What that teaches:
   larger loss is the grading: both films spread their depth much wider
   than our mapping (5th to 95th percentile 35 and 43 px at 1920, ours 21
   and 20), which one fit a clip already gets most of (+2.3 and +3.7 dB).
+
+  **Correction:** Furiosa never had an official 3D release; its "3D
+  disc" was an automatic 2D-to-3D conversion made by fans. What each eye
+  sees behind a nearer thing's edge is stretched in on 5 of its 14
+  clips (detail across rows 0.03 to 0.15 of the rest's, real pairs 0.64
+  to 1.13), and its depth range is the same on every clip (the nearest
+  -1.15% to -1.35% of the width), as a converter normalising each
+  picture gives. Every Furiosa number here measures the agreement with
+  another converter, not with a film's 3D. The training films were
+  screened the same way (see "Against other converters").
   A made eye scored against the disc's rewards less depth where the depth
   is unsure, so these scores alone do not say how much depth looks best.
 - **Motion parallax adds little to the tuned depth.** The network sees
@@ -380,6 +390,52 @@ What that teaches:
 - **The matcher** trusts a match only where the picture has texture:
   without that, space and night skies matched the grain, which two
   cameras do not share.
+
+## Against other converters
+
+`stereobench -made NAME=DIR` scores another converter's pairs beside
+ours: each made from the clips' left eyes (the left eye kept), the made
+right eye against the disc's (PSNR, VMAF), and each pair measured as a
+pair, which no depth budget or screen place favours: the disparity
+measured between its eyes fitted to the disc's (correlation, error left),
+the detail the worse eye has where it sees past a nearer thing's edge
+against the rest of the picture (about 1 in a real pair, low where
+stretched in; it says little where little is revealed), and the jitter of its fitted
+disparity from picture to picture against the disc's.
+
+iw3 (nunif, October 2026; the most used open converter) on the sixteen
+clips, three settings: its defaults; Video Depth Anything Large (13 times
+our network, non-commercial) with its two-layer warping (mlbw_l2), depth
+normalisation and scene detection; Depth Anything 3 with its default
+warping. `bdtools` is the command as it runs (`--to-3d`, the depth 1.5,
+both eyes made); `ours` the benchmark's (the depth 1, the right eye
+made).
+
+| | right eye PSNR / VMAF | pair corr / error | detail (revealed) | jitter |
+|---|---|---|---|---|
+| ours | **27.49 / 31.9** | **0.838** / 3.15 | 0.99 (0.10%) | 1.19 |
+| bdtools | 27.31 / 30.4 (both eyes moved) | 0.836 / **3.06** | 0.90 (0.31%) | 1.21 |
+| iw3, Video Depth Anything Large | 26.79 / 26.7 | 0.804 / 3.19 | 0.71 (0.36%) | **1.12** |
+| iw3, Depth Anything 3 | 27.06 / 28.7 | 0.788 / 3.24 | 0.84 (0.21%) | 1.20 |
+| iw3, defaults | 24.15 / 11.4 | 0.785 / 3.87 | 0.99 (0.25%) | 1.19 |
+| the disc's depth, our renderer | 36.09 / 82.3 | 0.966 / 0.64 | 0.36 (1.21%) | |
+
+Ours leads on the depth's shape and on the made eye; iw3's Large
+setting jitters a little less. The converters reveal too little here
+(0.1% to 0.4% of the picture) for the detail to tell them apart; where
+our renderer is given the disc's depth, and reveals 1.2%, its filling
+shows what it is: a stretch (0.36, real pairs 0.64 to 1.13). iw3 converts at about 5 pictures a second here, ours at
+about 110. StereoCrafter (diffusion inpainting, 14B parameters) does not
+fit this machine's 62 GB with 32 GB of GPU as it is published; a run
+with its weights in 8 bits is to come. VisionDepth3D is no longer open.
+
+**The training films screened.** Several films in the library are fans'
+automatic conversions sold as 3D. The detail test above, each eye on its
+own, on eight excerpts a film: Fast X, Godzilla vs. Kong, Godzilla x
+Kong: The New Empire and Trolls World Tour have an eye stretched in on
+six to eight of the eight (its detail 0.003 to 0.04); they, three more
+from the same release group, and seven films no longer in the library
+are left out of training from now on (39 of the 53).
 
 ## Milestones
 
