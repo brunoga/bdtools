@@ -440,9 +440,25 @@ setting jitters a little less. The converters reveal too little here
 (0.1% to 0.4% of the picture) for the detail to tell them apart; where
 our renderer is given the disc's depth, and reveals 1.2%, its filling
 shows what it is: a stretch (0.36, real pairs 0.64 to 1.13). iw3 converts at about 5 pictures a second here, ours at
-about 110. StereoCrafter (diffusion inpainting, 14B parameters) does not
-fit this machine's 62 GB with 32 GB of GPU as it is published; a run
-with its weights in 8 bits is to come. VisionDepth3D is no longer open.
+about 110. VisionDepth3D is no longer open.
+
+StereoCrafter (v2: diffusion inpainting, 14B parameters) on four of the
+clips: Video Depth Anything Large's depth (iw3's export; its own
+DepthCrafter's weights are gated), its splatting, then its inpainting,
+the transformer split between the GPU (14 GB) and memory; 39 minutes a
+clip of 7 seconds. It does not keep the left eye (41 dB against it).
+
+| | right eye PSNR / VMAF | pair corr / error | detail (revealed) | jitter |
+|---|---|---|---|---|
+| ours | 26.52 / **26.9** | 0.806 / 3.93 | (0.10%) | 1.45 |
+| iw3, Video Depth Anything Large | **26.69** / 25.2 | **0.831 / 3.35** | 0.84 (0.38%) | **1.41** |
+| StereoCrafter | 26.22 / 24.4 | 0.759 / 3.83 | 0.51 (2.24%) | 1.63 |
+
+Its inpainting fills more (2.2% revealed) and better than a stretch,
+but no better than a real pair's (0.51); on Mad Max it pulls the depth
+off the disc's (0.61 against 0.89, a right eye 32.9 dB against our
+34.5), and only on Gravity does it beat ours (28.0 dB against 26.9).
+Behind both on the made eye, at some 1,500 times our time.
 
 **The training films screened.** Several films in the library are fans'
 automatic conversions sold as 3D. The detail test above, each eye on its
