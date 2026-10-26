@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-26
+
 ### Added
 
 - `--to-3d` makes a 2D film 3D, out in any 3D layout (full or half side by
@@ -1106,7 +1108,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.14.2...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/brunoga/bdtools/compare/v0.14.2...v0.15.0
 [0.14.2]: https://github.com/brunoga/bdtools/compare/v0.14.1...v0.14.2
 [0.14.1]: https://github.com/brunoga/bdtools/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/brunoga/bdtools/compare/v0.13.0...v0.14.0
