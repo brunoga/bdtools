@@ -102,6 +102,7 @@ func main() {
 	flag.StringVar(&fillDir, "fill-samples", "", "write the hole filler's training crops (fill.go) of each measured picture to this directory")
 	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
+	flag.BoolVar(&tprobeOn, "tfill-probe", false, "the temporal fill probe (tprobe.go): how much of the holes the pictures around show, by the disc's depth")
 	flag.Parse()
 	if *madeFlag != "" {
 		var err error
@@ -216,6 +217,9 @@ func main() {
 	}
 	if len(all) > 1 {
 		report(mean(all))
+	}
+	if tprobeOn {
+		tprobe.report()
 	}
 	if *csvPath != "" {
 		if err := writeCSV(*csvPath, all); err != nil {
@@ -395,6 +399,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{},
 		pair: map[string][5]float64{}, leftPSNR: map[string]float64{}}
 	c.conv = stereo.NewConverter(m, shape)
+	tprobe.ring = nil
 	if samplesDir != "" {
 		m.Tap = func(t depth.TailInput) {
 			if c.wantTail {
@@ -410,6 +415,10 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 
 func (c *clipBench) frame(sbs *mvc.Frame) error {
 	left, right := split(sbs)
+	if tprobeOn {
+		dm, _ := matchBoth(left, right)
+		tprobe.frame(left, right, dm, c.k, c.every)
+	}
 	if parallaxKs != nil {
 		c.lumas = append(c.lumas, halfLuma(left))
 		if len(c.lumas) > slices.Max(parallaxKs)+1 {
