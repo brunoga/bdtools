@@ -44,7 +44,12 @@ func main() {
 	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
 	tailFrom := flag.String("tail", "", "learn the depth network's tail instead, from this checkpoint (.pth), on the GPU: the samples need their tail inputs (.bht)")
 	retuneBy := flag.String("retune", "", "write the -train samples into -out (a directory) with the depth these tail weights (-tail's) give, on the GPU")
+	fillMode := flag.Bool("fill", false, "learn the hole filler instead (stereo.FillLayers), from stereobench -fill-samples crops (-from: its weights to start from)")
 	flag.Parse()
+	if *fillMode {
+		trainFill(*trainDir, *valDir, *out, *from, *epochs, *lr, *batch, *limit)
+		return
+	}
 	if *retuneBy != "" {
 		retune(*retuneBy, *trainDir, *out)
 		return

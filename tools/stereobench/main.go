@@ -98,6 +98,8 @@ func main() {
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	parallaxFlag := flag.String("parallax", "", "the parallax probe: steps (pictures back, e.g. 2,4,8) to measure each picture's motion parallax against, and how much it adds to the network's depth")
 	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
+	fillPath := flag.String("fill", "", "correct the rendered eyes' holes by these hole filler weights (tools/depthtrain -fill's)")
+	flag.StringVar(&fillDir, "fill-samples", "", "write the hole filler's training crops (fill.go) of each measured picture to this directory")
 	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.Parse()
@@ -108,6 +110,12 @@ func main() {
 		}
 		for _, t := range made {
 			methods = append(methods, t.name)
+		}
+	}
+	if *fillPath != "" {
+		var err error
+		if filler, err = stereo.ReadFill(*fillPath); err != nil {
+			fail(err)
 		}
 	}
 	if refinePath != "" {
@@ -478,6 +486,11 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 			}
 		}
 	}
+	if fillDir != "" {
+		if err := writeFill(c.res.name, c.k-1, left, right, dm, top, bottom); err != nil {
+			return err
+		}
+	}
 	if framesOut != nil {
 		writeFeatures(c.res.name, c.k-1, left, raw, dm, hr, a, b, corr, matched, top, bottom)
 	}
@@ -573,9 +586,16 @@ func (c *clipBench) finish() (clipResult, error) {
 				}
 			} else {
 				eye, holes = stereo.Render(left, d, -1)
+				if err := fillEye(eye, holes, d); err != nil {
+					return res, err
+				}
 				if name == "ours" && r.next != nil {
 					next0 = r.next.left
-					next1, _ = stereo.Render(r.next.left, r.next.disp, -1)
+					var nh []bool
+					next1, nh = stereo.Render(r.next.left, r.next.disp, -1)
+					if err := fillEye(next1, nh, r.next.disp); err != nil {
+						return res, err
+					}
 				}
 			}
 			if name != "flat" {
