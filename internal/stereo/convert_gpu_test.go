@@ -189,9 +189,11 @@ func TestDisparityOnTheGPU(t *testing.T) {
 		up.Data[i] = r.Float32() * 80
 	}
 	s := Shaper{Shape: RefinedShape}
+	s.Shape.Offset, s.Shape.Far = -0.05, 0.03 // values behind the knee: the easing measured too
 	want := s.Disparity(up.Data, w)
 	ww := float64(w)
-	got, err := g.Download(g.Disparity(g.Upload(up), w, h, top, bottom, float32(s.Shape.Scale*ww), float32(s.Shape.Offset*ww), float32(0.04*ww)))
+	far := float32(s.Shape.Far * ww)
+	got, err := g.Download(g.Disparity(g.Upload(up), w, h, top, bottom, float32(s.Shape.Scale*ww), float32(s.Shape.Offset*ww), far, far*FarKnee, float32(0.04*ww)))
 	g.Release()
 	if err != nil {
 		t.Fatal(err)

@@ -26,6 +26,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--to-3d` with `--subs-3d` or `--burn-subs`: the subtitles just in front
   of the made 3D picture beneath them (an offset sequence made from its
   depth), not at the screen behind what comes out of it.
+- `--3d-screen-size` (with `--to-3d`): the screen's diagonal in inches;
+  what is behind the screen is kept short of the eyes' separation there,
+  eased in from 70% of it, so a projector's large screen never asks the
+  eyes to turn outwards.
 - `--to-3d` makes the credits flat, on the screen, as the 3D discs do:
   a picture that is mostly black with text-like strokes on it (measured
   on ten discs' end credits: the made right eye 18.5 dB and VMAF 23

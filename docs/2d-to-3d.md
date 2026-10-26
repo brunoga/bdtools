@@ -487,6 +487,22 @@ on pictures that are mostly black, a matter for the depth, not the
 credits. The benchmark's films and the glass clips are unchanged to the
 last decimal.
 
+## The screen's size
+
+What is behind the screen is shown with the right eye's picture to the
+right of the left's; past the eyes' own separation (about 63 mm) the eyes
+would have to turn outwards, which they cannot do comfortably. On a
+television that is far beyond anything made here (a 65-inch screen is
+1.44 m wide, so 63 mm is 4.4% of it, past the 4% of the width that all
+disparity is kept within); on a projector's screen it is not (ten
+metres wide, 0.63%: 12 pixels of a 1920-wide picture, where the films'
+backgrounds sit at 15 to 25). `--3d-screen-size` takes the screen's
+diagonal in inches and keeps everything behind the screen short of that:
+past 70% of the limit the depth is eased, as x/(1+x/r) of what lies
+beyond (x) with r the rest of the way, which leaves its slope unchanged
+where the easing starts and never reaches the limit, so the background
+keeps its order and shape instead of being flattened against a wall.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything

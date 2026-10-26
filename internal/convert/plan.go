@@ -156,6 +156,10 @@ type Options struct {
 	To3D              bool
 	DepthModel        string
 	Depth3D, Screen3D float64
+	// ScreenSize3D, when not zero, is the screen's diagonal in inches:
+	// --to-3d keeps what is behind its screen short of the eyes'
+	// separation there (stereo.ScreenFar).
+	ScreenSize3D float64
 	// NoWindow3D leaves out the floating window: the black strips down a
 	// side of one eye that put the picture's edge in front of what comes
 	// out of the screen there.
@@ -372,7 +376,11 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--3d-depth scales the depth, 0 to 5, 1 the depth that scores best against the 3D discs' (got %g)", o.Depth3D)
 		case o.Screen3D < -5 || o.Screen3D > 5:
 			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
+		case o.ScreenSize3D != 0 && (o.ScreenSize3D < 10 || o.ScreenSize3D > 1000):
+			return fmt.Errorf("--3d-screen-size is the screen's diagonal, 10 to 1000 inches (got %g)", o.ScreenSize3D)
 		}
+	} else if o.ScreenSize3D != 0 {
+		return fmt.Errorf("--3d-screen-size is --to-3d's")
 	} else if o.redepthAsked() {
 		switch {
 		case o.Remux:

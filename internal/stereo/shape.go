@@ -19,6 +19,38 @@ type Shape struct {
 	// is, not normalised a picture at a time: Scale times the depth plus
 	// Offset, as fractions of the width (Budget and Screen unused).
 	Scale, Offset float64
+	// Far, when not zero, is the farthest behind the screen anything may
+	// go, a fraction of the width: what goes past FarKnee of it is eased
+	// towards it, never reaching it (FarLimit).
+	Far float64
+}
+
+// FarKnee is where, as a share of Shape.Far, the depth behind the screen
+// starts to be eased.
+const FarKnee = 0.7
+
+// FarLimit is a disparity v kept short of far (pixels, 0 for no limit)
+// behind the screen: past knee (FarKnee of far) eased as x/(1+x/r), x what
+// lies past it and r the rest of the way, which leaves the slope 1 there
+// and tends to far. Its steps rounded one at a time, as the GPU's
+// disparity kernel takes them.
+func FarLimit(v, far, knee float32) float32 {
+	if far <= 0 || -v <= knee {
+		return v
+	}
+	r := far - knee
+	x := -v - knee
+	return -(knee + x/(1+x/r))
+}
+
+// ScreenFar is Shape.Far for a screen's size (its diagonal, in inches, of
+// a 16:9 picture): the eyes' separation, 63 mm, as a fraction of its
+// width; past that the eyes would turn outwards to see what is behind the
+// screen.
+func ScreenFar(diagonal float64) float64 {
+	const eyes = 0.063
+	width := diagonal * 0.0254 * 16 / math.Hypot(16, 9)
+	return eyes / width
 }
 
 // DefaultShape is the 3D discs' depth (native and studio-converted ones,
@@ -111,10 +143,12 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 		out := make([]float32, len(depth))
 		a, b := float32(s.Shape.Scale*float64(width)), float32(s.Shape.Offset*float64(width))
 		lim := float32(0.04 * float64(width))
+		far := float32(s.Shape.Far * float64(width))
+		knee := far * FarKnee
 		const chunk = 1 << 16
 		rows((len(depth)+chunk-1)/chunk, func(k int) {
 			for i := k * chunk; i < min((k+1)*chunk, len(depth)); i++ {
-				out[i] = min(max(a*depth[i]+b, -lim), lim)
+				out[i] = min(max(FarLimit(a*depth[i]+b, far, knee), -lim), lim)
 			}
 		})
 		return out
@@ -137,11 +171,13 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 	out := make([]float32, len(depth))
 	lo32, inv := float32(s.lo), float32(1/span)
 	b, screen := float32(budget), float32(s.Shape.Screen)
+	far := float32(s.Shape.Far * float64(width))
+	knee := far * FarKnee
 	const chunk = 1 << 16
 	rows((len(depth)+chunk-1)/chunk, func(k int) {
 		for i := k * chunk; i < min((k+1)*chunk, len(depth)); i++ {
 			n := min(max((depth[i]-lo32)*inv, -0.25), 1.25)
-			out[i] = b * (n - screen)
+			out[i] = FarLimit(b*(n-screen), far, knee)
 		}
 	})
 	return out
