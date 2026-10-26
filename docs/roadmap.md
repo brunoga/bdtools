@@ -105,7 +105,7 @@ Measurement:
 | 4. H.264 encoder | Done for now: +9% BD-rate against x264 --tune psnr (trellis, B-pyramid, lookahead); speed later |
 | 5. Interlaced H.264 | Done: PAFF and MBAFF bit-exact on 79 of 80 JVT streams; 1080i sources decoded and deinterlaced in Go |
 | 6. Dolby Vision two layers | Done: `--dv-fel keep`/`reencode` with `--encoder builtin` (profile 7 out, no NVENC or x265) |
-| 7. Scaling, cropping, tone mapping | `--crop` (and `--crop auto`, the bars found at twelve places) and `--scale` done (2D, Lanczos, subtitles and DV L5 follow); `--tonemap` done (BT.2390 on max(R,G,B), dynamic peaks from DV L1 and HDR10+) |
+| 7. Scaling, cropping, tone mapping | `--crop` (and `--crop auto`, the bars found at twelve places) and `--scale` done (2D, Lanczos, subtitles and DV L5 follow); `--tonemap` done (BT.2390 on max(R,G,B), dynamic peaks from DV L1 and HDR10+); both on an NVIDIA GPU when there is one, bit-exact with the CPU |
 | 8. Text subtitles, PGS OCR | Done: SRT, ASS/SSA, WebVTT and tx3g carried (Matroska as they are, MP4 as tx3g), `--subs-file` adds files; `--subs-ocr` reads PGS as text (a CRNN trained here, internal/ocr) |
 | 9. Control features | Trimming (`--start`, `--end`, `--duration`), device presets (`--for`), a target size (`--video-size`) and batches (`--input` a directory, `--watch`) done |
 | 10. Quality metrics in Go | Done: VMAF (libvmaf's integer VIF, ADM, motion and its v0.6.1 models), PSNR and float SSIM, the same numbers as libvmaf's tool; `--compare` |
