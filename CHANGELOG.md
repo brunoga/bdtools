@@ -30,6 +30,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   what is behind the screen is kept short of the eyes' separation there,
   eased in from 70% of it, so a projector's large screen never asks the
   eyes to turn outwards.
+- `--3d-shots FILE` (with `--to-3d`): stretches of the film graded by
+  hand, a line each, `START [END]` and `depth=`, `screen=` or `flat`.
 - `--3d-preview` (with `--to-3d`): no conversion, but stills of it at
   eight places through the film, each at depths 1, 1.5, 2, 2.5 and the
   one asked, full side by side and red-cyan anaglyph JPEGs into

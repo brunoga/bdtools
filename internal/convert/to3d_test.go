@@ -85,6 +85,21 @@ func TestRunnerTo3D(t *testing.T) {
 		t.Errorf("--3d-preview: %v; made %v", err, names)
 	}
 
+	// --3d-shots: a stretch made flat, one deeper
+	shots := filepath.Join(work, "shots.txt")
+	if err := os.WriteFile(shots, []byte("0:00 0:00.2 flat\n0:00.2 depth=3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g := o
+	g.Output, g.TempDir, g.Shots3D = filepath.Join(work, "graded.mkv"), t.TempDir(), shots
+	lines = nil
+	if err := NewRunner(CurrentGOOS, g, report).Run(context.Background()); err != nil {
+		t.Fatalf("--3d-shots: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "2 stretches graded") {
+		t.Errorf("--3d-shots: no report of the stretches:\n%s", strings.Join(lines, "\n"))
+	}
+
 	// a 3D source is refused
 	o.Input = mvcMatroska(t)
 	if err := NewRunner(CurrentGOOS, o, func(string, ...any) {}).Run(context.Background()); err == nil || !strings.Contains(err.Error(), "3D already") {

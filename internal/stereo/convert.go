@@ -24,6 +24,10 @@ type Converter struct {
 	// KeepCredits gives the credits (credits.go) their depth as any
 	// picture's, not flat.
 	KeepCredits bool
+	// Shot, when set, gives a picture's shape (by its PTS) in place of the
+	// Shaper's, and whether it is made flat: a stretch of the film graded
+	// by hand.
+	Shot func(pts int64) (s Shape, flat bool)
 	// Refine, when not nil, corrects the depth's shape (refinenet.go), on
 	// the depth model's backend.
 	Refine          *RefineWeights
@@ -88,6 +92,7 @@ type Estimate struct {
 	top, bottom int
 	d           *nn.Tensor // [1, h, w] of the active rows (nil: none)
 	fresh       bool       // a new shot: the shaping starts afresh
+	shape       Shape      // the shape it is made with
 	factor      float32    // of the disparity: 0 flat (the credits), 1 as shaped
 	left, right *mvc.Frame // the eyes, when the GPU made them
 	samples     *Samples   // of the disparity they were made with
@@ -141,13 +146,19 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 		c.netW, c.netH = netSize(f.Width, bottom-top)
 	}
 	c.frames++
-	e.factor = 1
+	e.factor, e.shape = 1, c.Shaper.Shape
 	if !c.KeepCredits {
 		e.factor = c.credits.next(Credits(f, top, bottom), e.fresh)
 	}
+	if c.Shot != nil {
+		var flat bool
+		if e.shape, flat = c.Shot(f.PTS); flat {
+			e.factor = 0
+		}
+	}
 	if ah := bottom - top; ah >= 28 {
 		if g, ok := c.Model.Backend().(*nn.GPU); ok {
-			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes())}
+			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes(e.shape))}
 		}
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm, err := c.Model.FrameErr(x)
@@ -191,7 +202,11 @@ func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 		up := nn.Bilinear(e.d, ah, w)
 		c.Guide.guided(up.Data, f.Y[top*f.StrideY:], f.StrideY, w, ah)
 		copy(depth[top*w:bottom*w], up.Data)
-		d := c.Disparity(up.Data, w)
+		// the Shaper's state (a shot's range) carried, its shape the picture's
+		sh := c.Shaper
+		sh.Shape = e.shape
+		d := sh.Disparity(up.Data, w)
+		c.lo, c.hi, c.primed = sh.lo, sh.hi, sh.primed
 		if e.factor != 1 {
 			for i := range d {
 				d[i] *= e.factor
@@ -279,9 +294,9 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 	var eyes, disp *nn.Tensor
 	if makeEyes {
 		w := float64(f.Width)
-		a, b, lim := float32(c.Shaper.Shape.Scale*w), float32(c.Shaper.Shape.Offset*w), float32(0.04*w)
+		a, b, lim := float32(e.shape.Scale*w), float32(e.shape.Offset*w), float32(0.04*w)
 		a, b = a*e.factor, b*e.factor
-		far := float32(c.Shaper.Shape.Far * w)
+		far := float32(e.shape.Far * w)
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim)
 		eyes = g.Eyes(p, disp, gapPixels)
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
@@ -309,8 +324,8 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 }
 
 // gpuEyes reports whether Estimate makes the eyes on a GPU: when the
-// disparity is the depth's as it is (Shape.Scale), the depth unguided.
-func (c *Converter) gpuEyes() bool { return c.Shaper.Shape.Scale != 0 && c.Guide.Radius <= 0 }
+// disparity is the depth's as it is (s.Scale), the depth unguided.
+func (c *Converter) gpuEyes(s Shape) bool { return s.Scale != 0 && c.Guide.Radius <= 0 }
 
 // eyeFrames is the two eyes of f in buf (nn.GPU.Eyes').
 func eyeFrames(buf []byte, f *mvc.Frame) (left, right *mvc.Frame) {
@@ -349,10 +364,10 @@ func (c *Converter) Depth(f *mvc.Frame) (*Estimate, error) { return c.estimate(f
 // picture on its own (its floating window not eased in from the pictures
 // before). The converter's own shape is left as it was.
 func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
-	keep, fresh := c.Shaper, e.fresh
-	c.Shaper, e.fresh = Shaper{Shape: s}, true
+	keep, shape, fresh := c.Shaper, e.shape, e.fresh
+	c.Shaper, e.shape, e.fresh = Shaper{Shape: s}, s, true
 	_, d := c.Shape(e)
-	c.Shaper, e.fresh = keep, fresh
+	c.Shaper, e.shape, e.fresh = keep, shape, fresh
 	left, right = Pair(e.f, d)
 	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
 	return left, right

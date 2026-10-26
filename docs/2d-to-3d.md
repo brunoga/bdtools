@@ -536,6 +536,28 @@ glasses). The window is each still's own, as a cut's first picture's.
 A 4K Dolby Vision film takes about 25 seconds on an RTX 5090, a 1080p
 one about 15.
 
+## Grading by hand
+
+No automatic depth gets every shot right. `--3d-shots FILE` grades
+stretches of the film by hand, a line each:
+
+```
+# START [END] SETTINGS...
+0:12:30 0:13:05 depth=0.8      # a close-up that comes out too far
+1:02:10.5 1:02:40 flat         # a screen within the picture
+1:30:00 screen=-1              # to the next line's start, or the end
+```
+
+Times are the film's as a player shows them (`--start`'s clock, also
+with `--start`); a line without an end runs to the next line's start.
+`depth=` and `screen=` are `--3d-depth`'s and `--3d-screen`'s for the
+stretch, `flat` puts it on the screen as the credits are; what a line
+does not set stays the command's, and where lines overlap the later one
+wins. The change is at the picture the time names, so a stretch should
+begin and end at cuts. `--3d-preview` shows what each depth looks like
+before; the file is part of what an interrupted conversion must match to
+resume.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything
