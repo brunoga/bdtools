@@ -33,8 +33,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   nearer theirs), its weights built in. `--3d-refine none` leaves it out,
   `--3d-refine FILE` uses weights of one's own: `tools/depthtrain` learns
   them from 3D films (`tools/stereobench -samples`), in Go on the CPU.
-- `--to-3d`'s depth network has its last stages learnt anew from the same
-  53 films' real 3D pairs (`--3d-tune`, on by default for the small
+- `--to-3d`'s depth network has its last stages learnt anew from 39
+  films' real 3D pairs (fans' automatic conversions screened out) (`--3d-tune`, on by default for the small
   network; in place of the refinement, which then stays off): on held-out
   discs the made right eye 0.1 to 0.9 dB nearer theirs and VMAF up to 7
   higher than the refined depth's, the glass shots most. `--3d-tune none`

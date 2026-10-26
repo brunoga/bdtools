@@ -326,6 +326,21 @@ What that teaches:
   It wins on every set it was not chosen on, the glass most, and the
   conversion is faster (no refinement: about 120 pictures a second at
   1080p on an RTX 5090). Built in and on by default for Small.
+
+  Learnt again without the fans' conversions (see "Against other
+  converters": 14 of the 53 films out, 5,454 pictures), the same recipe
+  and the same mapping (still the best of a 3 x 3 grid about it): the
+  validation error 6.35 to 6.30 px, and, one picture in 8:
+
+  | | 53 films | 39 films |
+  |---|---|---|
+  | the twelve clips | 27.31 / 30.0 | 27.37 / 30.4 |
+  | Avatar: Fire and Ash | 24.45 / 27.4 | 24.50 / 27.8 |
+  | the four glass clips | 27.65 / 42.7 | 27.45 / 40.9 |
+  | depth correlation (twelve, Avatar, glass) | .849 .747 .791 | .851 .745 .774 |
+
+  Less data, and a little better where the films are many; the glass
+  (four shots of one film) a little worse. These weights are built in.
 - **Whole films the choices never saw.** Furiosa (taken for a studio
   conversion; it is not one, see below) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
