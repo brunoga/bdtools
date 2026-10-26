@@ -208,6 +208,15 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 		if err != nil {
 			return nil, err
 		}
+		if r.Opts.Shots3D != "" {
+			shots, err := readShots3D(r.Opts.Shots3D)
+			if err != nil {
+				return nil, err
+			}
+			start := r.Opts.Trim.Start
+			c.Shot = r.Opts.shotShapes(shots, m.Size(), func(pts int64) time.Duration { return r.timeline(pts) + start })
+			r.Report.Report("--to-3d: %d stretches graded by %s", len(shots), r.Opts.Shots3D)
+		}
 		r.conv = &to3DState{conv: c}
 		s := r.Opts.shape3D(m.Size())
 		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",

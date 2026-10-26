@@ -160,6 +160,9 @@ type Options struct {
 	// --to-3d keeps what is behind its screen short of the eyes'
 	// separation there (stereo.ScreenFar).
 	ScreenSize3D float64
+	// Shots3D is a file of stretches of the film graded by hand
+	// (shots3d.go).
+	Shots3D string
 	// Preview3D makes stills of --to-3d's pairs at a few places and
 	// depths, into Output, a directory, instead of converting.
 	Preview3D bool
@@ -382,8 +385,15 @@ func (o Options) Validate(goos string) error {
 		case o.ScreenSize3D != 0 && (o.ScreenSize3D < 10 || o.ScreenSize3D > 1000):
 			return fmt.Errorf("--3d-screen-size is the screen's diagonal, 10 to 1000 inches (got %g)", o.ScreenSize3D)
 		}
+		if o.Shots3D != "" {
+			if _, err := readShots3D(o.Shots3D); err != nil {
+				return err
+			}
+		}
 	} else if o.ScreenSize3D != 0 {
 		return fmt.Errorf("--3d-screen-size is --to-3d's")
+	} else if o.Shots3D != "" {
+		return fmt.Errorf("--3d-shots is --to-3d's")
 	} else if o.redepthAsked() {
 		switch {
 		case o.Remux:
