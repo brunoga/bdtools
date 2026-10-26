@@ -667,8 +667,14 @@ resume.
     disc's eyes, scaled, and the eyes made again between the two
     cameras' views, so both are blended and little is invented; the
     subtitles' offsets scaled with it. More depth than the disc's (views
-    outside the cameras') after, with the conversion's filling. Needs a
-    disparity measure fit for output, not only for scoring.
+    outside the cameras', `--3d-depth` up to 3), with the conversion's
+    filling, measured against the disc itself (`redepthprobe
+    -roundtrip`): its pair made 1/k as deep, then k times that, the eyes
+    against the disc's (the twelve clips' mean luma PSNR): k 1.5, 47.8
+    dB (42.3 to 55.5; the shallow pair's 35.7), k 2, 46.0 dB (40.4 to
+    53.9; 33.2). The disparity is the matcher's both ways, so the trip
+    is partly the tool against itself; what neither camera saw is the
+    filling's, and small.
 12. **Layered glass** (kept in mind, not now): a reflection and what is
     seen through the glass separated by their motion, each its own
     depth. The disc's own single depth already renders the glass clips
