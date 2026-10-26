@@ -281,7 +281,8 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		w := float64(f.Width)
 		a, b, lim := float32(c.Shaper.Shape.Scale*w), float32(c.Shaper.Shape.Offset*w), float32(0.04*w)
 		a, b = a*e.factor, b*e.factor
-		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, lim)
+		far := float32(c.Shaper.Shape.Far * w)
+		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim)
 		eyes = g.Eyes(p, disp, gapPixels)
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}

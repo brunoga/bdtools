@@ -245,7 +245,7 @@ func (r *Runner) resumeKey() (string, error) {
 		ToneMap   bool       `json:",omitempty"`
 		Trim      Trim       `json:",omitempty"`
 		VideoSize int64      `json:",omitempty"`
-		To3D      [3]float64 `json:",omitempty"`
+		To3D      [4]float64 `json:",omitempty"`
 		Refine3D  string     `json:",omitempty"`
 		Model3D   string     `json:",omitempty"`
 		Tune3D    string     `json:",omitempty"`

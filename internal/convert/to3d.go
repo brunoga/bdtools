@@ -93,15 +93,15 @@ func (r *Runner) useTo3D(threeD bool) error {
 }
 
 // to3DKey is what of --to-3d changes the pictures (for resuming).
-func (o Options) to3DKey() [3]float64 {
+func (o Options) to3DKey() [4]float64 {
 	if !o.To3D {
-		return [3]float64{}
+		return [4]float64{}
 	}
 	w := 1.0
 	if o.NoWindow3D {
 		w = 2
 	}
-	return [3]float64{w, o.depth3D(), o.Screen3D}
+	return [4]float64{w, o.depth3D(), o.Screen3D, o.ScreenSize3D}
 }
 
 // DefaultDepth3D is --3d-depth's default: half again the depth that scores
@@ -178,6 +178,9 @@ func (o Options) shape3D(size string) stereo.Shape {
 	s.Scale *= o.depth3D()
 	s.Offset *= o.depth3D()
 	s.Offset += o.Screen3D / 100
+	if o.ScreenSize3D > 0 {
+		s.Far = stereo.ScreenFar(o.ScreenSize3D)
+	}
 	return s
 }
 
