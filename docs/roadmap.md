@@ -114,8 +114,26 @@ Measurement:
 
 ## AV1: next steps
 
-What is left of the gap to SVT-AV1 preset 4 (+5.7% at the default speed)
-and of its speed, by what each step is likely worth. The numbers are from
+`tools/av1bench` measures the encoder against SVT-AV1 (through ffmpeg's
+libsvtav1) on six 120-picture 1080p 8-bit clips (Blade Runner 2049,
+Frozen II, Godzilla vs. Kong, Children of Men, Free Solo, Incredibles 2,
+the HDR ones tone mapped): BD-rate by PSNR-Y, PSNR-YUV, SSIM and VMAF
+against SVT-AV1 2.3.0 preset 4, each stream decoded by libdav1d. The
+baseline (24 cores):
+
+| config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+|---|---|---|---|---|---|---|
+| SVT-AV1 preset 2 | -9.2% | -10.4% | -9.3% | -7.0% | 10.3 | 0.85 |
+| SVT-AV1 preset 4 | 0 | 0 | 0 | 0 | 24.5 | 0.30 |
+| SVT-AV1 preset 6 | +22.6% | +22.5% | +15.5% | +26.1% | 58.6 | 0.10 |
+| SVT-AV1 preset 8 | +42.0% | +43.9% | +32.2% | +43.9% | 78.3 | 0.06 |
+| ours, speed 0 | +7.0% | +7.7% | +11.4% | +6.7% | 0.99 | 15.7 |
+| ours, speed 1 | +9.7% | +10.4% | +13.8% | +8.8% | 1.58 | 10.1 |
+| ours, speed 2 | +10.9% | +11.6% | +15.0% | +10.8% | 2.05 | 7.6 |
+
+So 7 to 11% larger than preset 4 and 25 to 50 times its CPU time: speed
+is the larger gap. What is left, by what each step is likely worth (the
+size numbers below are from the earlier two-clip bench). The numbers are from
 the two 120-picture 1080p clips; the small tunings around today's settings
 (lambda, key frame and pyramid q, the temporal filter and model's
 strengths, the motion search's starts) are all within 0.3% of them.
