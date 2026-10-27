@@ -279,9 +279,10 @@ type gopRun struct {
 	done  chan struct{} // closed once every frame is coded
 }
 
-// maxRuns is how many mini-GOPs are coded at once: the next one's anchor
-// is coded while this one's frames above it are.
-const maxRuns = 2
+// maxRuns is how many mini-GOPs are coded at once: the next ones' frames
+// are coded while this one's below them are. (On the six clips: 4 coded
+// 1.07 times the pictures a second of 2, 3 1.04 times.)
+const maxRuns = 4
 
 // run starts coding the planned frames, each once its references are
 // coded (frames that do not depend on each other at once, mini-GOPs
@@ -300,9 +301,12 @@ func (e *Encoder) run(steps []step, out *[]Unit) {
 					}
 				}
 				j.obu = e.codeFrame(j)
+				j.src, j.orig = nil, nil // held by Encode and the temporal filter as long as they need them
 				if e.keepRecon {
 					y, cb, cr := j.frame.recon(e.o.Width, e.o.Height)
 					j.recon = &[3][]uint16{y, cb, cr}
+				} else {
+					j.frame = nil // a reference's picture is its state's
 				}
 				close(j.state.done)
 				if dbgSerialFrames {
@@ -382,26 +386,25 @@ func (e *Encoder) emit(disp int, out *[]Unit) {
 	*out = append(*out, u)
 }
 
-// refsPrevDepth is the deepest of the earlier mini-GOPs' frames an
-// anchor may use. (On the two 120-picture clips, against no limit: 2
-// cost 0.2% BD-rate and coded 1.12 times faster, 1 cost 1.1% and coded
-// 1.37 times faster.)
+// refsPrevDepth is the deepest of the earlier mini-GOPs' frames a frame
+// may use, so that the next mini-GOP is coded while the frames below
+// this one are. (On the two 120-picture clips, the anchors against no
+// limit: 2 cost 0.2% BD-rate and coded 1.12 times faster, 1 cost 1.1%
+// and coded 1.37 times faster. On the six clips, the frames below the
+// anchors too, against no limit: 2 the same size and 1.18 times the
+// pictures a second (with maxRuns 4), 3 0.2% smaller and 1.10 times,
+// 4 0.1% smaller and 1.09 times.)
 var refsPrevDepth = 2
 
 // refUsable reports whether a frame of a depth may reference one of
-// another (earlier: of an earlier mini-GOP): within a mini-GOP, only
-// frames above it in the pyramid, so that the frames of a depth are
-// coded at once; anchors, the earlier anchors and key frames, and the
-// earlier mini-GOP's frames to refsPrevDepth, so that the next anchor
-// is coded while the frames below this one are.
+// another (earlier: of an earlier mini-GOP): an earlier one to
+// refsPrevDepth; within a mini-GOP, only frames above it in the pyramid,
+// so that the frames of a depth are coded at once.
 func refUsable(refDepth, depth int, earlier bool) bool {
-	switch {
-	case depth <= 1:
-		return refDepth <= 1 || earlier && refDepth <= refsPrevDepth
-	case earlier:
-		return true
+	if earlier {
+		return refDepth <= refsPrevDepth
 	}
-	return refDepth < depth
+	return refDepth < depth || depth <= 1 && refDepth <= 1
 }
 
 // refsFor picks a frame's references among the slots' frames it may use

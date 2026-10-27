@@ -158,6 +158,26 @@ since: intra in inter pictures with fewer modes, depths or type searches
 (+0.6 to +1.4% for 1.08 to 1.14 times), no 4x4 blocks or 8x8 whole only
 in inter pictures (+0.1% and +0.3% for 1.02 and 1.08 times, the same
 trade as a speed step), no 4:1 partitions (+1.1% for 1.14 times).
+The inter-intra masks made once and blended in AVX2, and the distortions
+summed in AVX2, take it to 4.65 CPU seconds a picture, the same streams.
+
+The cores were then idle a third of the time: every 32-picture mini-GOP's
+frames below its anchor could use any earlier frame still in a slot, among
+them the previous mini-GOP's deepest, coded last, so each mini-GOP waited
+for most of the one before (6 to 9 of the 24 cores busy for 3 to 4 seconds
+in every 8). Limiting the earlier mini-GOPs' frames to depth 2 for every
+frame (as for the anchors already), with four mini-GOPs coded at once,
+keeps 23 to 24 cores busy past the stream's first mini-GOP, and the coded
+frames and their sources are let go of as soon as they are coded (1080p:
+4.0 GB at peak, from 4.7):
+
+| config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+|---|---|---|---|---|---|---|
+| ours, speed 0 | +7.9% | +8.5% | +12.4% | +7.2% | 2.25 | 8.9 |
+| ours, speed 2 | +11.5% | +12.1% | +15.3% | +11.5% | 3.87 | 4.7 |
+
+(Depth 3 was 0.2% smaller at 1.10 times, depth 4 0.1% at 1.09 times,
+within the clips' noise; 2 and 3 mini-GOPs at once 1.10 and 1.15 times.)
 
 Tried and dropped: pruning the horizontal and vertical partitions by the
 split's cost (+0.6%, 1.11 times), a first pass deciding the partitions
@@ -180,15 +200,14 @@ strengths, the motion search's starts) are all within 0.3% of them.
    and inter costs alike, and any weaker propagation loses (the inter costs
    scaled by 1.4 or the references' quantization noise added: 0.8% to
    4.7% worse). Likely 1 to 2%.
-2. **Frame-level parallelism.** One tile a picture (5.9% smaller than 2x2)
-   costs 1.31 times the time: a 1080p frame is 30 by 17 superblocks, and
-   its rows, two superblocks apart, keep about 8 cores busy where four
-   tiles kept 17; more mini-GOPs at once do not help (the pyramid's first
-   levels are one frame each). Starting a frame's rows as its references'
-   rows are done (x264's frame threads) is the way, but a frame's CDFs
-   (primary_ref_frame, 0.5%) and its temporal motion vectors need its
-   references whole: they would have to come from earlier frames, or the
-   references' rows be done in an order that gives them early.
+2. **Frame-level parallelism.** Done as far as whole frames go (above):
+   past the first mini-GOP the cores are busy. What is left is the
+   stream's start (a key frame, then each pyramid level one frame) and
+   one tile a picture (5.9% smaller than 2x2): a 1080p frame's rows, two
+   superblocks apart, keep about 8 cores busy where four tiles kept 17.
+   Starting a frame's rows as its references' rows are done (x264's frame
+   threads) needs a frame's CDFs (primary_ref_frame, 0.5%) and temporal
+   motion vectors from earlier frames than its references.
 3. **128x128 superblocks.** Fewer partition and skip symbols where the
    picture is flat, blocks up to 128x128: in libaom 0.5 to 1% on HD. It
    touches the superblock loops, the partition search, CDEF's and loop

@@ -83,7 +83,7 @@ type Encoder struct {
 	o     EncoderOptions
 	seq   seqParams
 	tools tools
-	frame *frameEnc
+	frame *frameEnc // the last frame coded (with keepRecon)
 	// queue is the pictures not coded yet; nIn counts the pictures in;
 	// gopStart is the picture before the mini-GOP being planned.
 	gopStart int
@@ -96,8 +96,8 @@ type Encoder struct {
 	// tfPast is the sources of the pictures just before the queue's (back
 	// to the last key frame's), for the temporal filter's window.
 	tfPast []*Source
-	// keepRecon keeps each shown picture's reconstruction in its unit
-	// (tests).
+	// keepRecon keeps each shown picture's reconstruction in its unit,
+	// and the last frame coded in frame (tests).
 	keepRecon bool
 	recons    map[int]*[3][]uint16
 	// recent is the last pictures in, by display index.
@@ -360,10 +360,6 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 	f.lambda = lambdaFor(f.dcQ[0])
 	return f
 }
-
-// Recon gives the last picture's reconstruction (its planes cropped to
-// the picture).
-func (e *Encoder) Recon() (y, cb, cr []uint16) { return e.frame.recon(e.o.Width, e.o.Height) }
 
 // recon is a frame's reconstruction cropped to the picture (width by
 // height).

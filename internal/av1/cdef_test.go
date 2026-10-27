@@ -99,6 +99,7 @@ func TestCdefSearchErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		e.keepRecon = true // e.frame
 		if _, err := e.Encode(halfFlatPicture(c.w, c.h, c.depth, 5)); err != nil {
 			t.Fatal(err)
 		}
