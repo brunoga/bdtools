@@ -305,6 +305,9 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	t.save(start, r, c, size, true)
 	bestJ := math.Inf(1)
 	var bestDec *blockDec
+	// with fastCands the candidates are costed with their largest
+	// transforms, DCT_DCT, and the best one's transforms searched after
+	t.fastTx = f.tools.fastCands
 	for i, cd := range cands[:min(f.tools.interCands, len(cands))] {
 		if i > 0 && f.tools.candRatio > 0 && cd.est > f.tools.candRatio*cands[0].est {
 			break
@@ -350,6 +353,17 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 					t.save(best, r, c, size, true)
 				}
 			}
+		}
+	}
+	if t.fastTx {
+		t.fastTx = false
+		if bestDec != nil {
+			t.restore(start, true)
+			d := *bestDec
+			d.skip, d.txSplit, d.txTypes = false, nil, nil
+			t.findMvStack(&t.stack, d.refFrame2 > INTRA_FRAME, [2]int{d.refFrame, d.refFrame2})
+			bestJ, bestDec = t.codeInter(&d, true), &d
+			t.save(best, r, c, size, true)
 		}
 	}
 	// the filter of the best, by rate and distortion
@@ -517,7 +531,11 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 	}
 	var jl float64
 	var zero bool
-	if search && f.tools.txTree && f.fp.qIndex > 0 && !dbgNoVarTx {
+	if t.fastTx {
+		t.dctOnly = true
+		defer func() { t.dctOnly = false }()
+	}
+	if search && f.tools.txTree && f.fp.qIndex > 0 && !dbgNoVarTx && !t.fastTx {
 		// the tree decided with DCT_DCT alone, then its types searched
 		s := t.snap(0, 8)
 		t.save(s, b.r, b.c, b.size, true)
@@ -931,7 +949,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		return leaf()
 	}
 	// search: whole, then split, the better kept
-	if dbgNoVarTx {
+	if dbgNoVarTx || t.fastTx {
 		dec.txSplit = append(dec.txSplit, false)
 		return leaf()
 	}

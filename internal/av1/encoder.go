@@ -44,16 +44,18 @@ type EncoderOptions struct {
 	// Speed trades size for time: -2 the partitions searched without
 	// pruning (5.3 times slower, 3.0% smaller on two 120-picture 1080p
 	// clips); -1 those after a skipped whole block too, intra everywhere
-	// and every inter candidate coded in full (2.8 times slower, 2.3%
-	// smaller); 0 every tool searched, intra in inter pictures where its
-	// estimate is near inter's, inter candidates coded in full where
-	// theirs are near the best's; 1 the transform trees decided with
+	// and every inter candidate coded in full, its transforms searched
+	// (2.8 times slower, 2.3% smaller); 0 every tool searched, intra in
+	// inter pictures where its estimate is near inter's, inter candidates
+	// coded in full where theirs are near the best's, with their largest
+	// transforms, DCT_DCT, the best's transforms then searched; 1 the
+	// transform trees decided with
 	// DCT_DCT, no warped motion or masked compound, no compound of two
 	// earlier frames or joint compound motion search, CDEF's damping from
 	// q, luma's two deblocking levels the same, the temporal model's
 	// vectors whole samples and nine of the self-guided filter's sixteen
-	// sets (1.69 times faster, 2.4% larger on six clips); 2 also no OBMC,
-	// four references and two candidates coded in full (2.27 times,
+	// sets (1.56 times faster, 2.6% larger on six clips); 2 also no OBMC,
+	// four references and two candidates coded in full (1.88 times,
 	// 3.8%).
 	Speed int
 }
@@ -65,6 +67,7 @@ type tools struct {
 	filterRD, obmc, fewRefs, txTree bool
 	pruneSkip, pruneExt             bool // the partition search's prunings
 	extEst                          float64
+	fastCands                       bool // inter candidates costed with DCT_DCT, the best's transforms searched
 	// the filters' and the temporal model's searches cut short: CDEF's
 	// damping from q, luma's deblocking levels the same, the model's
 	// vectors whole samples, a subset of the self-guided filter's sets
@@ -137,9 +140,9 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst, fastCands: true}
 	if o.Speed <= -1 {
-		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio = false, 0, 0
+		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio, e.tools.fastCands = false, 0, 0, false
 	}
 	if o.Speed <= -2 {
 		e.tools.pruneExt = false
