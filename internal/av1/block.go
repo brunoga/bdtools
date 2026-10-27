@@ -753,16 +753,10 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 			inverseTransform(t.dq[:], txSz, tt, f.bitDepth, f.lossless, t.inv[:])
 			reconstructAdd(t.trial[:], w, t.inv[:], txSz, tt, f.bitDepth)
 		}
-		var sse int64
-		for y := range vh {
-			for x := range vw {
-				d := int64(src[y*stride+x]) - int64(t.trial[y*w+x])
-				sse += d * d
-			}
-		}
+		d := sse(src, stride, t.trial[:], w, vw, vh)
 		t.cost.n = 0
 		t.writeCoeffs(&t.cost, &tc, false)
-		j := float64(sse) + t.lambda*float64(t.cost.n)/costScale
+		j := float64(d) + t.lambda*float64(t.cost.n)/costScale
 		if j < bestJ {
 			if bestOff >= 0 {
 				// keep the levels of the best only
@@ -782,17 +776,11 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	}
 	if best.eob > 0 {
 		// all zero: the prediction alone
-		var sse int64
-		for y := range vh {
-			for x := range vw {
-				d := int64(src[y*stride+x]) - int64(t.pred[y*w+x])
-				sse += d * d
-			}
-		}
+		d := sse(src, stride, t.pred[:], w, vw, vh)
 		zero := txCoded{plane: plane, x4: tc.x4, y4: tc.y4, txSz: txSz, txType: DCT_DCT, off: len(t.levels)}
 		t.cost.n = 0
 		t.writeCoeffs(&t.cost, &zero, false)
-		if j := float64(sse) + t.lambda*float64(t.cost.n)/costScale; j < bestJ {
+		if j := float64(d) + t.lambda*float64(t.cost.n)/costScale; j < bestJ {
 			t.levels = t.levels[:bestOff]
 			bestJ, best = j, zero
 			best.off = bestOff
@@ -1134,4 +1122,20 @@ func (t *tileEnc) resetBlockContext() {
 			t.leftLevel[p][i], t.leftDc[p][i] = 0, 0
 		}
 	}
+}
+
+// sseGo is sse a sample at a time.
+func sseGo(a []uint16, as int, b []uint16, bs int, w, h int) int64 {
+	var s int64
+	if w <= 0 {
+		return 0
+	}
+	for y := range h {
+		ra, rb := a[y*as:y*as+w], b[y*bs:y*bs+w]
+		for x, v := range ra {
+			d := int64(v) - int64(rb[x])
+			s += d * d
+		}
+	}
+	return s
 }

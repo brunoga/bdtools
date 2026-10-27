@@ -21,3 +21,9 @@ func invRowAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride
 }
 
 func invAVX2(kind, log2 int) bool { return false }
+
+func blendBlock(dst []uint16, dstStride int, intra, mask []uint16, w, h int) {
+	blendBlockGo(dst, dstStride, intra, mask, w, h)
+}
+
+func sse(a []uint16, as int, b []uint16, bs int, w, h int) int64 { return sseGo(a, as, b, bs, w, h) }

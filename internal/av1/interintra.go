@@ -77,33 +77,83 @@ func (t *tileEnc) interIntraPred(plane, mode int, pred []uint16) {
 // inter prediction in dst (w by h, stride dstStride) blended with its
 // intra prediction intra (stride w), the mask weighing the intra.
 func interIntraBlend(ii *interIntra, size, plane int, intra []uint16, w, h int, dst []uint16, dstStride int) {
+	k := ii.mode
+	if ii.wedge {
+		k = INTERINTRA_MODES + ii.idx
+	}
+	var mask []uint16
+	if size < len(iiMasks) {
+		mask = iiMasks[size][min(plane, 1)][k]
+	}
+	if mask == nil {
+		mask = iiMask(ii, size, plane, w, h)
+	}
+	blendBlock(dst, dstStride, intra, mask, w, h)
+}
+
+// iiMasks are the inter-intra masks of the sizes it is allowed at, by
+// plane (luma, chroma) and mode then wedge, w*h each.
+var iiMasks = func() (m [BLOCK_32X32 + 1][2][INTERINTRA_MODES + WEDGE_TYPES][]uint16) {
+	for size := BLOCK_8X8; size <= BLOCK_32X32; size++ {
+		for plane := range 2 {
+			w, h := int(blockWidth[size])>>plane, int(blockHeight[size])>>plane
+			for mode := range INTERINTRA_MODES {
+				m[size][plane][mode] = iiMask(&interIntra{mode: mode}, size, plane, w, h)
+			}
+			for idx, wm := range wedgeMasks[size][0] {
+				if wm != nil {
+					m[size][plane][INTERINTRA_MODES+idx] = iiMask(&interIntra{wedge: true, idx: idx}, size, plane, w, h)
+				}
+			}
+		}
+	}
+	return m
+}()
+
+// iiMask is the inter-intra mask of a plane's w by h block.
+func iiMask(ii *interIntra, size, plane, w, h int) []uint16 {
 	var wm []uint8
 	mw := int(blockWidth[size])
 	if ii.wedge {
 		wm = wedgeMasks[size][0][ii.idx]
 	}
 	scale := MAX_SB_SIZE / max(w, h)
+	m := make([]uint16, w*h)
 	for i := range h {
-		row := dst[i*dstStride : i*dstStride+w]
-		for j := range row {
-			var m int32
+		mr := m[i*w : i*w+w]
+		for j := range mr {
 			switch {
 			case ii.wedge && plane == 0:
-				m = int32(wm[i*mw+j])
+				mr[j] = uint16(wm[i*mw+j])
 			case ii.wedge:
 				a, b := wm[2*i*mw+2*j:], wm[(2*i+1)*mw+2*j:]
-				m = (int32(a[0]) + int32(a[1]) + int32(b[0]) + int32(b[1]) + 2) >> 2
+				mr[j] = (uint16(a[0]) + uint16(a[1]) + uint16(b[0]) + uint16(b[1]) + 2) >> 2
 			case ii.mode == II_V_PRED:
-				m = int32(iiWeights1d[i*scale])
+				mr[j] = uint16(iiWeights1d[i*scale])
 			case ii.mode == II_H_PRED:
-				m = int32(iiWeights1d[j*scale])
+				mr[j] = uint16(iiWeights1d[j*scale])
 			case ii.mode == II_SMOOTH_PRED:
-				m = int32(iiWeights1d[min(i, j)*scale])
+				mr[j] = uint16(iiWeights1d[min(i, j)*scale])
 			default:
-				m = 32
+				mr[j] = 32
 			}
-			row[j] = uint16((m*int32(intra[i*w+j]) + (64-m)*int32(row[j]) + 32) >> 6) //nolint:gosec // a sample
 		}
+	}
+	return m
+}
+
+// blendBlockGo is blendBlock a row at a time.
+func blendBlockGo(dst []uint16, dstStride int, intra, mask []uint16, w, h int) {
+	for i := range h {
+		blendRowGo(dst[i*dstStride:i*dstStride+w], intra[i*w:i*w+w], mask[i*w:i*w+w])
+	}
+}
+
+// blendRowGo is blendRow a sample at a time.
+func blendRowGo(dst, intra, mask []uint16) {
+	intra, mask = intra[:len(dst)], mask[:len(dst)]
+	for j, m := range mask {
+		dst[j] = uint16((int32(m)*int32(intra[j]) + int32(64-m)*int32(dst[j]) + 32) >> 6) //nolint:gosec // a sample
 	}
 }
 
