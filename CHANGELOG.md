@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's forward and inverse transforms (the DCTs of 8 to 64
+  points, the ADSTs of 8 and 16) run eight at a time in AVX2, generated
+  from the Go butterflies by `tools/av1txasm`: the same streams, 1.10
+  times faster at speed 2 (4.8 CPU seconds a 1080p picture).
 - The AV1 encoder is 1.06 to 1.28 times faster again (speeds 2 to 0) for
   0.2 to 0.6% in BD-rate: inter candidates are costed with their largest
   transforms, DCT_DCT, and only the best one's transforms searched. Speed

@@ -1,5 +1,7 @@
 package av1
 
+//go:generate go run ../../tools/av1txasm -dir .
+
 // The forward transform, for the encoder: libaom's integer forward transform
 // (av1_fwd_txfm2d_c and its 1D transforms, av1_fwd_txfm1d.c, Copyright the
 // Alliance for Open Media, BSD-2-Clause), ported. It is not specified by the
@@ -178,6 +180,34 @@ func fwdCols(residual []int32, txSz, kind int, flipUD bool, log2W, log2H int, bu
 	cosBit := int(fwdCosBitCol[log2W-2][log2H-2])
 	up := uint(shift[0])
 	down := int(-shift[1])
+	// eight columns at a time, where there is a kernel (which writes th
+	// rows of buf)
+	if useAVX2 && w >= 8 {
+		_ = buf[th*w-1]
+		src, stride := 0, w*4
+		if flipUD {
+			src, stride = (h-1)*w, -w*4
+		}
+		cospi := &cospiArr(cosBit)[0]
+		if fwdColAVX2(kind, log2H, &residual[src], stride, &buf[0], w*4, cospi, cosBit, int(up), down) {
+			for c := 8; c < w; c += 8 {
+				fwdColAVX2(kind, log2H, &residual[src+c], stride, &buf[c], w*4, cospi, cosBit, int(up), down)
+			}
+			return
+		}
+	}
+	fwdColsGo(residual, txSz, kind, flipUD, log2W, log2H, buf)
+}
+
+// fwdColsGo is fwdCols a column at a time.
+func fwdColsGo(residual []int32, txSz, kind int, flipUD bool, log2W, log2H int, buf []int32) {
+	w, h := 1<<log2W, 1<<log2H
+	th := min(h, 32)
+	residual = residual[:w*h]
+	shift := &fwdShift[txSz]
+	cosBit := int(fwdCosBitCol[log2W-2][log2H-2])
+	up := uint(shift[0])
+	down := int(-shift[1])
 	var tin, tout [64]int32
 	for c := 0; c < w; c++ {
 		if flipUD {
@@ -209,6 +239,34 @@ func fwdCols(residual []int32, txSz, kind int, flipUD bool, log2W, log2H int, bu
 // read whole before row r of coeffs (at most as long, and never further
 // on) is written, so they may be the same.
 func fwdRows(buf []int32, txSz, kind int, flipLR bool, log2W, log2H int, coeffs []int32) {
+	w, h := 1<<log2W, 1<<log2H
+	tw, th := min(w, 32), min(h, 32)
+	shift := &fwdShift[txSz]
+	cosBit := int(fwdCosBitRow[log2W-2][log2H-2])
+	down := int(-shift[2])
+	rect := log2W-log2H == 1 || log2H-log2W == 1
+	// eight rows at a time, where there is a kernel (which reads th rows
+	// of buf and writes th of coeffs)
+	if useAVX2 && w >= 8 && th >= 8 {
+		_, _ = buf[th*w-1], coeffs[th*tw-1]
+		cospi := &cospiArr(cosBit)[0]
+		if fwdRowAVX2(kind, log2W, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down) {
+			for r := 8; r < th; r += 8 {
+				fwdRowAVX2(kind, log2W, flipLR, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+			}
+			if rect {
+				for i, v := range coeffs[:th*tw] {
+					coeffs[i] = roundShift(int64(v)*5793, 12)
+				}
+			}
+			return
+		}
+	}
+	fwdRowsGo(buf, txSz, kind, flipLR, log2W, log2H, coeffs)
+}
+
+// fwdRowsGo is fwdRows a row at a time.
+func fwdRowsGo(buf []int32, txSz, kind int, flipLR bool, log2W, log2H int, coeffs []int32) {
 	w, h := 1<<log2W, 1<<log2H
 	tw, th := min(w, 32), min(h, 32)
 	shift := &fwdShift[txSz]
