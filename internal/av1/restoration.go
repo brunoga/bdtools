@@ -269,6 +269,31 @@ var sgrA2 = func() (t [255]int32) {
 	return t
 }()
 
+// sgrSubset is the self-guided filter's parameter sets searched at
+// speed 1 and up: the ones most chosen (sets 0 and 10 most of all),
+// which need 6 and 7 of the 12 and 11 strengths.
+const sgrSubset = 1<<0 | 1<<1 | 1<<2 | 1<<5 | 1<<9 | 1<<10 | 1<<11 | 1<<13 | 1<<14
+
+// sgrSets is the parameter sets the frame's search tries.
+func (f *frameEnc) sgrSets() uint16 {
+	if f.tools.sgrSubset {
+		return sgrSubset
+	}
+	return 0xffff
+}
+
+// sgrEpsNeeded is the strengths (bits by index in sgrEps[pass]) the
+// sets need.
+func sgrEpsNeeded(sets uint16, pass int) uint32 {
+	var need uint32
+	for s := range 16 {
+		if sets>>uint(s)&1 != 0 && sgrEpsIdx[s][pass] >= 0 {
+			need |= 1 << uint(sgrEpsIdx[s][pass])
+		}
+	}
+	return need
+}
+
 // sgrEps are each pass's distinct strengths (eps) among the sets, and
 // sgrEpsIdx each set's by pass (-1 for a radius 0).
 var sgrEps, sgrEpsIdx = func() (eps [2][]int, idx [16][2]int) {
@@ -696,7 +721,11 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 		r := 2 - pass
 		sgrBoxSums(win, w, h, r, pass == 0, sc.sum, sc.sq, sc.vs, sc.vq)
 		sc.fltS[pass] = grow32(sc.fltS[pass], len(sgrEps[pass])*w*h)
+		need := sgrEpsNeeded(f.sgrSets(), pass)
 		for e, eps := range sgrEps[pass] {
+			if need>>uint(e)&1 == 0 {
+				continue
+			}
 			sgrAB(sc.sum, sc.sq, w, h, r, eps, f.bitDepth, pass == 0, sc.a, sc.b)
 			sgrFilter(win, w, h, pass, sc.a, sc.b, sc.fltS[pass][e*w*h:])
 		}
@@ -717,7 +746,11 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 	}
 	u, e := sc.u[:wh], sc.e[:wh]
 	for pass, n := range [2]int{n0, n1} {
+		need := sgrEpsNeeded(f.sgrSets(), pass)
 		for q := range n {
+			if need>>uint(q)&1 == 0 {
+				continue
+			}
 			fq := sc.fltS[pass][q*wh : (q+1)*wh]
 			for k := range fq {
 				fq[k] -= u[k]
@@ -730,7 +763,7 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 		}
 	}
 	for s := range 16 {
-		if i0, i1 := sgrEpsIdx[s][0], sgrEpsIdx[s][1]; i0 >= 0 && i1 >= 0 {
+		if i0, i1 := sgrEpsIdx[s][0], sgrEpsIdx[s][1]; i0 >= 0 && i1 >= 0 && f.sgrSets()>>uint(s)&1 != 0 {
 			st.h01[s] += dot32(sc.fltS[0][i0*wh:(i0+1)*wh], sc.fltS[1][i1*wh:(i1+1)*wh])
 		}
 	}
@@ -936,10 +969,13 @@ func wienerSolve(st *lrStats, chroma bool) (lrUnit, float64) {
 
 // sgrSolve is a unit's best self-guided set from its statistics, its
 // weights, and the error predicted for it.
-func sgrSolve(st *lrStats) (lrUnit, float64) {
+func sgrSolve(st *lrStats, sets uint16) (lrUnit, float64) {
 	best, bestErr := lrUnit{typ: RESTORE_SGRPROJ}, math.Inf(1)
 	ee := float64(st.sse0) * (1 << (2 * SGRPROJ_RST_BITS))
 	for s := range 16 {
+		if sets>>uint(s)&1 == 0 {
+			continue
+		}
 		i0, i1 := sgrEpsIdx[s][0], sgrEpsIdx[s][1]
 		var h00, h11, h01, c0, c1 float64
 		if i0 >= 0 {
@@ -1074,7 +1110,7 @@ func (f *frameEnc) lrDecide(p, frameType int, cands []lrCand, order []int, units
 
 // lrSearchSize gives plane p's candidates for units of size, from the
 // cells' statistics (stripes by columns of cw).
-func lrSearchSize(g *lrGeom, cells []lrStats, cw int, chroma bool) []lrCand {
+func lrSearchSize(g *lrGeom, cells []lrStats, cw int, chroma bool, sets uint16) []lrCand {
 	nc := (g.pw + cw - 1) / cw
 	cands := make([]lrCand, g.rows*g.cols)
 	lrParallel(len(cands), func(i int, _ *lrScratch) {
@@ -1088,7 +1124,7 @@ func lrSearchSize(g *lrGeom, cells []lrStats, cw int, chroma bool) []lrCand {
 		c := &cands[i]
 		c.sse[0] = float64(st.sse0)
 		c.wiener, c.sse[1] = wienerSolve(&st, chroma)
-		c.sgr, c.sse[2] = sgrSolve(&st)
+		c.sgr, c.sse[2] = sgrSolve(&st, sets)
 	})
 	return cands
 }
@@ -1149,7 +1185,7 @@ func (f *frameEnc) restore(deb [3][]uint16, fixed *lrSettings) *lrFrame {
 		}
 		g := f.lrGeometry(p, size)
 		cw := 64 >> uint(min(p, 1)) //nolint:gosec // 0 or 1
-		r := &sizeResult{g: g, cands: lrSearchSize(&g, cells[p], cw, p > 0), rd: none[p]}
+		r := &sizeResult{g: g, cands: lrSearchSize(&g, cells[p], cw, p > 0, f.sgrSets()), rd: none[p]}
 		order := f.lrOrder(p, &g)
 		units := make([]lrUnit, g.rows*g.cols)
 		for _, typ := range [3]int{RESTORE_WIENER, RESTORE_SGRPROJ, RESTORE_SWITCHABLE} {

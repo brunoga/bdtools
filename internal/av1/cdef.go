@@ -341,7 +341,11 @@ func (f *frameEnc) cdefSearch() cdefSettings {
 	}
 	bestRD := math.Inf(1)
 	idx := make([]int8, len(coded))
-	for damping := 3; damping <= 6; damping++ {
+	lo, hi := 3, 6
+	if f.tools.cdefDampQ {
+		lo, hi = s.damping, s.damping
+	}
+	for damping := lo; damping <= hi; damping++ {
 		if c, rd := f.cdefTry(damping, coded, idx); rd < bestRD {
 			s, bestRD = c, rd
 			for k, sb := range coded {

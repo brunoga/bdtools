@@ -706,23 +706,17 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 	t.setInfo()
 }
 
-// interCandsFor adds a reference's candidates, with their estimates:
-// NEARESTMV, NEARMV with each RefMvIdx, GLOBALMV, and NEWMV from a motion
-// search (its RefMvIdx the one that codes its vector cheapest).
-func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
+// motionFor is the block's motion search in ref (the stack found for
+// it), done once for a superblock's partitions: the vector and its cost
+// (SATD and rate).
+func (t *tileEnc) motionFor(ref int) (mv, float64) {
 	f, b, s := t.f, &t.b, &t.stack
 	r, c, size := b.r, b.c, b.size
-	b.refFrame = ref
-	t.findMvStack(s, false, [2]int{ref, NONE})
-	sl := math.Sqrt(t.lambda)
-	first := len(cands)
-	cands = append(cands, interCand{ref: ref, mode: NEARESTMV, m: s.predMv(NEARESTMV, 0, 0)})
-	if lo, hi := s.refMvIdxRange(NEARMV); s.numMvFound > 1 {
-		for idx := lo; idx <= hi; idx++ {
-			cands = append(cands, interCand{ref: ref, mode: NEARMV, idx: idx, m: s.predMv(NEARMV, idx, 0)})
-		}
+	key := meKey{ref: f.refs[ref], r: r, c: c, size: size}
+	if e, ok := t.meSeen[key]; ok && meCache {
+		return e.m, e.cost
 	}
-	cands = append(cands, interCand{ref: ref, mode: GLOBALMV, m: s.predMv(GLOBALMV, 0, 0)})
+	sl := math.Sqrt(t.lambda)
 	pred0 := s.predMv(NEWMV, 0, 0)
 	me := meBlock{ref: f.refs[ref], src: f.src[0], srcStride: f.stride[0], x: c * 4, y: r * 4,
 		w: int(blockWidth[size]), h: int(blockHeight[size]), bitDepth: f.bitDepth, filt: f.filt,
@@ -740,7 +734,46 @@ func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
 			starts = append(starts, mv{row: d[0] * r * 8, col: d[1] * r * 8})
 		}
 	}
-	m, _ := t.ms.search(&me, starts)
+	m, cost := t.ms.search(&me, starts)
+	if t.meSeen == nil {
+		t.meSeen = map[meKey]meResult{}
+	}
+	t.meSeen[key] = meResult{m, cost}
+	return m, cost
+}
+
+// meKey is a motion search's reference frame, block and size.
+type meKey struct {
+	ref        *refFrameState
+	r, c, size int
+}
+
+type meResult struct {
+	m    mv
+	cost float64
+}
+
+// meCache has a block's motion search, done once for a superblock's
+// partitions, kept for the others (the starts and the vector's rate,
+// which the neighbours decided change, as the first's).
+var meCache = true
+
+// interCandsFor adds a reference's candidates, with their estimates:
+// NEARESTMV, NEARMV with each RefMvIdx, GLOBALMV, and NEWMV from a motion
+// search (its RefMvIdx the one that codes its vector cheapest).
+func (t *tileEnc) interCandsFor(ref int, cands []interCand) []interCand {
+	b, s := &t.b, &t.stack
+	b.refFrame = ref
+	t.findMvStack(s, false, [2]int{ref, NONE})
+	first := len(cands)
+	cands = append(cands, interCand{ref: ref, mode: NEARESTMV, m: s.predMv(NEARESTMV, 0, 0)})
+	if lo, hi := s.refMvIdxRange(NEARMV); s.numMvFound > 1 {
+		for idx := lo; idx <= hi; idx++ {
+			cands = append(cands, interCand{ref: ref, mode: NEARMV, idx: idx, m: s.predMv(NEARMV, idx, 0)})
+		}
+	}
+	cands = append(cands, interCand{ref: ref, mode: GLOBALMV, m: s.predMv(GLOBALMV, 0, 0)})
+	m, _ := t.motionFor(ref)
 	lo, hi := s.refMvIdxRange(NEWMV)
 	best, bestBits := lo, int64(math.MaxInt64)
 	for idx := lo; idx <= hi; idx++ {
