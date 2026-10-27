@@ -152,8 +152,9 @@ func eighthShifted(w, h int, dx float64) *Source {
 // Switchable interpolation filters (switchable on): blocks coded with
 // other filters than EIGHTTAP, and decoded to the reconstruction.
 func TestSwitchableFilters(t *testing.T) {
-	defer func(v bool) { switchable = v }(switchable)
+	defer func(v, n bool) { switchable, dbgNoTPL = v, n }(switchable, dbgNoTPL)
 	switchable = true
+	dbgNoTPL = true // the frames' q as planned: the picture is made for the filters
 	const w, h = 96, 64
 	o := EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: 60, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
 	var pics []*Source

@@ -1,19 +1,27 @@
 package av1
 
-// A temporal dependency model (libaom's TPL, simplified): before a
-// mini-GOP is coded, each of its frames' 16x16 blocks is costed on the
-// source pictures (intra: its SAD around its mean; inter: the SAD of an
-// integer motion search in each reference's source), then, from the last
-// frame coded back to the first, each block hands the information later
-// frames take from it ((intra + what depends on it) times the share inter
-// prediction saves) to the blocks of its reference it predicts from. A
-// superblock much depended on codes finer: its q index the one whose DC
-// quantizer is the frame's over the square root of beta (the frame's
-// intra share over the superblock's), as libaom's delta q does.
+// A temporal dependency model (libaom's TPL): before a mini-GOP is coded,
+// each of its frames' 16x16 luma blocks is coded in the model, in coding
+// order, at the frame's q: predicted the cheaper way by SATD (intra from
+// the source's neighbouring samples, or a motion search's vector into a
+// reference), its residual transformed (DCT_DCT), quantized, its rate
+// estimated from the levels and its distortion measured on the
+// reconstruction, which the later frames predict from. An inter block is
+// coded twice: from its reference's reconstruction in the model and from
+// the reference's source. What the reference's coding loses it (the
+// distortion and rate the source would have saved), and its share of what
+// the frames after it lose through it, is handed, from the last frame
+// coded back to the first, to the reference's blocks it predicts from. A
+// block's importance is its own distortion against that plus what depends
+// on it: a superblock much depended on codes finer (its lambda scaled, or
+// its q index, as libaom's delta q does), as does a frame (its q).
 
 import (
 	"math"
+	"math/bits"
+	"runtime"
 	"sync"
+	"sync/atomic"
 )
 
 const tplBlock = 16
@@ -22,30 +30,48 @@ const tplBlock = 16
 type tplFrame struct {
 	job        *frameJob
 	cols, rows int
-	intra, dep []float64
-	inter      []float64
-	refDisp    []int // the reference predicted from, -1 none
-	mvx, mvy   []int // its integer vector, in samples
+	// recDist and recRate are a block's distortion (the sum of squared
+	// errors) and rate (bits) predicted from the references'
+	// reconstructions, srcDist and srcRate from their sources (the same
+	// for intra blocks)
+	recDist, srcDist []float64
+	recRate, srcRate []float64
+	// depDist and depRate are what the frames after lose through the
+	// block
+	depDist, depRate []float64
+	refDisp          []int    // the reference predicted from, -1 none
+	mvx, mvy         []int    // its integer vector, in samples
+	rec              []uint16 // the luma reconstruction (width by height)
 }
 
 // tplLambda has the model scale the superblocks' lambdas (by
 // 1/beta^tplLambdaPow, within 0.5 and 1.5, as libaom's adaptive rdmult
 // does) and not their q indexes: nothing coded, the rows still coded at
 // once.
+// (On the six clips, against the model by SATD ratios: 0.9% smaller by
+// PSNR-YUV, 2.5% by SSIM, Blade Runner 2049 3.8%. Tried: tplLambdaPow 0.3
+// and 0.7 trade PSNR and SSIM (0.8% and 2.9%, 0.9% and 2.0%); the
+// lambdas within 0.33 and 2 or 0.25 and 3, the frames' q to depth 3,
+// tplRateK 0.5 or 1: the same.)
 var (
 	tplLambda    = true
-	tplLambdaPow = 0.5 // (1 was 0.3% better)
+	tplLambdaPow = 0.5
 	// tplFrameK moves an anchor's or a depth 2 frame's q by k log2(0.5/r0)
-	// (r0 its intra share): finer as more of it is taken. On the two
-	// 120-picture clips 8 is 0.6% better (Frozen II 1.1%, Blade Runner
-	// 2049 the same), 16 0.7% (Blade Runner 0.4% worse), 32 no better.
+	// (r0 its own share of its importance): finer as more of it is taken.
+	// (4 was 1.7% larger, 16 0.4% smaller by PSNR-YUV but 1.9% larger by
+	// SSIM and 6.2% by VMAF; centred on 0.25, or within 8 of the frame's
+	// q, 0.8% and 2.5% larger: the anchors want their q lowered.)
 	tplFrameK = 8.0
+	// tplRateK is the model's lambda, the coder's times this (libaom's
+	// TPL rdmult is a sixth of its coder's).
+	tplRateK = 1.0 / 6
 )
 
 // tplMaxDelta bounds a superblock's q index offset.
 const tplMaxDelta = 48
 
-// tpl sets the coded frames of a mini-GOP's steps' superblock q indexes.
+// tpl sets the coded frames of a mini-GOP's steps' superblock lambdas (or
+// q indexes) and the anchors' q.
 func (e *Encoder) tpl(steps []step) {
 	if dbgNoTPL || e.o.QIndex == 0 {
 		return
@@ -59,33 +85,78 @@ func (e *Encoder) tpl(steps []step) {
 			continue
 		}
 		n := cols * rows
-		tf := &tplFrame{job: s.job, cols: cols, rows: rows, intra: make([]float64, n), dep: make([]float64, n),
-			inter: make([]float64, n), refDisp: make([]int, n), mvx: make([]int, n), mvy: make([]int, n)}
+		tf := &tplFrame{job: s.job, cols: cols, rows: rows,
+			recDist: make([]float64, n), srcDist: make([]float64, n), recRate: make([]float64, n), srcRate: make([]float64, n),
+			depDist: make([]float64, n), depRate: make([]float64, n),
+			refDisp: make([]int, n), mvx: make([]int, n), mvy: make([]int, n), rec: make([]uint16, w*h)}
 		frames = append(frames, tf)
 		if _, dup := byDisp[s.job.disp]; !dup {
 			byDisp[s.job.disp] = tf
 		}
 	}
-	src := func(disp int) *Source { return e.recent[disp] }
-	var wg sync.WaitGroup
-	for _, tf := range frames {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			e.tplCost(tf, src)
-		}()
+	// the references' sources (as coded) and reconstructions (the
+	// model's, of this mini-GOP's frames or an earlier one's, else the
+	// source)
+	srcOf := func(disp int) *Source {
+		if tf, ok := byDisp[disp]; ok {
+			return tf.job.src
+		}
+		return e.recent[disp]
 	}
-	wg.Wait()
+	done := map[int]bool{}
+	recOf := func(disp int) []uint16 {
+		if tf, ok := byDisp[disp]; ok {
+			if done[disp] {
+				return tf.rec
+			}
+			return nil
+		}
+		return e.tplRec[disp]
+	}
+	// in waves: the frames whose references in the mini-GOP are coded,
+	// at once
+	for left := frames; len(left) > 0; {
+		var wave, rest []*tplFrame
+		for _, tf := range left {
+			ready := true
+			for _, r := range tf.job.refs {
+				if r == nil {
+					continue
+				}
+				if _, in := byDisp[r.disp]; in && !done[r.disp] {
+					ready = false
+				}
+			}
+			if ready {
+				wave = append(wave, tf)
+			} else {
+				rest = append(rest, tf)
+			}
+		}
+		if len(wave) == 0 {
+			panic("av1: a temporal model's frame waits on itself")
+		}
+		var wg sync.WaitGroup
+		for _, tf := range wave {
+			wg.Go(func() { e.tplCode(tf, srcOf, recOf) })
+		}
+		wg.Wait()
+		for _, tf := range wave {
+			done[tf.job.disp] = true
+		}
+		left = rest
+	}
 	// propagation, last coded first
 	for k := len(frames) - 1; k >= 0; k-- {
 		tf := frames[k]
-		for i := range tf.intra {
+		for i := range tf.recDist {
 			ref, ok := byDisp[tf.refDisp[i]]
-			if tf.refDisp[i] < 0 || !ok || tf.intra[i] <= 0 {
+			if tf.refDisp[i] < 0 || !ok || tf.recDist[i] <= 0 {
 				continue
 			}
-			frac := 1 - math.Min(tf.inter[i], tf.intra[i])/tf.intra[i]
-			amount := (tf.intra[i] + tf.dep[i]) * frac
+			recD, srcD := tf.recDist[i], min(tf.srcDist[i], tf.recDist[i])
+			dist := recD - srcD + tf.depDist[i]*(recD-srcD)/recD
+			rate := max(tf.recRate[i]-tf.srcRate[i], 0) + tplDeltaRate(tf.depRate[i], recD, srcD, tplBlock*tplBlock)
 			bx, by := i%cols*tplBlock+tf.mvx[i], i/cols*tplBlock+tf.mvy[i]
 			// spread over the four blocks the displaced block covers
 			x0, y0 := floorDiv(bx, tplBlock), floorDiv(by, tplBlock)
@@ -95,23 +166,28 @@ func (e *Encoder) tpl(steps []step) {
 				if o[2] == 0 || xx < 0 || yy < 0 || xx >= cols || yy >= rows {
 					continue
 				}
-				ref.dep[yy*cols+xx] += amount * float64(o[2]) / (tplBlock * tplBlock)
+				a := float64(o[2]) / (tplBlock * tplBlock)
+				ref.depDist[yy*cols+xx] += dist * a
+				ref.depRate[yy*cols+xx] += rate * a
 			}
 		}
 	}
-	// the superblocks' q
+	// the frames' and superblocks' q
 	bd := (e.o.BitDepth - 8) >> 1
 	for _, tf := range frames {
 		j := tf.job
-		var sumIntra, sumAll float64
-		for i := range tf.intra {
-			sumIntra += tf.intra[i]
-			sumAll += tf.intra[i] + tf.dep[i]
+		lambda := lambdaFor(int(dcQlookup[bd][j.q])) * tplRateK
+		own := func(i int) float64 { return tf.recDist[i] }
+		all := func(i int) float64 { return tf.recDist[i] + tf.depDist[i] + lambda*tf.depRate[i] }
+		var sumOwn, sumAll float64
+		for i := range tf.recDist {
+			sumOwn += own(i)
+			sumAll += all(i)
 		}
-		if sumIntra <= 0 || sumAll <= sumIntra {
+		if sumOwn <= 0 || sumAll <= sumOwn {
 			continue
 		}
-		r0 := sumIntra / sumAll
+		r0 := sumOwn / sumAll
 		if tplFrameK != 0 && j.depth <= 2 && !j.key {
 			// the frame's own q by how much the others take from it
 			j.q = min(max(j.q-int(math.Round(tplFrameK*math.Log2(0.5/r0))), 1), 255)
@@ -122,16 +198,16 @@ func (e *Encoder) tpl(steps []step) {
 		any := false
 		for sy := range sbRows {
 			for sx := range sbCols {
-				var in, all float64
+				var in, al float64
 				for y := sy * 4; y < min(sy*4+4, rows); y++ {
 					for x := sx * 4; x < min(sx*4+4, cols); x++ {
-						in += tf.intra[y*cols+x]
-						all += tf.intra[y*cols+x] + tf.dep[y*cols+x]
+						in += own(y*cols + x)
+						al += all(y*cols + x)
 					}
 				}
 				q, l := j.q, 1.0
 				if in > 0 {
-					beta := r0 / (in / all)
+					beta := r0 / (in / al)
 					q = deltaQFor(j.q, beta, bd)
 					l = min(max(math.Pow(beta, -tplLambdaPow), 0.5), 1.5)
 				}
@@ -147,6 +223,35 @@ func (e *Encoder) tpl(steps []step) {
 			j.sbQ = qs
 		}
 	}
+	// the reconstructions the next mini-GOP may predict from
+	for _, tf := range frames {
+		if tf.job.refresh != 0 {
+			e.tplRec[tf.job.disp] = tf.rec
+		}
+	}
+	for d := range e.tplRec {
+		if d < e.nIn-recentSources {
+			delete(e.tplRec, d)
+		}
+	}
+}
+
+// tplDeltaRate is the rate the frames after a block lose through it
+// (av1_delta_rate_cost): of rate bits lost through its reference by a
+// block of pix samples, the part its own coding loss (from srcDist to
+// recDist) accounts for.
+func tplDeltaRate(rate, recDist, srcDist float64, pix int) float64 {
+	if srcDist <= 8 || recDist <= 0 {
+		return rate
+	}
+	beta := srcDist / recDist
+	logDen := math.Log2(beta) + 2*rate/float64(pix)
+	if logDen > math.Log2(10) {
+		return math.Log2(1/beta) * float64(pix) / 2
+	}
+	num := math.Exp2(logDen)
+	den := num*beta + (1-beta)*beta
+	return float64(pix) * math.Log2(num/den) / 2
 }
 
 // deltaQFor is the q index whose DC quantizer is base's over sqrt(beta)
@@ -170,127 +275,240 @@ func floorDiv(a, b int) int {
 	return q
 }
 
-// tplCost costs a frame's blocks, both ways by SATD: intra the best of
-// DC, vertical, horizontal and a bilinear smooth prediction from the
-// source's neighbouring samples; inter a motion search (to a quarter
-// sample) in each reference's source.
-func (e *Encoder) tplCost(tf *tplFrame, src func(int) *Source) {
+// tplScratch is a worker's buffers for tplCode.
+type tplScratch struct {
+	ms               motionSearch
+	is               interScratch
+	pred, recP, srcP [tplBlock * tplBlock]uint16
+	res, coef, lv    [tplBlock * tplBlock]int32
+}
+
+// tplCode codes a frame's blocks in the model, its rows at once.
+func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int) []uint16) {
 	j := tf.job
 	cur := j.src
-	if j.orig != nil {
-		cur = j.orig
-	}
 	w, h := e.o.Width, e.o.Height
-	var refs []*refFrameState
-	var disps []int
+	type ref struct {
+		disp     int
+		src, rec *refFrameState
+	}
+	var refs []ref
 	seen := map[int]bool{}
 	for _, r := range j.refs {
 		if r == nil || seen[r.disp] {
 			continue
 		}
 		seen[r.disp] = true
-		if s := src(r.disp); s != nil {
-			refs = append(refs, &refFrameState{rec: [3][]uint16{s.Y, s.Cb, s.Cr}, stride: [3]int{s.StrideY, s.StrideC, s.StrideC}, width: w, height: h})
-			disps = append(disps, r.disp)
+		s := srcOf(r.disp)
+		if s == nil {
+			continue
 		}
+		rs := &refFrameState{rec: [3][]uint16{s.Y, s.Cb, s.Cr}, stride: [3]int{s.StrideY, s.StrideC, s.StrideC}, width: w, height: h}
+		rr := rs
+		if rec := recOf(r.disp); rec != nil {
+			rr = &refFrameState{rec: [3][]uint16{rec}, stride: [3]int{w}, width: w, height: h}
+		}
+		refs = append(refs, ref{r.disp, rs, rr})
 	}
-	var ms motionSearch
-	var pred [tplBlock * tplBlock]uint16
-	var above, left [tplBlock]int32
-	mid := int32(1) << (e.o.BitDepth - 1)
-	for by := range tf.rows {
-		for bx := range tf.cols {
-			i := by*tf.cols + bx
-			x0, y0 := bx*tplBlock, by*tplBlock
-			bw, bh := min(tplBlock, w-x0)&^3, min(tplBlock, h-y0)&^3
-			tf.inter[i], tf.refDisp[i] = 1, -1
-			if bw == 0 || bh == 0 {
-				tf.intra[i] = 1
-				continue
-			}
-			at := func(x, y int) int32 { return int32(cur.Y[y*cur.StrideY+x]) }
-			for k := range bw {
-				above[k] = mid
-				if y0 > 0 {
-					above[k] = at(x0+k, y0-1)
+	bd := (e.o.BitDepth - 8) >> 1
+	dcQ, acQ := int(dcQlookup[bd][j.q]), int(acQlookup[bd][j.q])
+	var next atomic.Int32
+	var wg sync.WaitGroup
+	for range min(runtime.GOMAXPROCS(0), tf.rows) {
+		wg.Go(func() {
+			sc := new(tplScratch)
+			for {
+				by := int(next.Add(1)) - 1
+				if by >= tf.rows {
+					return
 				}
-			}
-			for k := range bh {
-				left[k] = mid
-				if x0 > 0 {
-					left[k] = at(x0-1, y0+k)
-				}
-			}
-			var dc int32
-			switch {
-			case x0 > 0 && y0 > 0:
-				var s int32
-				for k := range bw {
-					s += above[k]
-				}
-				for k := range bh {
-					s += left[k]
-				}
-				dc = s / int32(bw+bh)
-			case y0 > 0:
-				var s int32
-				for k := range bw {
-					s += above[k]
-				}
-				dc = s / int32(bw)
-			case x0 > 0:
-				var s int32
-				for k := range bh {
-					s += left[k]
-				}
-				dc = s / int32(bh)
-			default:
-				dc = mid
-			}
-			corner := mid
-			if x0 > 0 && y0 > 0 {
-				corner = at(x0-1, y0-1)
-			}
-			blk := cur.Y[y0*cur.StrideY+x0:]
-			best := int64(math.MaxInt64)
-			for mode := range 4 {
-				for y := range bh {
-					for x := range bw {
-						var v int32
-						switch mode {
-						case 0:
-							v = dc
-						case 1:
-							v = above[x]
-						case 2:
-							v = left[y]
-						default: // the plane through the corner and both edges
-							v = above[x] + left[y] - corner
-							v = min(max(v, 0), 2*mid-1)
-						}
-						pred[y*tplBlock+x] = uint16(v)
+				for bx := range tf.cols {
+					i := by*tf.cols + bx
+					x0, y0 := bx*tplBlock, by*tplBlock
+					bw, bh := min(tplBlock, w-x0)&^3, min(tplBlock, h-y0)&^3
+					tf.refDisp[i] = -1
+					if bw == 0 || bh == 0 {
+						continue
 					}
+					blk := cur.Y[y0*cur.StrideY+x0:]
+					intra := e.tplIntra(cur, x0, y0, bw, bh, sc.pred[:])
+					// the motion search on the sources, the best reference
+					// costed from its reconstruction
+					best, bestK, bestMv := math.Inf(1), -1, mv{}
+					for k, r := range refs {
+						b := meBlock{ref: r.src, src: cur.Y, srcStride: cur.StrideY, x: x0, y: y0, w: bw, h: bh,
+							bitDepth: e.o.BitDepth, searchRange: 32, cost: func(mv) float64 { return 0 }}
+						var m mv
+						var c float64
+						if !e.tools.tplFull {
+							m, c = sc.ms.search(&b, []mv{{}})
+						} else {
+							m, _ = sc.ms.fullPel(&b, []mv{{}})
+							c = sc.ms.subCost(&b, m)
+						}
+						if c < best {
+							best, bestK, bestMv = c, k, m
+						}
+					}
+					var recP []uint16
+					if bestK >= 0 {
+						filt := [2]int{EIGHTTAP, EIGHTTAP}
+						predictInter(refs[bestK].rec, 0, x0, y0, bw, bh, bestMv, filt, e.o.BitDepth, sc.recP[:], tplBlock, &sc.is)
+						if satdBlock(blk, cur.StrideY, sc.recP[:], tplBlock, bw, bh) < intra {
+							recP = sc.recP[:]
+							predictInter(refs[bestK].src, 0, x0, y0, bw, bh, bestMv, filt, e.o.BitDepth, sc.srcP[:], tplBlock, &sc.is)
+						}
+					}
+					rec := tf.rec[y0*w+x0:]
+					if recP == nil {
+						d, r := e.tplBlockCode(sc, blk, cur.StrideY, sc.pred[:], bw, bh, dcQ, acQ, rec, w)
+						tf.recDist[i], tf.srcDist[i], tf.recRate[i], tf.srcRate[i] = d, d, r, r
+						continue
+					}
+					tf.recDist[i], tf.recRate[i] = e.tplBlockCode(sc, blk, cur.StrideY, recP, bw, bh, dcQ, acQ, rec, w)
+					tf.srcDist[i], tf.srcRate[i] = e.tplBlockCode(sc, blk, cur.StrideY, sc.srcP[:], bw, bh, dcQ, acQ, nil, 0)
+					tf.refDisp[i] = refs[bestK].disp
+					tf.mvx[i], tf.mvy[i] = int(math.Round(float64(bestMv.col)/8)), int(math.Round(float64(bestMv.row)/8))
 				}
-				best = min(best, satdBlock(blk, cur.StrideY, pred[:], tplBlock, bw, bh))
 			}
-			tf.intra[i] = float64(best) + 1
-			tf.inter[i] = tf.intra[i]
-			for k, r := range refs {
-				b := meBlock{ref: r, src: cur.Y, srcStride: cur.StrideY, x: x0, y: y0, w: bw, h: bh,
-					bitDepth: e.o.BitDepth, searchRange: 32, cost: func(mv) float64 { return 0 }}
-				var m mv
-				var c float64
-				if !e.tools.tplFull {
-					m, c = ms.search(&b, []mv{{}})
-				} else {
-					m, _ = ms.fullPel(&b, []mv{{}})
-					c = ms.subCost(&b, m)
-				}
-				if c+1 < tf.inter[i] {
-					tf.inter[i], tf.refDisp[i] = c+1, disps[k]
-					tf.mvx[i], tf.mvy[i] = int(math.Round(float64(m.col)/8)), int(math.Round(float64(m.row)/8))
-				}
+		})
+	}
+	wg.Wait()
+}
+
+// tplBlockCode codes a block predicted by pred (tplBlock wide) in the
+// model: its residual's DCT_DCT quantized to the nearest level, the
+// levels' rate (libaom's estimate: for each coefficient to the end of
+// block, its level's bit length and its sign), the reconstruction's
+// distortion. The reconstruction goes to rec (stride recStride) unless it
+// is nil.
+func (e *Encoder) tplBlockCode(sc *tplScratch, src []uint16, srcStride int, pred []uint16, bw, bh, dcQ, acQ int, rec []uint16, recStride int) (dist, rate float64) {
+	const n = tplBlock * tplBlock
+	res, coef, lv := sc.res[:], sc.coef[:], sc.lv[:]
+	clear(res)
+	for y := range bh {
+		for x := range bw {
+			res[y*tplBlock+x] = int32(src[y*srcStride+x]) - int32(pred[y*tplBlock+x])
+		}
+	}
+	forwardTransform(res, TX_16X16, DCT_DCT, e.o.BitDepth, false, coef)
+	inv := invScanFor(TX_16X16, DCT_DCT)
+	eob := 0
+	for i := range n {
+		qs := int64(acQ)
+		if i == 0 {
+			qs = int64(dcQ)
+		}
+		c := int64(coef[i])
+		a := c
+		if a < 0 {
+			a = -a
+		}
+		l := (a + qs/2) / qs
+		if c < 0 {
+			l = -l
+		}
+		lv[i] = int32(l) //nolint:gosec // a transform coefficient's level
+		if l != 0 {
+			eob = max(eob, int(inv[i])+1)
+		}
+	}
+	rate = 1
+	scan := scanFor(TX_16X16, DCT_DCT)
+	for k := range eob {
+		a := uint32(abs32(lv[scan[k]]))
+		rate += float64(bits.Len32(a+1) - 1 + 1 + b2i(a > 0))
+	}
+	dequantize(lv, TX_16X16, dcQ, acQ, e.o.BitDepth, coef)
+	inverseTransform(coef, TX_16X16, DCT_DCT, e.o.BitDepth, false, res)
+	maxV := int32(1)<<e.o.BitDepth - 1
+	for y := range bh {
+		for x := range bw {
+			v := clip(int32(pred[y*tplBlock+x])+res[y*tplBlock+x], maxV)
+			d := float64(int32(src[y*srcStride+x]) - v)
+			dist += d * d
+			if rec != nil {
+				rec[y*recStride+x] = uint16(v) //nolint:gosec // clipped to the bit depth
 			}
 		}
 	}
+	return dist, rate
+}
+
+// tplIntra is a block's intra cost by SATD, the best of DC, vertical,
+// horizontal and a bilinear smooth prediction from the source's
+// neighbouring samples, its prediction in pred (tplBlock wide).
+func (e *Encoder) tplIntra(cur *Source, x0, y0, bw, bh int, pred []uint16) int64 {
+	var above, left [tplBlock]int32
+	var try [tplBlock * tplBlock]uint16
+	mid := int32(1) << (e.o.BitDepth - 1)
+	at := func(x, y int) int32 { return int32(cur.Y[y*cur.StrideY+x]) }
+	for k := range bw {
+		above[k] = mid
+		if y0 > 0 {
+			above[k] = at(x0+k, y0-1)
+		}
+	}
+	for k := range bh {
+		left[k] = mid
+		if x0 > 0 {
+			left[k] = at(x0-1, y0+k)
+		}
+	}
+	var dc int32
+	switch {
+	case x0 > 0 && y0 > 0:
+		var s int32
+		for k := range bw {
+			s += above[k]
+		}
+		for k := range bh {
+			s += left[k]
+		}
+		dc = s / int32(bw+bh)
+	case y0 > 0:
+		var s int32
+		for k := range bw {
+			s += above[k]
+		}
+		dc = s / int32(bw)
+	case x0 > 0:
+		var s int32
+		for k := range bh {
+			s += left[k]
+		}
+		dc = s / int32(bh)
+	default:
+		dc = mid
+	}
+	corner := mid
+	if x0 > 0 && y0 > 0 {
+		corner = at(x0-1, y0-1)
+	}
+	blk := cur.Y[y0*cur.StrideY+x0:]
+	best := int64(math.MaxInt64)
+	for mode := range 4 {
+		for y := range bh {
+			for x := range bw {
+				var v int32
+				switch mode {
+				case 0:
+					v = dc
+				case 1:
+					v = above[x]
+				case 2:
+					v = left[y]
+				default: // the plane through the corner and both edges
+					v = above[x] + left[y] - corner
+					v = min(max(v, 0), 2*mid-1)
+				}
+				try[y*tplBlock+x] = uint16(v) //nolint:gosec // within the bit depth
+			}
+		}
+		if c := satdBlock(blk, cur.StrideY, try[:], tplBlock, bw, bh); c < best {
+			best = c
+			copy(pred, try[:])
+		}
+	}
+	return best
 }
