@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"bufio"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,10 +73,21 @@ func main() {
 	oursQ := flag.String("ours-q", "60,100,140,180", "our quantizer indexes")
 	svtCRF := flag.String("svt-crf", "24,30,36,42,48", "SVT-AV1's CRFs")
 	force := flag.Bool("force", false, "code the points again")
+	cpuProfile := flag.String("cpuprofile", "", "a CPU profile of the run to this file")
 	flag.Parse()
 	if *clips == "" || *res == "" {
 		flag.Usage()
 		os.Exit(2)
+	}
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			fail(err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fail(err)
+		}
+		defer pprof.StopCPUProfile()
 	}
 	files, _ := filepath.Glob(filepath.Join(*clips, "*.y4m"))
 	sort.Strings(files)
@@ -297,7 +310,7 @@ func encodeOurs(clip, stream string, speed, q int) (point, error) {
 
 func encodeSVT(clip, stream string, preset, crf int) (point, error) {
 	p := point{Q: crf}
-	cmd := exec.Command("ffmpeg", "-v", "error", "-y", "-i", clip, "-c:v", "libsvtav1", //nolint:gosec // the bench's own arguments
+	cmd := exec.CommandContext(context.Background(), "ffmpeg", "-v", "error", "-y", "-i", clip, "-c:v", "libsvtav1", //nolint:gosec // the bench's own arguments
 		"-preset", strconv.Itoa(preset), "-crf", strconv.Itoa(crf), "-g", "250", "-f", "obu", stream)
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "SVT_LOG=1") // errors only
@@ -328,7 +341,7 @@ func score(p *point, clip, stream string) error {
 		return err
 	}
 	w, h := src.w, src.h
-	cmd := exec.Command("ffmpeg", "-v", "error", "-c:v", "libdav1d", "-i", stream, //nolint:gosec // the bench's own arguments
+	cmd := exec.CommandContext(context.Background(), "ffmpeg", "-v", "error", "-c:v", "libdav1d", "-i", stream, //nolint:gosec // the bench's own arguments
 		"-f", "rawvideo", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough", "pipe:1")
 	cmd.Stderr = os.Stderr
 	pipe, err := cmd.StdoutPipe()
