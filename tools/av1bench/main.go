@@ -64,6 +64,9 @@ var metrics = []metric{
 	{"VMAF", func(p point) float64 { return p.VMAF }},
 }
 
+// keepStreams keeps the coded streams (-keep).
+var keepStreams bool
+
 func main() {
 	clips := flag.String("clips", "", "the clips' directory (*.y4m)")
 	res := flag.String("res", "", "the results' directory")
@@ -74,6 +77,7 @@ func main() {
 	svtCRF := flag.String("svt-crf", "24,30,36,42,48", "SVT-AV1's CRFs")
 	force := flag.Bool("force", false, "code the points again")
 	cpuProfile := flag.String("cpuprofile", "", "a CPU profile of the run to this file")
+	flag.BoolVar(&keepStreams, "keep", false, "keep the coded streams (beside the results, .obu)")
 	flag.Parse()
 	if *clips == "" || *res == "" {
 		flag.Usage()
@@ -194,7 +198,9 @@ func measure(res, config, clip string, q int, force bool) (point, error) {
 	if err := score(&p, clip, stream); err != nil {
 		return p, err
 	}
-	_ = os.Remove(stream)
+	if !keepStreams {
+		_ = os.Remove(stream)
+	}
 	fmt.Fprintf(os.Stderr, "%-12s %-14s q %3d: %8d bytes %6.2f fps  PSNR-Y %.3f  SSIM %.5f  VMAF %.3f\n",
 		config, clipName(clip), q, p.Bytes, float64(p.Frames)/p.Seconds, p.PSNRY, p.SSIM, p.VMAF)
 	b, _ := json.MarshalIndent(p, "", "\t")

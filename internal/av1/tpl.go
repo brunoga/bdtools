@@ -62,6 +62,13 @@ var (
 	// SSIM and 6.2% by VMAF; centred on 0.25, or within 8 of the frame's
 	// q, 0.8% and 2.5% larger: the anchors want their q lowered.)
 	tplFrameK = 8.0
+	// tplKeyK moves a key frame's q by k log2(0.5/r0), as tplFrameK an
+	// anchor's (the key frame costed with the mini-GOP after it). (On the
+	// six clips, against the key frame's q as planned: 12 1.5% smaller by
+	// PSNR-YUV, Free Solo 8.3%, a static shot the key frame is most of;
+	// 8 1.0%, 16 0.7% (Blade Runner 2049 3.3% larger), 8 centred on 0.7
+	// 1.1%; costed but its q as planned 0.1%.)
+	tplKeyK = 12.0
 	// tplRateK is the model's lambda, the coder's times this (libaom's
 	// TPL rdmult is a sixth of its coder's).
 	tplRateK = 1.0 / 6
@@ -81,7 +88,7 @@ func (e *Encoder) tpl(steps []step) {
 	var frames []*tplFrame
 	byDisp := map[int]*tplFrame{}
 	for _, s := range steps {
-		if s.job == nil || s.job.key {
+		if s.job == nil {
 			continue
 		}
 		n := cols * rows
@@ -188,7 +195,10 @@ func (e *Encoder) tpl(steps []step) {
 			continue
 		}
 		r0 := sumOwn / sumAll
-		if tplFrameK != 0 && j.depth <= 2 && !j.key {
+		switch {
+		case j.key && tplKeyK != 0:
+			j.q = min(max(j.q-int(math.Round(tplKeyK*math.Log2(0.5/r0))), 1), 255)
+		case !j.key && tplFrameK != 0 && j.depth <= 2:
 			// the frame's own q by how much the others take from it
 			j.q = min(max(j.q-int(math.Round(tplFrameK*math.Log2(0.5/r0))), 1), 255)
 		}
