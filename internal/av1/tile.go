@@ -356,42 +356,46 @@ func codeTile(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) []symOp {
 	var mu sync.Mutex
 	cond := sync.NewCond(&mu)
 	syncs := make([]*rowSync, len(rows))
-	encs := make([]*tileEnc, len(rows))
 	for i := range rows {
 		syncs[i] = &rowSync{mu: &mu, cond: cond, cols: cols}
 		if i > 0 {
 			syncs[i].above = syncs[i-1]
 		}
-		encs[i] = newTileEnc(f, rowStart, rowEnd, colStart, colEnd)
-		if i > 0 {
-			// the tile's above contexts are shared: each row reads the
-			// columns the row above has coded
-			encs[i].aboveLevel, encs[i].aboveDc = encs[0].aboveLevel, encs[0].aboveDc
-		}
 	}
+	// the tile's above contexts are shared: each row reads the columns
+	// the row above has coded
+	var aboveLevel, aboveDc [3][]uint8
+	recs := make([][]symOp, len(rows))
 	var wg sync.WaitGroup
 	for i, r := range rows {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			t := encs[i]
+		wg.Go(func() {
+			var c cdfs
 			if i > 0 {
 				s := syncs[i-1]
 				mu.Lock()
 				for s.cdf == nil {
 					cond.Wait()
 				}
-				c := *s.cdf
+				c = *s.cdf
 				mu.Unlock()
+			}
+			// made once the row may start (and dropped as it ends): only
+			// the rows coding hold their encoders
+			t := newTileEnc(f, rowStart, rowEnd, colStart, colEnd)
+			if i == 0 {
+				aboveLevel, aboveDc = t.aboveLevel, t.aboveDc
+			} else {
+				t.aboveLevel, t.aboveDc = aboveLevel, aboveDc
 				*t.cdf = c
 			}
 			t.codeRow(r, syncs[i])
-		}()
+			recs[i] = t.w.ops
+		})
 	}
 	wg.Wait()
 	var ops []symOp
-	for _, t := range encs {
-		ops = append(ops, t.w.ops...)
+	for _, rec := range recs {
+		ops = append(ops, rec...)
 	}
 	return ops
 }

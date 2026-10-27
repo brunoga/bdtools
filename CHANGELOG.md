@@ -7,6 +7,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder keeps the cores busy: every frame now uses the earlier
+  mini-GOPs' frames only to depth 2 (as the anchors did), so the next
+  mini-GOPs code while one's deepest frames do, four at once: 1.18 times
+  the pictures a second at speed 2 for the same size (1080p on 24 cores:
+  3.9 at speed 2, 2.25 at speed 0). The frames and sources are let go of
+  once coded: 0.8 GB less memory at peak.
 - The AV1 encoder's inter-intra masks are made once and blended in AVX2,
   and the transform search's distortions summed in AVX2: the same streams,
   1.03 times faster at speed 2.
