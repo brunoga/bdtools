@@ -14,8 +14,8 @@
 package main
 
 import (
-	"context"
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
