@@ -278,7 +278,14 @@ func (e *Encoder) tplCost(tf *tplFrame, src func(int) *Source) {
 			for k, r := range refs {
 				b := meBlock{ref: r, src: cur.Y, srcStride: cur.StrideY, x: x0, y: y0, w: bw, h: bh,
 					bitDepth: e.o.BitDepth, searchRange: 32, cost: func(mv) float64 { return 0 }}
-				m, c := ms.search(&b, []mv{{}})
+				var m mv
+				var c float64
+				if !e.tools.tplFull {
+					m, c = ms.search(&b, []mv{{}})
+				} else {
+					m, _ = ms.fullPel(&b, []mv{{}})
+					c = ms.subCost(&b, m)
+				}
 				if c+1 < tf.inter[i] {
 					tf.inter[i], tf.refDisp[i] = c+1, disps[k]
 					tf.mvx[i], tf.mvy[i] = int(math.Round(float64(m.col)/8)), int(math.Round(float64(m.row)/8))

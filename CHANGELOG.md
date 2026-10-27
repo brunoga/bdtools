@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The AV1 encoder is 1.24 to 1.37 times faster (speeds 0 to 2) for 0.3 to
+  0.5% in BD-rate: the extended partitions tried only where the halves
+  and quarters already coded say they could win, a block's motion search
+  done once for a superblock's partitions, and from speed 1 the filters'
+  and the temporal model's searches cut short. Speed 2 now takes 5.6 CPU
+  seconds a 1080p picture (from 7.6), +12.1% PSNR-YUV BD-rate against
+  SVT-AV1 preset 4.
+
 ## [0.15.1] - 2026-10-26
 
 ### Changed

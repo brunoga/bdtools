@@ -350,8 +350,10 @@ func (f *frameEnc) pickLevels(sharp int) [4]int {
 	}
 	both := scanLevel(func(v int) int64 { return try(0, [4]int{v, v}) })
 	level[0], level[1] = both, both
-	level[0] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{v, level[1]}) })
-	level[1] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{level[0], v}) })
+	if !f.tools.lfBoth {
+		level[0] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{v, level[1]}) })
+		level[1] = searchLevel(both, 4, func(v int) int64 { return try(0, [4]int{level[0], v}) })
+	}
 	if level[0] == 0 && level[1] == 0 {
 		return level
 	}

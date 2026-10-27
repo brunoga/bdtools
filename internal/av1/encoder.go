@@ -49,9 +49,12 @@ type EncoderOptions struct {
 	// estimate is near inter's, inter candidates coded in full where
 	// theirs are near the best's; 1 the transform trees decided with
 	// DCT_DCT, no warped motion or masked compound, no compound of two
-	// earlier frames or joint compound motion search (1.51 times faster,
-	// 2.5% larger); 2 also no OBMC, four references and two candidates
-	// coded in full (1.86 times, 3.7%).
+	// earlier frames or joint compound motion search, CDEF's damping from
+	// q, luma's two deblocking levels the same, the temporal model's
+	// vectors whole samples and nine of the self-guided filter's sixteen
+	// sets (1.69 times faster, 2.4% larger on six clips); 2 also no OBMC,
+	// four references and two candidates coded in full (2.27 times,
+	// 3.8%).
 	Speed int
 }
 
@@ -61,10 +64,15 @@ type tools struct {
 	interCands                      int
 	filterRD, obmc, fewRefs, txTree bool
 	pruneSkip, pruneExt             bool // the partition search's prunings
-	intraSkip, candRatio            float64
-	sameDir                         int // sameDirComp's
-	txCands                         int
-	jointME                         bool
+	extEst                          float64
+	// the filters' and the temporal model's searches cut short: CDEF's
+	// damping from q, luma's deblocking levels the same, the model's
+	// vectors whole samples, a subset of the self-guided filter's sets
+	cdefDampQ, lfBoth, tplFull, sgrSubset bool
+	intraSkip, candRatio                  float64
+	sameDir                               int // sameDirComp's
+	txCands                               int
+	jointME                               bool
 }
 
 // Encoder codes pictures.
@@ -129,7 +137,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio = false, 0, 0
 	}
@@ -145,6 +153,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		e.seq.warpedMotion, e.seq.maskedCompound = false, false
 		e.tools.sameDir = 0
 		e.tools.jointME = false
+		e.tools.cdefDampQ, e.tools.lfBoth, e.tools.tplFull, e.tools.sgrSubset = true, true, true, true
 	}
 	if o.Speed >= 2 {
 		e.tools.obmc, e.tools.fewRefs = false, true

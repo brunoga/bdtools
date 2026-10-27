@@ -119,8 +119,11 @@ type tileEnc struct {
 	stack      mvStack
 	txX4, txY4 int // the transform block being coded, in 4x4s of its plane
 	ms         motionSearch
-	is         interScratch
-	interPred  [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
+	// meSeen is the superblock's motion searches (interCandsFor's), by
+	// reference, block and size: the partitions search the same blocks
+	meSeen    map[meKey]meResult
+	is        interScratch
+	interPred [3][64 * 64]uint16 // an inter block's prediction, by plane // the superblock's cdef_idx is coded
 	// maskP are the luma predictions masked variants are blended from
 	maskP [2][]int32
 	// interEst is the best inter candidate's estimate, intraLimit the
@@ -415,6 +418,7 @@ func (t *tileEnc) startSB(r, c int) {
 		t.sbDelta, t.sbQ, t.readDeltas = d, q, true
 	}
 	t.setQ(q)
+	clear(t.meSeen)
 	if f.sbLambda != nil {
 		t.lambda *= f.sbLambda[(r>>4)*((f.miCols+15)>>4)+c>>4]
 	}
@@ -728,6 +732,11 @@ func (t *tileEnc) partitionBlocks(part, r, c, bSize int) []partBlock {
 	return out
 }
 
+// extEst prunes an extended partition whose estimate (the split's
+// quarters' and the halves' costs, as searched) is above extEst times the
+// best partition's cost; 0 tries them all.
+var extEst = 1.0
+
 // searchPartition decides the partition at (r, c) by rate and distortion,
 // leaving the state as the best leaves it.
 func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
@@ -756,9 +765,9 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	case hasRows && hasCols && dbgSquare:
 		cands = []int{PARTITION_NONE, PARTITION_SPLIT}
 	case hasRows && hasCols && (bSize == BLOCK_8X8 || dbgNoExt):
-		cands = []int{PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT, PARTITION_SPLIT}
+		cands = []int{PARTITION_NONE, PARTITION_SPLIT, PARTITION_HORZ, PARTITION_VERT}
 	case hasRows && hasCols:
-		cands = []int{PARTITION_NONE, PARTITION_HORZ, PARTITION_VERT, PARTITION_SPLIT,
+		cands = []int{PARTITION_NONE, PARTITION_SPLIT, PARTITION_HORZ, PARTITION_VERT,
 			PARTITION_HORZ_A, PARTITION_HORZ_B, PARTITION_VERT_A, PARTITION_VERT_B, PARTITION_HORZ_4, PARTITION_VERT_4}
 	case hasCols:
 		cands = []int{PARTITION_HORZ, PARTITION_SPLIT}
@@ -775,6 +784,10 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	bestJ := math.Inf(1)
 	var bestNode *partNode
 	jOf := map[int]float64{}
+	// the blocks' costs of the split (its quarters') and of the
+	// horizontal and vertical halves, for the extended partitions'
+	// estimates
+	var kidJ, horzJ, vertJ [4]float64
 	bestI, last := -1, -1
 	for i, part := range cands {
 		// Pruned: everything else after a skipped inter block that is
@@ -786,6 +799,27 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 			}
 			if !t.f.tools.pruneExt {
 				goto search
+			}
+			// an extended partition whose blocks, costed as the split's
+			// quarters and the halves were, are worse than the best
+			if r := t.f.tools.extEst; r > 0 {
+				_, okS := jOf[PARTITION_SPLIT]
+				_, okH := jOf[PARTITION_HORZ]
+				_, okV := jOf[PARTITION_VERT]
+				est := math.Inf(-1)
+				switch {
+				case part == PARTITION_HORZ_A && okS && okH:
+					est = kidJ[0] + kidJ[1] + horzJ[1]
+				case part == PARTITION_HORZ_B && okS && okH:
+					est = horzJ[0] + kidJ[2] + kidJ[3]
+				case part == PARTITION_VERT_A && okS && okV:
+					est = kidJ[0] + kidJ[2] + vertJ[1]
+				case part == PARTITION_VERT_B && okS && okV:
+					est = vertJ[0] + kidJ[1] + kidJ[3]
+				}
+				if est > r*bestJ {
+					continue
+				}
 			}
 			switch part {
 			case PARTITION_HORZ_A, PARTITION_HORZ_B, PARTITION_HORZ_4:
@@ -818,6 +852,12 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 				}
 				bj, bd := t.searchBlock(r+pb.dr, c+pb.dc, pb.size)
 				j += bj
+				switch k := len(node.blocks); part {
+				case PARTITION_HORZ:
+					horzJ[k] = bj
+				case PARTITION_VERT:
+					vertJ[k] = bj
+				}
 				node.blocks = append(node.blocks, bd)
 			}
 		case PARTITION_SPLIT:
@@ -828,6 +868,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 				}
 				kj, kn := t.searchPartition(r+o[0], c+o[1], sub, 0)
 				j += kj
+				kidJ[k] = kj
 				node.kids[k] = kn
 			}
 		}

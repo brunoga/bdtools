@@ -132,7 +132,24 @@ baseline (24 cores):
 | ours, speed 2 | +10.9% | +11.6% | +15.0% | +10.8% | 2.05 | 7.6 |
 
 So 7 to 11% larger than preset 4 and 25 to 50 times its CPU time: speed
-is the larger gap. What is left, by what each step is likely worth (the
+is the larger gap. Since then (the extended partitions estimated from the
+halves and quarters, the motion search cached for a superblock's
+partitions, the filters' and the temporal model's searches cut short from
+speed 1):
+
+| config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+|---|---|---|---|---|---|---|
+| ours, speed 0 | +7.3% | +8.0% | +11.7% | +7.0% | 1.31 | 12.6 |
+| ours, speed 1 | +9.8% | +10.6% | +13.5% | +8.7% | 2.19 | 7.5 |
+| ours, speed 2 | +11.3% | +12.1% | +15.2% | +10.8% | 2.84 | 5.6 |
+
+Tried and dropped: pruning the horizontal and vertical partitions by the
+split's cost (+0.6%, 1.11 times), a first pass deciding the partitions
+with a cheaper search (+0.9% for no gain, or +12% for 1.49 times), intra
+in inter pictures cut where inter's estimate is lower (+3.3%, 1.06
+times), a skip decided from the prediction error (no threshold separates
+it: the boundary spans four octaves and moves with q), the candidates'
+estimates with one filter (+0.3%, slower). What is left, by what each step is likely worth (the
 size numbers below are from the earlier two-clip bench). The numbers are from
 the two 120-picture 1080p clips; the small tunings around today's settings
 (lambda, key frame and pyramid q, the temporal filter and model's
