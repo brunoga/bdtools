@@ -152,6 +152,13 @@ transforms searched after (libaom's way):
 | ours, speed 1 | +10.4% | +11.0% | +14.1% | +9.5% | 2.58 | 6.4 |
 | ours, speed 2 | +11.6% | +12.2% | +15.3% | +11.4% | 3.00 | 5.3 |
 
+The transforms in AVX2 then make the same streams 1.10 times faster
+(speed 2: 3.28 pictures a second, 4.8 CPU seconds each). Tried and dropped
+since: intra in inter pictures with fewer modes, depths or type searches
+(+0.6 to +1.4% for 1.08 to 1.14 times), no 4x4 blocks or 8x8 whole only
+in inter pictures (+0.1% and +0.3% for 1.02 and 1.08 times, the same
+trade as a speed step), no 4:1 partitions (+1.1% for 1.14 times).
+
 Tried and dropped: pruning the horizontal and vertical partitions by the
 split's cost (+0.6%, 1.11 times), a first pass deciding the partitions
 with a cheaper search (+0.9% for no gain, or +12% for 1.49 times), intra

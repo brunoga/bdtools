@@ -409,3 +409,56 @@ func fwdTypeExists(txSz, tt int) bool {
 	return fwd1D(int(txTypeCol[tt]), int(txHeightLog2[txSz]), &in, &out, 12) &&
 		fwd1D(int(txTypeRow[tt]), int(txWidthLog2[txSz]), &in, &out, 12)
 }
+
+// The AVX2 forward kernels give the scalar transform's coefficients
+// exactly, on random residuals and on extreme ones (every sample at the
+// bit depth's limit, alternating, a checkerboard), at 8 and 10 bits.
+func TestForwardKernels(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 9))
+	for txSz := range TX_SIZES_ALL {
+		log2W, log2H := int(txWidthLog2[txSz]), int(txHeightLog2[txSz])
+		w, h := 1<<log2W, 1<<log2H
+		if w < 8 && h < 8 {
+			continue
+		}
+		for tt := range TX_TYPES {
+			if !txTypeValid(txSz, tt) {
+				continue
+			}
+			for _, bd := range []int{8, 10} {
+				m := int32(1)<<bd - 1
+				for trial := range 40 {
+					res := make([]int32, w*h)
+					for i := range res {
+						switch trial {
+						case 0:
+							res[i] = m
+						case 1:
+							res[i] = -m
+						case 2:
+							res[i] = m * int32(1-2*(i&1))
+						case 3:
+							res[i] = m * int32(1-2*((i/w+i%w)&1))
+						case 4:
+							res[i] = m * int32(1-2*((i/w)&1))
+						default:
+							res[i] = rng.Int32N(2*m+1) - m
+						}
+					}
+					got := make([]int32, 64*64)
+					forwardTransform(res, txSz, tt, bd, false, got)
+					var buf [64 * 64]int32
+					want := make([]int32, 64*64)
+					fwdColsGo(res, txSz, int(txTypeCol[tt]), txFlipUD[tt], log2W, log2H, buf[:])
+					fwdRowsGo(buf[:], txSz, int(txTypeRow[tt]), txFlipLR[tt], log2W, log2H, want)
+					n := min(w, 32) * min(h, 32)
+					for i := range n {
+						if got[i] != want[i] {
+							t.Fatalf("size %d type %d bd %d trial %d: coefficient %d is %d, want %d", txSz, tt, bd, trial, i, got[i], want[i])
+						}
+					}
+				}
+			}
+		}
+	}
+}

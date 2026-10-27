@@ -1,5 +1,7 @@
 package av1
 
+import "math"
+
 // The inverse transform (spec 7.13.2, 7.13.3) and the reconstruction around
 // it (7.12.3): dequantization of the coded levels, the 2D inverse transform
 // from the dequantized coefficients to the residual, and the addition of the
@@ -220,6 +222,60 @@ func inverseTransform(coeffs []int32, txSz, txType, bitDepth int, lossless bool,
 	rect := log2W-log2H == 1 || log2H-log2W == 1
 	rowKind, colKind := txTypeRow[txType], txTypeCol[txType]
 
+	// eight rows or columns at a time, where there are kernels (exact in
+	// 32 bits up to 10 bits deep)
+	simd := useAVX2 && !lossless && bitDepth <= 10
+	if simd && w >= 8 && h >= 8 && invAVX2(int(rowKind), log2W) {
+		rowLo, rowHi := -1<<(rowRange-1), 1<<(rowRange-1)-1
+		rnd := 0
+		if rowShift > 0 {
+			rnd = 1 << (rowShift - 1)
+		}
+		for i := 0; i < h; i += 8 {
+			out := residual[i*w : (i+8)*w]
+			if i >= th {
+				clear(out)
+				continue
+			}
+			nz := int32(0)
+			for _, v := range coeffs[i*tw : (i+8)*tw] {
+				nz |= v
+			}
+			if nz == 0 {
+				clear(out)
+				continue
+			}
+			invRowAVX2(int(rowKind), log2W, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+		}
+	} else {
+		inverseRows(coeffs, residual, txSz, rowKind, lossless, log2W, log2H, rowShift, rowRange, colLo, colHi, rect)
+	}
+	if simd && w >= 8 && invAVX2(int(colKind), log2H) {
+		for j := 0; j < w; j += 8 {
+			invColAVX2(int(colKind), log2H, &residual[j], w*4, &residual[j], w*4, int(colLo), int(colHi), 1<<(colShift-1), int(colShift), math.MinInt32, math.MaxInt32, 0)
+		}
+		return
+	}
+	var t [64]int32
+	for j := 0; j < w; j++ {
+		for i := 0; i < h; i++ {
+			t[i] = residual[i*w+j]
+		}
+		if lossless {
+			iwht(&t, 0)
+		} else {
+			inverse1D(&t, colKind, log2H, colRange)
+		}
+		for i := 0; i < h; i++ {
+			residual[i*w+j] = round2(t[i], colShift)
+		}
+	}
+}
+
+// inverseRows is inverseTransform's row pass a row at a time.
+func inverseRows(coeffs, residual []int32, txSz int, rowKind uint8, lossless bool, log2W, log2H int, rowShift uint, rowRange int, colLo, colHi int32, rect bool) {
+	w, h := 1<<log2W, 1<<log2H
+	tw, th := min(w, 32), min(h, 32)
 	var t [64]int32
 	for i := 0; i < h; i++ {
 		out := residual[i*w : i*w+w]
@@ -251,19 +307,6 @@ func inverseTransform(coeffs []int32, txSz, txType, bitDepth int, lossless bool,
 		}
 		for j := range out {
 			out[j] = min(max(round2(t[j], rowShift), colLo), colHi)
-		}
-	}
-	for j := 0; j < w; j++ {
-		for i := 0; i < h; i++ {
-			t[i] = residual[i*w+j]
-		}
-		if lossless {
-			iwht(&t, 0)
-		} else {
-			inverse1D(&t, colKind, log2H, colRange)
-		}
-		for i := 0; i < h; i++ {
-			residual[i*w+j] = round2(t[i], colShift)
 		}
 	}
 }
