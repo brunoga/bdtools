@@ -63,3 +63,33 @@ func TestInverseKernels(t *testing.T) {
 		}
 	}
 }
+
+// The AVX2 SSE gives sseGo's sum on every block width and height, at the
+// 12-bit limit too.
+func TestSSEKernel(t *testing.T) {
+	// a block past the picture's edge has no visible samples
+	if s := sse(make([]uint16, 64), 8, make([]uint16, 64), 8, -2, 4); s != 0 {
+		t.Fatalf("width -2: %d", s)
+	}
+	rng := rand.New(rand.NewPCG(11, 13))
+	for _, w := range []int{8, 16, 24, 32, 64} {
+		for _, h := range []int{1, 4, 8, 16, 32, 64} {
+			for trial := range 6 {
+				as, bs := w+rng.IntN(9), w+rng.IntN(9)
+				a, b := make([]uint16, h*as), make([]uint16, h*bs)
+				for i := range a {
+					a[i] = uint16(rng.IntN(4096))
+				}
+				for i := range b {
+					b[i] = uint16(rng.IntN(4096))
+					if trial == 0 {
+						a[min(i, len(a)-1)], b[i] = 4095, 0
+					}
+				}
+				if got, want := sse(a, as, b, bs, w, h), sseGo(a, as, b, bs, w, h); got != want {
+					t.Fatalf("%dx%d trial %d: %d, want %d", w, h, trial, got, want)
+				}
+			}
+		}
+	}
+}

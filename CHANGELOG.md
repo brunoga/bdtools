@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's inter-intra masks are made once and blended in AVX2,
+  and the transform search's distortions summed in AVX2: the same streams,
+  1.03 times faster at speed 2.
 - The AV1 encoder's forward and inverse transforms (the DCTs of 8 to 64
   points, the ADSTs of 8 and 16) run eight at a time in AVX2, generated
   from the Go butterflies by `tools/av1txasm`: the same streams, 1.10
