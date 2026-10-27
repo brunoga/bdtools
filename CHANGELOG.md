@@ -5,8 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `tools/av1bench -keep` keeps the coded streams beside the results.
+
 ### Changed
 
+- The AV1 encoder codes a key frame with the mini-GOP after it, its q set
+  by the temporal model by how much the mini-GOP takes from it (SVT-AV1
+  codes Free Solo's at q 16, ours was 44): against SVT-AV1 preset 4,
+  +6.3% by PSNR-YUV at speed 0 (from +7.7%), +9.6% at speed 2 (from
+  +11.7%), Free Solo +12.5% (from +21%).
 - The AV1 encoder's temporal model is libaom's: each 16x16 block of a
   mini-GOP coded in the model at its frame's q (a DCT, quantized, its rate
   and distortion measured), predicted from the model's reconstructions,

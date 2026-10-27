@@ -201,9 +201,20 @@ strengths, the motion search's starts) are all within 0.3% of them.
    | ours, speed 0 | +7.0% | +7.7% | +10.2% | +7.3% | | |
    | ours, speed 2 | +10.9% | +11.7% | +13.4% | +11.1% | 3.86 | 4.7 |
 
-   Left: the key frame in the model (its q by what the first mini-GOP
-   takes from it: the mini-GOP would have to be planned before the key
-   frame is coded), intra in the model from the reconstruction's
+   Then the key frame in the model, coded with the mini-GOP after it and
+   its q by what that takes from it. libaom's decoder built with
+   CONFIG_ACCOUNTING gives each syntax element's bits a frame, on both
+   encoders' streams (`av1bench -keep`): on Free Solo SVT-AV1 spent twice
+   ours on its key frame (q 16 to our 44) and a third less on the frames
+   after it, which predicted from it.
+
+   | config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+   |---|---|---|---|---|---|---|
+   | ours, speed 0 | +6.1% | +6.3% | +10.3% | +7.7% | 2.23 | 8.9 |
+   | ours, speed 2 | +9.3% | +9.6% | +12.6% | +10.7% | 3.84 | 4.7 |
+
+   The clips have one key frame in 120 pictures, a film one in 250: less
+   gained there. Left: intra in the model from the reconstruction's
    neighbours, compound references.
 2. **Frame-level parallelism.** Done as far as whole frames go (above):
    past the first mini-GOP the cores are busy. What is left is the

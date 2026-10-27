@@ -156,7 +156,10 @@ func (e *Encoder) drain(flush bool) []Unit {
 			if first.orig != nil {
 				e.tfPast[0] = first.orig
 			}
-			e.run([]step{e.plan(first)}, &out)
+			// coded with the mini-GOP after it, once the temporal model
+			// has costed both
+			e.runKey(&out)
+			e.key = []step{e.plan(first)}
 			e.queue = e.queue[1:]
 			continue
 		}
@@ -187,6 +190,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 		last := byDisp(a + n)
 		e.filterAnchor(gop, ahead)
 		if n == 1 {
+			e.runKey(&out)
 			last.show, last.depth = true, 1
 			e.run([]step{e.plan(last)}, &out)
 			continue
@@ -194,10 +198,22 @@ func (e *Encoder) drain(flush bool) []Unit {
 		last.depth = 1
 		steps := []step{e.plan(last)}
 		e.pyramid(a, a+n, 2, byDisp, &steps)
-		e.tpl(steps)
+		e.tpl(append(e.key[:len(e.key):len(e.key)], steps...))
+		e.runKey(&out)
 		e.run(steps, &out)
 	}
+	if flush {
+		e.runKey(&out)
+	}
 	return out
+}
+
+// runKey codes the key frame planned (and not yet coded), if any.
+func (e *Encoder) runKey(out *[]Unit) {
+	if e.key != nil {
+		e.run(e.key, out)
+		e.key = nil
+	}
 }
 
 // pyramid plans the pictures a+1..b, b planned already (not shown).

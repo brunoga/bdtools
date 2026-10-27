@@ -93,6 +93,9 @@ type Encoder struct {
 	queue   []*frameJob
 	nIn     int
 	pending []byte
+	// key is the key frame's step, planned and coded with the mini-GOP
+	// after it.
+	key []step
 	// tfPast is the sources of the pictures just before the queue's (back
 	// to the last key frame's), for the temporal filter's window.
 	tfPast []*Source
