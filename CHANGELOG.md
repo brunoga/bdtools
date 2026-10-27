@@ -7,6 +7,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's temporal model is libaom's: each 16x16 block of a
+  mini-GOP coded in the model at its frame's q (a DCT, quantized, its rate
+  and distortion measured), predicted from the model's reconstructions,
+  and what a reference's coding loss costs the frames after it handed
+  back to the reference. 0.9% smaller by PSNR-YUV and 2.5% by SSIM at
+  speed 2 (Blade Runner 2049 3.8%), at the same speed: against SVT-AV1
+  preset 4, +7.7% at speed 0 (from +8.5%), +11.7% at speed 2.
 - The AV1 encoder keeps the cores busy: every frame now uses the earlier
   mini-GOPs' frames only to depth 2 (as the anchors did), so the next
   mini-GOPs code while one's deepest frames do, four at once: 1.18 times

@@ -191,15 +191,20 @@ the two 120-picture 1080p clips; the small tunings around today's settings
 (lambda, key frame and pyramid q, the temporal filter and model's
 strengths, the motion search's starts) are all within 0.3% of them.
 
-1. **A full temporal model.** Ours costs blocks by SATD on the source
-   pictures and is worth 3.0%; SVT-AV1's own is worth 5.5% to it. libaom's
-   form codes each block in the model (a transform, the frame's quantizer,
-   a reconstruction the later frames predict from) and propagates rates and
-   distortions, not SATD ratios. A cheap quantization-aware cost (a 4x4
-   Hadamard dead-zone estimate) was 3.2% worse: its rate floor makes intra
-   and inter costs alike, and any weaker propagation loses (the inter costs
-   scaled by 1.4 or the references' quantization noise added: 0.8% to
-   4.7% worse). Likely 1 to 2%.
+1. **A full temporal model.** Done: libaom's form (each block coded in
+   the model, the references' coding loss propagated in distortion and
+   rate) against the SATD ratios before: 0.9% smaller by PSNR-YUV, 2.5%
+   by SSIM, at the same speed:
+
+   | config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+   |---|---|---|---|---|---|---|
+   | ours, speed 0 | +7.0% | +7.7% | +10.2% | +7.3% | | |
+   | ours, speed 2 | +10.9% | +11.7% | +13.4% | +11.1% | 3.86 | 4.7 |
+
+   Left: the key frame in the model (its q by what the first mini-GOP
+   takes from it: the mini-GOP would have to be planned before the key
+   frame is coded), intra in the model from the reconstruction's
+   neighbours, compound references.
 2. **Frame-level parallelism.** Done as far as whole frames go (above):
    past the first mini-GOP the cores are busy. What is left is the
    stream's start (a key frame, then each pyramid level one frame) and
