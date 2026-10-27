@@ -39,8 +39,9 @@ jobs:
       - name: Test the pure-Go decoder
         # Every assembly kernel has a Go fallback selected by this tag (and
         # on every non-amd64 platform); the conformance corpus must pass
-        # through it too.
-        run: go test -tags purego -timeout 300s ./...
+        # through it too. The packages share the runner's cores
+        # (internal/convert 290 to 300 s), hence the timeout.
+        run: go test -tags purego -timeout 600s ./...
 
   test-macos:
     name: Test (macOS)
