@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder is 1.06 to 1.28 times faster again (speeds 2 to 0) for
+  0.2 to 0.6% in BD-rate: inter candidates are costed with their largest
+  transforms, DCT_DCT, and only the best one's transforms searched. Speed
+  0 now takes 9.9 CPU seconds a 1080p picture (from 12.6).
 - The AV1 encoder is 1.24 to 1.37 times faster (speeds 0 to 2) for 0.3 to
   0.5% in BD-rate: the extended partitions tried only where the halves
   and quarters already coded say they could win, a block's motion search

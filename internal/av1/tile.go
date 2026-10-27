@@ -114,6 +114,7 @@ type tileEnc struct {
 	readDeltas bool
 	sbDelta    int
 	dctOnly    bool // luma transform types not searched
+	fastTx     bool // inter candidates costed with their largest transforms, DCT_DCT
 	// retype codes a decided transform tree searching its types
 	retype     bool
 	stack      mvStack

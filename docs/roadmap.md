@@ -143,6 +143,15 @@ speed 1):
 | ours, speed 1 | +9.8% | +10.6% | +13.5% | +8.7% | 2.19 | 7.5 |
 | ours, speed 2 | +11.3% | +12.1% | +15.2% | +10.8% | 2.84 | 5.6 |
 
+Then the inter candidates costed with DCT_DCT alone, the best's
+transforms searched after (libaom's way):
+
+| config | PSNR-Y | PSNR-YUV | SSIM | VMAF | fps | CPU s a picture |
+|---|---|---|---|---|---|---|
+| ours, speed 0 | +7.8% | +8.4% | +12.2% | +7.1% | 1.72 | 9.9 |
+| ours, speed 1 | +10.4% | +11.0% | +14.1% | +9.5% | 2.58 | 6.4 |
+| ours, speed 2 | +11.6% | +12.2% | +15.3% | +11.4% | 3.00 | 5.3 |
+
 Tried and dropped: pruning the horizontal and vertical partitions by the
 split's cost (+0.6%, 1.11 times), a first pass deciding the partitions
 with a cheaper search (+0.9% for no gain, or +12% for 1.49 times), intra
