@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder predicts a block's luma from the block's own motion
+  rather than its stored mode info, so the inter candidates' estimates no
+  longer store it for each: the same streams, 2.3% less CPU.
 - The AV1 encoder's filter intra prediction sums its seven taps unrolled,
   the 2D coefficient base contexts read their five neighbours unrolled,
   and the motion search keeps each vector component's rate for the
