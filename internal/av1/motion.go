@@ -142,39 +142,48 @@ func (ms *motionSearch) fullCost(b *meBlock, px, py int) float64 {
 		return e.cost
 	}
 	m := mv{row: int32((py - b.y) * 8), col: int32((px - b.x) * 8)} //nolint:gosec // within mvLimit
-	c := float64(sadAt(b, px, py)) + b.cost(m)
+	c := float64(ms.sadAt(b, px, py)) + b.cost(m)
 	*e = seenPoint{gen: ms.gen, px: int32(px), py: int32(py), cost: c} //nolint:gosec // positions
 	return c
 }
 
 // sadAt is the SAD of the block against the reference's block at integer
 // position (px, py), whose samples outside the reference are its edges'
-// (an integer vector's prediction is exactly those samples).
-func sadAt(b *meBlock, px, py int) int64 {
+// (an integer vector's prediction is exactly those samples): such a block
+// is made in ms.pred first.
+func (ms *motionSearch) sadAt(b *meBlock, px, py int) int64 {
 	ref, rs := b.ref.rec[0], b.ref.stride[0]
 	lastX, lastY := b.ref.width-1, b.ref.height-1
-	var sum int64
-	if px >= 0 && py >= 0 && px+b.w-1 <= lastX && py+b.h-1 <= lastY {
-		if b.w&7 == 0 {
-			return int64(sadBlock(b.srcBlock(), b.srcStride, ref[py*rs+px:], rs, b.w, b.h))
-		}
+	if px < 0 || py < 0 || px+b.w-1 > lastX || py+b.h-1 > lastY {
+		// the columns inside the reference copied, those left and right
+		// of it its first and last
+		in0, in1 := min(max(-px, 0), b.w), min(max(lastX+1-px, 0), b.w)
 		for i := range b.h {
-			s := b.srcBlock()[i*b.srcStride:][:b.w]
-			r := ref[(py+i)*rs+px:][:b.w]
-			var d int32
-			for j, v := range s {
-				d += abs32(int32(v) - int32(r[j]))
+			row := ref[min(max(py+i, 0), lastY)*rs:]
+			e := ms.pred[i*b.w : i*b.w+b.w]
+			for j := range in0 {
+				e[j] = row[0]
 			}
-			sum += int64(d)
+			if in1 > in0 {
+				copy(e[in0:in1], row[px+in0:px+in1])
+			}
+			for j := max(in1, in0); j < b.w; j++ {
+				e[j] = row[lastX]
+			}
 		}
-		return sum
+		ref, rs = ms.pred[:], b.w
+		px, py = 0, 0
 	}
+	if b.w&7 == 0 {
+		return int64(sadBlock(b.srcBlock(), b.srcStride, ref[py*rs+px:], rs, b.w, b.h))
+	}
+	var sum int64
 	for i := range b.h {
 		s := b.srcBlock()[i*b.srcStride:][:b.w]
-		r := ref[min(max(py+i, 0), lastY)*rs:]
+		r := ref[(py+i)*rs+px:][:b.w]
 		var d int32
 		for j, v := range s {
-			d += abs32(int32(v) - int32(r[min(max(px+j, 0), lastX)]))
+			d += abs32(int32(v) - int32(r[j]))
 		}
 		sum += int64(d)
 	}

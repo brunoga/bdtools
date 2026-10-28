@@ -11,6 +11,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's whole-sample motion search measures a block reaching
+  past the reference's edges from a copy with the edges extended, with
+  the AVX2 SAD (it clamped each sample's position): the same streams,
+  1.5% less CPU.
 - The AV1 encoder's inter prediction and sub-sample motion search filter
   a block in two calls, each pass's taps in pairs with VPMADDWD on 16-bit
   intermediate values (it was one call a row, a multiply a tap): the
