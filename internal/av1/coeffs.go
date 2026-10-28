@@ -260,8 +260,15 @@ func baseCtx(lv []uint8, txSz, cls, bwl, stride, pos int) int {
 	col := pos - row<<uint(bwl)
 	p := row*stride + col
 	mag := 0
-	for _, o := range sigRefDiffOffset[cls] {
-		mag += min(int(lv[p+int(o[0])*stride+int(o[1])]), 3)
+	if cls == TX_CLASS_2D {
+		// sigRefDiffOffset's: right, below, below right, 2 right, 2 below
+		q := lv[p : p+2*stride+1]
+		mag = min(int(q[1]), 3) + min(int(q[stride]), 3) + min(int(q[stride+1]), 3) +
+			min(int(q[2]), 3) + min(int(q[2*stride]), 3)
+	} else {
+		for _, o := range sigRefDiffOffset[cls] {
+			mag += min(int(lv[p+int(o[0])*stride+int(o[1])]), 3)
+		}
 	}
 	ctx := min((mag+1)>>1, 4)
 	if cls == TX_CLASS_2D {

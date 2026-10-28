@@ -203,7 +203,12 @@ func clip(v, maxV int32) int32 { return min(max(v, 0), maxV) }
 
 func (e *intraEdges) recursive(b *intraBlock, w, h int, maxV int32, pred []uint16) {
 	left := e.left[edgeOff:]
-	taps := &intraFilterTaps[b.filterIntra]
+	var taps [8][7]int32
+	for k, tk := range &intraFilterTaps[b.filterIntra] {
+		for i, v := range tk {
+			taps[k][i] = int32(v)
+		}
+	}
 	var p [7]int32
 	for i2 := range h >> 1 {
 		for j4 := range w >> 2 {
@@ -226,12 +231,11 @@ func (e *intraEdges) recursive(b *intraBlock, w, h int, maxV int32, pred []uint1
 				}
 			}
 			for i1 := range 2 {
-				for j1 := range 4 {
-					var pr int32
-					for i, t := range taps[(i1<<2)+j1] {
-						pr += int32(t) * p[i]
-					}
-					pred[((i2<<1)+i1)*w+(j4<<2)+j1] = uint16(clip(round2Signed(pr, INTRA_FILTER_SCALE_BITS), maxV)) //nolint:gosec // clipped
+				out := pred[((i2<<1)+i1)*w+(j4<<2):][:4]
+				for j1 := range out {
+					t := &taps[(i1<<2)+j1]
+					pr := t[0]*p[0] + t[1]*p[1] + t[2]*p[2] + t[3]*p[3] + t[4]*p[4] + t[5]*p[5] + t[6]*p[6]
+					out[j1] = uint16(clip(round2Signed(pr, INTRA_FILTER_SCALE_BITS), maxV)) //nolint:gosec // clipped
 				}
 			}
 		}

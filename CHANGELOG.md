@@ -11,6 +11,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's filter intra prediction sums its seven taps unrolled,
+  the 2D coefficient base contexts read their five neighbours unrolled,
+  and the motion search keeps each vector component's rate for the
+  search: the same streams, 4.4% less CPU.
 - The AV1 encoder's directional intra prediction finds each sample's
   edge position and weight from its column's or row's (computed once)
   and writes by rows: the same streams, 1.6% less CPU.
