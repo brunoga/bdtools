@@ -364,10 +364,30 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 			return
 		}
 	}
-	planeSz := b.size
-	if plane > 0 {
-		planeSz = int(subsampledSize[b.size][1][1])
+	if plane == 0 {
+		// the block's own motion (what setModes stores, so a luma block
+		// is never in parts): read from the block, not its mode info
+		if f.fp.interpFilter == SWITCHABLE {
+			filt = [2]int{b.interp, b.interp}
+		}
+		w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
+		if b.refFrame2 > INTRA_FRAME && !b.ii.on {
+			ref := [2]int{b.refFrame, b.refFrame2}
+			var wt [2]int32 // COMPOUND_AVERAGE
+			if b.compDist {
+				wt = f.fp.distWeights(ref)
+			}
+			var mk *compMask
+			if b.masked {
+				mk = &b.mask
+			}
+			predictCompound(refs, 0, b.c*MI_SIZE, b.r*MI_SIZE, w, h, ref, [2]mv{b.mv, b.mv2}, filt, f.bitDepth, wt, dst, dstStride, s, mk, b)
+			return
+		}
+		predictInter(refs[b.refFrame], 0, b.c*MI_SIZE, b.r*MI_SIZE, w, h, b.mv, filt, f.bitDepth, dst, dstStride, s)
+		return
 	}
+	planeSz := int(subsampledSize[b.size][1][1])
 	num4x4W, num4x4H := int(num4x4BlocksWide[planeSz]), int(num4x4BlocksHigh[planeSz])
 	baseX, baseY := (b.c>>sub)*MI_SIZE, (b.r>>sub)*MI_SIZE
 	candRow, candCol := (b.r>>sub)<<sub, (b.c>>sub)<<sub

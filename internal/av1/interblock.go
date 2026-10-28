@@ -904,7 +904,6 @@ func (t *tileEnc) estimate(cands []interCand) {
 			b.compDist = dist
 			for _, fl := range filters {
 				b.interp = fl
-				t.setModes()
 				f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
 				satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
 				t.cost.n = 0
@@ -938,7 +937,6 @@ func (t *tileEnc) estimateFilters(cands []interCand) {
 		}
 		for _, fl := range [2]int{EIGHTTAP_SMOOTH, EIGHTTAP_SHARP} {
 			b.interp = fl
-			t.setModes()
 			f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
 			satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
 			t.cost.n = 0
