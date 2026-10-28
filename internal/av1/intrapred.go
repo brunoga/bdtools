@@ -331,17 +331,18 @@ func filterEdge(buf []int32, sz, strength int) {
 	if strength == 0 {
 		return
 	}
-	var edge [129 + 1]int32
-	for i := range sz {
-		edge[i] = buf[edgeOff+i-1]
-	}
+	// the samples with two copies of the first before and of the last
+	// after (the spec clamps the taps' indexes)
+	var edge [2 + 129 + 2]int32
+	copy(edge[2:2+sz], buf[edgeOff-1:edgeOff-1+sz])
+	edge[0], edge[1] = edge[2], edge[2]
+	edge[sz+2], edge[sz+3] = edge[sz+1], edge[sz+1]
 	k := &intraEdgeKernel[strength-1]
-	for i := 1; i < sz; i++ {
-		var s int32
-		for j := range 5 {
-			s += int32(k[j]) * edge[min(max(i-2+j, 0), sz-1)]
-		}
-		buf[edgeOff+i-1] = (s + 8) >> 4
+	k0, k1, k2 := int32(k[0]), int32(k[1]), int32(k[2]) // symmetric
+	out := buf[edgeOff : edgeOff+sz-1]
+	for i := range out {
+		e := edge[i+1 : i+6]
+		out[i] = (k0*(e[0]+e[4]) + k1*(e[1]+e[3]) + k2*e[2] + 8) >> 4
 	}
 }
 

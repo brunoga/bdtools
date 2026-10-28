@@ -7,6 +7,8 @@ package av1
 // so far. The distortion is measured on the coefficients: a coefficient's
 // squared error is 1/64 of the pixels' (times dqDenom squared).
 
+import "slices"
+
 // quantize quantizes t.coef (the spec's layout, min(32, w) wide) into
 // levels appended to t.levels, giving the end of block (in scan order).
 func (t *tileEnc) quantize(plane, txSz, txType int) int {
@@ -14,32 +16,54 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	tw, th := min(32, int(txWidth[txSz])), min(32, int(txHeight[txSz]))
 	n := tw * th
 	off := len(t.levels)
-	t.levels = append(t.levels, make([]int32, n)...)
+	t.levels = slices.Grow(t.levels, n)[:off+n]
 	q := t.levels[off:]
+	if !useAVX2 {
+		clear(q)
+	}
 	den := int64(dqDenom(txSz))
 	dcQ, acQ := int64(t.dcQ[plane]), int64(t.acQ[plane])
 	inv := invScanFor(txSz, txType)[:n]
 	eob := 0
-	for i := range n {
-		qs := acQ
-		if i == 0 {
-			qs = dcQ
+	if useAVX2 {
+		// every coefficient with the AC step, then the DC with its own
+		_ = inv[n-1]
+		eob = quantDZAVX2(&t.coef[0], &q[0], &inv[0], n, int(den), int(acQ))
+		if dcQ != acQ {
+			c := int64(abs32(t.coef[0]))
+			l := int32(min((c*den+dcQ/2)/dcQ, 1<<18)) //nolint:gosec // clamped
+			if t.coef[0] < 0 {
+				l = -l
+			}
+			q[0] = l
+			if l != 0 {
+				eob = max(eob, int(inv[0])+1)
+			} else if eob == int(inv[0])+1 {
+				eob = 0 // the DC alone was non-zero with the AC step
+			}
 		}
-		c := int64(t.coef[i])
-		neg := c < 0
-		if neg {
-			c = -c
+	} else {
+		for i := range n {
+			qs := acQ
+			if i == 0 {
+				qs = dcQ
+			}
+			c := int64(t.coef[i])
+			neg := c < 0
+			if neg {
+				c = -c
+			}
+			v := c*den + qs/2
+			if v < qs {
+				continue // 0 (q is zeroed): most are, and no division
+			}
+			l := min(v/qs, 1<<18)
+			if neg {
+				l = -l
+			}
+			q[i] = int32(l) //nolint:gosec // clamped
+			eob = max(eob, int(inv[i])+1)
 		}
-		v := c*den + qs/2
-		if v < qs {
-			continue // 0 (q is zeroed): most are, and no division
-		}
-		l := min(v/qs, 1<<18)
-		if neg {
-			l = -l
-		}
-		q[i] = int32(l) //nolint:gosec // clamped
-		eob = max(eob, int(inv[i])+1)
 	}
 	scan := scanFor(txSz, txType)[:n]
 	if eob == 0 || f.lossless || dbgNoRDOQ {

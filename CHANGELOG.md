@@ -11,6 +11,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's first quantization pass is an AVX2 kernel and the
+  intra edge filter reads a padded copy of the edge instead of clamping
+  each tap: the same streams, quantization 1.3x and directional intra
+  prediction 1.2x faster.
 - The AV1 encoder switches the interpolation filter by block, as SVT-AV1
   does: every inter candidate estimated with EIGHTTAP, the best three with
   the smooth and sharp filters too (speed -1 and below code the best
