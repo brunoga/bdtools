@@ -6,8 +6,10 @@ package av1
 // prediction's SATD.
 
 import (
+	"cmp"
 	"math"
 	"math/bits"
+	"slices"
 	"sort"
 )
 
@@ -550,7 +552,7 @@ func (t *tileEnc) chromaEstimate(mode, angle int) float64 {
 
 // withAngles adds the other angles of the best directional candidates.
 func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []modeCand {
-	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	var dirs []modeCand
 	for _, c := range cands {
 		if isDirectional(c.mode) && c.filterMode < 0 && len(dirs) < n {
@@ -564,7 +566,7 @@ func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []mo
 			}
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	return cands
 }
 
@@ -584,7 +586,7 @@ func (t *tileEnc) lumaCandidates() []modeCand {
 	if b.size >= BLOCK_8X8 && !dbgNoAngles {
 		cands = withAngles(cands, angleModes, func(m, a int) float64 { return t.lumaEstimate(m, a, -1) })
 	} else {
-		sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+		slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	}
 	return cands[:min(lumaCands, len(cands))]
 }
@@ -623,7 +625,7 @@ func (t *tileEnc) chromaCandidates() []modeCand {
 			cands = append(cands, modeCand{mode: UV_CFL_PRED, filterMode: -1, cost: float64(satd) + math.Sqrt(t.lambda)*float64(t.cost.n)/costScale, cflU: au, cflV: av})
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool { return cands[i].cost < cands[j].cost })
+	slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	return cands[:min(chromaCands, len(cands))]
 }
 
@@ -920,7 +922,7 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 		rs[i] = ranked{tt, float64(d)*scale + t.lambda*(float64(nb)+0.5*float64(eob))}
 	}
 	r := rs[:len(types)]
-	sort.SliceStable(r, func(a, b int) bool { return r[a].est < r[b].est })
+	slices.SortStableFunc(r, func(a, b ranked) int { return cmp.Compare(a.est, b.est) })
 	out := t.txTypeBuf[:0]
 	for _, x := range r[:k] {
 		if x.tt == DCT_DCT {

@@ -44,8 +44,9 @@ type EncoderOptions struct {
 	// Speed trades size for time: -2 the partitions searched without
 	// pruning (5.3 times slower, 3.0% smaller on two 120-picture 1080p
 	// clips); -1 those after a skipped whole block too, intra everywhere
-	// and every inter candidate coded in full, its transforms searched
-	// (2.8 times slower, 2.3% smaller); 0 every tool searched, intra in
+	// and every inter candidate coded in full, its transforms searched,
+	// the best's interpolation filter by coding it with each (2.8 times
+	// slower, 2.3% smaller); 0 every tool searched, intra in
 	// inter pictures where its estimate is near inter's, inter candidates
 	// coded in full where theirs are near the best's, with their largest
 	// transforms, DCT_DCT, the best's transforms then searched; 1 the
@@ -144,16 +145,17 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		primaries: o.Primaries, transfer: o.Transfer, matrix: o.Matrix, fullRange: o.FullRange,
 		num: o.FPSNum, den: o.FPSDen,
 	}
-	e.tools = tools{interCands: interCands, filterRD: filterRD, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
+	e.tools = tools{interCands: interCands, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
 		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst, fastCands: true}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio, e.tools.fastCands = false, 0, 0, false
+		e.tools.filterRD = filterRD
 	}
 	if o.Speed <= -2 {
 		e.tools.pruneExt = false
 	}
 	if o.Speed >= 1 {
-		e.tools.txTree, e.tools.filterRD = true, false
+		e.tools.txTree = true
 		e.tools.intraSkip = min(e.tools.intraSkip, 1)
 		if e.tools.candRatio > 0 {
 			e.tools.candRatio = min(e.tools.candRatio, 1.05)
