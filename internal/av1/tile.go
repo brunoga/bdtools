@@ -130,6 +130,10 @@ type tileEnc struct {
 	// interEst is the best inter candidate's estimate, intraLimit the
 	// intra estimate above which the intra search stops (0 none)
 	interEst, intraLimit float64
+	// mvCosts are the motion vector components' rates mvDiffCost keeps,
+	// of generation mvGen
+	mvCosts [2][2*mvCostRange + 1]mvCompCost
+	mvGen   uint32
 	// iiPred is a plane's intra prediction of an inter-intra block,
 	// iiIntra the block's luma ones by mode, iiInter its luma inter one
 	iiPred  [32 * 32]uint16

@@ -750,10 +750,9 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 	me := meBlock{ref: f.refs[ref], src: f.src[0], srcStride: f.stride[0], x: c * 4, y: r * 4,
 		w: int(blockWidth[size]), h: int(blockHeight[size]), bitDepth: f.bitDepth, filt: f.filt,
 		allowHP: f.fp.highPrecisionMV, cost: func(m mv) float64 {
-			t.cost.n = 0
-			t.writeMvDiff(&t.cost, mv{m.row - pred0.row, m.col - pred0.col})
-			return sl * float64(t.cost.n) / costScale
+			return sl * float64(t.mvDiffCost(mv{m.row - pred0.row, m.col - pred0.col})) / costScale
 		}}
+	t.mvGen++
 	starts := []mv{{}}
 	for i := range min(s.numMvFound, 4) {
 		starts = append(starts, s.refStackMv[i][0])
@@ -769,6 +768,50 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 	}
 	t.meSeen[key] = meResult{m, cost}
 	return m, cost
+}
+
+// mvCostRange is how far from 0 the motion vector components whose
+// rates mvDiffCost keeps go (in eighths of a sample).
+const mvCostRange = 1024
+
+// mvCompCost is a component's rate as kept: of generation gen.
+type mvCompCost struct {
+	gen  uint32
+	cost int32
+}
+
+// mvDiffCost is writeMvDiff's rate of d, its components' rates kept for
+// the generation (a motion search's: the CDFs are the same throughout).
+func (t *tileEnc) mvDiffCost(d mv) int64 {
+	joint := MV_JOINT_ZERO
+	switch {
+	case d.row != 0 && d.col != 0:
+		joint = MV_JOINT_HNZVNZ
+	case d.row != 0:
+		joint = MV_JOINT_HZVNZ
+	case d.col != 0:
+		joint = MV_JOINT_HNZVZ
+	}
+	n := int64(symbolCost(joint, t.cdf.mvJoint[0][:]))
+	for comp, v := range [2]int32{d.row, d.col} {
+		if v == 0 {
+			continue
+		}
+		if v < -mvCostRange || v > mvCostRange {
+			t.cost.n = 0
+			t.writeMvComponent(&t.cost, 0, comp, v)
+			n += t.cost.n
+			continue
+		}
+		e := &t.mvCosts[comp][v+mvCostRange]
+		if e.gen != t.mvGen {
+			t.cost.n = 0
+			t.writeMvComponent(&t.cost, 0, comp, v)
+			e.gen, e.cost = t.mvGen, int32(t.cost.n) //nolint:gosec // a rate
+		}
+		n += int64(e.cost)
+	}
+	return n
 }
 
 // meKey is a motion search's reference frame, block and size.
