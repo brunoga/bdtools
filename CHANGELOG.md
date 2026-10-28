@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's directional intra prediction finds each sample's
+  edge position and weight from its column's or row's (computed once)
+  and writes by rows: the same streams, 1.6% less CPU.
 - The AV1 encoder's whole-sample motion search measures a block reaching
   past the reference's edges from a copy with the edges extended, with
   the AVX2 SAD (it clamped each sample's position): the same streams,

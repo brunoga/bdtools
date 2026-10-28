@@ -407,9 +407,6 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 		}
 	}
 	above, left := e.above[edgeOff:], e.left[edgeOff:]
-	// edge index i (from -2) of above and left
-	ab := func(i int) int32 { return e.above[edgeOff+i] }
-	lf := func(i int) int32 { return e.left[edgeOff+i] }
 	var dx, dy int
 	if pAngle < 90 {
 		dx = int(drIntraDerivative[pAngle])
@@ -447,32 +444,57 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 			}
 		}
 	case pAngle > 90 && pAngle < 180:
+		// A sample's edge position is i<<upL plus a term of its column
+		// (from the left edge), or j<<upA plus one of its row (from the
+		// above), its shift that term's alone: (i<<6 + v) >> k is
+		// i<<(6-k) + v>>k, and i<<6 vanishes from the shift's 5 bits.
+		var lBase, lShift [64]int32
+		for j := range w {
+			v := -(j + 1) * dy
+			lBase[j] = int32(v >> uint(6-upL))          //nolint:gosec // an edge position
+			lShift[j] = int32((v<<uint(upL))>>1) & 0x1f //nolint:gosec // 0..31
+		}
 		for i := range h {
 			// from the left edge while the above one's base would be
 			// before -(1 << upA), that is idx < -64: to j0
 			j0 := min(max(((i+1)*dx-64+63)>>6, 0), w)
 			out := pred[i*w : i*w+w]
+			il := int32(i << uint(upL)) //nolint:gosec // a row
 			for j := range out[:j0] {
-				idx := (i << 6) - (j+1)*dy
-				base := idx >> uint(6-upL)
-				shift := int32((idx<<uint(upL))>>1) & 0x1f
-				out[j] = uint16((lf(base)*(32-shift) + lf(base+1)*shift + 16) >> 5) //nolint:gosec // a sample
+				base, sh := il+lBase[j], lShift[j]
+				out[j] = uint16((e.left[edgeOff+int(base)]*(32-sh) + e.left[edgeOff+int(base)+1]*sh + 16) >> 5) //nolint:gosec // a sample
 			}
-			for j := j0; j < w; j++ {
-				idx := (j << 6) - (i+1)*dx
-				base := idx >> uint(6-upA)
-				shift := int32((idx<<uint(upA))>>1) & 0x1f
-				out[j] = uint16((ab(base)*(32-shift) + ab(base+1)*shift + 16) >> 5) //nolint:gosec // a sample
+			v := -(i + 1) * dx
+			b0 := v >> uint(6-upA)
+			sh := int32((v<<uint(upA))>>1) & 0x1f //nolint:gosec // 0..31
+			if j0 == w {
+				continue
+			}
+			if upA == 0 {
+				a := e.above[edgeOff+b0+j0 : edgeOff+b0+w+1]
+				for j := range out[j0:] {
+					out[j0+j] = uint16((a[j]*(32-sh) + a[j+1]*sh + 16) >> 5) //nolint:gosec // a sample
+				}
+			} else {
+				for j := j0; j < w; j++ {
+					base := edgeOff + b0 + j<<1
+					out[j] = uint16((e.above[base]*(32-sh) + e.above[base+1]*sh + 16) >> 5) //nolint:gosec // a sample
+				}
 			}
 		}
 	case pAngle > 180:
+		var cBase, cShift [64]int32
 		for j := range w {
 			idx := (j + 1) * dy
-			shift := int32((idx<<uint(upL))>>1) & 0x1f
-			for i := range h {
-				base := (idx >> uint(6-upL)) + (i << uint(upL))
-				v := (left[base]*(32-shift) + left[base+1]*shift + 16) >> 5
-				pred[i*w+j] = uint16(v) //nolint:gosec // a sample
+			cBase[j] = int32(idx >> uint(6-upL))          //nolint:gosec // an edge position
+			cShift[j] = int32((idx<<uint(upL))>>1) & 0x1f //nolint:gosec // 0..31
+		}
+		for i := range h {
+			out := pred[i*w : i*w+w]
+			il := int32(i << uint(upL)) //nolint:gosec // a row
+			for j := range out {
+				base, sh := il+cBase[j], cShift[j]
+				out[j] = uint16((left[base]*(32-sh) + left[base+1]*sh + 16) >> 5) //nolint:gosec // a sample
 			}
 		}
 	case pAngle == 90:
