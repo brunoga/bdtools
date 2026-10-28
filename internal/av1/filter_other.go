@@ -19,3 +19,7 @@ func widen(out []int32, src []uint16, sh uint) { widenGo(out, src, sh) }
 func compAvg(out []uint16, p0, p1 []int32, w0, w1 int32, sh uint, maxV int32) {
 	compAvgGo(out, p0, p1, w0, w1, sh, maxV)
 }
+
+func filterBlock(s *interScratch, src []uint16, off, ss, w, h, r0, r1 int, kx, ky *[8]int16, rnd interRounding, maxV int32, dst16 []uint16, dst32 []int32, dstStride int) bool {
+	return false
+}

@@ -57,6 +57,8 @@ func scaleMv(plane, x, y int, m mv, refW, refH, frameW, frameH int) (startX, sta
 type interScratch struct {
 	edge [(128 + 7) * (128 + 7)]uint16
 	mid  [(128 + 7) * 128]int32
+	// mid16 is filterBlock's
+	mid16 [(128 + 7) * 128]int16
 	// comp holds a compound block's two predictions (preds[])
 	comp [2][]int32
 	// obmc is an overlapped prediction's obmcPred
@@ -155,6 +157,9 @@ func (s *interScratch) blockInterPred(ref *refFrameState, plane, startX, startY,
 	// filter's nonzero taps read.
 	ty := subpelTaps[fy][fracY]
 	r0, r1 := int(ty[0]), h-1+int(ty[1])
+	if filterBlock(s, src, off, ss, w, h, r0, r1, &subpelFilters[fx][fracX], &subpelFilters[fy][fracY], rnd, maxV, dst16, dst32, dstStride) {
+		return
+	}
 	mid := s.mid[:]
 	kx := &subpelFilters[fx][fracX]
 	tx := subpelTaps[fx][fracX]
