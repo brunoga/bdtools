@@ -102,16 +102,29 @@ func filterBlock(s *interScratch, src []uint16, off, ss, w, h, r0, r1 int, kx, k
 	if !useAVX2 || w&7 != 0 {
 		return false
 	}
-	_ = src[off+(r1-1)*ss+w+6]
-	sh0 := uint(rnd.round0)
-	filterHAVX2(&s.mid16[r0*w], &src[off+r0*ss], ss, w, r1-r0, &kx[0], 1<<(sh0-1), uint64(sh0))
+	filterH16(s.mid16[r0*w:], src, off+r0*ss, ss, w, r1-r0, kx, uint(rnd.round0))
 	sh1 := uint(rnd.round1)
 	if dst16 != nil {
-		_ = dst16[(h-1)*dstStride+w-1]
-		filterVClipAVX2(&dst16[0], dstStride, &s.mid16[0], w, h, &ky[0], 1<<(sh1-1), uint64(sh1), maxV)
+		filterVClip16(dst16, dstStride, s.mid16[:], w, h, ky, sh1, maxV)
 	} else {
 		_ = dst32[(h-1)*dstStride+w-1]
 		filterV32AVX2(&dst32[0], dstStride, &s.mid16[0], w, h, &ky[0], 1<<(sh1-1), uint64(sh1))
 	}
 	return true
+}
+
+// filterH16 is the horizontal filter of rows rows of w samples (w a
+// multiple of 8, with AVX2) into mid as words: each row's w+7 samples
+// from src at off, ss apart; the kernel's 8 taps, rounded by sh.
+func filterH16(mid []int16, src []uint16, off, ss, w, rows int, k *[8]int16, sh uint) {
+	_, _ = src[off+(rows-1)*ss+w+6], mid[rows*w-1]
+	filterHAVX2(&mid[0], &src[off], ss, w, rows, &k[0], 1<<(sh-1), uint64(sh))
+}
+
+// filterVClip16 is the vertical filter of a w by h block (w a multiple of
+// 8, with AVX2) from mid's words (w apart, h+7 rows) into dst (ds
+// apart), clipped to 0..maxV: the kernel's 8 taps, rounded by sh.
+func filterVClip16(dst []uint16, ds int, mid []int16, w, h int, k *[8]int16, sh uint, maxV int32) {
+	_, _ = dst[(h-1)*ds+w-1], mid[(h+6)*w+w-1]
+	filterVClipAVX2(&dst[0], ds, &mid[0], w, h, &k[0], 1<<(sh-1), uint64(sh), maxV)
 }

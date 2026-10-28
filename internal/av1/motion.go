@@ -46,6 +46,8 @@ type motionSearch struct {
 	s    interScratch
 	pred [128 * 128]uint16
 	hmid [3][]int32 // subPelStep's horizontal passes
+	// hmid16 are subPelStep's horizontal passes as words (with AVX2)
+	hmid16 [3][]int16
 	seen [1024]seenPoint
 	gen  uint32
 }
@@ -239,6 +241,10 @@ func (ms *motionSearch) subPelStep(b *meBlock, c mv, step int32, costs *[8]float
 		ymin, ymax = min(ymin, y0+int(ty[0])), max(ymax, y0+h-1+int(ty[1]))
 	}
 	rnd := interRoundingFor(b.bitDepth, false)
+	if useAVX2 && w&7 == 0 {
+		ms.subPelStep16(b, c, step, &sx, &sy, costs)
+		return true
+	}
 	sh0 := uint(rnd.round0)
 	add0 := int32(1) << (sh0 - 1)
 	src, ss := b.ref.rec[0], b.ref.stride[0]
@@ -288,6 +294,46 @@ func (ms *motionSearch) subPelStep(b *meBlock, c mv, step int32, costs *[8]float
 		costs[i] = float64(satdBlock(b.srcBlock(), b.srcStride, ms.pred[:], w, w, h)) + b.cost(m)
 	}
 	return true
+}
+
+// subPelStep16 is subPelStep's predictions with the block filters (w a
+// multiple of 8): each column's horizontal pass over the rows any of its
+// neighbours' 8 taps read.
+func (ms *motionSearch) subPelStep16(b *meBlock, c mv, step int32, sx, sy *[8]int, costs *[8]float64) {
+	w, h := b.w, b.h
+	fx, fy := filterFor(b.filt[1], w), filterFor(b.filt[0], h)
+	ymin, ymax := math.MaxInt, math.MinInt
+	for i := range subPelDirs {
+		y0 := (sy[i] >> 10) - 3
+		ymin, ymax = min(ymin, y0), max(ymax, y0+h+7)
+	}
+	rnd := interRoundingFor(b.bitDepth, false)
+	src, ss := b.ref.rec[0], b.ref.stride[0]
+	var cols [3]int
+	nc := 0
+	col := func(x int) []int16 {
+		for k := range nc {
+			if cols[k] == x {
+				return ms.hmid16[k]
+			}
+		}
+		k := nc
+		cols[k], nc = x, nc+1
+		if n := w * (ymax - ymin); cap(ms.hmid16[k]) < n {
+			ms.hmid16[k] = make([]int16, n)
+		}
+		fracX, x0 := (x>>6)&SUBPEL_MASK, (x>>10)-3
+		filterH16(ms.hmid16[k], src, ymin*ss+x0, ss, w, ymax-ymin, &subpelFilters[fx][fracX], uint(rnd.round0))
+		return ms.hmid16[k]
+	}
+	maxV := int32(1)<<uint(b.bitDepth) - 1
+	for i, d := range subPelDirs {
+		mid := col(sx[i])
+		fracY, y0 := (sy[i]>>6)&SUBPEL_MASK, (sy[i]>>10)-3
+		filterVClip16(ms.pred[:], w, mid[(y0-ymin)*w:], w, h, &subpelFilters[fy][fracY], uint(rnd.round1), maxV)
+		m := mv{row: c.row + d[0]*step, col: c.col + d[1]*step}
+		costs[i] = float64(satdBlock(b.srcBlock(), b.srcStride, ms.pred[:], w, w, h)) + b.cost(m)
+	}
 }
 
 // subCost is the SATD and rate of the block's exact prediction by m.

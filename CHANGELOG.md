@@ -11,10 +11,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- The AV1 encoder's inter prediction filters a block in two calls, each
-  pass's taps in pairs with VPMADDWD on 16-bit intermediate values (it
-  was one call a row, a multiply a tap): the same streams. With the
-  AVX2 quantization below, speed 2 takes 7% less CPU.
+- The AV1 encoder's inter prediction and sub-sample motion search filter
+  a block in two calls, each pass's taps in pairs with VPMADDWD on 16-bit
+  intermediate values (it was one call a row, a multiply a tap): the
+  same streams. With the AVX2 quantization below, speed 2 takes 12% less
+  CPU (4.09 CPU-seconds a 1080p picture, 4.16 pictures a second).
 - The AV1 encoder's first quantization pass is an AVX2 kernel and the
   intra edge filter reads a padded copy of the edge instead of clamping
   each tap: the same streams, quantization 1.3x and directional intra
