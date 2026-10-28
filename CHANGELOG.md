@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's speed 2 leaves inter-intra out: 0.3% smaller by
+  PSNR-YUV, 0.7% by VMAF (at speed 0 it is worth nothing either way,
+  masked compound 1%).
 - The AV1 encoder codes a key frame with the mini-GOP after it, its q set
   by the temporal model by how much the mini-GOP takes from it (SVT-AV1
   codes Free Solo's at q 16, ours was 44): against SVT-AV1 preset 4,
