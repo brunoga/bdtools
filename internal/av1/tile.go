@@ -100,7 +100,7 @@ type tileEnc struct {
 	txTypeBuf           [TX_TYPES]int
 	txs                 []txCoded
 	levels              []int32
-	lv                  [32 * 32]uint8
+	lv                  [(32 + lvPad) * (32 + lvPad)]uint8
 	cflL                [32 * 32]int32
 	snaps               [10][9]*snapshot // by depth, a few each
 	sbStart             snapshot

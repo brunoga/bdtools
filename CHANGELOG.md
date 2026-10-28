@@ -11,6 +11,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder switches the interpolation filter by block, as SVT-AV1
+  does: every inter candidate estimated with EIGHTTAP, the best three with
+  the smooth and sharp filters too (speed -1 and below code the best
+  with each). Against SVT-AV1 preset 4, by VMAF +8.6% at speed 2 (from
+  +9.7%) and +6.5% at speed 0 (from +7.7%), by PSNR-YUV the same, at the
+  same speed. The candidates are sorted without reflection and the
+  coefficient contexts read from a padded buffer: the same streams, 1.01
+  times faster.
 - The AV1 encoder's speed 2 leaves inter-intra out: 0.3% smaller by
   PSNR-YUV, 0.7% by VMAF (at speed 0 it is worth nothing either way,
   masked compound 1%).

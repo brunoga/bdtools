@@ -57,8 +57,8 @@ func TestDistWeights(t *testing.T) {
 // Compound blocks from two frames on one side: every picture coded from
 // the ones before it (MiniGOP 1), and in a mini-GOP's later frames.
 func TestSameDirCompound(t *testing.T) {
-	defer func() { dbgForceCompound, dbgForceInter = false, false }()
-	dbgForceCompound, dbgForceInter = true, true
+	defer func(v bool) { dbgForceCompound, dbgForceInter, switchable = false, false, v }(switchable)
+	dbgForceCompound, dbgForceInter, switchable = true, true, false
 	for _, gop := range raceCut([]int{1, 4}) {
 		t.Run(fmt.Sprint(gop), func(t *testing.T) {
 			o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: gop}

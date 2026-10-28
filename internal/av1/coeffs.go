@@ -173,7 +173,8 @@ func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, i
 	adj := int(adjustedTxSize[txSz])
 	bwl := int(txWidthLog2[adj])
 	width, height := 1<<uint(bwl), int(txHeight[adj])
-	lv := t.lv[:width*height]
+	stride := width + lvPad
+	lv := t.lv[:(height+lvPad)*stride]
 	clear(lv)
 	for c := eob - 1; c >= 0; c-- {
 		pos := int(scan[c])
@@ -192,10 +193,10 @@ func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, i
 			}
 			cd.symbol(min(level, 3)-1, cdf.coeffBaseEob[txSzCtx][ptype][ctx][:])
 		} else {
-			cd.symbol(min(level, 3), cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:])
+			cd.symbol(min(level, 3), cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, stride, pos)][:])
 		}
 		if level > NUM_BASE_LEVELS {
-			bctx := brCtx(lv, cls, bwl, width, height, pos)
+			bctx := brCtx(lv, cls, bwl, stride, pos)
 			rem := level - (NUM_BASE_LEVELS + 1)
 			for range COEFF_BASE_RANGE / (BR_CDF_SIZE - 1) {
 				k := min(rem, BR_CDF_SIZE-1)
@@ -206,7 +207,7 @@ func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, i
 				}
 			}
 		}
-		lv[pos] = uint8(min(level, NUM_BASE_LEVELS+COEFF_BASE_RANGE+1)) //nolint:gosec // at most 15
+		lv[lvAt(pos, bwl, stride)] = uint8(min(level, NUM_BASE_LEVELS+COEFF_BASE_RANGE+1)) //nolint:gosec // at most 15
 	}
 	// signs and remainders, first first
 	cul, dcCat := 0, 0
@@ -242,16 +243,25 @@ func (t *tileEnc) writeLevels(cd coder, tc *txCoded, txSzCtx, ptype int) (int, i
 	return min(63, cul), dcCat
 }
 
+// lvPad is the columns right of and the rows below the levels' buffer
+// (their stride width+lvPad) the contexts' neighbours read as 0, as
+// libaom's: no neighbour is outside the block.
+const lvPad = 4
+
+// lvAt is the coefficient at pos's place in the levels' buffer.
+func lvAt(pos, bwl, stride int) int {
+	row := pos >> uint(bwl)
+	return row*stride + pos - row<<uint(bwl)
+}
+
 // baseCtx is get_coeff_base_ctx for a coefficient not the last.
-func baseCtx(lv []uint8, txSz, cls, bwl, width, height, pos int) int {
+func baseCtx(lv []uint8, txSz, cls, bwl, stride, pos int) int {
 	row := pos >> uint(bwl)
 	col := pos - row<<uint(bwl)
+	p := row*stride + col
 	mag := 0
 	for _, o := range sigRefDiffOffset[cls] {
-		rr, cc := row+int(o[0]), col+int(o[1])
-		if rr < height && cc < width {
-			mag += min(int(lv[rr<<uint(bwl)+cc]), 3)
-		}
+		mag += min(int(lv[p+int(o[0])*stride+int(o[1])]), 3)
 	}
 	ctx := min((mag+1)>>1, 4)
 	if cls == TX_CLASS_2D {
@@ -268,15 +278,13 @@ func baseCtx(lv []uint8, txSz, cls, bwl, width, height, pos int) int {
 }
 
 // brCtx is coeff_br's context.
-func brCtx(lv []uint8, cls, bwl, width, height, pos int) int {
+func brCtx(lv []uint8, cls, bwl, stride, pos int) int {
 	row := pos >> uint(bwl)
 	col := pos - row<<uint(bwl)
+	p := row*stride + col
 	mag := 0
 	for _, o := range magRefOffsetWithTxClass[cls] {
-		rr, cc := row+int(o[0]), col+int(o[1])
-		if rr < height && cc < width {
-			mag += min(int(lv[rr*width+cc]), COEFF_BASE_RANGE+NUM_BASE_LEVELS+1)
-		}
+		mag += min(int(lv[p+int(o[0])*stride+int(o[1])]), COEFF_BASE_RANGE+NUM_BASE_LEVELS+1)
 	}
 	mag = min((mag+1)>>1, 6)
 	switch {

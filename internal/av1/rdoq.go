@@ -53,7 +53,8 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 	adj := int(adjustedTxSize[txSz])
 	bwl := int(txWidthLog2[adj])
 	width, height := 1<<uint(bwl), int(txHeight[adj])
-	lv := t.lv[:width*height]
+	stride := width + lvPad
+	lv := t.lv[:(height+lvPad)*stride]
 	clear(lv)
 	scale := float64(den*den) / 64
 	lambda := t.lambda
@@ -64,7 +65,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 		l0 := int64(abs32(q[pos]))
 		if l0 == 0 {
 			// its base level's symbol: the rate the end of block saves
-			r := symbolCost(0, cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:])
+			r := symbolCost(0, cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, stride, pos)][:])
 			gain[c] = -lambda * float64(r) / costScale
 			continue
 		}
@@ -87,7 +88,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 			}
 			baseCDF = cdf.coeffBaseEob[txSzCtx][ptype][ctx][:]
 		} else {
-			baseCDF = cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, width, height, pos)][:]
+			baseCDF = cdf.coeffBase[txSzCtx][ptype][baseCtx(lv, txSz, cls, bwl, stride, pos)][:]
 		}
 		bctx := -1
 		bestL, bestJ, bestD, bestR := l0, 0.0, 0.0, int32(0)
@@ -108,7 +109,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 			}
 			if l > NUM_BASE_LEVELS {
 				if bctx < 0 {
-					bctx = brCtx(lv, cls, bwl, width, height, pos)
+					bctx = brCtx(lv, cls, bwl, stride, pos)
 				}
 				rem := int(l) - (NUM_BASE_LEVELS + 1)
 				for range COEFF_BASE_RANGE / (BR_CDF_SIZE - 1) {
@@ -139,7 +140,7 @@ func (t *tileEnc) quantize(plane, txSz, txType int) int {
 		} else {
 			q[pos] = int32(bestL) //nolint:gosec // a level
 		}
-		lv[pos] = uint8(min(bestL, NUM_BASE_LEVELS+COEFF_BASE_RANGE+1)) //nolint:gosec // at most 15
+		lv[lvAt(pos, bwl, stride)] = uint8(min(bestL, NUM_BASE_LEVELS+COEFF_BASE_RANGE+1)) //nolint:gosec // at most 15
 	}
 	// RDOQ only lowers levels: the end of block can only move back
 	for eob > 0 && q[scan[eob-1]] == 0 {

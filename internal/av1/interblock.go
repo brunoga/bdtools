@@ -8,8 +8,9 @@ package av1
 // distortion.
 
 import (
+	"cmp"
 	"math"
-	"sort"
+	"slices"
 	"sync/atomic"
 )
 
@@ -23,13 +24,19 @@ var interCands = 4
 var candRatio = 1.15
 
 // switchable makes the inter frames' interpolation filter switchable by
-// block (else EIGHTTAP throughout): off, as the filters' symbols and the
-// search cost more than they save. (On the two 120-picture clips, against
-// switchable with filterRD: 0.3% smaller and 1.23 times faster.)
-var switchable = false
+// block (else EIGHTTAP throughout). (On the six clips, at speed 2: 0.3%
+// smaller by PSNR-YUV, 0.8% by VMAF, as fast; at speed 0 0.0% and 1.0%.)
+var switchable = true
+
+// filterTop is how many of the best candidates by their EIGHTTAP
+// estimate have the other filters estimated (0 all of them). (At speed
+// 2, all: 0.6% smaller by PSNR-YUV, 0.7% by VMAF, 1.16 times slower.)
+var filterTop = 3
 
 // filterRD chooses the best candidate's interpolation filter by coding it
-// with each (else the estimates' SATD alone chooses).
+// with each (else the estimates alone choose): at speed -1 and below.
+// (At speed 0: 0.7% smaller by PSNR-YUV, 3.1% by VMAF, 1.18 times
+// slower.)
 var filterRD = true
 
 // obmcCands is how many of them (single reference ones) are also coded
@@ -280,10 +287,14 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 			}
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+	slices.SortStableFunc(cands, func(a, b interCand) int { return cmp.Compare(a.est, b.est) })
+	if filterTop > 0 && f.fp.interpFilter == SWITCHABLE {
+		t.estimateFilters(cands[:min(filterTop, len(cands))])
+		slices.SortStableFunc(cands, func(a, b interCand) int { return cmp.Compare(a.est, b.est) })
+	}
 	if f.seq.interIntra {
 		cands = t.interIntraCandidates(cands)
-		sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+		slices.SortStableFunc(cands, func(a, b interCand) int { return cmp.Compare(a.est, b.est) })
 	}
 	if f.seq.maskedCompound {
 		var extra []interCand
@@ -297,7 +308,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		} else {
 			cands = append(cands, extra...)
 		}
-		sort.SliceStable(cands, func(i, j int) bool { return cands[i].est < cands[j].est })
+		slices.SortStableFunc(cands, func(a, b interCand) int { return cmp.Compare(a.est, b.est) })
 	}
 	t.interEst = cands[0].est
 	d := 5 + depthOf(min(size, BLOCK_64X64))
@@ -835,7 +846,7 @@ func (t *tileEnc) estimate(cands []interCand) {
 		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
 		b.interp, b.obmc, b.compDist, b.masked, b.ii = EIGHTTAP, false, false, false, interIntra{}
 		filters := []int{EIGHTTAP}
-		if t.needsInterpFilter() {
+		if filterTop == 0 && t.needsInterpFilter() {
 			filters = []int{EIGHTTAP, EIGHTTAP_SMOOTH, EIGHTTAP_SHARP}
 		}
 		weights := []bool{false}
@@ -862,6 +873,39 @@ func (t *tileEnc) estimate(cands []interCand) {
 		}
 		b.compDist = false
 	}
+}
+
+// estimateFilters estimates the candidates with the other interpolation
+// filters, each keeping its best.
+func (t *tileEnc) estimateFilters(cands []interCand) {
+	f, b := t.f, &t.b
+	w, h := int(blockWidth[b.size]), int(blockHeight[b.size])
+	sl := math.Sqrt(t.lambda)
+	for i := range cands {
+		cd := &cands[i]
+		b.refFrame, b.refFrame2 = cd.ref, cd.ref2
+		if b.refFrame2 <= INTRA_FRAME {
+			b.refFrame2 = NONE
+		}
+		b.yMode, b.refMvIdx, b.mv, b.mv2 = cd.mode, cd.idx, cd.m, cd.m2
+		b.obmc, b.compDist, b.masked, b.ii = false, cd.compDist, false, interIntra{}
+		t.findMvStack(&t.stack, b.refFrame2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
+		if !t.needsInterpFilter() {
+			continue
+		}
+		for _, fl := range [2]int{EIGHTTAP_SMOOTH, EIGHTTAP_SHARP} {
+			b.interp = fl
+			t.setModes()
+			f.predictInterBlock(&f.refs, b, 0, f.filt, t.interPred[0][:], w, &t.is)
+			satd := t.satd(0, b.c*4, b.r*4, w, h, t.interPred[0][:])
+			t.cost.n = 0
+			t.writeInterModes(&t.cost)
+			if e := float64(satd) + sl*float64(t.cost.n)/costScale; e < cd.est {
+				cd.est, cd.interp = e, fl
+			}
+		}
+	}
+	b.compDist = false
 }
 
 // varTxCursor is where a decided transform tree is read from.
