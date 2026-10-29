@@ -55,16 +55,6 @@ func newLoopFilter(f *frameEnc, level [4]int, sharp int) *loopFilter {
 	return lf
 }
 
-// lvl is the adaptive filter strength selection (spec 7.14.5) for the
-// block at mi index mi, i being the level's index (pass for luma, plane+1
-// for chroma). With no segmentation, delta_lf or loop_filter_delta_enabled
-// it is the frame's level; those (and the block's reference frame and
-// mode type) would apply here.
-func (lf *loopFilter) lvl(mi, i int) int {
-	_ = mi
-	return lf.level[i]
-}
-
 // filterPlane applies the loop filter to plane p of buf (laid out as
 // f.rec[p]).
 func (lf *loopFilter) filterPlane(p int, buf []uint16) {
@@ -78,8 +68,27 @@ func (lf *loopFilter) filterPlane(p int, buf []uint16) {
 	bands := (h4 + bandH - 1) / bandH
 	workers := min(runtime.GOMAXPROCS(0), bands)
 	for pass := range 2 {
+		li := pass
+		if p > 0 {
+			li = p + 1
+		}
+		if lf.level[li] == 0 {
+			continue // every edge's level 0
+		}
+		if f.lfEdges[p][pass] == nil {
+			f.lfEdges[p][pass] = make([][]lfEdge, bands)
+		}
+		run := func(b int) {
+			e := &f.lfEdges[p][pass][b]
+			if *e == nil {
+				*e = lf.edges(p, pass, b*bandH, min((b+1)*bandH, h4), []lfEdge{})
+			}
+			lf.filterEdges(p, pass, li, *e, buf)
+		}
 		if workers <= 1 {
-			lf.edges(p, pass, 0, h4, buf)
+			for b := range bands {
+				run(b)
+			}
 			continue
 		}
 		var next atomic.Int32
@@ -91,7 +100,7 @@ func (lf *loopFilter) filterPlane(p int, buf []uint16) {
 					if b >= bands {
 						return
 					}
-					lf.edges(p, pass, b*bandH, min((b+1)*bandH, h4), buf)
+					run(b)
 				}
 			})
 		}
@@ -99,10 +108,20 @@ func (lf *loopFilter) filterPlane(p int, buf []uint16) {
 	}
 }
 
-// edges runs the edge loop filter process (spec 7.14.2) over the rows of
-// 4x4 blocks y4a..y4b-1 of plane p, for one pass (0 vertical edges, 1
-// horizontal).
-func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
+// lfEdge is a 4-sample edge segment the loop filter filters: its first
+// sample's place and its filter size.
+type lfEdge struct {
+	pos  int32
+	size int32
+}
+
+// edges appends to out the edges the edge loop filter process (spec
+// 7.14.2) filters over the rows of 4x4 blocks y4a..y4b-1 of plane p, for
+// one pass (0 vertical edges, 1 horizontal). Every block's level is the
+// frame's (spec 7.14.5's adaptive strength selection: no segmentation,
+// delta_lf or loop_filter_delta_enabled), so the edges are the same at
+// every level but 0, which filters none.
+func (lf *loopFilter) edges(p, pass, y4a, y4b int, out []lfEdge) []lfEdge {
 	f := lf.f
 	sub := uint(min(p, 1)) //nolint:gosec // 0 or 1
 	stride := f.stride[p]
@@ -111,13 +130,9 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 	w4 := min(lw, (f.width+(4<<sub)-1)/(4<<sub))
 	h4 := min(y4b, (f.height+(4<<sub)-1)/(4<<sub))
 	lfTx := f.lfTx[p]
-	dx, dy, step := 1, 0, 1
+	dx, dy := 1, 0
 	if pass == 1 {
-		dx, dy, step = 0, 1, stride
-	}
-	li := pass
-	if p > 0 {
-		li = p + 1
+		dx, dy = 0, 1
 	}
 	maxSize := 16
 	if p > 0 {
@@ -138,15 +153,16 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 			txSz := lfTx[y4*lw+x4]
 			prevTxSz := lfTx[(y4-dy)*lw+x4-dx]
 			planeSize := subsampledSize[f.mis[mi].miSize][sub][sub]
+			// (the sizes are powers of two)
 			var isBlockEdge, isTxEdge bool
 			var baseSize int
 			if pass == 0 {
-				isBlockEdge = xP%int(blockWidth[planeSize]) == 0
-				isTxEdge = xP%int(txWidth[txSz]) == 0
+				isBlockEdge = xP&(int(blockWidth[planeSize])-1) == 0
+				isTxEdge = xP&(int(txWidth[txSz])-1) == 0
 				baseSize = int(min(txWidth[prevTxSz], txWidth[txSz]))
 			} else {
-				isBlockEdge = yP%int(blockHeight[planeSize]) == 0
-				isTxEdge = yP%int(txHeight[txSz]) == 0
+				isBlockEdge = yP&(int(blockHeight[planeSize])-1) == 0
+				isTxEdge = yP&(int(txHeight[txSz])-1) == 0
 				baseSize = int(min(txHeight[prevTxSz], txHeight[txSz]))
 			}
 			if !isTxEdge {
@@ -156,22 +172,26 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 			if !isBlockEdge && f.mis[mi].skip != 0 && !isIntra {
 				continue
 			}
-			lvl := lf.lvl(mi, li)
-			if lvl == 0 {
-				lvl = lf.lvl(f.mi(row-(dy<<sub), col-(dx<<sub)), li)
-				if lvl == 0 {
-					continue
-				}
-			}
 			size := min(maxSize, baseSize)
-			pos := yP*stride + xP
-			across := stride // along the edge
-			if pass == 1 {
-				across = 1
-			}
-			for i := range 4 {
-				lf.sample(buf, pos+i*across, step, p, size, lf.limit[lvl], lf.blimit[lvl], lf.thresh[lvl])
-			}
+			out = append(out, lfEdge{int32(yP*stride + xP), int32(size)}) //nolint:gosec // in the plane
+		}
+	}
+	return out
+}
+
+// filterEdges filters a pass's edges of plane p with level index li.
+func (lf *loopFilter) filterEdges(p, pass, li int, edges []lfEdge, buf []uint16) {
+	stride := lf.f.stride[p]
+	step, across := 1, stride // across the edge, along it
+	if pass == 1 {
+		step, across = stride, 1
+	}
+	lvl := lf.level[li]
+	limit, blimit, thresh := lf.limit[lvl], lf.blimit[lvl], lf.thresh[lvl]
+	for _, e := range edges {
+		pos := int(e.pos)
+		for i := range 4 {
+			lf.sample(buf, pos+i*across, step, p, int(e.size), limit, blimit, thresh)
 		}
 	}
 }
