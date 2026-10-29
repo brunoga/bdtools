@@ -400,7 +400,7 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 			if candRow+r >= f.miRows || candCol+c >= f.miCols {
 				continue
 			}
-			if f.refFrames[0][f.mi(candRow+r, candCol+c)] == INTRA_FRAME {
+			if f.mis[f.mi(candRow+r, candCol+c)].refFrames[0] == INTRA_FRAME {
 				someUseIntra = true
 			}
 		}
@@ -416,12 +416,12 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 			i := f.mi(candRow+r, candCol+c)
 			filt := filt
 			if f.fp.interpFilter == SWITCHABLE {
-				filt = [2]int{int(f.interp[i]), int(f.interp[i])}
+				filt = [2]int{int(f.mis[i].interp), int(f.mis[i].interp)}
 			}
-			if f.refFrames[1][i] > INTRA_FRAME {
-				ref := [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])}
+			if f.mis[i].refFrames[1] > INTRA_FRAME {
+				ref := [2]int{int(f.mis[i].refFrames[0]), int(f.mis[i].refFrames[1])}
 				var wt [2]int32 // COMPOUND_AVERAGE
-				if f.compIdx[i] == 0 {
+				if f.mis[i].compIdx == 0 {
 					wt = f.fp.distWeights(ref)
 				}
 				var mk *compMask
@@ -429,11 +429,11 @@ func (f *frameEnc) predictInterBlock(refs *[TOTAL_REFS_PER_FRAME]*refFrameState,
 					mk = &b.mask
 				}
 				predictCompound(refs, plane, baseX+x, baseY+y, predW, predH, ref,
-					[2]mv{f.mvs[0][i], f.mvs[1][i]}, filt, f.bitDepth, wt, dst[y*dstStride+x:], dstStride, s, mk, b)
+					[2]mv{f.mis[i].mvs[0], f.mis[i].mvs[1]}, filt, f.bitDepth, wt, dst[y*dstStride+x:], dstStride, s, mk, b)
 				c++
 				continue
 			}
-			predictInter(refs[f.refFrames[0][i]], plane, baseX+x, baseY+y, predW, predH, f.mvs[0][i], filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)
+			predictInter(refs[f.mis[i].refFrames[0]], plane, baseX+x, baseY+y, predW, predH, f.mis[i].mvs[0], filt, f.bitDepth, dst[y*dstStride+x:], dstStride, s)
 			c++
 		}
 		r++
@@ -484,10 +484,10 @@ func (f *frameEnc) overlapPredict(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, b 
 		}
 		fl := filt
 		if f.fp.interpFilter == SWITCHABLE {
-			fl = [2]int{int(f.interp[i]), int(f.interp[i])}
+			fl = [2]int{int(f.mis[i].interp), int(f.mis[i].interp)}
 		}
 		op := s.obmc[:pw*ph]
-		predictInter(refs[f.refFrames[0][i]], plane, predX, predY, pw, ph, f.mvs[0][i], fl, f.bitDepth, op, pw, s)
+		predictInter(refs[f.mis[i].refFrames[0]], plane, predX, predY, pw, ph, f.mis[i].mvs[0], fl, f.bitDepth, op, pw, s)
 		d := dst[(predY-baseY)*dstStride+predX-baseX:]
 		for y := range ph {
 			row, o := d[y*dstStride:y*dstStride+pw], op[y*pw:(y+1)*pw]
@@ -508,8 +508,8 @@ func (f *frameEnc) overlapPredict(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, b 
 		n, limit := 0, min(4, int(miWidthLog2[b.size]))
 		for x4 := b.c; n < limit && x4 < min(f.miCols, b.c+b.bw4); {
 			i := f.mi(b.r-1, x4|1)
-			step4 := min(max(int(num4x4BlocksWide[f.miSize[i]]), 2), 16)
-			if f.refFrames[0][i] > INTRA_FRAME {
+			step4 := min(max(int(num4x4BlocksWide[f.mis[i].miSize]), 2), 16)
+			if f.mis[i].refFrames[0] > INTRA_FRAME {
 				n++
 				overlap(i, (x4*4)>>sub, baseY, min(w, (step4*MI_SIZE)>>sub), min(h>>1, 32>>sub), 0)
 			}
@@ -520,8 +520,8 @@ func (f *frameEnc) overlapPredict(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, b 
 		n, limit := 0, min(4, int(miHeightLog2[b.size]))
 		for y4 := b.r; n < limit && y4 < min(f.miRows, b.r+b.bh4); {
 			i := f.mi(y4|1, b.c-1)
-			step4 := min(max(int(num4x4BlocksHigh[f.miSize[i]]), 2), 16)
-			if f.refFrames[0][i] > INTRA_FRAME {
+			step4 := min(max(int(num4x4BlocksHigh[f.mis[i].miSize]), 2), 16)
+			if f.mis[i].refFrames[0] > INTRA_FRAME {
 				n++
 				overlap(i, baseX, (y4*4)>>sub, min(w>>1, 32>>sub), min(h, (step4*MI_SIZE)>>sub), 1)
 			}

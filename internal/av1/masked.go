@@ -185,9 +185,9 @@ func (t *tileEnc) compGroupCtx() int {
 			continue
 		}
 		i := f.mi(n.r, n.c)
-		if f.refFrames[1][i] > INTRA_FRAME {
-			ctx += int(f.compGroup[i])
-		} else if f.refFrames[0][i] == ALTREF_FRAME {
+		if f.mis[i].refFrames[1] > INTRA_FRAME {
+			ctx += int(f.mis[i].compGroup)
+		} else if f.mis[i].refFrames[0] == ALTREF_FRAME {
 			ctx += 3
 		}
 	}

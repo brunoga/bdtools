@@ -31,22 +31,12 @@ type frameEnc struct {
 	// (the source by its edges).
 	src, rec [3][]uint16
 	stride   [3]int
-	// Per 4x4 luma block (the mi grid, miCols wide).
-	miSize, yMode, uvMode, skip, txSize []uint8
-	txType                              []uint8 // TxTypes
-	// Inter state per mi: the reference frames (RefFrames: INTRA_FRAME
-	// and NONE for intra blocks), the motion vectors (Mvs), whether a block
-	// is inter (IsInters) and skip_mode (SkipModes).
-	refFrames [2][]int8
-	mvs       [2][]mv
-	isInter   []uint8
-	interp    []uint8 // InterpFilters (both directions: no dual filter)
-	skipMode  []uint8
-	compIdx   []uint8                              // compound_idx (1 where not coded)
-	compGroup []uint8                              // comp_group_idx
-	inter     *interFrameInfo                      // inter frames' header values (nil for key frames)
-	refs      [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
-	filt      [2]int                               // the frame's interpolation filter
+	// mis is the mode info per 4x4 luma block (the mi grid, miCols
+	// wide).
+	mis   []modeInfo
+	inter *interFrameInfo                      // inter frames' header values (nil for key frames)
+	refs  [TOTAL_REFS_PER_FRAME]*refFrameState // by LAST_FRAME..ALTREF_FRAME
+	filt  [2]int                               // the frame's interpolation filter
 	// cdefIdx is each 64x64's cdef_idx: -1 where none is coded (all its
 	// blocks skipped), else what the frame's CDEF search chose.
 	cdefIdx []int8
@@ -499,14 +489,28 @@ func (t *tileEnc) clearDecoded(r, c int) {
 	}
 }
 
+// modeInfo is what the mi grid keeps of a 4x4 luma block, together so
+// a block's can be saved and put back a row at a time. Of inter state:
+// the reference frames (RefFrames: INTRA_FRAME and NONE for intra
+// blocks), the motion vectors (Mvs), whether a block is inter (IsInters)
+// and skip_mode (SkipModes).
+type modeInfo struct {
+	mvs                                 [2]mv
+	refFrames                           [2]int8
+	miSize, yMode, uvMode, skip, txSize uint8
+	txType                              uint8 // TxTypes
+	isInter, skipMode                   uint8
+	interp                              uint8 // InterpFilters (both directions: no dual filter)
+	compIdx                             uint8 // compound_idx (1 where not coded)
+	compGroup                           uint8 // comp_group_idx
+}
+
 // snapshot is what coding a block changes: its reconstruction, its mi
 // grid, the contexts along its edges and the decoded flags.
 type snapshot struct {
 	r, c, size int
 	rec        [3][]uint16
-	mi         [11][]uint8
-	refs       [2][]int8
-	mvs        [2][]mv
+	mi         []modeInfo
 	above, aDc [3][16]uint8
 	left, lDc  [3][16]uint8
 	decoded    [3][18][18]bool
@@ -550,40 +554,15 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	}
 	if pixels {
 		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
-		for k, a := range t.miArrays() {
-			if cap(s.mi[k]) < 256 {
-				s.mi[k] = make([]uint8, 256)
-			}
-			s.mi[k] = s.mi[k][:cols*rows]
-			for y := range rows {
-				copy(s.mi[k][y*cols:(y+1)*cols], a[f.mi(r+y, c):])
-			}
+		if cap(s.mi) < 256 {
+			s.mi = make([]modeInfo, 256)
 		}
-		for k := range 2 {
-			if cap(s.refs[k]) < 256 {
-				s.refs[k] = make([]int8, 256)
-			}
-			s.refs[k] = s.refs[k][:cols*rows]
-			for y := range rows {
-				copy(s.refs[k][y*cols:(y+1)*cols], f.refFrames[k][f.mi(r+y, c):])
-			}
-		}
-		for k := range 2 {
-			if cap(s.mvs[k]) < 256 {
-				s.mvs[k] = make([]mv, 256)
-			}
-			s.mvs[k] = s.mvs[k][:cols*rows]
-			for y := range rows {
-				copy(s.mvs[k][y*cols:(y+1)*cols], f.mvs[k][f.mi(r+y, c):])
-			}
+		s.mi = s.mi[:cols*rows]
+		for y := range rows {
+			copy(s.mi[y*cols:(y+1)*cols], f.mis[f.mi(r+y, c):])
 		}
 	}
 	s.decoded = t.decoded
-}
-
-func (t *tileEnc) miArrays() [11][]uint8 {
-	f := t.f
-	return [11][]uint8{f.miSize, f.yMode, f.uvMode, f.skip, f.txSize, f.txType, f.isInter, f.skipMode, f.interp, f.compIdx, f.compGroup}
 }
 
 // restore puts a snapshot back.
@@ -612,20 +591,9 @@ func (t *tileEnc) restore(s *snapshot, pixels bool) {
 	}
 	if pixels {
 		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
-		for k, a := range t.miArrays() {
-			for y := range rows {
-				copy(a[f.mi(r+y, c):f.mi(r+y, c)+cols], s.mi[k][y*cols:(y+1)*cols])
-			}
-		}
-		for k := range 2 {
-			for y := range rows {
-				copy(f.refFrames[k][f.mi(r+y, c):f.mi(r+y, c)+cols], s.refs[k][y*cols:(y+1)*cols])
-			}
-		}
-		for k := range 2 {
-			for y := range rows {
-				copy(f.mvs[k][f.mi(r+y, c):f.mi(r+y, c)+cols], s.mvs[k][y*cols:(y+1)*cols])
-			}
+		for y := range rows {
+			i := f.mi(r+y, c)
+			copy(f.mis[i:i+cols], s.mi[y*cols:(y+1)*cols])
 		}
 	}
 	t.decoded = s.decoded
@@ -636,10 +604,10 @@ func (t *tileEnc) partitionCDF(r, c, bSize int) []uint16 {
 	f := t.f
 	bsl := int(miWidthLog2[bSize])
 	ctx := 0
-	if t.inside(r-1, c) && int(miWidthLog2[f.miSize[f.mi(r-1, c)]]) < bsl {
+	if t.inside(r-1, c) && int(miWidthLog2[f.mis[f.mi(r-1, c)].miSize]) < bsl {
 		ctx++
 	}
-	if t.inside(r, c-1) && int(miHeightLog2[f.miSize[f.mi(r, c-1)]]) < bsl {
+	if t.inside(r, c-1) && int(miHeightLog2[f.mis[f.mi(r, c-1)].miSize]) < bsl {
 		ctx += 2
 	}
 	switch bsl {

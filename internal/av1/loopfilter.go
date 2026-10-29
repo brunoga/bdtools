@@ -137,7 +137,7 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 			mi := f.mi(row, col)
 			txSz := lfTx[y4*lw+x4]
 			prevTxSz := lfTx[(y4-dy)*lw+x4-dx]
-			planeSize := subsampledSize[f.miSize[mi]][sub][sub]
+			planeSize := subsampledSize[f.mis[mi].miSize][sub][sub]
 			var isBlockEdge, isTxEdge bool
 			var baseSize int
 			if pass == 0 {
@@ -152,8 +152,8 @@ func (lf *loopFilter) edges(p, pass, y4a, y4b int, buf []uint16) {
 			if !isTxEdge {
 				continue
 			}
-			isIntra := f.refFrames[0][mi] <= INTRA_FRAME
-			if !isBlockEdge && f.skip[mi] != 0 && !isIntra {
+			isIntra := f.mis[mi].refFrames[0] <= INTRA_FRAME
+			if !isBlockEdge && f.mis[mi].skip != 0 && !isIntra {
 				continue
 			}
 			lvl := lf.lvl(mi, li)
