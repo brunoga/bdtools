@@ -100,8 +100,10 @@ func main() {
 			if err != nil {
 				fail(err)
 			}
-			defer f.Close()
 			if err := pprof.Lookup("allocs").WriteTo(f, 0); err != nil {
+				fail(err)
+			}
+			if err := f.Close(); err != nil {
 				fail(err)
 			}
 		}()
