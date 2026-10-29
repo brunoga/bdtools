@@ -12,6 +12,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder keeps its latest compound predictions of each
+  reference, which the compound candidates share, rather than filtering
+  them again (about 2% less CPU, the same output).
 - The AV1 encoder's directional intra prediction interpolates its rows
   and gathers from the left edge with AVX2 (the same output).
 - The AV1 encoder finds a frame's loop filter edges once rather than
