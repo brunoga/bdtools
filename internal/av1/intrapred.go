@@ -433,10 +433,7 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 			n := min(max((maxBase-b0+(1<<uint(upA))-1)>>uint(upA), 0), w)
 			out := pred[i*w : i*w+w]
 			if upA == 0 {
-				a := above[b0 : b0+n+1]
-				for j := range out[:n] {
-					out[j] = uint16((a[j]*(32-shift) + a[j+1]*shift + 16) >> 5) //nolint:gosec // a sample
-				}
+				dirRow(out[:n], above[b0:b0+n+1], shift)
 			} else {
 				for j := range out[:n] {
 					base := b0 + 2*j
@@ -464,10 +461,7 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 			j0 := min(max(((i+1)*dx-64+63)>>6, 0), w)
 			out := pred[i*w : i*w+w]
 			il := int32(i << uint(upL)) //nolint:gosec // a row
-			for j := range out[:j0] {
-				base, sh := il+lBase[j], lShift[j]
-				out[j] = uint16((e.left[edgeOff+int(base)]*(32-sh) + e.left[edgeOff+int(base)+1]*sh + 16) >> 5) //nolint:gosec // a sample
-			}
+			dirGather(out[:j0], e.left[:], edgeOff, lBase[:], lShift[:], il)
 			v := -(i + 1) * dx
 			b0 := v >> uint(6-upA)
 			sh := int32((v<<uint(upA))>>1) & 0x1f //nolint:gosec // 0..31
@@ -475,10 +469,7 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 				continue
 			}
 			if upA == 0 {
-				a := e.above[edgeOff+b0+j0 : edgeOff+b0+w+1]
-				for j := range out[j0:] {
-					out[j0+j] = uint16((a[j]*(32-sh) + a[j+1]*sh + 16) >> 5) //nolint:gosec // a sample
-				}
+				dirRow(out[j0:], e.above[edgeOff+b0+j0:edgeOff+b0+w+1], sh)
 			} else {
 				for j := j0; j < w; j++ {
 					base := edgeOff + b0 + j<<1
@@ -496,10 +487,7 @@ func (e *intraEdges) directional(b *intraBlock, w, h int, maxV int32, pred []uin
 		for i := range h {
 			out := pred[i*w : i*w+w]
 			il := int32(i << uint(upL)) //nolint:gosec // a row
-			for j := range out {
-				base, sh := il+cBase[j], cShift[j]
-				out[j] = uint16((left[base]*(32-sh) + left[base+1]*sh + 16) >> 5) //nolint:gosec // a sample
-			}
+			dirGather(out, e.left[:], edgeOff, cBase[:], cShift[:], il)
 		}
 	case pAngle == 90:
 		for i := range h {
