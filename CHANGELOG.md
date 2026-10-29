@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder ranks transform types with an AVX2 estimate of
+  their quantization error, level bits and end of block (the same
+  output).
 - The AV1 encoder's Wiener statistics fold a window's rows into planes
   of 16-bit words and sum them a row at a time (about 1.5% less CPU, the
   same output).

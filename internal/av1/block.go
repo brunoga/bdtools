@@ -864,7 +864,6 @@ func (t *tileEnc) txSet(txSz int) int {
 	return TX_SET_INTRA_1
 }
 
-// dqDenom is the dequantization's divisor by transform size.
 // txCands is how many transform types a transform searches by rate and
 // distortion when it has more to try, the others ranked out by
 // rankTxTypes (0: all searched). (On the two 120-picture clips against
@@ -872,6 +871,19 @@ func (t *tileEnc) txSet(txSz int) int {
 // times; 4 and 5 0.4% smaller, 1.06 and 1.02 times. The estimate ranks
 // better than each transform's own rate and distortion decides.)
 var txCands = 3
+
+// levelEst is rankTxTypes' estimate of a coefficient of magnitude a
+// quantized with step qs: its squared error, its level's bits and
+// whether the level is non-zero.
+func levelEst(a int64, dsh uint, qs int64) (int64, int, bool) {
+	r := a<<dsh + qs/2
+	if r < qs { // a level of 0: most are, and no division
+		return a * a, 0, false
+	}
+	l := r / qs
+	e := a - ((l*qs)&0xFFFFFF)>>dsh
+	return e * e, 3 + 2*(bits.Len64(uint64(l))-1), true //nolint:gosec // l > 0
+}
 
 // rankTxTypes is the best k of a transform's types by an estimate from
 // their forward transforms of t.resid (kept in t.txCoef): the distortion
@@ -899,22 +911,27 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 		inv := invScanFor(txSz, tt)[:n]
 		var d int64
 		nb, eob := 0, 0
-		qs := dcQ
-		for j, v := range c {
-			if j == 1 {
-				qs = acQ
+		if useAVX2 {
+			// every coefficient with the AC step, then the DC's put right
+			d, nb, eob = rankEstAVX2(&c[0], &inv[0], n, int(dsh), int(acQ))
+			da, ba, za := levelEst(int64(abs32(c[0])), dsh, acQ)
+			dd, bd, zd := levelEst(int64(abs32(c[0])), dsh, dcQ)
+			d, nb = d-da+dd, nb-ba+bd
+			if eob <= 1 && za != zd {
+				eob = b2i(zd)
 			}
-			a := int64(abs32(v))
-			r := a<<dsh + qs/2
-			if r < qs { // a level of 0: most are, and no division
-				d += a * a
-				continue
+		} else {
+			for j, v := range c {
+				qs := acQ
+				if j == 0 {
+					qs = dcQ
+				}
+				dj, bj, nz := levelEst(int64(abs32(v)), dsh, qs)
+				d, nb = d+dj, nb+bj
+				if nz {
+					eob = max(eob, int(inv[j])+1)
+				}
 			}
-			l := r / qs
-			e := a - ((l*qs)&0xFFFFFF)>>dsh
-			d += e * e
-			nb += 3 + 2*(bits.Len64(uint64(l))-1) //nolint:gosec // l > 0
-			eob = max(eob, int(inv[j])+1)
 		}
 		if tt == DCT_DCT && eob == 0 && pruneTxZero && t.b.isInter {
 			return types[i : i+1]
@@ -937,6 +954,7 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 	return out
 }
 
+// dqDenom is the dequantization's divisor by transform size.
 func dqDenom(txSz int) int {
 	switch txSz {
 	case TX_32X32, TX_16X32, TX_32X16, TX_16X64, TX_64X16:
