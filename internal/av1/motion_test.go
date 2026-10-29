@@ -121,8 +121,8 @@ func TestHighPrecisionMV(t *testing.T) {
 				return
 			}
 			hp.Add(1)
-			for i, v := range f.mvs[0] {
-				if f.isInter[i] != 0 && (v.row|v.col)&1 != 0 {
+			for _, m := range f.mis {
+				if v := m.mvs[0]; m.isInter != 0 && (v.row|v.col)&1 != 0 {
 					eighth.Add(1)
 				}
 			}
@@ -164,8 +164,8 @@ func TestSwitchableFilters(t *testing.T) {
 	var other atomic.Int64
 	checkDecodesWith(t, o, pics, func(e *Encoder) {
 		e.frameHook = func(f *frameEnc) {
-			for i, v := range f.interp {
-				if f.isInter[i] != 0 && v != EIGHTTAP {
+			for _, m := range f.mis {
+				if m.isInter != 0 && m.interp != EIGHTTAP {
 					other.Add(1)
 				}
 			}

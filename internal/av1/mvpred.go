@@ -235,7 +235,7 @@ func (t *tileEnc) scanRow(s *mvStack, deltaRow int) {
 		if !t.inside(mvRow, mvCol) {
 			break
 		}
-		l := min(bw4, int(num4x4BlocksWide[f.miSize[f.mi(mvRow, mvCol)]]))
+		l := min(bw4, int(num4x4BlocksWide[f.mis[f.mi(mvRow, mvCol)].miSize]))
 		if abs(deltaRow) > 1 {
 			l = max(2, l)
 		}
@@ -265,7 +265,7 @@ func (t *tileEnc) scanCol(s *mvStack, deltaCol int) {
 		if !t.inside(mvRow, mvCol) {
 			break
 		}
-		l := min(bh4, int(num4x4BlocksHigh[f.miSize[f.mi(mvRow, mvCol)]]))
+		l := min(bh4, int(num4x4BlocksHigh[f.mis[f.mi(mvRow, mvCol)].miSize]))
 		if abs(deltaCol) > 1 {
 			l = max(2, l)
 		}
@@ -412,18 +412,18 @@ func (t *tileEnc) addTplRefMv(s *mvStack, deltaRow, deltaCol int) {
 func (t *tileEnc) addRefMvCandidate(s *mvStack, mvRow, mvCol, weight int) {
 	f := t.f
 	i := f.mi(mvRow, mvCol)
-	if f.isInter[i] == 0 {
+	if f.mis[i].isInter == 0 {
 		return
 	}
 	if !s.isCompound {
 		for candList := range 2 {
-			if int(f.refFrames[candList][i]) == s.refFrame[0] {
+			if int(f.mis[i].refFrames[candList]) == s.refFrame[0] {
 				t.searchStack(s, i, candList, weight)
 			}
 		}
 		return
 	}
-	if int(f.refFrames[0][i]) == s.refFrame[0] && int(f.refFrames[1][i]) == s.refFrame[1] {
+	if int(f.mis[i].refFrames[0]) == s.refFrame[0] && int(f.mis[i].refFrames[1]) == s.refFrame[1] {
 		t.compoundSearchStack(s, i, weight)
 	}
 }
@@ -433,14 +433,14 @@ func (t *tileEnc) addRefMvCandidate(s *mvStack, mvRow, mvCol, weight int) {
 func (t *tileEnc) searchStack(s *mvStack, i, candList, weight int) {
 	f := t.f
 	fi := f.inter
-	candMode := int(f.yMode[i])
-	candSize := f.miSize[i]
+	candMode := int(f.mis[i].yMode)
+	candSize := f.mis[i].miSize
 	large := min(blockWidth[candSize], blockHeight[candSize]) >= 8
 	var candMv mv
 	if (candMode == GLOBALMV || candMode == GLOBAL_GLOBALMV) && fi.gmType[s.refFrame[0]] > TRANSLATION && large {
 		candMv = s.globalMvs[0]
 	} else {
-		candMv = f.mvs[candList][i]
+		candMv = f.mis[i].mvs[candList]
 	}
 	fi.lowerMvPrecision(&candMv)
 	if hasNewmv(candMode) {
@@ -465,8 +465,8 @@ func (t *tileEnc) searchStack(s *mvStack, i, candList, weight int) {
 func (t *tileEnc) compoundSearchStack(s *mvStack, i, weight int) {
 	f := t.f
 	fi := f.inter
-	candMvs := [2]mv{f.mvs[0][i], f.mvs[1][i]}
-	candMode := int(f.yMode[i])
+	candMvs := [2]mv{f.mis[i].mvs[0], f.mis[i].mvs[1]}
+	candMode := int(f.mis[i].yMode)
 	if candMode == GLOBAL_GLOBALMV {
 		for refList := range 2 {
 			if fi.gmType[s.refFrame[refList]] > TRANSLATION {
@@ -567,9 +567,9 @@ func (t *tileEnc) extraSearch(s *mvStack) {
 			}
 			t.addExtraMvCandidate(s, mvRow, mvCol)
 			if pass == 0 {
-				idx += int(num4x4BlocksWide[f.miSize[f.mi(mvRow, mvCol)]])
+				idx += int(num4x4BlocksWide[f.mis[f.mi(mvRow, mvCol)].miSize])
 			} else {
-				idx += int(num4x4BlocksHigh[f.miSize[f.mi(mvRow, mvCol)]])
+				idx += int(num4x4BlocksHigh[f.mis[f.mi(mvRow, mvCol)].miSize])
 			}
 		}
 	}
@@ -619,10 +619,10 @@ func (t *tileEnc) addExtraMvCandidate(s *mvStack, mvRow, mvCol int) {
 	i := f.mi(mvRow, mvCol)
 	if s.isCompound {
 		for candList := range 2 {
-			candRef := int(f.refFrames[candList][i])
+			candRef := int(f.mis[i].refFrames[candList])
 			if candRef > INTRA_FRAME {
 				for list := range 2 {
-					candMv := f.mvs[candList][i]
+					candMv := f.mis[i].mvs[candList]
 					if candRef == s.refFrame[list] && s.refIDCount[list] < 2 {
 						s.refIDMvs[list][s.refIDCount[list]] = candMv
 						s.refIDCount[list]++
@@ -640,9 +640,9 @@ func (t *tileEnc) addExtraMvCandidate(s *mvStack, mvRow, mvCol int) {
 		return
 	}
 	for candList := range 2 {
-		candRef := int(f.refFrames[candList][i])
+		candRef := int(f.mis[i].refFrames[candList])
 		if candRef > INTRA_FRAME {
-			candMv := f.mvs[candList][i]
+			candMv := f.mis[i].mvs[candList]
 			if fi.refFrameSignBias[candRef] != fi.refFrameSignBias[s.refFrame[0]] {
 				candMv.row *= -1
 				candMv.col *= -1
@@ -727,7 +727,7 @@ func (t *tileEnc) hasOverlappableCandidates() bool {
 	if b.availU {
 		w4 := b.bw4
 		for x4 := b.c; x4 < min(f.miCols, b.c+w4); x4 += 2 {
-			if f.refFrames[0][f.mi(b.r-1, x4|1)] > INTRA_FRAME {
+			if f.mis[f.mi(b.r-1, x4|1)].refFrames[0] > INTRA_FRAME {
 				return true
 			}
 		}
@@ -735,7 +735,7 @@ func (t *tileEnc) hasOverlappableCandidates() bool {
 	if b.availL {
 		h4 := b.bh4
 		for y4 := b.r; y4 < min(f.miRows, b.r+h4); y4 += 2 {
-			if f.refFrames[0][f.mi(y4|1, b.c-1)] > INTRA_FRAME {
+			if f.mis[f.mi(y4|1, b.c-1)].refFrames[0] > INTRA_FRAME {
 				return true
 			}
 		}

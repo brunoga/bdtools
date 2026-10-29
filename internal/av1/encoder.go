@@ -342,20 +342,14 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 		}
 	}
 	n := miCols * miRows
-	f.miSize, f.yMode, f.uvMode = make([]uint8, n), make([]uint8, n), make([]uint8, n)
-	f.skip, f.txSize, f.txType = make([]uint8, n), make([]uint8, n), make([]uint8, n)
+	f.mis = make([]modeInfo, n)
 	for p := range 3 {
 		sub := min(p, 1)
 		f.lfTx[p] = make([]uint8, (miCols>>sub)*(miRows>>sub))
 	}
-	for k := range 2 {
-		f.refFrames[k] = make([]int8, n)
-		f.mvs[k] = make([]mv, n)
+	for i := range f.mis {
+		f.mis[i].refFrames = [2]int8{INTRA_FRAME, NONE}
 	}
-	for i := range f.refFrames[0] {
-		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
-	}
-	f.isInter, f.skipMode, f.interp, f.compIdx, f.compGroup = make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n), make([]uint8, n)
 	f.cdefIdx = make([]int8, ((miCols+15)>>4)*((miRows+15)>>4))
 	for i := range f.cdefIdx {
 		f.cdefIdx[i] = -1

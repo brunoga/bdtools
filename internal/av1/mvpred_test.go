@@ -6,13 +6,9 @@ import "testing"
 // intra 4x4 block, coded (BlockDecoded) where a test says so.
 func mvGrid(miRows, miCols int) *tileEnc {
 	n := miRows * miCols
-	f := &frameEnc{miRows: miRows, miCols: miCols, miSize: make([]uint8, n), yMode: make([]uint8, n), isInter: make([]uint8, n)}
-	for k := range 2 {
-		f.refFrames[k] = make([]int8, n)
-		f.mvs[k] = make([]mv, n)
-	}
+	f := &frameEnc{miRows: miRows, miCols: miCols, mis: make([]modeInfo, n)}
 	for i := range n {
-		f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
+		f.mis[i].refFrames[0], f.mis[i].refFrames[1] = INTRA_FRAME, NONE
 	}
 	f.inter = newInterFrameInfo()
 	f.inter.allowHighPrecisionMv = true
@@ -25,9 +21,9 @@ func (t *tileEnc) place(r, c, size, mode, ref0, ref1 int, mv0, mv1 mv) {
 	for y := r; y < min(r+int(num4x4BlocksHigh[size]), f.miRows); y++ {
 		for x := c; x < min(c+int(num4x4BlocksWide[size]), f.miCols); x++ {
 			i := f.mi(y, x)
-			f.miSize[i], f.yMode[i], f.isInter[i] = uint8(size), uint8(mode), 1
-			f.refFrames[0][i], f.refFrames[1][i] = int8(ref0), int8(ref1)
-			f.mvs[0][i], f.mvs[1][i] = mv0, mv1
+			f.mis[i].miSize, f.mis[i].yMode, f.mis[i].isInter = uint8(size), uint8(mode), 1
+			f.mis[i].refFrames[0], f.mis[i].refFrames[1] = int8(ref0), int8(ref1)
+			f.mis[i].mvs[0], f.mis[i].mvs[1] = mv0, mv1
 		}
 	}
 }

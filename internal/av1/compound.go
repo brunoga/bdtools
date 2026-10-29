@@ -17,11 +17,11 @@ func (t *tileEnc) neighbourRefs() (above, left [2]int) {
 	above, left = [2]int{INTRA_FRAME, NONE}, [2]int{INTRA_FRAME, NONE}
 	if b.availU {
 		i := f.mi(b.r-1, b.c)
-		above = [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])}
+		above = [2]int{int(f.mis[i].refFrames[0]), int(f.mis[i].refFrames[1])}
 	}
 	if b.availL {
 		i := f.mi(b.r, b.c-1)
-		left = [2]int{int(f.refFrames[0][i]), int(f.refFrames[1][i])}
+		left = [2]int{int(f.mis[i].refFrames[0]), int(f.mis[i].refFrames[1])}
 	}
 	return above, left
 }
@@ -309,9 +309,9 @@ func (t *tileEnc) writeCompoundIdx(cd coder) {
 			continue
 		}
 		i := f.mi(n.r, n.c)
-		if f.refFrames[1][i] > INTRA_FRAME {
-			ctx += int(f.compIdx[i])
-		} else if f.refFrames[0][i] == ALTREF_FRAME {
+		if f.mis[i].refFrames[1] > INTRA_FRAME {
+			ctx += int(f.mis[i].compIdx)
+		} else if f.mis[i].refFrames[0] == ALTREF_FRAME {
 			ctx++
 		}
 	}

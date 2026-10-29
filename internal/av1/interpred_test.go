@@ -195,11 +195,7 @@ func TestInterPredSpec(t *testing.T) {
 func TestPredictInterBlockChroma(t *testing.T) {
 	const W, H = 64, 64
 	f := &frameEnc{bitDepth: 8, miCols: W / 4, miRows: H / 4, width: W, height: H, fp: &frameParams{interpFilter: EIGHTTAP}}
-	n := f.miCols * f.miRows
-	for k := range 2 {
-		f.refFrames[k] = make([]int8, n)
-		f.mvs[k] = make([]mv, n)
-	}
+	f.mis = make([]modeInfo, f.miCols*f.miRows)
 	ref := &refFrameState{width: W, height: H}
 	rs := uint32(5)
 	for p := range 3 {
@@ -214,8 +210,8 @@ func TestPredictInterBlockChroma(t *testing.T) {
 	mvs := [4]mv{{3, -5}, {-17, 9}, {40, 1}, {-2, -66}}
 	for i, m := range mvs {
 		r, c := 6+i/2, 8+i%2
-		f.refFrames[0][f.mi(r, c)], f.refFrames[1][f.mi(r, c)] = LAST_FRAME, NONE
-		f.mvs[0][f.mi(r, c)] = m
+		f.mis[f.mi(r, c)].refFrames[0], f.mis[f.mi(r, c)].refFrames[1] = LAST_FRAME, NONE
+		f.mis[f.mi(r, c)].mvs[0] = m
 	}
 	var s interScratch
 	filt := [2]int{EIGHTTAP, EIGHTTAP}
@@ -230,7 +226,7 @@ func TestPredictInterBlockChroma(t *testing.T) {
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("all inter: %v, want %v", got, want)
 	}
-	f.refFrames[0][f.mi(6, 8)] = INTRA_FRAME
+	f.mis[f.mi(6, 8)].refFrames[0] = INTRA_FRAME
 	f.predictInterBlock(&refs, b, 1, filt, got, 4, &s)
 	predictInter(ref, 1, 16, 12, 4, 4, mvs[3], filt, 8, want, 4, &s)
 	if fmt.Sprint(got) != fmt.Sprint(want) {

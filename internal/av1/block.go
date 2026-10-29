@@ -57,24 +57,24 @@ func (t *tileEnc) setModes() {
 	for y := range b.bh4 {
 		for x := range b.bw4 {
 			if b.r+y < f.miRows && b.c+x < f.miCols {
-				i := f.mi(b.r+y, b.c+x)
-				f.yMode[i] = uint8(b.yMode) //nolint:gosec // a mode
+				m := &f.mis[f.mi(b.r+y, b.c+x)]
+				m.yMode = uint8(b.yMode) //nolint:gosec // a mode
 				if b.hasChroma && !b.isInter {
-					f.uvMode[i] = uint8(b.uvMode) //nolint:gosec // a mode
+					m.uvMode = uint8(b.uvMode) //nolint:gosec // a mode
 				}
 				if b.isInter {
-					f.refFrames[0][i], f.refFrames[1][i] = int8(b.refFrame), int8(b.refFrame2) //nolint:gosec // references
+					m.refFrames[0], m.refFrames[1] = int8(b.refFrame), int8(b.refFrame2) //nolint:gosec // references
 					if b.ii.on {
-						f.refFrames[1][i] = INTRA_FRAME
+						m.refFrames[1] = INTRA_FRAME
 					}
-					f.mvs[0][i], f.mvs[1][i], f.isInter[i] = b.mv, b.mv2, 1
-					f.interp[i] = uint8(b.interp) //nolint:gosec // a filter
-					f.compIdx[i] = uint8(b2i(!b.compDist || b.refFrame2 <= INTRA_FRAME))
-					f.compGroup[i] = uint8(b2i(b.masked && b.refFrame2 > INTRA_FRAME))
+					m.mvs[0], m.mvs[1], m.isInter = b.mv, b.mv2, 1
+					m.interp = uint8(b.interp) //nolint:gosec // a filter
+					m.compIdx = uint8(b2i(!b.compDist || b.refFrame2 <= INTRA_FRAME))
+					m.compGroup = uint8(b2i(b.masked && b.refFrame2 > INTRA_FRAME))
 				} else {
-					f.refFrames[0][i], f.refFrames[1][i] = INTRA_FRAME, NONE
-					f.compIdx[i], f.compGroup[i] = 1, 0
-					f.mvs[0][i], f.isInter[i] = mv{}, 0
+					m.refFrames[0], m.refFrames[1] = INTRA_FRAME, NONE
+					m.compIdx, m.compGroup = 1, 0
+					m.mvs[0], m.isInter = mv{}, 0
 				}
 			}
 		}
@@ -87,12 +87,12 @@ func (t *tileEnc) setInfo() {
 	for y := range b.bh4 {
 		for x := range b.bw4 {
 			if b.r+y < f.miRows && b.c+x < f.miCols {
-				i := f.mi(b.r+y, b.c+x)
-				f.skip[i] = uint8(b2i(b.skip))         //nolint:gosec // a flag
-				f.skipMode[i] = uint8(b2i(b.skipMode)) //nolint:gosec // a flag
-				f.miSize[i] = uint8(b.size)            //nolint:gosec // a size
+				m := &f.mis[f.mi(b.r+y, b.c+x)]
+				m.skip = uint8(b2i(b.skip))         //nolint:gosec // a flag
+				m.skipMode = uint8(b2i(b.skipMode)) //nolint:gosec // a flag
+				m.miSize = uint8(b.size)            //nolint:gosec // a size
 				if !b.isInter || b.skip {
-					f.txSize[i] = uint8(b.txSz) //nolint:gosec // a size (else the transform tree's)
+					m.txSize = uint8(b.txSz) //nolint:gosec // a size (else the transform tree's)
 				}
 			}
 		}
@@ -485,13 +485,13 @@ func (t *tileEnc) filterType(plane int) bool {
 
 func (t *tileEnc) smoothAt(r, c, plane int) bool {
 	i := t.f.mi(min(r, t.f.miRows-1), min(c, t.f.miCols-1))
-	if plane > 0 && t.f.refFrames[0][i] > INTRA_FRAME {
+	if plane > 0 && t.f.mis[i].refFrames[0] > INTRA_FRAME {
 		return false
 	}
 	if plane == 0 {
-		return isSmooth(int(t.f.yMode[i]))
+		return isSmooth(int(t.f.mis[i].yMode))
 	}
-	return isSmooth(int(t.f.uvMode[i]))
+	return isSmooth(int(t.f.mis[i].uvMode))
 }
 
 // typeSearches is how many of a block's luma candidates (mode and
@@ -802,7 +802,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		for y := range stepY {
 			for x := range stepX {
 				if row+y < f.miRows && col+x < f.miCols {
-					f.txType[f.mi(row+y, col+x)] = tt
+					f.mis[f.mi(row+y, col+x)].txType = tt
 				}
 			}
 		}
@@ -955,10 +955,10 @@ func (t *tileEnc) writeSkipMode(cd coder) {
 	}
 	ctx := 0
 	if b.availU {
-		ctx += int(f.skipMode[f.mi(b.r-1, b.c)])
+		ctx += int(f.mis[f.mi(b.r-1, b.c)].skipMode)
 	}
 	if b.availL {
-		ctx += int(f.skipMode[f.mi(b.r, b.c-1)])
+		ctx += int(f.mis[f.mi(b.r, b.c-1)].skipMode)
 	}
 	cd.symbol(b2i(b.skipMode), t.cdf.skipMode[ctx][:])
 }
@@ -969,10 +969,10 @@ func (t *tileEnc) writeSkip(cd coder) {
 	f, b := t.f, &t.b
 	ctx := 0
 	if b.availU {
-		ctx += int(f.skip[f.mi(b.r-1, b.c)])
+		ctx += int(f.mis[f.mi(b.r-1, b.c)].skip)
 	}
 	if b.availL {
-		ctx += int(f.skip[f.mi(b.r, b.c-1)])
+		ctx += int(f.mis[f.mi(b.r, b.c-1)].skip)
 	}
 	cd.symbol(b2i(b.skip), t.cdf.skip[ctx][:])
 }
@@ -982,10 +982,10 @@ func (t *tileEnc) writeYMode(cd coder) {
 	f, b := t.f, &t.b
 	am, lm := DC_PRED, DC_PRED
 	if b.availU {
-		am = int(f.yMode[f.mi(b.r-1, b.c)])
+		am = int(f.mis[f.mi(b.r-1, b.c)].yMode)
 	}
 	if b.availL {
-		lm = int(f.yMode[f.mi(b.r, b.c-1)])
+		lm = int(f.mis[f.mi(b.r, b.c-1)].yMode)
 	}
 	if f.fp.key {
 		cd.symbol(b.yMode, t.cdf.yMode[intraModeContext[am]][intraModeContext[lm]][:])
@@ -1019,7 +1019,7 @@ func (t *tileEnc) writeIsInter(cd coder, inter bool) {
 	if f.fp.key {
 		return
 	}
-	intra := func(r, c int) bool { return f.refFrames[0][f.mi(r, c)] <= INTRA_FRAME }
+	intra := func(r, c int) bool { return f.mis[f.mi(r, c)].refFrames[0] <= INTRA_FRAME }
 	ctx := 0
 	switch {
 	case b.availU && b.availL:
@@ -1079,15 +1079,15 @@ func (t *tileEnc) writeTxDepth(cd coder, depth int) {
 	maxW, maxH := int(txWidth[maxRect]), int(txHeight[maxRect])
 	aboveW, leftH := 0, 0
 	if b.availU {
-		if i := f.mi(b.r-1, b.c); f.isInter[i] != 0 {
-			aboveW = int(blockWidth[f.miSize[i]])
+		if i := f.mi(b.r-1, b.c); f.mis[i].isInter != 0 {
+			aboveW = int(blockWidth[f.mis[i].miSize])
 		} else {
 			aboveW = t.aboveTxWidth(b.r, b.c)
 		}
 	}
 	if b.availL {
-		if i := f.mi(b.r, b.c-1); f.isInter[i] != 0 {
-			leftH = int(blockHeight[f.miSize[i]])
+		if i := f.mi(b.r, b.c-1); f.mis[i].isInter != 0 {
+			leftH = int(blockHeight[f.mis[i].miSize])
 		} else {
 			leftH = t.leftTxHeight(b.r, b.c)
 		}

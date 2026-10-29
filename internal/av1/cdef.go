@@ -205,7 +205,7 @@ func cdefFilter(win []int32, w, h int, out []uint16, stride int, pri, sec, dampi
 // skip.
 func (f *frameEnc) cdefSkipped(r, c int) bool {
 	m := f.mi(r, c)
-	return f.skip[m] != 0 && f.skip[m+1] != 0 && f.skip[m+f.miCols] != 0 && f.skip[m+f.miCols+1] != 0
+	return f.mis[m].skip != 0 && f.mis[m+1].skip != 0 && f.mis[m+f.miCols].skip != 0 && f.mis[m+f.miCols+1].skip != 0
 }
 
 // cdefAdjust is the luma primary strength adjusted by the variance.

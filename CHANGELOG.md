@@ -11,6 +11,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder keeps a 4x4 block's mode info in one record rather
+  than one array per field, so saving and restoring a block between
+  candidates copies a row in one go (about 1% less CPU, the same
+  output).
 - The AV1 encoder predicts a block's luma from the block's own motion
   rather than its stored mode info, so the inter candidates' estimates no
   longer store it for each: the same streams, 2.3% less CPU.

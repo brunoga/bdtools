@@ -71,7 +71,7 @@ func (t *tileEnc) interTxTypesFor(plane, txSz int) []int {
 		return t.interTxTypes(txSz)
 	}
 	x4, y4 := max(b.c, t.txX4<<1), max(b.r, t.txY4<<1)
-	tt := int(f.txType[f.mi(min(y4, f.miRows-1), min(x4, f.miCols-1))])
+	tt := int(f.mis[f.mi(min(y4, f.miRows-1), min(x4, f.miCols-1))].txType)
 	if txTypeInSetInter[t.interTxSet(txSz)][tt] == 0 {
 		return []int{DCT_DCT}
 	}
@@ -1069,7 +1069,7 @@ func (t *tileEnc) setTxSize(row, col, txSz int) {
 	for i := range int(txHeight[txSz]) >> 2 {
 		for k := range int(txWidth[txSz]) >> 2 {
 			if row+i < f.miRows && col+k < f.miCols {
-				f.txSize[f.mi(row+i, col+k)] = uint8(txSz) //nolint:gosec // a size
+				f.mis[f.mi(row+i, col+k)].txSize = uint8(txSz) //nolint:gosec // a size
 			}
 		}
 	}
@@ -1121,14 +1121,14 @@ func (t *tileEnc) writeInterpFilter(cd coder) {
 	lt, at := 3, 3
 	if b.availL {
 		i := f.mi(b.r, b.c-1)
-		if int(f.refFrames[0][i]) == b.refFrame || int(f.refFrames[1][i]) == b.refFrame {
-			lt = int(f.interp[i])
+		if int(f.mis[i].refFrames[0]) == b.refFrame || int(f.mis[i].refFrames[1]) == b.refFrame {
+			lt = int(f.mis[i].interp)
 		}
 	}
 	if b.availU {
 		i := f.mi(b.r-1, b.c)
-		if int(f.refFrames[0][i]) == b.refFrame || int(f.refFrames[1][i]) == b.refFrame {
-			at = int(f.interp[i])
+		if int(f.mis[i].refFrames[0]) == b.refFrame || int(f.mis[i].refFrames[1]) == b.refFrame {
+			at = int(f.mis[i].interp)
 		}
 	}
 	switch {

@@ -12,11 +12,11 @@ func (t *tileEnc) countRefs(ref int) int {
 	n := 0
 	if b.availU {
 		i := f.mi(b.r-1, b.c)
-		n += b2i(int(f.refFrames[0][i]) == ref) + b2i(int(f.refFrames[1][i]) == ref)
+		n += b2i(int(f.mis[i].refFrames[0]) == ref) + b2i(int(f.mis[i].refFrames[1]) == ref)
 	}
 	if b.availL {
 		i := f.mi(b.r, b.c-1)
-		n += b2i(int(f.refFrames[0][i]) == ref) + b2i(int(f.refFrames[1][i]) == ref)
+		n += b2i(int(f.mis[i].refFrames[0]) == ref) + b2i(int(f.mis[i].refFrames[1]) == ref)
 	}
 	return n
 }
@@ -130,11 +130,11 @@ func (t *tileEnc) aboveTxWidth(row, col int) int {
 		if !b.availU {
 			return 64
 		}
-		if i := f.mi(row-1, col); f.skip[i] != 0 && f.isInter[i] != 0 {
-			return int(blockWidth[f.miSize[i]])
+		if i := f.mi(row-1, col); f.mis[i].skip != 0 && f.mis[i].isInter != 0 {
+			return int(blockWidth[f.mis[i].miSize])
 		}
 	}
-	return int(txWidth[f.txSize[f.mi(row-1, col)]])
+	return int(txWidth[f.mis[f.mi(row-1, col)].txSize])
 }
 
 // leftTxHeight is get_left_tx_height at (row, col).
@@ -144,11 +144,11 @@ func (t *tileEnc) leftTxHeight(row, col int) int {
 		if !b.availL {
 			return 64
 		}
-		if i := f.mi(row, col-1); f.skip[i] != 0 && f.isInter[i] != 0 {
-			return int(blockHeight[f.miSize[i]])
+		if i := f.mi(row, col-1); f.mis[i].skip != 0 && f.mis[i].isInter != 0 {
+			return int(blockHeight[f.mis[i].miSize])
 		}
 	}
-	return int(txHeight[f.txSize[f.mi(row, col-1)]])
+	return int(txHeight[f.mis[f.mi(row, col-1)].txSize])
 }
 
 // writeTxfmSplit is txfm_split at (row, col) for a transform of txSz.

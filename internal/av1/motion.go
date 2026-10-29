@@ -48,8 +48,8 @@ type motionSearch struct {
 	hmid [3][]int32 // subPelStep's horizontal passes
 	// hmid16 are subPelStep's horizontal passes as words (with AVX2)
 	hmid16 [3][]int16
-	seen [1024]seenPoint
-	gen  uint32
+	seen   [1024]seenPoint
+	gen    uint32
 }
 
 // seenPoint is an integer position the search has measured: the cache of

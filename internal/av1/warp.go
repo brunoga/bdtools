@@ -36,7 +36,7 @@ func (t *tileEnc) findWarpSamples() warpSamples {
 	w4, h4 := b.bw4, b.bh4
 	doTopLeft, doTopRight := true, true
 	if b.availU {
-		srcW := int(num4x4BlocksWide[f.miSize[f.mi(b.r-1, b.c)]])
+		srcW := int(num4x4BlocksWide[f.mis[f.mi(b.r-1, b.c)].miSize])
 		if w4 <= srcW {
 			colOffset := -(b.c & (srcW - 1))
 			if colOffset < 0 {
@@ -48,14 +48,14 @@ func (t *tileEnc) findWarpSamples() warpSamples {
 			t.addWarpSample(&ws, -1, 0)
 		} else {
 			for i, step := 0, 0; i < min(w4, f.miCols-b.c); i += step {
-				srcW = int(num4x4BlocksWide[f.miSize[f.mi(b.r-1, b.c+i)]])
+				srcW = int(num4x4BlocksWide[f.mis[f.mi(b.r-1, b.c+i)].miSize])
 				step = min(w4, srcW)
 				t.addWarpSample(&ws, -1, i)
 			}
 		}
 	}
 	if b.availL {
-		srcH := int(num4x4BlocksHigh[f.miSize[f.mi(b.r, b.c-1)]])
+		srcH := int(num4x4BlocksHigh[f.mis[f.mi(b.r, b.c-1)].miSize])
 		if h4 <= srcH {
 			if rowOffset := -(b.r & (srcH - 1)); rowOffset < 0 {
 				doTopLeft = false
@@ -63,7 +63,7 @@ func (t *tileEnc) findWarpSamples() warpSamples {
 			t.addWarpSample(&ws, 0, -1)
 		} else {
 			for i, step := 0, 0; i < min(h4, f.miRows-b.r); i += step {
-				srcH = int(num4x4BlocksHigh[f.miSize[f.mi(b.r+i, b.c-1)]])
+				srcH = int(num4x4BlocksHigh[f.mis[f.mi(b.r+i, b.c-1)].miSize])
 				step = min(h4, srcH)
 				t.addWarpSample(&ws, i, -1)
 			}
@@ -92,15 +92,15 @@ func (t *tileEnc) addWarpSample(ws *warpSamples, deltaRow, deltaCol int) {
 		return
 	}
 	i := f.mi(mvRow, mvCol)
-	if int(f.refFrames[0][i]) != b.refFrame || int(f.refFrames[1][i]) != NONE {
+	if int(f.mis[i].refFrames[0]) != b.refFrame || int(f.mis[i].refFrames[1]) != NONE {
 		return
 	}
-	candSz := f.miSize[i]
+	candSz := f.mis[i].miSize
 	candW4, candH4 := int(num4x4BlocksWide[candSz]), int(num4x4BlocksHigh[candSz])
 	candRow, candCol := mvRow&^(candH4-1), mvCol&^(candW4-1)
 	midY, midX := candRow*4+candH4*2-1, candCol*4+candW4*2-1
 	threshold := min(max(int(max(blockWidth[b.size], blockHeight[b.size])), 16), 112)
-	m := f.mvs[0][f.mi(candRow, candCol)]
+	m := f.mis[f.mi(candRow, candCol)].mvs[0]
 	valid := abs(int(m.row-b.mv.row))+abs(int(m.col-b.mv.col)) <= threshold
 	ws.scanned++
 	if !valid && ws.scanned > 1 {

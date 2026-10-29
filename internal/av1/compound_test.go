@@ -23,8 +23,8 @@ func TestCompoundDistance(t *testing.T) {
 			var n atomic.Int64
 			checkDecodesWith(t, o, pics, func(e *Encoder) {
 				e.frameHook = func(f *frameEnc) {
-					for _, v := range f.compIdx {
-						if v == 0 {
+					for _, m := range f.mis {
+						if m.compIdx == 0 {
 							n.Add(1)
 						}
 					}

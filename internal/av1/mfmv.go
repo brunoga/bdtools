@@ -32,14 +32,14 @@ func (f *frameEnc) saveMotionField(st *refFrameState) {
 				continue
 			}
 			for list := range 2 {
-				r := int(f.refFrames[list][i])
+				r := int(f.mis[i].refFrames[list])
 				if r <= INTRA_FRAME {
 					continue
 				}
 				if f.inter.getRelativeDist(f.inter.orderHints[r], f.inter.orderHint) >= 0 {
 					continue
 				}
-				m := f.mvs[list][i]
+				m := f.mis[i].mvs[list]
 				if abs32(m.row) <= REFMVS_LIMIT && abs32(m.col) <= REFMVS_LIMIT {
 					st.mfRef[k], st.mfMv[k] = int8(r), m //nolint:gosec // a reference
 				}
