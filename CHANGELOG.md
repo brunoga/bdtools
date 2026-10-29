@@ -12,6 +12,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's directional intra prediction interpolates its rows
+  and gathers from the left edge with AVX2 (the same output).
 - The AV1 encoder finds a frame's loop filter edges once rather than
   for each level its search tries (the same output).
 - The AV1 encoder's CDEF strength search takes a whole 8x8 luma block
