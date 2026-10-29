@@ -481,6 +481,7 @@ func (f *frameEnc) cdefSearchSB(sbr, sbc, damping int, e *cdefSSE, win []int32) 
 		priShiftUV[pi] = constrainShift(t, damping+cs-1)
 		priTapsUV[pi] = [2]int32{int32(cdefPriTaps[pi&1][0]), int32(cdefPriTaps[pi&1][1])}
 	}
+	var cp cdefParams
 	for r := sbr * 16; r < min(sbr*16+16, f.miRows); r += 2 {
 		for c := sbc * 16; c < min(sbc*16+16, f.miCols); c += 2 {
 			if f.cdefSkipped(r, c) {
@@ -504,8 +505,11 @@ func (f *frameEnc) cdefSearchSB(sbr, sbc, damping int, e *cdefSSE, win []int32) 
 				priTaps[pi] = [2]int32{int32(tp[0]), int32(tp[1])}
 			}
 			f.cdefWindow(0, f.rec[0], x0, y0, 8, 8, win)
-			cdefSearchBlock(win, 8, min(8, f.width-x0), min(8, f.height-y0), f.src[0][y0*f.stride[0]+x0:], f.stride[0],
-				yDir, &priT, &priShift, &priTaps, &secT, &secShiftY, &e.y)
+			vw, vh := min(8, f.width-x0), min(8, f.height-y0)
+			src := f.src[0][y0*f.stride[0]+x0:]
+			if !cdefSearch8(win, 8, vw, vh, src, f.stride[0], yDir, &priT, &priShift, &priTaps, &secT, &secShiftY, &e.y, &cp) {
+				cdefSearchBlock(win, 8, vw, vh, src, f.stride[0], yDir, &priT, &priShift, &priTaps, &secT, &secShiftY, &e.y)
+			}
 			cx, cy := x0/2, y0/2
 			cw, ch := (f.width+1)/2, (f.height+1)/2
 			uvDir := int(cdefUvDir[1][1][yDir])
