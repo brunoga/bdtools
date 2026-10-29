@@ -255,11 +255,14 @@ func (t *tileEnc) reset() {
 	ic, lc, cc, st, ir := t.interCands[:0], t.lumaCands[:0], t.chromaCands[:0], t.meStarts[:0], t.intraRanked[:0]
 	maskP, maskBuf := t.maskP, t.b.maskBuf
 	hmid, hmid16, msComp, isComp := t.ms.hmid, t.ms.hmid16, t.ms.s.comp, t.is.comp
+	predCache := t.is.predCache
 	*t = tileEnc{}
 	t.txs, t.levels, t.snaps = txs, levels, snaps
 	t.interCands, t.lumaCands, t.chromaCands, t.meStarts, t.intraRanked = ic, lc, cc, st, ir
 	t.maskP, t.b.maskBuf = maskP, maskBuf
 	t.ms.hmid, t.ms.hmid16, t.ms.s.comp, t.is.comp = hmid, hmid16, msComp, isComp
+	t.is.predCache = predCache
+	t.is.clearCache() // the frame's references may be new
 }
 
 func (t *tileEnc) inside(r, c int) bool {

@@ -61,6 +61,10 @@ type interScratch struct {
 	mid16 [(128 + 7) * 128]int16
 	// comp holds a compound block's two predictions (preds[])
 	comp [2][]int32
+	// predCache keeps the latest compound predictions of a reference
+	// (compound candidates share them), clock their use
+	predCache [16]cachedPred
+	clock     uint64
 	// obmc is an overlapped prediction's obmcPred
 	obmc [64 * 64]uint16
 }
@@ -290,21 +294,68 @@ func predictInter(ref *refFrameState, plane, x, y, w, h int, m mv, filt [2]int, 
 	s.blockInterPred(ref, plane, startX, startY, w, h, filt, interRoundingFor(bitDepth, false), bitDepth, dst, nil, dstStride)
 }
 
+// cachedPred is a reference's prediction at the compound rounding, by
+// what decides it.
+type cachedPred struct {
+	key  predKey
+	used uint64 // 0: empty
+	p    []int32
+}
+
+type predKey struct {
+	ref                   *refFrameState
+	plane, startX, startY int
+	w, h                  int
+	filt                  [2]int
+}
+
+// clearCache empties the prediction cache (keeping its room): a new
+// frame's references are new.
+func (s *interScratch) clearCache() {
+	for i := range s.predCache {
+		s.predCache[i].used = 0
+	}
+	s.clock = 0
+}
+
+// compoundPred is a reference's prediction at the compound rounding, w
+// wide: from the cache, or made into it.
+func (s *interScratch) compoundPred(r *refFrameState, plane, startX, startY, w, h int, filt [2]int, rnd interRounding, bitDepth int) []int32 {
+	k := predKey{r, plane, startX, startY, w, h, filt}
+	s.clock++
+	lru := 0
+	for i := range s.predCache {
+		e := &s.predCache[i]
+		if e.used != 0 && e.key == k {
+			e.used = s.clock
+			return e.p[:w*h]
+		}
+		if e.used < s.predCache[lru].used {
+			lru = i
+		}
+	}
+	e := &s.predCache[lru]
+	if cap(e.p) < w*h {
+		e.p = make([]int32, max(w*h, 32*32))
+	}
+	e.key, e.used = k, s.clock
+	s.blockInterPred(r, plane, startX, startY, w, h, filt, rnd, bitDepth, nil, e.p[:w*h], w)
+	return e.p[:w*h]
+}
+
 // predictCompound is a compound block's prediction (COMPOUND_AVERAGE):
 // each reference's at the compound rounding, averaged.
 func predictCompound(refs *[TOTAL_REFS_PER_FRAME]*refFrameState, plane, x, y, w, h int, ref [2]int, m [2]mv, filt [2]int, bitDepth int, wt [2]int32, dst []uint16, dstStride int, s *interScratch, mk *compMask, b *blockState) {
 	rnd := interRoundingFor(bitDepth, true)
+	var p [2][]int32
 	for k := range 2 {
-		if cap(s.comp[k]) < 128*128 {
-			s.comp[k] = make([]int32, 128*128)
-		}
 		r := refs[ref[k]]
 		startX, startY, _, _ := scaleMv(plane, x, y, m[k], r.width, r.height, r.width, r.height)
-		s.blockInterPred(r, plane, startX, startY, w, h, filt, rnd, bitDepth, nil, s.comp[k], w)
+		p[k] = s.compoundPred(r, plane, startX, startY, w, h, filt, rnd, bitDepth)
 	}
 	sh := uint(1 + rnd.post)
 	maxV := int32(1)<<uint(bitDepth) - 1
-	p0, p1 := s.comp[0], s.comp[1]
+	p0, p1 := p[0], p[1]
 	if mk != nil { // COMPOUND_WEDGE, COMPOUND_DIFFWTD
 		if plane == 0 {
 			mk.setMask(b.size, p0, p1, w, h, bitDepth, rnd, &b.maskBuf)
