@@ -14,6 +14,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's fast speeds (2 and up) use overlapped block motion
+  compensation again (0.2-0.3% smaller on every metric, 1.5% more CPU).
 - The AV1 encoder still tries splitting a skipped whole block when its
   quarters' motion, each with its own vector, predicts it better (about
   1.5% smaller by PSNR, 2% by SSIM and VMAF, for 8-12% more CPU).
