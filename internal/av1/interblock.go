@@ -313,7 +313,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	t.interEst = cands[0].est
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
-	t.save(start, r, c, size, true)
+	t.save(start, r, c, size, 3)
 	bestJ := math.Inf(1)
 	var bestDec *blockDec
 	// with fastCands the candidates are costed with their largest
@@ -324,7 +324,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 			break
 		}
 		if i > 0 {
-			t.restore(start, true)
+			t.restore(start, 3)
 		}
 		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: cd.ref, refFrame2: cd.ref2, yMode: cd.mode, refMvIdx: cd.idx, mv: cd.m, mv2: cd.m2, interp: cd.interp, compDist: cd.compDist, masked: cd.masked, mask: cd.mask, ii: cd.ii}
 		t.findMvStack(&t.stack, cd.ref2 > INTRA_FRAME, [2]int{cd.ref, cd.ref2})
@@ -339,29 +339,29 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		if !obmc || !dbgForceObmc {
 			if j := t.codeInter(dec, true); j < bestJ {
 				bestJ, bestDec = j, dec
-				t.save(best, r, c, size, true)
+				t.save(best, r, c, size, 3)
 			}
 		}
 		if obmc {
-			t.restore(start, true)
+			t.restore(start, 3)
 			do := *dec
 			do.obmc, do.skip, do.txSplit, do.txTypes = true, false, nil, nil
 			if j := t.codeInter(&do, true); j < bestJ || dbgForceObmc {
 				bestJ, bestDec = j, &do
-				t.save(best, r, c, size, true)
+				t.save(best, r, c, size, 3)
 			}
 		}
 		// warped, for the best two single reference candidates whose
 		// neighbours give a valid model
 		if (i < warpCands || dbgForceWarp) && cd.ref2 <= INTRA_FRAME && f.fp.allowWarp && t.readsUseObmc() && t.readsMotionMode() {
-			t.restore(start, true)
+			t.restore(start, 3)
 			dw := *dec
 			dw.warp, dw.obmc, dw.skip, dw.txSplit, dw.txTypes, dw.interp = true, false, false, nil, nil, EIGHTTAP
 			t.setInterState(&dw)
 			if b.warpValid {
 				if j := t.codeInter(&dw, true); j < bestJ || dbgForceWarp {
 					bestJ, bestDec = j, &dw
-					t.save(best, r, c, size, true)
+					t.save(best, r, c, size, 3)
 				}
 			}
 		}
@@ -369,12 +369,12 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	if t.fastTx {
 		t.fastTx = false
 		if bestDec != nil {
-			t.restore(start, true)
+			t.restore(start, 3)
 			d := *bestDec
 			d.skip, d.txSplit, d.txTypes = false, nil, nil
 			t.findMvStack(&t.stack, d.refFrame2 > INTRA_FRAME, [2]int{d.refFrame, d.refFrame2})
 			bestJ, bestDec = t.codeInter(&d, true), &d
-			t.save(best, r, c, size, true)
+			t.save(best, r, c, size, 3)
 		}
 	}
 	// the filter of the best, by rate and distortion
@@ -390,29 +390,29 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 				if fl == base.interp {
 					continue
 				}
-				t.restore(start, true)
+				t.restore(start, 3)
 				dec := base
 				dec.interp, dec.txTypes, dec.txSplit = fl, nil, nil
 				t.findMvStack(&t.stack, dec.refFrame2 > INTRA_FRAME, [2]int{dec.refFrame, dec.refFrame2})
 				if j := t.codeInter(&dec, true); j < bestJ {
 					bestJ, bestDec = j, &dec
-					t.save(best, r, c, size, true)
+					t.save(best, r, c, size, 3)
 				}
 			}
 		}
 	}
 	if f.fp.skipModePresent && !dbgNoSkipMode {
-		t.restore(start, true)
+		t.restore(start, 3)
 		sm := f.fp.skipModeFrame
 		dec := &blockDec{r: r, c: c, size: size, isInter: true, refFrame: sm[0], refFrame2: sm[1], yMode: NEAREST_NEARESTMV, skipMode: true, skip: true}
 		t.findMvStack(&t.stack, true, [2]int{sm[0], sm[1]})
 		dec.mv, dec.mv2 = t.stack.predMv(NEAREST_NEARESTMV, 0, 0), t.stack.predMv(NEAREST_NEARESTMV, 0, 1)
 		if j := t.codeInter(dec, true); j < bestJ || dbgForceSkipMode {
 			bestJ, bestDec = j, dec
-			t.save(best, r, c, size, true)
+			t.save(best, r, c, size, 3)
 		}
 	}
-	t.restore(best, true)
+	t.restore(best, 3)
 	t.setupBlock(r, c, size)
 	t.findMvStack(&t.stack, bestDec.refFrame2 > INTRA_FRAME, [2]int{bestDec.refFrame, bestDec.refFrame2})
 	t.setInterState(bestDec)
@@ -549,12 +549,12 @@ func (t *tileEnc) codeInter(dec *blockDec, search bool) float64 {
 	if search && f.tools.txTree && f.fp.qIndex > 0 && !dbgNoVarTx && !t.fastTx {
 		// the tree decided with DCT_DCT alone, then its types searched
 		s := t.snap(0, 8)
-		t.save(s, b.r, b.c, b.size, true)
+		t.save(s, b.r, b.c, b.size, 1)
 		nTxs, nLevels := len(t.txs), len(t.levels)
 		t.dctOnly = true
 		luma(true)
 		t.dctOnly = false
-		t.restore(s, true)
+		t.restore(s, 1)
 		t.txs, t.levels = t.txs[:nTxs], t.levels[:nLevels]
 		dec.txTypes = dec.txTypes[:0]
 		t.retype = true
@@ -690,13 +690,13 @@ func (t *tileEnc) finalInterBlock(dec *blockDec) {
 		}
 	}
 	var ctx snapshot
-	t.save(&ctx, dec.r, dec.c, dec.size, false)
+	t.save(&ctx, dec.r, dec.c, dec.size, 0)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
 	t.cdf = t.sbCDF
 	t.codeInter(dec, false)
 	skip := dec.skip || b.skip
 	ctx.decoded = t.decoded
-	t.restore(&ctx, false)
+	t.restore(&ctx, 0)
 	t.cdf = t.live
 	b.skip = skip
 	if dec.skipMode {
@@ -1042,15 +1042,15 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 	// the tree's own slots, by its depth (the block search holds the
 	// others)
 	start, whole := t.snap(0, 4+2*depth), t.snap(0, 5+2*depth)
-	t.save(start, row, col, bs, true)
+	t.save(start, row, col, bs, 1) // luma alone
 	at := len(dec.txSplit)
 	dec.txSplit = append(dec.txSplit, false)
 	nTypes := len(dec.txTypes)
 	j0, z0 := leaf()
 	t0 := dec.txTypes[nTypes:]
 	t0 = append([]uint8(nil), t0...)
-	t.save(whole, row, col, bs, true)
-	t.restore(start, true)
+	t.save(whole, row, col, bs, 1)
+	t.restore(start, 1)
 	dec.txTypes = dec.txTypes[:nTypes]
 	dec.txSplit[at] = true
 	j1, z1 := split(min(j0, budget))
@@ -1059,7 +1059,7 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 	}
 	dec.txSplit = append(dec.txSplit[:at], false)
 	dec.txTypes = append(dec.txTypes[:nTypes], t0...)
-	t.restore(whole, true)
+	t.restore(whole, 1)
 	return j0, z0
 }
 

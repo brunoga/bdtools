@@ -261,10 +261,10 @@ func (t *tileEnc) codeRow(r int, sync *rowSync) {
 			t.startSB(r, c)
 			t.clearDecoded(r, c)
 			t.cdefDone = false
-			t.save(&t.sbStart, r, c, BLOCK_64X64, false)
+			t.save(&t.sbStart, r, c, BLOCK_64X64, 0)
 			*t.sbCDF = *t.live
 			_, node := t.searchPartition(r, c, BLOCK_64X64, 0)
-			t.restore(&t.sbStart, false)
+			t.restore(&t.sbStart, 0)
 			var keep [3][]uint16
 			if dbgCompare {
 				for p := range 3 {
@@ -523,9 +523,9 @@ func (t *tileEnc) snap(depth, i int) *snapshot {
 	return t.snaps[depth][i]
 }
 
-// save saves what coding a block at (r, c) changes; with pixels, its
-// reconstruction and mi grid too (else only the contexts).
-func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
+// save saves what coding a block at (r, c) changes: its contexts and,
+// with planes, the reconstruction of the first planes and the mi grid.
+func (t *tileEnc) save(s *snapshot, r, c, size, planes int) {
 	f := t.f
 	s.r, s.c, s.size = r, c, size
 	bw4, bh4 := int(num4x4BlocksWide[size]), int(num4x4BlocksHigh[size])
@@ -540,7 +540,7 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 		copy(s.aDc[p][:w4], t.aboveDc[p][x0:])
 		copy(s.left[p][:h4], t.leftLevel[p][y0:])
 		copy(s.lDc[p][:h4], t.leftDc[p][y0:])
-		if pixels {
+		if p < planes {
 			w, h := w4*4, h4*4
 			st := f.stride[p]
 			if cap(s.rec[p]) < w*h {
@@ -552,7 +552,7 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 			}
 		}
 	}
-	if pixels {
+	if planes > 0 {
 		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
 		if cap(s.mi) < 256 {
 			s.mi = make([]modeInfo, 256)
@@ -565,8 +565,8 @@ func (t *tileEnc) save(s *snapshot, r, c, size int, pixels bool) {
 	s.decoded = t.decoded
 }
 
-// restore puts a snapshot back.
-func (t *tileEnc) restore(s *snapshot, pixels bool) {
+// restore puts a snapshot back (of its planes, the first planes).
+func (t *tileEnc) restore(s *snapshot, planes int) {
 	f := t.f
 	r, c := s.r, s.c
 	bw4, bh4 := int(num4x4BlocksWide[s.size]), int(num4x4BlocksHigh[s.size])
@@ -581,7 +581,7 @@ func (t *tileEnc) restore(s *snapshot, pixels bool) {
 		copy(t.aboveDc[p][x0:x0+w4], s.aDc[p][:w4])
 		copy(t.leftLevel[p][y0:y0+h4], s.left[p][:h4])
 		copy(t.leftDc[p][y0:y0+h4], s.lDc[p][:h4])
-		if pixels {
+		if p < planes {
 			w, h := w4*4, h4*4
 			st := f.stride[p]
 			for y := range h {
@@ -589,7 +589,7 @@ func (t *tileEnc) restore(s *snapshot, pixels bool) {
 			}
 		}
 	}
-	if pixels {
+	if planes > 0 {
 		cols, rows := min(bw4, f.miCols-c), min(bh4, f.miRows-r)
 		for y := range rows {
 			i := f.mi(r+y, c)
@@ -756,7 +756,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	d := depthOf(bSize)
 	start, best := t.snap(d, 0), t.snap(d, 1)
 	if len(cands) > 1 {
-		t.save(start, r, c, bSize, true)
+		t.save(start, r, c, bSize, 3)
 	}
 	bestJ := math.Inf(1)
 	var bestNode *partNode
@@ -811,7 +811,7 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		}
 	search:
 		if last >= 0 {
-			t.restore(start, true)
+			t.restore(start, 3)
 		}
 		last = i
 		t.cost.n = 0
@@ -855,12 +855,12 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		if j < bestJ {
 			bestJ, bestNode, bestI = j, node, i
 			if i < len(cands)-1 {
-				t.save(best, r, c, bSize, true)
+				t.save(best, r, c, bSize, 3)
 			}
 		}
 	}
 	if bestI != last {
-		t.restore(best, true)
+		t.restore(best, 3)
 	}
 	return bestJ, bestNode
 }

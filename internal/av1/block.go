@@ -114,20 +114,20 @@ func (t *tileEnc) searchBlock(r, c, size int) (float64, *blockDec) {
 	}
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, intra := t.snap(d, 2), t.snap(d, 3)
-	t.save(start, r, c, size, true)
+	t.save(start, r, c, size, 3)
 	// inter first: when it codes no residual, intra is not tried
 	jn, dn := t.searchInterBlock(r, c, size)
 	if dn != nil && (dbgForceInter || dn.skip && !dbgNoPrune && !dbgNoPruneIntra) {
 		return jn, dn
 	}
-	t.save(intra, r, c, size, true) // the inter's
-	t.restore(start, true)
+	t.save(intra, r, c, size, 3) // the inter's
+	t.restore(start, 3)
 	if dn != nil {
 		t.intraLimit = t.f.tools.intraSkip * t.interEst
 	}
 	ji, di := t.searchIntraBlock(r, c, size)
 	if dn != nil && jn < ji {
-		t.restore(intra, true)
+		t.restore(intra, 3)
 		return jn, dn
 	}
 	return ji, di
@@ -140,9 +140,9 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	b := &t.b
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
-	t.save(start, r, c, size, true)
+	t.save(start, r, c, size, 3)
 	dec := &blockDec{r: r, c: c, size: size}
-	// luma
+	// luma (the candidates changing its reconstruction alone)
 	cands := t.lumaCandidates()
 	if lim := t.intraLimit; lim > 0 {
 		t.intraLimit = 0
@@ -159,14 +159,14 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	n := 0
 	try := func(d blockDec) {
 		if n > 0 {
-			t.restore(start, true)
+			t.restore(start, 1)
 			t.setupBlock(r, c, size)
 		}
 		n++
 		j, zero := t.codeLuma(&d, true)
 		if j < bestJ {
 			bestJ, bestZero, bestLuma = j, zero, d
-			t.save(best, r, c, size, true)
+			t.save(best, r, c, size, 1)
 		}
 	}
 	// Every candidate at every depth with DCT alone, then the best few
@@ -180,7 +180,7 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	for _, cand := range cands {
 		for depth := 0; depth <= maxDepth; depth++ {
 			if n > 0 {
-				t.restore(start, true)
+				t.restore(start, 1)
 				t.setupBlock(r, c, size)
 			}
 			n++
@@ -195,7 +195,7 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 		a.d.txTypes = nil
 		try(a.d)
 	}
-	t.restore(best, true)
+	t.restore(best, 1)
 	t.setupBlock(r, c, size)
 	*dec = bestLuma
 	b.yMode, b.angleY, b.filterMode, b.txSz = dec.yMode, dec.angleY, dec.filterMode, t.lumaTxSize(dec.txDepth)
@@ -203,25 +203,25 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	j := bestJ
 	allZero := bestZero
 	if b.hasChroma {
-		t.save(start, r, c, size, true)
+		t.save(start, r, c, size, 3)
 		ucands := t.chromaCandidates()
 		cj, czero := math.Inf(1), false
 		var cb modeCand
 		for i, cand := range ucands {
 			if i > 0 {
-				t.restore(start, true)
+				t.restore(start, 3)
 			}
 			b.uvMode, b.angleUV, b.cflU, b.cflV = cand.mode, cand.angle, cand.cflU, cand.cflV
 			jj, zero := t.codeChroma(true)
 			if jj < cj {
 				cj, czero, cb = jj, zero, cand
 				if i < len(ucands)-1 {
-					t.save(best, r, c, size, true)
+					t.save(best, r, c, size, 3)
 				}
 			}
 		}
 		if cb != ucands[len(ucands)-1] {
-			t.restore(best, true)
+			t.restore(best, 3)
 		}
 		dec.uvMode, dec.angleUV, dec.cflU, dec.cflV = cb.mode, cb.angle, cb.cflU, cb.cflV
 		b.uvMode, b.angleUV, b.cflU, b.cflV = cb.mode, cb.angle, cb.cflU, cb.cflV
@@ -250,7 +250,7 @@ func (t *tileEnc) finalBlock(dec *blockDec) {
 	t.setupBlock(dec.r, dec.c, dec.size)
 	b := &t.b
 	var ctx snapshot
-	t.save(&ctx, dec.r, dec.c, dec.size, false)
+	t.save(&ctx, dec.r, dec.c, dec.size, 0)
 	t.txs, t.levels = t.txs[:0], t.levels[:0]
 	// decided as the search decided, with its rates
 	t.cdf = t.sbCDF
@@ -262,7 +262,7 @@ func (t *tileEnc) finalBlock(dec *blockDec) {
 	}
 	b.skip = zero
 	ctx.decoded = t.decoded // the block's, which a decoder has after it too
-	t.restore(&ctx, false)
+	t.restore(&ctx, 0)
 	t.cdf = t.live
 	t.writeSkip(t.w)
 	if f := t.f; f.seq.cdef && !b.skip && !f.lossless && !t.cdefDone {
