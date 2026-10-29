@@ -55,8 +55,8 @@ type EncoderOptions struct {
 	// earlier frames or joint compound motion search, CDEF's damping from
 	// q, luma's two deblocking levels the same, the temporal model's
 	// vectors whole samples and nine of the self-guided filter's sixteen
-	// sets (1.56 times faster, 2.6% larger on six clips); 2 also no OBMC
-	// or inter-intra, four references and two candidates coded in full
+	// sets (1.56 times faster, 2.6% larger on six clips); 2 also no
+	// inter-intra, four references and two candidates coded in full
 	// (1.88 times, 3.8%).
 	Speed int
 }
@@ -166,7 +166,8 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		e.tools.cdefDampQ, e.tools.lfBoth, e.tools.tplFull, e.tools.sgrSubset = true, true, true, true
 	}
 	if o.Speed >= 2 {
-		e.tools.obmc, e.tools.fewRefs = false, true
+		// (OBMC is worth 0.2-0.3% here on every metric for 1.5% more CPU)
+		e.tools.fewRefs = true
 		e.tools.interCands = min(e.tools.interCands, 2)
 		// (inter-intra is worth nothing at speed 0 on the six clips, and
 		// costs 0.3% here, 0.7% by VMAF)
