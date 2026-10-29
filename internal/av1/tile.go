@@ -42,10 +42,10 @@ type frameEnc struct {
 	cdefIdx []int8
 	// lfTx is LoopfilterTxSizes: each plane's transform size by 4x4 block
 	// of the plane, (miCols >> sub) wide.
-	lfTx     [3][]uint8
+	lfTx [3][]uint8
 	// lfEdges are the loop filter's edges by plane, pass and band, found
 	// once the frame is coded (the levels' search filters many times)
-	lfEdges [3][2][][]lfEdge
+	lfEdges  [3][2][][]lfEdge
 	dcQ, acQ [3]int
 	lossless bool
 	lambda   float64 // distortion per bit (the frame's q's)
