@@ -42,10 +42,10 @@ type frameEnc struct {
 	cdefIdx []int8
 	// lfTx is LoopfilterTxSizes: each plane's transform size by 4x4 block
 	// of the plane, (miCols >> sub) wide.
-	lfTx     [3][]uint8
+	lfTx [3][]uint8
 	// lfEdges are the loop filter's edges by plane, pass and band, found
 	// once the frame is coded (the levels' search filters many times)
-	lfEdges [3][2][][]lfEdge
+	lfEdges  [3][2][][]lfEdge
 	dcQ, acQ [3]int
 	lossless bool
 	lambda   float64 // distortion per bit (the frame's q's)
@@ -748,6 +748,49 @@ func (t *tileEnc) partitionBlocks(part, r, c, bSize int) []partBlock {
 // best partition's cost; 0 tries them all.
 var extEst = 1.0
 
+// splitSkipRatio is how much cheaper than a skipped whole block's its
+// quarters' motion must be for the split to be tried after it (motion
+// searched skipSplitRange samples around the block's vector, on its first
+// reference). (On the six clips at speed 2: 1.5% smaller by PSNR-YUV,
+// 2.4% by SSIM, 2.0% by VMAF, for 8% more CPU; at speed 0 1.4%, 2.3%,
+// 2.4% for 12%. At speed 2, 0.9 0.35% for 2%, 0.95 0.7% for 3%, 1.1 2.0%
+// for 52%; trying the split after every skipped whole block 2.1% for
+// 46%; by the block's error rather than its motion nothing.)
+const (
+	splitSkipRatio = 1.0
+	skipSplitRange = 16
+)
+
+// quartersMove reports whether a skipped inter whole block d at (r, c)
+// should still try the split: its quarters' motion searches' costs
+// (each its own vector) come to less than splitSkipRatio times the whole
+// block's.
+func (t *tileEnc) quartersMove(r, c, size int, d *blockDec) bool {
+	f := t.f
+	x, y := c*4, r*4
+	w, h := int(blockWidth[size]), int(blockHeight[size])
+	if size <= BLOCK_8X8 || x+w > f.width || y+h > f.height {
+		return false
+	}
+	sl := math.Sqrt(t.lambda)
+	m0 := d.mv
+	me := meBlock{ref: f.refs[d.refFrame], src: f.src[0], srcStride: f.stride[0], x: x, y: y, w: w, h: h,
+		bitDepth: f.bitDepth, filt: f.filt, allowHP: f.fp.highPrecisionMV, searchRange: skipSplitRange,
+		cost: func(m mv) float64 {
+			return sl * float64(t.mvDiffCost(mv{m.row - m0.row, m.col - m0.col})) / costScale
+		}}
+	t.mvGen++
+	_, whole := t.ms.search(&me, []mv{m0})
+	var quarters float64
+	me.w, me.h = w/2, h/2
+	for _, o := range [4][2]int{{0, 0}, {0, w / 2}, {h / 2, 0}, {h / 2, w / 2}} {
+		me.x, me.y = x+o[1], y+o[0]
+		_, q := t.ms.search(&me, []mv{m0, {}})
+		quarters += q
+	}
+	return quarters < splitSkipRatio*whole
+}
+
 // searchPartition decides the partition at (r, c) by rate and distortion,
 // leaving the state as the best leaves it.
 func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
@@ -802,11 +845,15 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 	bestI, last := -1, -1
 	for i, part := range cands {
 		// Pruned: everything else after a skipped inter block that is
-		// the whole partition; the extended partitions in a direction
+		// the whole partition (but the split where its quarters' motion
+		// is better than its own); the extended partitions in a direction
 		// splitting it that way did not help.
 		if jn, ok := jOf[PARTITION_NONE]; ok && !dbgNoPrune {
 			if bestNode != nil && bestNode.part == PARTITION_NONE && bestNode.blocks[0].isInter && bestNode.blocks[0].skip && t.f.tools.pruneSkip {
-				break
+				if part != PARTITION_SPLIT || !t.quartersMove(r, c, bSize, bestNode.blocks[0]) {
+					break
+				}
+				goto search
 			}
 			if !t.f.tools.pruneExt {
 				goto search

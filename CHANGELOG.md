@@ -14,6 +14,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder still tries splitting a skipped whole block when its
+  quarters' motion, each with its own vector, predicts it better (about
+  1.5% smaller by PSNR, 2% by SSIM and VMAF, for 8-12% more CPU).
 - The AV1 encoder keeps its latest compound predictions of each
   reference, which the compound candidates share, rather than filtering
   them again (about 2% less CPU, the same output).
