@@ -8,7 +8,8 @@
 //	av1bench -clips DIR -res DIR -run ours:0,svt:4,svt:8 -anchor svt:4
 //
 // The clips are 8-bit 4:2:0 y4m files. A configuration is ours:SPEED or
-// svt:PRESET, with @TAG for a variant (a build being tried): its points
+// svt:PRESET, with @TAG for a variant (a build being tried, or SVT with
+// the parameters in $SVT_PARAMS, as -svtav1-params takes them): its points
 // are kept in -res and coded again only with -force. One encode runs at
 // a time, each with the whole machine.
 package main
@@ -331,8 +332,12 @@ func encodeOurs(clip, stream string, speed, q int) (point, error) {
 
 func encodeSVT(clip, stream string, preset, crf int) (point, error) {
 	p := point{Q: crf}
-	cmd := exec.CommandContext(context.Background(), "ffmpeg", "-v", "error", "-y", "-i", clip, "-c:v", "libsvtav1", //nolint:gosec // the bench's own arguments
-		"-preset", strconv.Itoa(preset), "-crf", strconv.Itoa(crf), "-g", "250", "-f", "obu", stream)
+	args := []string{"-v", "error", "-y", "-i", clip, "-c:v", "libsvtav1",
+		"-preset", strconv.Itoa(preset), "-crf", strconv.Itoa(crf), "-g", "250"}
+	if sp := os.Getenv("SVT_PARAMS"); sp != "" { // a variant's (with @TAG)
+		args = append(args, "-svtav1-params", sp)
+	}
+	cmd := exec.CommandContext(context.Background(), "ffmpeg", append(args, "-f", "obu", stream)...) //nolint:gosec // the bench's own arguments
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(), "SVT_LOG=1") // errors only
 	start := time.Now()
