@@ -293,6 +293,9 @@ type tplScratch struct {
 	res, coef, lv    [tplBlock * tplBlock]int32
 }
 
+// tplPool keeps the model's workers' buffers for later frames.
+var tplPool = sync.Pool{New: func() any { return new(tplScratch) }}
+
 // tplCode codes a frame's blocks in the model, its rows at once.
 func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int) []uint16) {
 	j := tf.job
@@ -326,7 +329,9 @@ func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int)
 	var wg sync.WaitGroup
 	for range min(runtime.GOMAXPROCS(0), tf.rows) {
 		wg.Go(func() {
-			sc := new(tplScratch)
+			sc := tplPool.Get().(*tplScratch) //nolint:errcheck // always a *tplScratch
+			defer tplPool.Put(sc)
+			sc.ms.reset()
 			for {
 				by := int(next.Add(1)) - 1
 				if by >= tf.rows {

@@ -10,7 +10,6 @@ import (
 	"math"
 	"math/bits"
 	"slices"
-	"sort"
 )
 
 // Debugging switches.
@@ -99,6 +98,13 @@ func (t *tileEnc) setInfo() {
 	}
 }
 
+// rankedDec is a luma choice with its cost, as searchIntraBlock ranks
+// them.
+type rankedDec struct {
+	d blockDec
+	j float64
+}
+
 type modeCand struct {
 	mode, angle int
 	cost        float64
@@ -171,11 +177,7 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	}
 	// Every candidate at every depth with DCT alone, then the best few
 	// with their transform types searched.
-	type ranked struct {
-		d blockDec
-		j float64
-	}
-	var all []ranked
+	all := t.intraRanked[:0]
 	t.dctOnly = true
 	for _, cand := range cands {
 		for depth := 0; depth <= maxDepth; depth++ {
@@ -186,11 +188,12 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 			n++
 			d := blockDec{r: r, c: c, size: size, yMode: cand.mode, angleY: cand.angle, filterMode: cand.filterMode, txDepth: depth}
 			j, _ := t.codeLuma(&d, true)
-			all = append(all, ranked{d, j})
+			all = append(all, rankedDec{d, j})
 		}
 	}
 	t.dctOnly = false
-	sort.SliceStable(all, func(i, j int) bool { return all[i].j < all[j].j })
+	t.intraRanked = all
+	slices.SortStableFunc(all, func(a, b rankedDec) int { return cmp.Compare(a.j, b.j) })
 	for _, a := range all[:min(typeSearches, len(all))] {
 		a.d.txTypes = nil
 		try(a.d)
@@ -553,7 +556,8 @@ func (t *tileEnc) chromaEstimate(mode, angle int) float64 {
 // withAngles adds the other angles of the best directional candidates.
 func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []modeCand {
 	slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
-	var dirs []modeCand
+	var room [8]modeCand
+	dirs := room[:0]
 	for _, c := range cands {
 		if isDirectional(c.mode) && c.filterMode < 0 && len(dirs) < n {
 			dirs = append(dirs, c)
@@ -574,7 +578,7 @@ func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []mo
 // their estimates.
 func (t *tileEnc) lumaCandidates() []modeCand {
 	b := &t.b
-	var cands []modeCand
+	cands := t.lumaCands[:0]
 	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
 		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.lumaEstimate(mode, 0, -1)})
 	}
@@ -588,13 +592,14 @@ func (t *tileEnc) lumaCandidates() []modeCand {
 	} else {
 		slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	}
+	t.lumaCands = cands
 	return cands[:min(lumaCands, len(cands))]
 }
 
 // chromaCandidates are the chroma modes worth coding in full.
 func (t *tileEnc) chromaCandidates() []modeCand {
 	f, b := t.f, &t.b
-	var cands []modeCand
+	cands := t.chromaCands[:0]
 	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
 		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.chromaEstimate(mode, 0)})
 	}
@@ -626,6 +631,7 @@ func (t *tileEnc) chromaCandidates() []modeCand {
 		}
 	}
 	slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
+	t.chromaCands = cands
 	return cands[:min(chromaCands, len(cands))]
 }
 
@@ -724,8 +730,10 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	}
 	vw, vh = min(vw, pw-startX), min(vh, ph-startY)
 	t.txX4, t.txY4 = startX>>2, startY>>2
-	types := []int{txType}
-	if txType < 0 {
+	var types []int
+	if txType >= 0 {
+		types = oneTxType[txType][:]
+	} else {
 		types = t.txTypes(plane, txSz)
 		if dbgDCTOnly || t.dctOnly {
 			types = types[:1]
@@ -826,11 +834,25 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	return bestJ, best.eob, best.txType, true
 }
 
+// The transform types the sets try (read only).
+var (
+	txTypesIntra1 = []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT}
+	txTypesIntra2 = []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX}
+	txTypesInter1 = []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT, FLIPADST_DCT, DCT_FLIPADST}
+	txTypesInter3 = []int{DCT_DCT, IDTX}
+	oneTxType     = func() (a [TX_TYPES][1]int) {
+		for i := range a {
+			a[i][0] = i
+		}
+		return a
+	}()
+)
+
 // txTypes are the transform types to try: the luma's set's, the
-// chroma's one.
+// chroma's one (read only).
 func (t *tileEnc) txTypes(plane, txSz int) []int {
 	if t.f.lossless || int(txSizeSqrUp[txSz]) > TX_32X32 {
-		return []int{DCT_DCT}
+		return oneTxType[DCT_DCT][:]
 	}
 	if t.b.isInter {
 		return t.interTxTypesFor(plane, txSz)
@@ -839,17 +861,17 @@ func (t *tileEnc) txTypes(plane, txSz int) []int {
 	if plane == 0 {
 		switch {
 		case set == TX_SET_DCTONLY || t.f.fp.qIndex == 0:
-			return []int{DCT_DCT}
+			return oneTxType[DCT_DCT][:]
 		case set == TX_SET_INTRA_1:
-			return []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT}
+			return txTypesIntra1
 		}
-		return []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX}
+		return txTypesIntra2
 	}
 	tt := int(modeToTxfm[t.b.uvMode])
 	if txTypeInSetIntra[set][tt] == 0 {
-		return []int{DCT_DCT}
+		return oneTxType[DCT_DCT][:]
 	}
-	return []int{tt}
+	return oneTxType[tt][:]
 }
 
 // txSet is get_tx_set for an intra block.

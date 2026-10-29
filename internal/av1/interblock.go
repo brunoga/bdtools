@@ -66,16 +66,16 @@ func (t *tileEnc) interTxTypesFor(plane, txSz int) []int {
 	f, b := t.f, &t.b
 	if plane == 0 {
 		if f.fp.qIndex == 0 {
-			return []int{DCT_DCT}
+			return oneTxType[DCT_DCT][:]
 		}
 		return t.interTxTypes(txSz)
 	}
 	x4, y4 := max(b.c, t.txX4<<1), max(b.r, t.txY4<<1)
 	tt := int(f.mis[f.mi(min(y4, f.miRows-1), min(x4, f.miCols-1))].txType)
 	if txTypeInSetInter[t.interTxSet(txSz)][tt] == 0 {
-		return []int{DCT_DCT}
+		return oneTxType[DCT_DCT][:]
 	}
-	return []int{tt}
+	return oneTxType[tt][:]
 }
 
 // writeInterModes writes an inter block's is_inter, reference, mode,
@@ -224,7 +224,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 	t.setupBlock(r, c, size)
 	b := &t.b
 	b.isInter, b.txSz = true, int(maxTxSizeRect[size])
-	var cands []interCand
+	cands := t.interCands[:0]
 	seen := map[*refFrameState]bool{}
 	refs, pairs := interRefs, compPairs
 	if f.tools.fewRefs {
@@ -310,6 +310,7 @@ func (t *tileEnc) searchInterBlock(r, c, size int) (float64, *blockDec) {
 		}
 		slices.SortStableFunc(cands, func(a, b interCand) int { return cmp.Compare(a.est, b.est) })
 	}
+	t.interCands = cands
 	t.interEst = cands[0].est
 	d := 5 + depthOf(min(size, BLOCK_64X64))
 	start, best := t.snap(d, 0), t.snap(d, 1)
@@ -753,7 +754,7 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 			return sl * float64(t.mvDiffCost(mv{m.row - pred0.row, m.col - pred0.col})) / costScale
 		}}
 	t.mvGen++
-	starts := []mv{{}}
+	starts := append(t.meStarts[:0], mv{})
 	for i := range min(s.numMvFound, 4) {
 		starts = append(starts, s.refStackMv[i][0])
 	}
@@ -762,6 +763,7 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 			starts = append(starts, mv{row: d[0] * r * 8, col: d[1] * r * 8})
 		}
 	}
+	t.meStarts = starts
 	m, cost := t.ms.search(&me, starts)
 	if t.meSeen == nil {
 		t.meSeen = map[meKey]meResult{}

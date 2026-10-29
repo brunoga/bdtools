@@ -7,10 +7,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `tools/av1bench -memprofile` writes an allocation profile of the run.
 - `tools/av1bench -keep` keeps the coded streams beside the results.
 
 ### Changed
 
+- The AV1 encoder keeps its block searches' candidate lists, its tile
+  encoders (by superblock row) and its loop restoration and temporal
+  model scratch for later blocks, rows and frames, and shares its
+  transform type lists, rather than allocating them again (about 5%
+  less CPU, the same output).
 - The AV1 encoder ranks transform types with an AVX2 estimate of
   their quantization error, level bits and end of block (the same
   output).

@@ -220,11 +220,11 @@ func (t *tileEnc) writeInterTxType(cd coder, txSz, tt int) {
 func (t *tileEnc) interTxTypes(txSz int) []int {
 	switch t.interTxSet(txSz) {
 	case TX_SET_DCTONLY:
-		return []int{DCT_DCT}
+		return oneTxType[DCT_DCT][:]
 	case TX_SET_INTER_3:
-		return []int{DCT_DCT, IDTX}
+		return txTypesInter3
 	case TX_SET_INTER_2:
-		return []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT}
+		return txTypesIntra1
 	}
-	return []int{DCT_DCT, ADST_DCT, DCT_ADST, ADST_ADST, IDTX, V_DCT, H_DCT, FLIPADST_DCT, DCT_FLIPADST}
+	return txTypesInter1
 }

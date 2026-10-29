@@ -77,6 +77,7 @@ func main() {
 	svtCRF := flag.String("svt-crf", "24,30,36,42,48", "SVT-AV1's CRFs")
 	force := flag.Bool("force", false, "code the points again")
 	cpuProfile := flag.String("cpuprofile", "", "a CPU profile of the run to this file")
+	memProfile := flag.String("memprofile", "", "an allocation profile of the run to this file")
 	flag.BoolVar(&keepStreams, "keep", false, "keep the coded streams (beside the results, .obu)")
 	flag.Parse()
 	if *clips == "" || *res == "" {
@@ -92,6 +93,20 @@ func main() {
 			fail(err)
 		}
 		defer pprof.StopCPUProfile()
+	}
+	if *memProfile != "" {
+		defer func() {
+			f, err := os.Create(*memProfile)
+			if err != nil {
+				fail(err)
+			}
+			if err := pprof.Lookup("allocs").WriteTo(f, 0); err != nil {
+				fail(err)
+			}
+			if err := f.Close(); err != nil {
+				fail(err)
+			}
+		}()
 	}
 	files, _ := filepath.Glob(filepath.Join(*clips, "*.y4m"))
 	sort.Strings(files)
