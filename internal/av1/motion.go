@@ -52,6 +52,13 @@ type motionSearch struct {
 	gen    uint32
 }
 
+// reset makes ms as new, keeping its buffers' room.
+func (ms *motionSearch) reset() {
+	hmid, hmid16, comp := ms.hmid, ms.hmid16, ms.s.comp
+	*ms = motionSearch{}
+	ms.hmid, ms.hmid16, ms.s.comp = hmid, hmid16, comp
+}
+
 // seenPoint is an integer position the search has measured: the cache of
 // the current generation's.
 type seenPoint struct {

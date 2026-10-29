@@ -1044,19 +1044,23 @@ type lrCand struct {
 	sgr    lrUnit
 }
 
+// lrPool keeps the workers' buffers for later calls and frames.
+var lrPool = sync.Pool{New: func() any { return new(lrScratch) }}
+
 // lrParallel runs fn(i) for each i < n, on the CPUs.
 func lrParallel(n int, fn func(i int, sc *lrScratch)) {
 	var next atomic.Int32
 	var wg sync.WaitGroup
 	for range min(runtime.GOMAXPROCS(0), n) {
 		wg.Go(func() {
-			var sc lrScratch
+			sc := lrPool.Get().(*lrScratch) //nolint:errcheck // always an *lrScratch
+			defer lrPool.Put(sc)
 			for {
 				i := int(next.Add(1)) - 1
 				if i >= n {
 					return
 				}
-				fn(i, &sc)
+				fn(i, sc)
 			}
 		})
 	}

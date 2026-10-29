@@ -123,7 +123,13 @@ type tileEnc struct {
 	// mvCosts are the motion vector components' rates mvDiffCost keeps,
 	// of generation mvGen
 	mvCosts [2][2*mvCostRange + 1]mvCompCost
-	mvGen   uint32
+	// the block searches' lists, kept for their room
+	interCands  []interCand
+	lumaCands   []modeCand
+	chromaCands []modeCand
+	meStarts    []mv
+	intraRanked []rankedDec
+	mvGen       uint32
 	// iiPred is a plane's intra prediction of an inter-intra block,
 	// iiIntra the block's luma ones by mode, iiInter its luma inter one
 	iiPred  [32 * 32]uint16
@@ -216,7 +222,9 @@ type partNode struct {
 }
 
 func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) *tileEnc {
-	t := &tileEnc{f: f, rowStart: rowStart, rowEnd: rowEnd, colStart: colStart, colEnd: colEnd, cdf: f.startCDF()}
+	t := tilePool.Get().(*tileEnc) //nolint:errcheck // always a *tileEnc
+	t.reset()
+	t.f, t.rowStart, t.rowEnd, t.colStart, t.colEnd, t.cdf = f, rowStart, rowEnd, colStart, colEnd, f.startCDF()
 	t.w = &recorder{base: t.cdf}
 	t.live, t.sbCDF = t.cdf, new(cdfs)
 	t.curQ = f.fp.qIndex
@@ -232,6 +240,23 @@ func newTileEnc(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) *tileEnc {
 		t.leftDc[p] = make([]uint8, (f.miRows>>sub)+32)
 	}
 	return t
+}
+
+// tilePool keeps tile encoders (a superblock row's, in the rows'
+// wavefront) for later rows and frames: their buffers' room.
+var tilePool = sync.Pool{New: func() any { return new(tileEnc) }}
+
+// reset makes t as new, keeping its scratch buffers' room.
+func (t *tileEnc) reset() {
+	txs, levels, snaps := t.txs[:0], t.levels[:0], t.snaps
+	ic, lc, cc, st, ir := t.interCands[:0], t.lumaCands[:0], t.chromaCands[:0], t.meStarts[:0], t.intraRanked[:0]
+	maskP, maskBuf := t.maskP, t.b.maskBuf
+	hmid, hmid16, msComp, isComp := t.ms.hmid, t.ms.hmid16, t.ms.s.comp, t.is.comp
+	*t = tileEnc{}
+	t.txs, t.levels, t.snaps = txs, levels, snaps
+	t.interCands, t.lumaCands, t.chromaCands, t.meStarts, t.intraRanked = ic, lc, cc, st, ir
+	t.maskP, t.b.maskBuf = maskP, maskBuf
+	t.ms.hmid, t.ms.hmid16, t.ms.s.comp, t.is.comp = hmid, hmid16, msComp, isComp
 }
 
 func (t *tileEnc) inside(r, c int) bool {
@@ -340,7 +365,9 @@ func codeTile(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) []symOp {
 	if f.fp.deltaQ || dbgSerialRows {
 		t := newTileEnc(f, rowStart, rowEnd, colStart, colEnd)
 		t.code()
-		return t.w.ops
+		ops := t.w.ops
+		tilePool.Put(t)
+		return ops
 	}
 	var rows []int
 	for r := rowStart; r < rowEnd; r += 16 {
@@ -384,6 +411,7 @@ func codeTile(f *frameEnc, rowStart, rowEnd, colStart, colEnd int) []symOp {
 			}
 			t.codeRow(r, syncs[i])
 			recs[i] = t.w.ops
+			tilePool.Put(t)
 		})
 	}
 	wg.Wait()
