@@ -147,14 +147,15 @@ func (g *lrGeom) sbUnits(p, r, c int) (r0, r1, c0, c1 int) {
 
 // lrScratch is a worker's buffers.
 type lrScratch struct {
-	win, inter, hfold []int32
-	sum, sq, vs, vq   []int32
-	a, b              []int32
-	flt               [2][]int32 // a unit's two box filters
-	fltS              [2][]int32 // the search's, every strength's
-	u, e              []int32    // lrCellStats' window and error, scaled
-	out               []uint16
-	ymat              []int16 // lrCellStats' rows for gram
+	win, inter      []int32
+	hfold           []int16 // lrCellStats' horizontal folds
+	sum, sq, vs, vq []int32
+	a, b            []int32
+	flt             [2][]int32 // a unit's two box filters
+	fltS            [2][]int32 // the search's, every strength's
+	u, e            []int32    // lrCellStats' window and error, scaled
+	out             []uint16
+	ymat            []int16 // lrCellStats' rows for gram
 }
 
 func grow16(b []int16, n int) []int16 {
@@ -672,16 +673,22 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 		k, t0 = 3, 1
 	}
 	kk := k * k
-	sc.hfold = grow32(sc.hfold, (h+6)*w*4)
+	// the horizontal folds, a plane per tap pair (the centre's last), a
+	// row of w per window row
+	hw := (h + 6) * w
+	sc.hfold = grow16(sc.hfold, hw*k)
 	hf := sc.hfold
 	for r := range h + 6 {
 		row := win[r*ww : (r+1)*ww]
-		for j := range w {
-			o := (r*w + j) * 4
-			for b := t0; b < 3; b++ {
-				hf[o+b-t0] = row[j+b] + row[j+6-b] - 2*center
+		for b := t0; b < 3; b++ {
+			out := hf[(b-t0)*hw+r*w:][:w]
+			for j := range out {
+				out[j] = int16(row[j+b] + row[j+6-b] - 2*center) //nolint:gosec // bitDepth+1 bits
 			}
-			hf[o+k-1] = row[j+3] - center
+		}
+		out := hf[(k-1)*hw+r*w:][:w]
+		for j := range out {
+			out[j] = int16(row[j+3] - center) //nolint:gosec // bitDepth bits
 		}
 	}
 	// a row's sums (kk rows of w, padded to n, and the source's after):
@@ -692,19 +699,22 @@ func (f *frameEnc) lrCellStats(p int, g *lrGeom, cdefd, deb []uint16, x0, y0, w,
 	clear(ym)
 	var gm [17 * 17]int64
 	for i := range h {
-		srow := src[(y0+i)*stride+x0:]
-		for j := range w {
-			for a := t0; a < 3; a++ {
-				o1, o2 := ((i+a)*w+j)*4, ((i+6-a)*w+j)*4
-				for b := range k {
-					ym[((a-t0)*k+b)*n+j] = int16(hf[o1+b] + hf[o2+b]) //nolint:gosec // bitDepth+2 bits
+		for a := t0; a < 3; a++ {
+			for b := range k {
+				out := ym[((a-t0)*k+b)*n:][:w]
+				h1, h2 := hf[b*hw+(i+a)*w:][:w], hf[b*hw+(i+6-a)*w:][:w]
+				for j := range out {
+					out[j] = h1[j] + h2[j] // bitDepth+2 bits
 				}
 			}
-			o := ((i+3)*w + j) * 4
-			for b := range k {
-				ym[((k-1)*k+b)*n+j] = int16(hf[o+b]) //nolint:gosec // bitDepth+1 bits
-			}
-			ym[kk*n+j] = int16(int32(srow[j]) - center) //nolint:gosec // bitDepth bits
+		}
+		for b := range k {
+			copy(ym[((k-1)*k+b)*n:][:w], hf[b*hw+(i+3)*w:])
+		}
+		out := ym[kk*n:][:w]
+		srow := src[(y0+i)*stride+x0:][:w]
+		for j := range out {
+			out[j] = int16(int32(srow[j]) - center) //nolint:gosec // bitDepth bits
 		}
 		gram(ym, n, kk+1, &gm)
 	}

@@ -11,6 +11,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's Wiener statistics fold a window's rows into planes
+  of 16-bit words and sum them a row at a time (about 1.5% less CPU, the
+  same output).
 - The AV1 encoder's transform tree search and intra luma candidates
   save and restore the luma reconstruction alone.
 - The AV1 encoder keeps a 4x4 block's mode info in one record rather
