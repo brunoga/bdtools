@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `tools/av1bench` passes `$SVT_PARAMS` to SVT-AV1 (`-svtav1-params`), for
+  a variant tagged `svt:PRESET@TAG`.
 - `tools/av1bench -memprofile` writes an allocation profile of the run.
 - `tools/av1bench -keep` keeps the coded streams beside the results.
 
