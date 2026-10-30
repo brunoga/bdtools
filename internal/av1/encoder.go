@@ -51,10 +51,9 @@ type EncoderOptions struct {
 	// coded in full where theirs are near the best's, with their largest
 	// transforms, DCT_DCT, the best's transforms then searched; 1 no
 	// warped motion or masked compound, no compound of two
-	// earlier frames or joint compound motion search, CDEF's damping from
-	// q, luma's two deblocking levels the same, the temporal model's
-	// vectors whole samples and nine of the self-guided filter's sixteen
-	// sets (1.56 times faster, 2.6% larger on six clips); 2 also no
+	// earlier frames or joint compound motion search, luma's two
+	// deblocking levels the same and nine of the self-guided filter's
+	// sixteen sets (1.56 times faster, 2.6% larger on six clips); 2 also no
 	// inter-intra, four references and three candidates coded in full
 	// (1.88 times, 3.8%).
 	Speed int
@@ -145,7 +144,12 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		num: o.FPSNum, den: o.FPSDen,
 	}
 	e.tools = tools{interCands: interCands, obmc: !dbgNoObmc, fewRefs: dbgFewRefs, txTree: pruneTxTree,
-		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst, fastCands: true}
+		pruneSkip: !dbgNoPruneSkip, pruneExt: !dbgNoPruneExt, intraSkip: intraSkip, candRatio: candRatio, sameDir: sameDirComp, txCands: txCands, jointME: jointME, extEst: extEst, fastCands: true,
+		// (at speed 0, CDEF's damping searched was 0.03% larger by
+		// PSNR-YUV and 0.26% by VMAF for 3% more CPU; the model's vectors
+		// to eighths 0.03% smaller by PSNR-YUV but 0.44% larger by SSIM
+		// and 0.46% by VMAF for 2%)
+		cdefDampQ: true, tplFull: true}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio, e.tools.fastCands = false, 0, 0, false
 		e.tools.filterRD = filterRD
@@ -164,7 +168,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		e.seq.warpedMotion, e.seq.maskedCompound = false, false
 		e.tools.sameDir = 0
 		e.tools.jointME = false
-		e.tools.cdefDampQ, e.tools.lfBoth, e.tools.tplFull, e.tools.sgrSubset = true, true, true, true
+		e.tools.lfBoth, e.tools.sgrSubset = true, true
 	}
 	if o.Speed >= 2 {
 		// (OBMC is worth 0.2-0.3% here on every metric for 1.5% more CPU)

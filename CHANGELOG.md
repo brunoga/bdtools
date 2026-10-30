@@ -14,6 +14,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's slower speeds take CDEF's damping from q and the
+  temporal model's vectors in whole samples, as the faster ones did
+  (2-5% less CPU, the same size or smaller).
 - The AV1 encoder's speeds 1 and up search inter blocks' transform trees
   with every transform type, not DCT_DCT alone (0.4-0.7% smaller at speed
   2, 4% more CPU).
