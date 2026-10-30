@@ -56,7 +56,7 @@ type EncoderOptions struct {
 	// q, luma's two deblocking levels the same, the temporal model's
 	// vectors whole samples and nine of the self-guided filter's sixteen
 	// sets (1.56 times faster, 2.6% larger on six clips); 2 also no
-	// inter-intra, four references and two candidates coded in full
+	// inter-intra, four references and three candidates coded in full
 	// (1.88 times, 3.8%).
 	Speed int
 }
@@ -168,7 +168,10 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.Speed >= 2 {
 		// (OBMC is worth 0.2-0.3% here on every metric for 1.5% more CPU)
 		e.tools.fewRefs = true
-		e.tools.interCands = min(e.tools.interCands, 2)
+		// (three, not two: 0.29% smaller by PSNR-YUV, 0.16% by SSIM, 0.45%
+		// by VMAF for 2% more CPU; all seven references, not four, 0.3%
+		// for 12%)
+		e.tools.interCands = min(e.tools.interCands, 3)
 		// (inter-intra is worth nothing at speed 0 on the six clips, and
 		// costs 0.3% here, 0.7% by VMAF)
 		e.seq.interIntra = false
