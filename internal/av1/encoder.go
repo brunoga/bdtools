@@ -49,9 +49,8 @@ type EncoderOptions struct {
 	// slower, 2.3% smaller); 0 every tool searched, intra in
 	// inter pictures where its estimate is near inter's, inter candidates
 	// coded in full where theirs are near the best's, with their largest
-	// transforms, DCT_DCT, the best's transforms then searched; 1 the
-	// transform trees decided with
-	// DCT_DCT, no warped motion or masked compound, no compound of two
+	// transforms, DCT_DCT, the best's transforms then searched; 1 no
+	// warped motion or masked compound, no compound of two
 	// earlier frames or joint compound motion search, CDEF's damping from
 	// q, luma's two deblocking levels the same, the temporal model's
 	// vectors whole samples and nine of the self-guided filter's sixteen
@@ -155,7 +154,9 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		e.tools.pruneExt = false
 	}
 	if o.Speed >= 1 {
-		e.tools.txTree = true
+		// (the transform trees decided with DCT_DCT, pruneTxTree, were
+		// 0.44% larger by PSNR-YUV, 0.47% by SSIM, 0.73% by VMAF at speed
+		// 2 for 4% less CPU; at speed 1 0.36%, 0.44%, 0.47% for 5%)
 		e.tools.intraSkip = min(e.tools.intraSkip, 1)
 		if e.tools.candRatio > 0 {
 			e.tools.candRatio = min(e.tools.candRatio, 1.05)
