@@ -14,6 +14,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's fast speeds code three inter candidates of a block in
+  full, not two (0.2-0.45% smaller, 2% more CPU).
 - The AV1 encoder's fast speeds (2 and up) use overlapped block motion
   compensation again (0.2-0.3% smaller on every metric, 1.5% more CPU).
 - The AV1 encoder still tries splitting a skipped whole block when its
