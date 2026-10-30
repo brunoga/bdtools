@@ -50,11 +50,11 @@ type EncoderOptions struct {
 	// inter pictures where its estimate is near inter's, inter candidates
 	// coded in full where theirs are near the best's, with their largest
 	// transforms, DCT_DCT, the best's transforms then searched; 1 no
-	// warped motion or masked compound, no compound of two
+	// warped motion, masked compound or inter-intra, no compound of two
 	// earlier frames or joint compound motion search, luma's two
 	// deblocking levels the same and nine of the self-guided filter's
-	// sixteen sets (1.56 times faster, 2.6% larger on six clips); 2 also no
-	// inter-intra, four references and three candidates coded in full
+	// sixteen sets (1.56 times faster, 2.6% larger on six clips); 2 also
+	// four references and three candidates coded in full
 	// (1.88 times, 3.8%).
 	Speed int
 }
@@ -169,6 +169,10 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		e.tools.sameDir = 0
 		e.tools.jointME = false
 		e.tools.lfBoth, e.tools.sgrSubset = true, true
+		// (inter-intra is worth 0.1-0.2% at speed 0 on the six clips,
+		// but costs 0.43% by PSNR-YUV, 0.35% by SSIM and 0.84% by VMAF
+		// at speed 1, 0.3% and 0.7% by VMAF at speed 2)
+		e.seq.interIntra = false
 	}
 	if o.Speed >= 2 {
 		// (OBMC is worth 0.2-0.3% here on every metric for 1.5% more CPU)
@@ -177,9 +181,6 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// by VMAF for 2% more CPU; all seven references, not four, 0.3%
 		// for 12%)
 		e.tools.interCands = min(e.tools.interCands, 3)
-		// (inter-intra is worth nothing at speed 0 on the six clips, and
-		// costs 0.3% here, 0.7% by VMAF)
-		e.seq.interIntra = false
 	}
 	return e, nil
 }
