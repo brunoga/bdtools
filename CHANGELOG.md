@@ -14,6 +14,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's speed 1 leaves inter-intra prediction out, as speed 2
+  did (0.35-0.84% smaller).
 - The AV1 encoder's slower speeds take CDEF's damping from q and the
   temporal model's vectors in whole samples, as the faster ones did
   (2-5% less CPU, the same size or smaller).
