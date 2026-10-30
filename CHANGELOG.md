@@ -14,6 +14,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's speeds 1 and up search inter blocks' transform trees
+  with every transform type, not DCT_DCT alone (0.4-0.7% smaller at speed
+  2, 4% more CPU).
 - The AV1 encoder's fast speeds code three inter candidates of a block in
   full, not two (0.2-0.45% smaller, 2% more CPU).
 - The AV1 encoder's fast speeds (2 and up) use overlapped block motion
