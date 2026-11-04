@@ -33,6 +33,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"runtime/pprof"
 	"strings"
 	"syscall"
@@ -48,7 +49,18 @@ import (
 // version reports that tag rather than the placeholder.
 var version = pversion.Placeholder
 
+// gcPercent is the collector's target unless GOGC says otherwise: the
+// encoders make garbage fast (picture copies, candidate lists), and Go's
+// default 100 lets the heap grow to twice what is live. (A 1080p AV1
+// encode peaked at 5.6 GB, at 50 3.9 GB; the built-in HEVC encoder 2.5
+// and 2.0 GB, a 3D disc to side by side HEVC on NVENC 0.93 and 0.85 GB;
+// each as fast. 25 cost a 2D conversion 14% more CPU.)
+const gcPercent = 50
+
 func main() {
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(gcPercent)
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
