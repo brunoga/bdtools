@@ -15,6 +15,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and filters key frames with the 32 pictures after them (was 6): 4.3%
   smaller by PSNR-YUV, 6.8% by SSIM and 3.0% by VMAF at speed 2 (speed 0
   4.3%, 6.8%, 3.3%), at the same speed.
+- The AV1 encoder filters each mini-GOP's depth 2 frame (its middle) with
+  the two pictures each side, as SVT-AV1 filters its second layer: 0.7%
+  smaller by PSNR-YUV, 0.6% by SSIM and 2.0% by VMAF at speed 2, at the
+  same speed (grainier sources most: Children of Men 2.5%).
 
 ### Fixed
 
