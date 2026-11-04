@@ -12,6 +12,9 @@ import (
 // The AV1 encoder here, end to end: a clip converted to Matroska and to
 // MP4, read back by ffmpeg as AV1 with every frame.
 func TestRunnerBuiltinAV1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	ff, err := LookPath("ffmpeg")
 	if err != nil {
 		t.Skip("no ffmpeg")

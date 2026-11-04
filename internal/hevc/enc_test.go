@@ -111,6 +111,9 @@ func encodeSynth(t *testing.T, o EncoderOptions, frames int) ([]byte, [][3][]uin
 // encoder's own reconstruction, and ffmpeg agrees: intra only, and with
 // P pictures.
 func TestEncoderRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	for _, tc := range []struct {
 		name    string
 		depth   int

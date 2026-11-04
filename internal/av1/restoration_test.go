@@ -12,6 +12,9 @@ import (
 // both bit depths, sizes not whole units or superblocks, with deblocking
 // and CDEF, and inter frames.
 func TestLRFixed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	W, S, X := RESTORE_WIENER, RESTORE_SGRPROJ, RESTORE_SWITCHABLE
 	sets := []lrSettings{
@@ -58,6 +61,9 @@ func TestLRTiles(t *testing.T) {
 // TestLRSearch codes pictures with the restoration searched and compares
 // them with it off.
 func TestLRSearch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 60}, {200, 136, 8, 140}, {200, 136, 8, 220}, {264, 200, 10, 120}, {90, 70, 10, 200}, {320, 240, 8, 160},

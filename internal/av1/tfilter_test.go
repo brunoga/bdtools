@@ -166,6 +166,9 @@ func TestTemporalFilterEncode(t *testing.T) {
 // A key frame is filtered with the pictures after it, and shown so: its
 // unit differs from the unfiltered one's, and the stream decodes.
 func TestTemporalFilterKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	const w, h, depth = 96, 64, 8
 	var src []*Source
 	for i := range 8 {
