@@ -169,8 +169,8 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		}
 		return r.work.add(seg)
 	}
-	// post is what follows a picture's making: its encoding.
-	post := func(sf picture) error {
+	// encode is what follows a picture's making: its encoding.
+	encode := func(sf picture) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -275,6 +275,36 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		inSegment++
 		prog.frame(n - skip)
 		return nil
+	}
+	// post encodes a picture, first filling the hole before it, if the
+	// source lost pictures there, with copies of it. A copied left eye
+	// cannot be filled: its pictures are the source's.
+	var holes pictureHoles
+	post := func(sf picture) error {
+		if r.timeline != nil && sf.pts >= 0 {
+			if k := holes.missing(r.timeline(sf.pts), r.burnFrameDur); k > 0 {
+				at := (r.timeline(sf.pts) - time.Duration(k)*r.burnFrameDur).Round(time.Millisecond)
+				lost := "1 picture"
+				if k > 1 {
+					lost = fmt.Sprintf("%d pictures", k)
+				}
+				if r.Opts.Encoder == EncoderCopy {
+					r.Report.Report("warning: the source lost %s at %s; the picture runs out of step with the sound from there", lost, at)
+				} else {
+					r.Report.Report("the source lost %s at %s (damaged?): the picture after stands in, to stay in step with the sound", lost, at)
+					// each at the timestamp it would have had
+					tick := int64(r.burnFrameDur * 90000 / time.Second)
+					for i := k; i > 0; i-- {
+						fill := sf
+						fill.pts -= int64(i) * tick
+						if err := encode(fill); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+		return encode(sf)
 	}
 	var stages *stagePipe
 	if r.to3D {

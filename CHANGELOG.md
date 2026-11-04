@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A source that lost pictures (a damaged disc image, a broken download) no
+  longer plays out of step with its sound after the damage: the hole in the
+  picture's timestamps is filled with the picture after it, and reported.
+  Before, the pictures were packed back to back and the sound, which keeps
+  its timestamps, ran late from there on.
+
 ## [0.16.0] - 2026-10-30
 
 ### Added
