@@ -10,6 +10,9 @@ import (
 // The encoder makes the same stream without the AVX2 kernels as with
 // them (the Go paths a CPU without AVX2 takes), at 8 and 10 bits.
 func TestNoAVX2SameStream(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	if !useAVX2 {
 		t.Skip("no AVX2")
 	}

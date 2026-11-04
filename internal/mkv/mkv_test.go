@@ -333,6 +333,9 @@ func TestVideoDelay(t *testing.T) {
 // every access unit comes out whole. A start code in the last bytes of a read
 // used to be lost, merging the next picture into the one before.
 func TestVideoReadBoundaries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	for codec, name := range map[Codec]string{H264: "bframes.264", HEVC: "bframes.265"} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "mkv", name))
 		if err != nil {
