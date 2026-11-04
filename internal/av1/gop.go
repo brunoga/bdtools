@@ -189,6 +189,21 @@ func (e *Encoder) drain(flush bool) []Unit {
 		byDisp := func(d int) *frameJob { return gop[d-first.disp] }
 		last := byDisp(a + n)
 		e.filterAnchor(gop, ahead)
+		if k := tfDepth2; k > 0 && n >= 2*k+2 && !dbgNoTF && e.o.QIndex > 0 {
+			// the depth 2 frame filtered with k pictures each side (the
+			// anchor's source as it came), shown so
+			m := a + n/2
+			window := make([]*Source, 0, 2*k+1)
+			for d := m - k; d <= m+k; d++ {
+				j := byDisp(d)
+				src := j.src
+				if j.orig != nil {
+					src = j.orig
+				}
+				window = append(window, src)
+			}
+			byDisp(m).src = temporalFilter(window, k, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
+		}
 		if n == 1 {
 			e.runKey(&out)
 			last.show, last.depth = true, 1

@@ -72,6 +72,14 @@ var dbgNoTF = false
 // 3 0.5%.)
 var tfKeyAfter = 32
 
+// tfDepth2 is how many pictures each side filter a mini-GOP's depth 2
+// frame (its middle; 0: not filtered), the filtered picture shown, as
+// SVT-AV1 filters its second layer. (On the six clips at speed 2: 2 0.7%
+// smaller by PSNR-YUV, 0.6% by SSIM and 2.0% by VMAF, at the same speed
+// (Children of Men 2.5%, Free Solo 0.8%; Incredibles 2 0.2% larger); 1
+// 0.6, 0.6, 1.8.)
+var tfDepth2 = 2
+
 // tfAfter is how many pictures after the anchor the filter waits for
 // (the next mini-GOP's first ones: a lookahead).
 var tfAfter = 3
