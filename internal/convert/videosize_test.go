@@ -49,6 +49,9 @@ func TestAUSizes(t *testing.T) {
 // --video-size: half the size of a plain encode asked for, about half
 // comes out.
 func TestRunnerVideoSize(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	src := filepath.Join(work, "src.mkv")
 	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=24:d=24",
@@ -93,6 +96,9 @@ func TestRunnerVideoSize(t *testing.T) {
 // --compare: a conversion measured against its source; the source against
 // itself is perfect.
 func TestCompare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	src := filepath.Join(work, "src.mkv")
 	if err := runCmd(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=320x240:r=24:d=2",

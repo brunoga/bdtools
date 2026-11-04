@@ -28,6 +28,9 @@ func halfFlatPicture(w, h, depth int, seed uint64) *Source {
 // 64x64s' indexes in turn, both bit depths, sizes not whole superblocks
 // and pictures with skipped superblocks.
 func TestCdefFixed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	sets := []cdefSettings{
 		{damping: 3, y: [8][2]int{{5, 0}}, uv: [8][2]int{{3, 0}}},   // primary only
@@ -73,6 +76,9 @@ func TestCdefFixed(t *testing.T) {
 // TestCdefSearch codes pictures with the parameters searched, at low to
 // high q, and compares them with CDEF off.
 func TestCdefSearch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 60}, {200, 136, 8, 160}, {200, 136, 8, 240}, {136, 72, 10, 120}, {90, 70, 10, 220},

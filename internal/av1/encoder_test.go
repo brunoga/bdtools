@@ -113,6 +113,9 @@ func TestEncodeDecodes(t *testing.T) {
 }
 
 func TestEncodeTiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range []struct{ w, h, cl, rl int }{{200, 136, 1, 1}, {520, 264, 2, 1}, {136, 72, 1, 0}} {
 		o := EncoderOptions{Width: c.w, Height: c.h, BitDepth: 8, QIndex: 90, FPSNum: 25, FPSDen: 1, TileColsLog2: c.cl, TileRowsLog2: c.rl}
@@ -122,6 +125,9 @@ func TestEncodeTiles(t *testing.T) {
 
 // Inter frames (of intra blocks, for now) after a key frame.
 func TestEncodeInterFrames(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 100, FPSNum: 25, FPSDen: 1}
 	p := testPicture(200, 136, 8, 1)
@@ -173,6 +179,9 @@ func encodeAll(t *testing.T, e *Encoder, pics []*Source) []Unit {
 // A longer run: mini-GOPs cut by key frames, the last one short, the
 // slots reused.
 func TestEncodeGOPs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range []struct{ mini, keyint, n int }{{8, 12, 20}, {4, 0, 11}, {1, 5, 7}, {3, 0, 10}} {
 		o := EncoderOptions{Width: 96, Height: 64, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: c.mini, Keyint: c.keyint}
@@ -229,6 +238,9 @@ func TestEncodeFramesConcurrently(t *testing.T) {
 // The superblock rows coded at once make the same stream however they are
 // scheduled.
 func TestEncodeRowsDeterministic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	o := EncoderOptions{Width: 264, Height: 200, BitDepth: 8, QIndex: 120, MiniGOP: 4}
 	p := testPicture(264, 200, 8, 3)
 	pics := []*Source{p, shifted(p, 2, 1), shifted(p, 4, 2), shifted(p, 6, 3), shifted(p, 8, 4)}
@@ -277,6 +289,9 @@ func TestPruneTxTree(t *testing.T) {
 // The faster settings code smaller searches, decoded to the
 // reconstruction, the more so the faster.
 func TestSpeeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	p := testPicture(136, 96, 8, 2)
 	var pics []*Source

@@ -94,6 +94,9 @@ func TestMatroskaResync(t *testing.T) {
 // --crop auto finds a letterboxed film's bars, in Matroska, MP4 and
 // transport stream sources, and the picture comes out without them.
 func TestRunnerCropsAuto(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	for _, c := range []struct{ name, format string }{{"src.mkv", "matroska"}, {"src.mp4", "mp4"}, {"src.m2ts", "mpegts"}} {
 		t.Run(c.format, func(t *testing.T) {

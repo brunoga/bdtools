@@ -909,6 +909,9 @@ func composesFEL(t *testing.T, fs felSource, dec Decoder) {
 // encoded base layer (keep) than with the source's re-encoded (reencode).
 // Skips without ffmpeg, and without NVENC or x265 for those.
 func TestRunnerKeepsFELLayers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	fs := makeFELSource(t, 10, 0)
 	for _, enc := range []Encoder{EncoderNVENC, EncoderSoftware, EncoderBuiltin} {
 		t.Run(string(enc), func(t *testing.T) {
@@ -1414,6 +1417,9 @@ func TestRunnerConvertsToH264Builtin(t *testing.T) {
 // height, or squeezed to it, marked top-bottom in the file, each eye's
 // picture the source's (the eyes of the test source differ).
 func TestRunnerConvertsToOverUnder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	for _, tc := range []struct {
 		layout Layout
 		h      int
@@ -1450,6 +1456,9 @@ func TestRunnerConvertsToOverUnder(t *testing.T) {
 // stereo mode says so, each eye is cut out, and it comes out over-under,
 // as MV-HEVC, or (told it is one picture, or asked for 2D) flat.
 func TestRunnerTakesFramedSources(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	sbs := filepath.Join(work, "SBS.mkv")
 	o := DefaultOptions()
@@ -1568,6 +1577,9 @@ func TestRunnerConvertsMP4Sources(t *testing.T) {
 // source: both views decode here and come out side by side, or as
 // MV-HEVC again.
 func TestRunnerConvertsMVHEVCSources(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	src := filepath.Join(work, "Spatial.mp4")
 	vf, err := os.Open("../mkv/testdata/mvhevc.hevc")
@@ -1644,6 +1656,9 @@ func TestRunnerConvertsMVHEVCSources(t *testing.T) {
 // .mp4, H.264 over-under into a .mov, each flagged (st3d) and shaped as
 // in Matroska, the AC-3 track with it, and ffmpeg decodes them.
 func TestRunnerWritesMP4(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	for _, tc := range []struct {
 		name         string
 		codec        Codec
