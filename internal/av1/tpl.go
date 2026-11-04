@@ -56,19 +56,18 @@ type tplFrame struct {
 var (
 	tplLambda    = true
 	tplLambdaPow = 0.5
-	// tplFrameK moves an anchor's or a depth 2 frame's q by k log2(0.5/r0)
-	// (r0 its own share of its importance): finer as more of it is taken.
-	// (4 was 1.7% larger, 16 0.4% smaller by PSNR-YUV but 1.9% larger by
-	// SSIM and 6.2% by VMAF; centred on 0.25, or within 8 of the frame's
-	// q, 0.8% and 2.5% larger: the anchors want their q lowered.)
-	tplFrameK = 8.0
-	// tplKeyK moves a key frame's q by k log2(0.5/r0), as tplFrameK an
-	// anchor's (the key frame costed with the mini-GOP after it). (On the
-	// six clips, against the key frame's q as planned: 12 1.5% smaller by
-	// PSNR-YUV, Free Solo 8.3%, a static shot the key frame is most of;
-	// 8 1.0%, 16 0.7% (Blade Runner 2049 3.3% larger), 8 centred on 0.7
-	// 1.1%; costed but its q as planned 0.1%.)
-	tplKeyK = 12.0
+	// tplQRatio is the quantizer step a key frame, an anchor and a depth
+	// 2 frame code at, as a fraction of the leaves' times sqrt(r0) (r0 the
+	// frame's own share of its importance; a key frame's r0/0.7, at most
+	// 1): finer as more of it is taken, as SVT-AV1's r0-based q for its
+	// lower layers (whose fractions, 0.75, 0.9 and 1, these are 0.8 of).
+	// (On the six clips at speed 2, against moving the q index by
+	// 12 log2(0.5/r0) for key frames and 8 log2(0.5/r0) for the others:
+	// 4.3% smaller by PSNR-YUV, 6.8% by SSIM, 3.0% by VMAF, with key
+	// frames filtered with 32 pictures; 0.9 of SVT-AV1's 2.5, 5.0, 3.1;
+	// for key frames and anchors alone, 0.7 5.8, 6.3, 1.8, 0.8 4.5, 5.7,
+	// 2.5, 0.9 2.6, 4.3, 2.7.)
+	tplQRatio = [3]float64{0.6, 0.72, 0.8}
 	// tplRateK is the model's lambda, the coder's times this (libaom's
 	// TPL rdmult is a sixth of its coder's).
 	tplRateK = 1.0 / 6
@@ -195,12 +194,18 @@ func (e *Encoder) tpl(steps []step) {
 			continue
 		}
 		r0 := sumOwn / sumAll
-		switch {
-		case j.key && tplKeyK != 0:
-			j.q = min(max(j.q-int(math.Round(tplKeyK*math.Log2(0.5/r0))), 1), 255)
-		case !j.key && tplFrameK != 0 && j.depth <= 2:
-			// the frame's own q by how much the others take from it
-			j.q = min(max(j.q-int(math.Round(tplFrameK*math.Log2(0.5/r0))), 1), 255)
+		if j.key || j.depth <= 2 {
+			k, r := tplQRatio[j.depth], r0
+			if j.key {
+				k, r = tplQRatio[0], min(r0/0.7, 1)
+			}
+			leaf := min(e.o.QIndex+leafQ, 255)
+			target := float64(dcQlookup[bd][leaf]) * k * math.Sqrt(r)
+			q := leaf
+			for q > 1 && float64(dcQlookup[bd][q-1]) >= target {
+				q--
+			}
+			j.q = q
 		}
 		sbCols, sbRows := (2*((w+7)>>3)+15)>>4, (2*((h+7)>>3)+15)>>4
 		qs := make([]int, sbCols*sbRows)
