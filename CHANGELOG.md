@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `bdtools` runs Go's collector at GOGC 50 (unless `GOGC` is set): a
+  1080p AV1 encode peaks at 3.9 GB (was 5.6), the built-in HEVC encoder at
+  2.0 GB (2.5), a 3D disc to side by side HEVC on NVENC at 0.85 GB (0.93),
+  each as fast.
 - The AV1 encoder's temporal filter keeps its padded picture copies for
   the next filtering instead of leaving them to the collector: a 1080p
   encode peaks at 4.4 GB (was 6.1 GB; 4.8 GB before key frames were
