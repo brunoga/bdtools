@@ -185,10 +185,12 @@ func TestBenchSeq(t *testing.T) {
 		tplLambdaPow = v
 		defer func() { tplLambdaPow = old }()
 	}
-	if v, err := strconv.ParseFloat(os.Getenv("AV1TPLFRAMEK"), 64); err == nil {
-		old := tplFrameK
-		tplFrameK = v
-		defer func() { tplFrameK = old }()
+	if v, err := strconv.ParseFloat(os.Getenv("AV1TPLQRATIO"), 64); err == nil {
+		old := tplQRatio
+		for i := range tplQRatio {
+			tplQRatio[i] *= v
+		}
+		defer func() { tplQRatio = old }()
 	}
 	if os.Getenv("AV1TPLQ") != "" {
 		tplLambda = false

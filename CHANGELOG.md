@@ -5,14 +5,20 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The AV1 encoder codes key frames, anchors and depth 2 frames at a
+  quantizer step a fraction of the leaves' times the square root of their
+  r0 (how little the frames after them take from them), as SVT-AV1 does,
+  and filters key frames with the 32 pictures after them (was 6): 4.3%
+  smaller by PSNR-YUV, 6.8% by SSIM and 3.0% by VMAF at speed 2 (speed 0
+  4.3%, 6.8%, 3.3%), at the same speed.
+
 ### Fixed
 
 - The AV1 encoder no longer fails ("index out of range") when the
   transform tree search keeps a split it cut short: a rounding edge (an
   ulp) could let a split whose blocks were not all coded through.
-
-### Fixed
-
 - A source that lost pictures (a damaged disc image, a broken download) no
   longer plays out of step with its sound after the damage: the hole in the
   picture's timestamps is filled with the picture after it, and reported.

@@ -65,10 +65,12 @@ var tfStrength = 2
 var dbgNoTF = false
 
 // tfKeyAfter is how many pictures after a key frame filter it (0: the
-// key frames not filtered), the filtered picture shown. (On the two
-// 120-picture clips, a key frame each: 6 0.7% better, 3 0.5%; with it,
-// key frames coded finer than keyQ do not gain.)
-var tfKeyAfter = 6
+// key frames not filtered), the filtered picture shown. (On the six
+// clips at speed 2, against 6: 32 0.4% smaller by PSNR-YUV, 0.8% by SSIM
+// and 1.0% by VMAF, 24 0.4, 0.6, 0.6, 16 0.3, 0.4, 0.8; SVT-AV1 takes up
+// to 32. Before, on the two 120-picture clips: 6 0.7% better than none,
+// 3 0.5%.)
+var tfKeyAfter = 32
 
 // tfAfter is how many pictures after the anchor the filter waits for
 // (the next mini-GOP's first ones: a lookahead).
