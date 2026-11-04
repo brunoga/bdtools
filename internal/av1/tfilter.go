@@ -157,8 +157,20 @@ func temporalFilter(window []*Source, center, qIndex, bitDepth, width, height in
 		p.rec[2], p.stride[2] = padPlane(s.Cr, s.StrideC, cw, ch, pw/2, ph/2), pw/2
 	}
 	for p := range 3 {
-		t.out[p] = make([]uint16, len(t.pics[center].rec[p]))
+		t.out[p] = tfPlane(len(t.pics[center].rec[p]))
+		clear(t.out[p])
 	}
+	// the padded planes are the filter's alone: kept for the next
+	defer func() {
+		for i := range t.pics {
+			for p := range 3 {
+				tfPlaneDone(t.pics[i].rec[p])
+			}
+		}
+		for p := range 3 {
+			tfPlaneDone(t.out[p])
+		}
+	}()
 
 	// av1_estimate_noise_level, on the picture filtered
 	src := window[center]
@@ -229,7 +241,7 @@ func temporalFilter(window []*Source, center, qIndex, bitDepth, width, height in
 // padPlane copies a w by h plane into a pw by ph one, the edge samples
 // repeated.
 func padPlane(in []uint16, stride, w, h, pw, ph int) []uint16 {
-	out := make([]uint16, pw*ph)
+	out := tfPlane(pw * ph)
 	for y := range ph {
 		row := in[min(y, h-1)*stride:]
 		dst := out[y*pw : (y+1)*pw]
@@ -239,6 +251,28 @@ func padPlane(in []uint16, stride, w, h, pw, ph int) []uint16 {
 		}
 	}
 	return out
+}
+
+// tfPlanes keeps the filter's padded planes between filterings, by
+// their length: a key frame's window is 33 pictures, and the garbage of
+// a plane copy of each per filtering grew the heap by a gigabyte and
+// more (the collector's target, not what the encoder held).
+var tfPlanes sync.Map // int -> *sync.Pool of *[]uint16
+
+// tfPlane is a plane of n samples, its contents undefined.
+func tfPlane(n int) []uint16 {
+	if p, ok := tfPlanes.Load(n); ok {
+		if b, ok := p.(*sync.Pool).Get().(*[]uint16); ok {
+			return *b
+		}
+	}
+	return make([]uint16, n)
+}
+
+// tfPlaneDone gives a plane from tfPlane back.
+func tfPlaneDone(b []uint16) {
+	p, _ := tfPlanes.LoadOrStore(len(b), &sync.Pool{})
+	p.(*sync.Pool).Put(&b)
 }
 
 // tfWorker is a row's working memory.
