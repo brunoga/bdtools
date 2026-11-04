@@ -74,7 +74,10 @@ func main() {
 	run := flag.String("run", "ours:0,svt:4", "the configurations, comma separated")
 	anchor := flag.String("anchor", "svt:4", "the configuration the BD-rates are against")
 	only := flag.String("only", "", "only these clips (names without .y4m, comma separated)")
-	oursQ := flag.String("ours-q", "60,100,140,180", "our quantizer indexes")
+	// five points over SVT-AV1's range of rates at its CRFs (60 was two to
+	// five times its highest rate on every clip, and BD-rates over curves
+	// that barely overlap shift with any change to where ours lie)
+	oursQ := flag.String("ours-q", "90,115,140,165,190", "our quantizer indexes")
 	svtCRF := flag.String("svt-crf", "24,30,36,42,48", "SVT-AV1's CRFs")
 	force := flag.Bool("force", false, "code the points again")
 	cpuProfile := flag.String("cpuprofile", "", "a CPU profile of the run to this file")
