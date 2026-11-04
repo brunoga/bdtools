@@ -7,6 +7,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The AV1 encoder no longer fails ("index out of range") when the
+  transform tree search keeps a split it cut short: a rounding edge (an
+  ulp) could let a split whose blocks were not all coded through.
+
+### Fixed
+
 - A source that lost pictures (a damaged disc image, a broken download) no
   longer plays out of step with its sound after the damage: the hole in the
   picture's timestamps is filled with the picture after it, and reported.

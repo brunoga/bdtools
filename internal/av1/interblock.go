@@ -1004,8 +1004,9 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		return j + jj, eob == 0
 	}
 	// split stops at a cost of limit or more (searching, the whole's: the
-	// split is then not taken, its costs only adding up)
-	split := func(limit float64) (float64, bool) {
+	// split is then not taken, its costs only adding up), reporting
+	// whether it went through
+	split := func(limit float64) (float64, bool, bool) {
 		t.cost.n = 0
 		t.writeTxfmSplit(&t.cost, row, col, txSz, true)
 		j := t.lambda * float64(t.cost.n) / costScale
@@ -1015,14 +1016,14 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		for i := 0; i < int(txHeight[txSz])>>2; i += sh {
 			for k := 0; k < int(txWidth[txSz])>>2; k += sw {
 				if j >= limit {
-					return j, false
+					return j, false, false
 				}
 				jj, z := t.varTx(dec, row+i, col+k, sub, depth+1, search, cur, limit-j)
 				j += jj
 				zero = zero && z
 			}
 		}
-		return j, zero
+		return j, zero, true
 	}
 	if !splits {
 		return leaf()
@@ -1031,7 +1032,8 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 		s := dec.txSplit[cur.split]
 		cur.split++
 		if s {
-			return split(math.Inf(1))
+			j, zero, _ := split(math.Inf(1))
+			return j, zero
 		}
 		return leaf()
 	}
@@ -1055,8 +1057,12 @@ func (t *tileEnc) varTx(dec *blockDec, row, col, txSz, depth int, search bool, c
 	t.restore(start, 1)
 	dec.txTypes = dec.txTypes[:nTypes]
 	dec.txSplit[at] = true
-	j1, z1 := split(min(j0, budget))
-	if j1 < j0 {
+	// a split cut short is never taken: its cost is the budget or more,
+	// which its parent's cost, adding it, reaches too, but in floating
+	// point j + (budget - j) can fall an ulp short, and the parent would
+	// keep a tree whose leaves were not all coded
+	j1, z1, done := split(min(j0, budget))
+	if done && j1 < j0 {
 		return j1, z1
 	}
 	dec.txSplit = append(dec.txSplit[:at], false)
