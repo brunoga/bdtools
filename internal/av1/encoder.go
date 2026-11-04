@@ -213,6 +213,10 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		fp.deltaQ = true
 	}
 	f := e.newFrame(fp, src)
+	if !key {
+		f.lambdaK = layerLambda[b2i(j.show)]
+		f.lambda *= f.lambdaK
+	}
 	switch {
 	case e.sbQHook != nil && fp.deltaQ:
 		f.sbQ = e.sbQHook(((f.miCols + 15) >> 4) * ((f.miRows + 15) >> 4))
