@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder scales an inter frame's lambda by its layer, as SVT-AV1
+  does: the leaves' 1.4 times, the frames kept for others' 1.18 times.
+  0.2% smaller by PSNR-YUV and 0.4% by SSIM, VMAF within 0.1%, and 5-7%
+  less CPU (speeds 2 and 0).
 - `bdtools` runs Go's collector at GOGC 50 (unless `GOGC` is set): a
   1080p AV1 encode peaks at 3.9 GB (was 5.6), the built-in HEVC encoder at
   2.0 GB (2.5), a 3D disc to side by side HEVC on NVENC at 0.85 GB (0.93),

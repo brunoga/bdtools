@@ -21,6 +21,8 @@ var dbgCompare bool
 
 // frameEnc is the frame being coded, shared by its tiles.
 type frameEnc struct {
+	// lambdaK is the frame's lambda as a factor of lambdaFor's (0: 1)
+	lambdaK        float64
 	tools          *tools // the encoder's
 	seq            *seqParams
 	fp             *frameParams
@@ -466,6 +468,9 @@ func (t *tileEnc) setQ(q int) {
 	t.dcQ = [3]int{int(dcQlookup[bd][qi(q+fp.deltaQYDc)]), int(dcQlookup[bd][qi(q+fp.deltaQUVDc)]), int(dcQlookup[bd][qi(q+fp.deltaQUVDc)])}
 	t.acQ = [3]int{int(acQlookup[bd][qi(q)]), int(acQlookup[bd][qi(q+fp.deltaQUVAc)]), int(acQlookup[bd][qi(q+fp.deltaQUVAc)])}
 	t.lambda = lambdaFor(t.dcQ[0])
+	if k := t.f.lambdaK; k > 0 {
+		t.lambda *= k
+	}
 }
 
 // lambdaFor is libaom's lambda for a DC quantizer: 88/24 q^2 per bit,
@@ -477,6 +482,15 @@ func lambdaFor(dcQ int) float64 { return lambdaScale * 88.0 / 24 * float64(dcQ) 
 // 1.15 1.1%, 0.7 0.7%, 0.5 1.3% worse; before it, 0.6 was 0.3% better
 // than 0.7.)
 var lambdaScale = 1.0
+
+// layerLambda scales an inter frame's lambda, by whether it is shown at
+// once (the leaves, which no other frame refers to) or kept for others
+// (anchors and the layers between): SVT-AV1's per-layer factors (its
+// 140/128 or 180/128, and 138/128 above the base layer). (On the six
+// clips at speed 2: 0.2% smaller by PSNR-YUV, 0.4% by SSIM, 0.1% by VMAF
+// and 5% less CPU; at speed 0 0.2%, 0.4%, VMAF 0.1% larger, 7% less CPU.
+// The leaves' alone or the others' alone each traded VMAF against PSNR.)
+var layerLambda = [2]float64{1.18, 1.4}
 
 // writeDeltaQ is read_delta_qindex, on a superblock's first block.
 func (t *tileEnc) writeDeltaQ(cd coder) {
