@@ -7,6 +7,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `tools/av1bench` codes ours at q 90, 115, 140, 165 and 190 by default
+  (was 60, 100, 140, 180): five points over SVT-AV1's range of rates.
 - The AV1 encoder codes key frames, anchors and depth 2 frames at a
   quantizer step a fraction of the leaves' times the square root of their
   r0 (how little the frames after them take from them), as SVT-AV1 does,
