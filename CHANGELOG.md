@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's temporal filter keeps its padded picture copies for
+  the next filtering instead of leaving them to the collector: a 1080p
+  encode peaks at 4.4 GB (was 6.1 GB; 4.8 GB before key frames were
+  filtered with 32 pictures and depth 2 frames at all), the streams
+  unchanged.
 - `tools/av1bench` codes ours at q 90, 115, 140, 165 and 190 by default
   (was 60, 100, 140, 180): five points over SVT-AV1's range of rates.
 - The AV1 encoder codes key frames, anchors and depth 2 frames at a
