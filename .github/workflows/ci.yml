@@ -5,9 +5,23 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The full suite (the slow end-to-end tests, the race detector) runs
+  # nightly, on demand and before a release (release.yml calls this with
+  # full); pushes and pull requests run the short one (go test -short).
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      full:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+
+env:
+  FULL: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || inputs.full == true }}
 
 jobs:
   test:
@@ -30,18 +44,29 @@ jobs:
       - name: Test
         # The end-to-end conversion tests skip when x264 is not installed,
         # which it is not here; the GPU encoder tests skip without a GPU.
-        # The race detector slows the Go encoders' conversions several
-        # times over, and the packages share the runner's cores.
+        # The full suite runs under the race detector, which slows the Go
+        # encoders' conversions several times over (the packages share the
+        # runner's cores: internal/convert alone 830 s and more).
         env:
           MVC_MF_HEADERS: /usr/share/mingw-w64/include:/usr/x86_64-w64-mingw32/include
-        run: go test -race -timeout 1200s ./...
+        run: |
+          if [ "$FULL" = true ]; then
+            go test -race -timeout 2400s ./...
+          else
+            go test -short -timeout 900s ./...
+          fi
 
       - name: Test the pure-Go decoder
         # Every assembly kernel has a Go fallback selected by this tag (and
         # on every non-amd64 platform); the conformance corpus must pass
         # through it too. The packages share the runner's cores
         # (internal/convert 290 to 300 s), hence the timeout.
-        run: go test -tags purego -timeout 600s ./...
+        run: |
+          if [ "$FULL" = true ]; then
+            go test -tags purego -timeout 1200s ./...
+          else
+            go test -short -tags purego -timeout 900s ./...
+          fi
 
   test-macos:
     name: Test (macOS)
@@ -67,7 +92,10 @@ jobs:
         # more often with sessions of several packages at once: one
         # package at a time. The runners' speed varies by a third
         # (internal/convert 290 to 400 s), hence the timeout.
-        run: go test -p 1 -timeout 600s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
+        run: |
+          short=-short
+          if [ "$FULL" = true ]; then short=; fi
+          go test -p 1 $short -timeout 1200s ./internal/gpu/... ./internal/convert/... ./internal/hevc/...
 
   test-windows:
     name: Test (Windows)

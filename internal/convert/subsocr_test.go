@@ -50,6 +50,9 @@ func TestOCRTrack(t *testing.T) {
 // --subs-ocr: a Matroska source's PGS track read, the text beside it in
 // Matroska, alone in MP4 (tx3g).
 func TestRunnerReadsPGS(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	work := t.TempDir()
 	src := filepath.Join(work, "src.mkv")
 	sup, _ := filepath.Abs(filepath.Join("..", "..", "testdata", "subs", "ocr.sup"))

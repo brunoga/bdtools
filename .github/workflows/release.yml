@@ -9,8 +9,17 @@ permissions:
   contents: write  # needed to create GitHub releases and upload assets
 
 jobs:
+  # The full test suite (the CI workflow's, with its slow tests and the
+  # race detector) passes before anything is released.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    with:
+      full: true
+
   release:
     name: GoReleaser
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

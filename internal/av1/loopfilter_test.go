@@ -32,6 +32,9 @@ func smoothPicture(w, h, depth int) *Source {
 // TestLoopFilterDecodes codes pictures with the levels searched, at low
 // to high q, and compares them with the filter off.
 func TestLoopFilterDecodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range raceCut([]struct{ w, h, depth, q int }{
 		{200, 136, 8, 40}, {200, 136, 8, 120}, {200, 136, 8, 200}, {200, 136, 8, 250},
@@ -54,6 +57,9 @@ func TestLoopFilterDecodes(t *testing.T) {
 // TestLoopFilterFixed codes pictures with fixed levels and sharpnesses,
 // for every filter path and each plane on its own.
 func TestLoopFilterFixed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, lv := range raceCut([][5]int{
 		{63, 63, 63, 63, 0}, {10, 40, 5, 63, 0}, {63, 0, 30, 0, 0}, {0, 63, 0, 20, 0},

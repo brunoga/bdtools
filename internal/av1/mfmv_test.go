@@ -9,6 +9,9 @@ import (
 // Steady motion over two mini-GOPs: the later frames' motion fields hold
 // projected vectors, and the streams decode to the reconstruction.
 func TestRefFrameMvs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	for _, c := range []struct{ w, h, depth, mini, n int }{{136, 96, 8, 4, 9}, {104, 72, 10, 8, 10}} {
 		t.Run(fmt.Sprintf("%dx%d-%d", c.w, c.h, c.depth), func(t *testing.T) {

@@ -230,6 +230,9 @@ func TestDbgSkipMode(t *testing.T) {
 
 // A q index a superblock (delta_q), the targets random.
 func TestDeltaQ(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: the full suite runs it")
+	}
 	t.Parallel()
 	o := EncoderOptions{Width: 200, Height: 136, BitDepth: 8, QIndex: 120, FPSNum: 25, FPSDen: 1, MiniGOP: 4}
 	p := testPicture(200, 136, 8, 1)
