@@ -21,6 +21,8 @@ var dbgCompare bool
 
 // frameEnc is the frame being coded, shared by its tiles.
 type frameEnc struct {
+	// noLR has the frame not restored (a leaf at speed 2)
+	noLR bool
 	// lambdaK is the frame's lambda as a factor of lambdaFor's (0: 1)
 	lambdaK        float64
 	tools          *tools // the encoder's

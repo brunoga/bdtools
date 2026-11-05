@@ -1150,7 +1150,7 @@ func lrSearchSize(g *lrGeom, cells []lrStats, cw int, chroma bool, sets uint16) 
 func (f *frameEnc) restore(deb [3][]uint16, fixed *lrSettings) *lrFrame {
 	fp := f.fp
 	fp.lrType, fp.lrUnitShift, fp.lrUVShift = [3]int{}, 0, 0
-	if !f.seq.restoration || f.lossless {
+	if !f.seq.restoration || f.lossless || f.noLR {
 		return nil
 	}
 	cdefd := f.rec

@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- At speed 2 the AV1 encoder does not restore (loop restoration) the
+  leaves, the frames shown and kept for no other, as SVT-AV1 does from
+  its preset 3: 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, 0.33%
+  larger by VMAF.
 - `bdtools` is built with profile-guided optimization (`cmd/bdtools/default.pgo`,
   a CPU profile of AV1 encodes at speeds 0 and 2, which `go build` picks
   up): an AV1 encode 1.6-2.2% less CPU, the streams unchanged.
