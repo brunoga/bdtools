@@ -72,7 +72,12 @@ type tools struct {
 	// vectors whole samples, a subset of the self-guided filter's sets
 	cdefDampQ, lfBoth, tplFull, sgrSubset bool
 	// leafLR has the leaves (frames shown and kept for none) restored
-	leafLR               bool
+	leafLR bool
+	// anchorTiles is the least log2 of the tile columns of the key frames
+	// and anchors (which the mini-GOPs wait on, coded much of the time
+	// alone: a frame's superblock rows, each two superblocks behind the
+	// one above, keep few cores busy)
+	anchorTiles          int
 	intraSkip, candRatio float64
 	sameDir              int // sameDirComp's
 	txCands              int
@@ -190,6 +195,10 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, VMAF 0.33%
 		// larger)
 		e.tools.leafLR = false
+		// (two tile columns: on the six clips 1.05 times the pictures a
+		// second, 360 pictures 1.06 times, 0.30% larger by PSNR-YUV, 0.27%
+		// by SSIM, 0.06% by VMAF; four 1.10 times on the 360, 0.5%)
+		e.tools.anchorTiles = 1
 	}
 	return e, nil
 }
@@ -210,6 +219,9 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
 	cl, rl = max(cl, 0), max(rl, 0) // newTiling raises them to the limits'
+	if key || j.depth <= 1 {
+		cl = max(cl, e.tools.anchorTiles)
+	}
 	fp.tiles = newTiling(miCols, miRows, cl, rl)
 	if !key {
 		fp.highPrecisionMV = fp.qIndex < hpMaxQ

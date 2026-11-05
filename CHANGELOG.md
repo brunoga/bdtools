@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- At speed 2 the AV1 encoder codes key frames and anchors in two tile
+  columns: the mini-GOPs wait on them, and one tile's superblock rows
+  keep few cores busy. 1.05 times the pictures a second on the six clips
+  (1.06 on 360 pictures), 0.30% larger by PSNR-YUV, 0.27% by SSIM, 0.06%
+  by VMAF.
 - The AV1 encoder's anchors reference only the earlier anchors and key
   frames (no longer the earlier mini-GOPs' depth 2 frames), as SVT-AV1's
   base layer does: the anchors, coded first and slowest, no longer wait
