@@ -446,10 +446,18 @@ var refsPrevDepth = 2
 
 // refUsable reports whether a frame of a depth may reference one of
 // another (earlier: of an earlier mini-GOP): an earlier one to
-// refsPrevDepth; within a mini-GOP, only frames above it in the pyramid,
-// so that the frames of a depth are coded at once.
+// refsPrevDepth, an anchor only the earlier anchors and key frames;
+// within a mini-GOP, only frames above it in the pyramid, so that the
+// frames of a depth are coded at once. (The anchors, coded first and
+// slowest, chain the mini-GOPs: through the depth 2 frames as well the
+// chain was the encode's pace. Without them, on the six clips at speed 2,
+// the sizes within 0.06% and 1.14 times the pictures a second; on 360
+// pictures, 1.06 times.)
 func refUsable(refDepth, depth int, earlier bool) bool {
 	if earlier {
+		if depth <= 1 {
+			return refDepth <= 1
+		}
 		return refDepth <= refsPrevDepth
 	}
 	return refDepth < depth || depth <= 1 && refDepth <= 1

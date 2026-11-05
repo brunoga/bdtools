@@ -7,6 +7,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's anchors reference only the earlier anchors and key
+  frames (no longer the earlier mini-GOPs' depth 2 frames), as SVT-AV1's
+  base layer does: the anchors, coded first and slowest, no longer wait
+  on those, so mini-GOPs overlap more: 1.14 times the pictures a second
+  on the six clips at speed 2 (1.06 times on 360 pictures), sizes within
+  0.06%.
 - The AV1 encoder's temporal filter sums its 5x5 windows' squared
   differences by rows then columns and looks its subblocks up by row and
   column: its weighting 2.6 times faster (2% of the CPU at speed 2), the
