@@ -9,6 +9,9 @@ func xgetbvAsm() (eax, edx uint32)
 func sadAVX2(a *uint16, as int, b *uint16, bs int, w, h int) int
 
 //go:noescape
+func sad8AVX2(a *uint8, as int, b *uint8, bs int, w, h int) int
+
+//go:noescape
 func satd8AVX2(a *uint16, as int, b *uint16, bs int) int
 
 //go:noescape
@@ -50,6 +53,16 @@ func sadBlock(a []uint16, as int, b []uint16, bs, w, h int) int {
 	_ = a[(h-1)*as+w-1]
 	_ = b[(h-1)*bs+w-1]
 	return sadAVX2(&a[0], as, &b[0], bs, w, h)
+}
+
+// sadBlock8 is sadBlock of 8-bit samples.
+func sadBlock8(a []uint8, as int, b []uint8, bs, w, h int) int {
+	if !useAVX2 || w&7 != 0 || h == 0 {
+		return sadBlock8Go(a, as, b, bs, w, h)
+	}
+	_ = a[(h-1)*as+w-1]
+	_ = b[(h-1)*bs+w-1]
+	return sad8AVX2(&a[0], as, &b[0], bs, w, h)
 }
 
 // satd8 is the sum of the absolute Hadamard transformed differences of

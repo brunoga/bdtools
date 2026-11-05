@@ -11,6 +11,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   block's search without costing its levels again, and takes residuals
   and adds reconstructions with AVX2 kernels: a transform block's search
   6% faster (about 2.5% of the CPU at speed 2), the streams unchanged.
+- The AV1 encoder's integer motion search measures 8-bit pictures' SADs
+  on 8-bit copies of their luma (VPSADBW), and keeps the motion vectors'
+  rates for a whole superblock instead of a block's search: the motion
+  search's time down by a fifth (1.5% of the CPU at speed 2), the
+  streams unchanged.
 - The AV1 encoder finds scene cuts (a picture's luma far from the two
   before it's) and ends a mini-GOP on the picture before one, its
   temporal filters' windows at one: 0.5% smaller by PSNR-YUV, 0.6% by
