@@ -20,6 +20,21 @@ func sadBlockGo(a []uint16, as int, b []uint16, bs, w, h int) int {
 	return sum
 }
 
+func sadBlock8Go(a []uint8, as int, b []uint8, bs, w, h int) int {
+	sum := 0
+	for y := range h {
+		ra, rb := a[y*as:y*as+w], b[y*bs:y*bs+w]
+		for x := range ra {
+			d := int(ra[x]) - int(rb[x])
+			if d < 0 {
+				d = -d
+			}
+			sum += d
+		}
+	}
+	return sum
+}
+
 func satd8Go(a []uint16, as int, b []uint16, bs int) int {
 	var m [64]int32
 	for y := range 8 {

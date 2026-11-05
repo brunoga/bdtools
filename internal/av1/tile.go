@@ -33,6 +33,8 @@ type frameEnc struct {
 	// (the source by its edges).
 	src, rec [3][]uint16
 	stride   [3]int
+	// src8 is the source's luma as 8-bit samples (luma8's), or nil
+	src8 []uint8
 	// mis is the mode info per 4x4 luma block (the mi grid, miCols
 	// wide).
 	mis   []modeInfo
@@ -126,7 +128,8 @@ type tileEnc struct {
 	// intra estimate above which the intra search stops (0 none)
 	interEst, intraLimit float64
 	// mvCosts are the motion vector components' rates mvDiffCost keeps,
-	// of generation mvGen
+	// of generation mvGen (the superblock's: its search's CDFs are the
+	// same throughout)
 	mvCosts [2][2*mvCostRange + 1]mvCompCost
 	// the block searches' lists, kept for their room
 	interCands  []interCand
@@ -296,6 +299,7 @@ func (t *tileEnc) codeRow(r int, sync *rowSync) {
 			t.cdefDone = false
 			t.save(&t.sbStart, r, c, BLOCK_64X64, 0)
 			*t.sbCDF = *t.live
+			t.mvGen++ // the motion vector rates kept are the last superblock's
 			_, node := t.searchPartition(r, c, BLOCK_64X64, 0)
 			t.restore(&t.sbStart, 0)
 			var keep [3][]uint16
@@ -788,12 +792,11 @@ func (t *tileEnc) quartersMove(r, c, size int, d *blockDec) bool {
 	}
 	sl := math.Sqrt(t.lambda)
 	m0 := d.mv
-	me := meBlock{ref: f.refs[d.refFrame], src: f.src[0], srcStride: f.stride[0], x: x, y: y, w: w, h: h,
+	me := meBlock{ref: f.refs[d.refFrame], src: f.src[0], src8: f.src8, srcStride: f.stride[0], x: x, y: y, w: w, h: h,
 		bitDepth: f.bitDepth, filt: f.filt, allowHP: f.fp.highPrecisionMV, searchRange: skipSplitRange,
 		cost: func(m mv) float64 {
 			return sl * float64(t.mvDiffCost(mv{m.row - m0.row, m.col - m0.col})) / costScale
 		}}
-	t.mvGen++
 	_, whole := t.ms.search(&me, []mv{m0})
 	var quarters float64
 	me.w, me.h = w/2, h/2

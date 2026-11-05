@@ -748,12 +748,11 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 	}
 	sl := math.Sqrt(t.lambda)
 	pred0 := s.predMv(NEWMV, 0, 0)
-	me := meBlock{ref: f.refs[ref], src: f.src[0], srcStride: f.stride[0], x: c * 4, y: r * 4,
+	me := meBlock{ref: f.refs[ref], src: f.src[0], src8: f.src8, srcStride: f.stride[0], x: c * 4, y: r * 4,
 		w: int(blockWidth[size]), h: int(blockHeight[size]), bitDepth: f.bitDepth, filt: f.filt,
 		allowHP: f.fp.highPrecisionMV, cost: func(m mv) float64 {
 			return sl * float64(t.mvDiffCost(mv{m.row - pred0.row, m.col - pred0.col})) / costScale
 		}}
-	t.mvGen++
 	starts := append(t.meStarts[:0], mv{})
 	for i := range min(s.numMvFound, 4) {
 		starts = append(starts, s.refStackMv[i][0])
@@ -783,7 +782,7 @@ type mvCompCost struct {
 }
 
 // mvDiffCost is writeMvDiff's rate of d, its components' rates kept for
-// the generation (a motion search's: the CDFs are the same throughout).
+// the generation (a superblock's: its search's CDFs are the same throughout).
 func (t *tileEnc) mvDiffCost(d mv) int64 {
 	joint := MV_JOINT_ZERO
 	switch {

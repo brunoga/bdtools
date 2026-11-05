@@ -11,9 +11,13 @@ import "math"
 
 // meBlock is the block a motion search predicts.
 type meBlock struct {
-	ref        *refFrameState
-	src        []uint16 // the source's luma
-	srcStride  int
+	ref       *refFrameState
+	src       []uint16 // the source's luma
+	srcStride int
+	// src8 is src as 8-bit samples (an 8-bit frame's), or nil: the
+	// integer search's SADs then on 8-bit samples where the reference
+	// has them too
+	src8       []uint8
 	x, y, w, h int // the block, in luma samples (w, h multiples of 4)
 	bitDepth   int
 	filt       [2]int // InterpFilter, as for predictInter
@@ -161,7 +165,13 @@ func (ms *motionSearch) fullCost(b *meBlock, px, py int) float64 {
 func (ms *motionSearch) sadAt(b *meBlock, px, py int) int64 {
 	ref, rs := b.ref.rec[0], b.ref.stride[0]
 	lastX, lastY := b.ref.width-1, b.ref.height-1
-	if px < 0 || py < 0 || px+b.w-1 > lastX || py+b.h-1 > lastY {
+	inside := px >= 0 && py >= 0 && px+b.w-1 <= lastX && py+b.h-1 <= lastY
+	if inside && b.src8 != nil && b.blk == nil && b.w&7 == 0 {
+		if r8 := b.ref.luma8(b.bitDepth); r8 != nil {
+			return int64(sadBlock8(b.src8[b.y*b.srcStride+b.x:], b.srcStride, r8[py*rs+px:], rs, b.w, b.h))
+		}
+	}
+	if !inside {
 		// the columns inside the reference copied, those left and right
 		// of it its first and last
 		in0, in1 := min(max(-px, 0), b.w), min(max(lastX+1-px, 0), b.w)

@@ -358,6 +358,9 @@ func (e *Encoder) newFrame(fp *frameParams, src *Source) *frameEnc {
 			}
 		}
 	}
+	if f.bitDepth == 8 && useAVX2 {
+		f.src8 = narrow(f.src[0])
+	}
 	n := miCols * miRows
 	f.mis = make([]modeInfo, n)
 	for p := range 3 {

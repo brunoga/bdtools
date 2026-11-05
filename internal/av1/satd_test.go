@@ -26,6 +26,17 @@ func TestSATDKernels(t *testing.T) {
 					t.Fatalf("sad %v %d, want %d", wh, g, w)
 				}
 			}
+			if depth == 8 {
+				a8, b8 := narrow(a), narrow(b)
+				for _, wh := range [][2]int{{8, 8}, {8, 32}, {16, 4}, {24, 8}, {32, 32}, {56, 8}, {64, 64}} {
+					if wh[1]+y > 80 || wh[0]+x > 80 {
+						continue
+					}
+					if g, w := sadBlock8(a8[y*80+x:], 80, b8[y*80+x:], 80, wh[0], wh[1]), sadBlockGo(a[y*80+x:], 80, b[y*80+x:], 80, wh[0], wh[1]); g != w {
+						t.Fatalf("sad8 %v %d, want %d", wh, g, w)
+					}
+				}
+			}
 		}
 	}
 }

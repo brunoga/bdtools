@@ -6,6 +6,10 @@ func sadBlock(a []uint16, as int, b []uint16, bs, w, h int) int {
 	return sadBlockGo(a, as, b, bs, w, h)
 }
 
+func sadBlock8(a []uint8, as int, b []uint8, bs, w, h int) int {
+	return sadBlock8Go(a, as, b, bs, w, h)
+}
+
 func satd8(a []uint16, as int, b []uint16, bs int) int { return satd8Go(a, as, b, bs) }
 
 func satd16x8(a []uint16, as int, b []uint16, bs int) int {

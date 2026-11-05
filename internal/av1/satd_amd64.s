@@ -313,3 +313,62 @@ TEXT ·xgetbvAsm(SB), NOSPLIT, $0-8
 	MOVL AX, eax+0(FP)
 	MOVL DX, edx+4(FP)
 	RET
+
+// func sad8AVX2(a *uint8, as int, b *uint8, bs int, w, h int) int
+// Sum of absolute differences of two w x h blocks of 8-bit samples (w a
+// multiple of 8): VPSADBW's eight-byte sums in qwords, added up.
+TEXT ·sad8AVX2(SB), NOSPLIT, $0-56
+	MOVQ a+0(FP), SI
+	MOVQ as+8(FP), R8
+	MOVQ b+16(FP), DI
+	MOVQ bs+24(FP), R9
+	MOVQ w+32(FP), CX
+	MOVQ h+40(FP), DX
+	VPXOR Y0, Y0, Y0
+	VPXOR X4, X4, X4
+row8:
+	MOVQ CX, AX
+	MOVQ SI, R10
+	MOVQ DI, R11
+c32:
+	CMPQ AX, $32
+	JL c16
+	VMOVDQU (R10), Y1
+	VMOVDQU (R11), Y2
+	VPSADBW Y2, Y1, Y1
+	VPADDQ Y1, Y0, Y0
+	ADDQ $32, R10
+	ADDQ $32, R11
+	SUBQ $32, AX
+	JMP c32
+c16:
+	CMPQ AX, $16
+	JL c8
+	VMOVDQU (R10), X1
+	VMOVDQU (R11), X2
+	VPSADBW X2, X1, X1
+	VPADDQ X1, X4, X4
+	ADDQ $16, R10
+	ADDQ $16, R11
+	SUBQ $16, AX
+c8:
+	CMPQ AX, $8
+	JL r8done
+	VMOVQ (R10), X1
+	VMOVQ (R11), X2
+	VPSADBW X2, X1, X1
+	VPADDQ X1, X4, X4
+r8done:
+	ADDQ R8, SI
+	ADDQ R9, DI
+	DECQ DX
+	JNZ row8
+	VEXTRACTI128 $1, Y0, X1
+	VPADDQ X1, X0, X0
+	VPADDQ X4, X0, X0
+	VPSHUFD $0x4E, X0, X1
+	VPADDQ X1, X0, X0
+	VMOVQ X0, AX
+	MOVQ AX, ret+48(FP)
+	VZEROUPPER
+	RET
