@@ -387,10 +387,11 @@ func (f *frameEnc) pickLevels(sharp int) [4]int {
 	return level
 }
 
-// scanLevel is the level of least error: the best of every eighth, then
-// searched from there. (The error is far from convex in the level, flat
-// over ranges where the masks stop changing, so a search from a guess
-// alone, as libaom's from q, can stall.)
+// scanLevel is the level of least error: the best of every sixteenth,
+// then searched from there. (The error is far from convex in the level,
+// flat over ranges where the masks stop changing, so a search from a
+// guess alone, as libaom's from q, can stall. Every eighth: the same
+// sizes on the six clips at speed 2, within 0.06%, for 1.6% more CPU.)
 func scanLevel(errAt func(int) int64) int {
 	var errs [MAX_LOOP_FILTER + 1]int64
 	var done [MAX_LOOP_FILTER + 1]bool
@@ -401,7 +402,7 @@ func scanLevel(errAt func(int) int64) int {
 		return errs[v]
 	}
 	best, bestErr := 0, get(0)
-	for v := 8; v <= MAX_LOOP_FILTER+7; v += 8 {
+	for v := 16; v <= MAX_LOOP_FILTER+15; v += 16 {
 		v = min(v, MAX_LOOP_FILTER)
 		if e := get(v); e < bestErr {
 			best, bestErr = v, e
