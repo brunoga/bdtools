@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder keeps the two latest anchors (or key frames) in its
+  reference slots: the anchors, which reference only those, had the last
+  one alone, the others replaced by the mini-GOP's frames. 1.3% smaller by
+  PSNR-YUV, 1.3% by SSIM and 1.4% by VMAF at speed 0 (Free Solo 6.1%),
+  1.0%, 1.0% and 0.7% at speed 2.
 - At speed 2 the AV1 encoder codes key frames and anchors in two tile
   columns: the mini-GOPs wait on them, and one tile's superblock rows
   keep few cores busy. 1.05 times the pictures a second on the six clips

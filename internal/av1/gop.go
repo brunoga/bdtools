@@ -506,9 +506,9 @@ func (e *Encoder) refsFor(disp, depth int) [REFS_PER_FRAME]int {
 }
 
 // slotFor is the slot a kept frame goes in: an empty one (or one whose
-// frame another holds too), else the one
-// whose frame is the oldest of those before the frame, the newest of them
-// kept (it is the next frames' LAST or GOLDEN).
+// frame another holds too), else the one whose frame is the oldest of
+// those before the frame, the newest of them kept (it is the next frames'
+// LAST or GOLDEN) and the two newest anchors or key frames.
 func (e *Encoder) slotFor(disp int) int {
 	count := map[*refFrameState]int{}
 	for _, s := range e.slots {
@@ -525,16 +525,34 @@ func (e *Encoder) slotFor(disp int) int {
 			newest = s.disp
 		}
 	}
+	// the two newest anchors (or key frames) kept too: the anchors, which
+	// reference only those (refUsable), else had the last alone, the
+	// others gone to the mini-GOP's frames. (On the six clips at speed 0,
+	// 1.3% smaller by PSNR-YUV, 1.3% by SSIM, 1.4% by VMAF, Free Solo 6.1%,
+	// for 3% more CPU; at speed 2 1.0%, 1.0%, 0.7%.)
+	var keep [2]*refFrameState
+	for _, s := range e.slots {
+		if s.depth > 1 {
+			continue
+		}
+		switch {
+		case keep[0] == nil || s.disp > keep[0].disp:
+			keep[0], keep[1] = s, keep[0]
+		case s != keep[0] && (keep[1] == nil || s.disp > keep[1].disp):
+			keep[1] = s
+		}
+	}
+	kept := func(s *refFrameState) bool { return s.disp == newest || s == keep[0] || s == keep[1] }
 	best, bestDisp := -1, 0
 	for i, s := range e.slots {
-		if s.disp < disp && s.disp != newest && (best < 0 || s.disp < bestDisp) {
+		if s.disp < disp && !kept(s) && (best < 0 || s.disp < bestDisp) {
 			best, bestDisp = i, s.disp
 		}
 	}
 	if best < 0 {
 		// every other slot is after the frame: the farthest
 		for i, s := range e.slots {
-			if s.disp != newest && (best < 0 || s.disp > bestDisp) {
+			if !kept(s) && (best < 0 || s.disp > bestDisp) {
 				best, bestDisp = i, s.disp
 			}
 		}
