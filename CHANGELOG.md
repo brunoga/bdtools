@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `bdtools` is built with profile-guided optimization (`cmd/bdtools/default.pgo`,
+  a CPU profile of AV1 encodes at speeds 0 and 2, which `go build` picks
+  up): an AV1 encode 1.6-2.2% less CPU, the streams unchanged.
 - The AV1 encoder updates the coefficient contexts after a transform
   block's search without costing its levels again, and takes residuals
   and adds reconstructions with AVX2 kernels: a transform block's search
