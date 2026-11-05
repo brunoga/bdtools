@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's deblocking level search scans every sixteenth level
+  before refining (was every eighth): 1.6% less CPU at speed 2, sizes
+  within 0.06% on every metric.
 - `bdtools` is built with profile-guided optimization (`cmd/bdtools/default.pgo`,
   a CPU profile of AV1 encodes at speeds 0 and 2, which `go build` picks
   up): an AV1 encode 1.6-2.2% less CPU, the streams unchanged.
