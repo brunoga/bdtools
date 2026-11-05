@@ -71,10 +71,12 @@ type tools struct {
 	// damping from q, luma's deblocking levels the same, the model's
 	// vectors whole samples, a subset of the self-guided filter's sets
 	cdefDampQ, lfBoth, tplFull, sgrSubset bool
-	intraSkip, candRatio                  float64
-	sameDir                               int // sameDirComp's
-	txCands                               int
-	jointME                               bool
+	// leafLR has the leaves (frames shown and kept for none) restored
+	leafLR               bool
+	intraSkip, candRatio float64
+	sameDir              int // sameDirComp's
+	txCands              int
+	jointME              bool
 }
 
 // Encoder codes pictures.
@@ -152,7 +154,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// PSNR-YUV and 0.26% by VMAF for 3% more CPU; the model's vectors
 		// to eighths 0.03% smaller by PSNR-YUV but 0.44% larger by SSIM
 		// and 0.46% by VMAF for 2%)
-		cdefDampQ: true, tplFull: true}
+		cdefDampQ: true, tplFull: true, leafLR: true}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio, e.tools.fastCands = false, 0, 0, false
 		e.tools.filterRD = filterRD
@@ -184,6 +186,10 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// by VMAF for 2% more CPU; all seven references, not four, 0.3%
 		// for 12%)
 		e.tools.interCands = min(e.tools.interCands, 3)
+		// (no loop restoration in the leaves, as SVT-AV1's presets 3 to 8:
+		// 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, VMAF 0.33%
+		// larger)
+		e.tools.leafLR = false
 	}
 	return e, nil
 }
@@ -302,6 +308,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	f.deblock(e.lfFixed)
 	deblocked := f.rec // CDEF filters into a new frame
 	f.cdef(e.cdefFixed)
+	f.noLR = !e.tools.leafLR && !key && j.refresh == 0
 	lr := f.restore(deblocked, e.lrFixed)
 	var tiles [][]byte
 	saved := f.cdf0

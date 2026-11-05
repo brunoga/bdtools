@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- At speed 2 the AV1 encoder does not restore (loop restoration) the
+  leaves, the frames shown and kept for no other, as SVT-AV1 does from
+  its preset 3: 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, 0.33%
+  larger by VMAF.
 - The AV1 encoder's deblocking level search scans every sixteenth level
   before refining (was every eighth): 1.6% less CPU at speed 2, sizes
   within 0.06% on every metric.
