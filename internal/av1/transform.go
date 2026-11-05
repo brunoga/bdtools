@@ -353,6 +353,10 @@ func reconstructAdd(rec []uint16, stride int, residual []int32, txSz, txType, bi
 	w, h := int(txWidth[txSz]), int(txHeight[txSz])
 	maxV := int32(1)<<bitDepth - 1
 	flipUD, flipLR := txFlipUD[txType], txFlipLR[txType]
+	if !flipUD && !flipLR {
+		reconAdd(rec, stride, residual, w, h, maxV)
+		return
+	}
 	for i := 0; i < h; i++ {
 		yy := i
 		if flipUD {
@@ -366,10 +370,27 @@ func reconstructAdd(rec []uint16, stride int, residual []int32, txSz, txType, bi
 				*p = uint16(min(max(int32(*p)+r, 0), maxV))
 			}
 		} else {
-			for j, r := range res {
-				p := &row[j]
-				*p = uint16(min(max(int32(*p)+r, 0), maxV))
-			}
+			reconAddGo(row, stride, res, w, 1, maxV)
+		}
+	}
+}
+
+// residualGo is residual's Go code.
+func residualGo(src []uint16, ss int, pred []uint16, out []int32, w, h int) {
+	for y := range h {
+		s, p, o := src[y*ss:y*ss+w], pred[y*w:y*w+w], out[y*w:y*w+w]
+		for x, v := range s {
+			o[x] = int32(v) - int32(p[x])
+		}
+	}
+}
+
+// reconAddGo is reconAdd's Go code.
+func reconAddGo(rec []uint16, rs int, res []int32, w, h int, maxV int32) {
+	for y := range h {
+		row, r := rec[y*rs:y*rs+w], res[y*w:y*w+w]
+		for x, v := range r {
+			row[x] = uint16(min(max(int32(row[x])+v, 0), maxV)) //nolint:gosec // clamped
 		}
 	}
 }
