@@ -7,6 +7,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder picks a candidate's interpolation filter by its
+  prediction's squared error and rate (was its SATD, which prefers the
+  smooth filters and loses textures: SVT-AV1 picks the sharp ones for 44%
+  of its inter blocks, the encoder 1%). At speed 0 0.51% smaller by
+  PSNR-YUV, 0.63% by SSIM and 1.27% by VMAF for 3% more CPU; at speed 2
+  0.50%, 0.60% and 1.91% for 2%.
 - The AV1 encoder keeps the two latest anchors (or key frames) in its
   reference slots: the anchors, which reference only those, had the last
   one alone, the others replaced by the mini-GOP's frames. 1.3% smaller by
