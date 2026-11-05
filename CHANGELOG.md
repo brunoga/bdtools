@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's temporal filter sums its 5x5 windows' squared
+  differences by rows then columns and looks its subblocks up by row and
+  column: its weighting 2.6 times faster (2% of the CPU at speed 2), the
+  streams unchanged.
 - At speed 2 the AV1 encoder does not restore (loop restoration) the
   leaves, the frames shown and kept for no other, as SVT-AV1 does from
   its preset 3: 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, 0.33%

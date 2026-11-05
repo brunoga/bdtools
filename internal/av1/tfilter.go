@@ -283,10 +283,11 @@ type tfWorker struct {
 	count      [3][]uint16
 	squareDiff []uint32
 	lumaSSESum []uint32
+	rowSum     []uint32 // squareDiff's window rows' sums
 }
 
 func newTFWorker() *tfWorker {
-	w := &tfWorker{squareDiff: make([]uint32, tfBlock*tfBlock), lumaSSESum: make([]uint32, tfBlock*tfBlock)}
+	w := &tfWorker{squareDiff: make([]uint32, tfBlock*tfBlock), lumaSSESum: make([]uint32, tfBlock*tfBlock), rowSum: make([]uint32, tfBlock*tfBlock)}
 	for p := range 3 {
 		n := tfBlock * tfBlock
 		if p > 0 {
@@ -495,23 +496,36 @@ func (t *tfCtx) apply(w *tfWorker, r, c int, mvs *[16]mv, mses *[16]int) {
 				w.squareDiff[i*size+j] = uint32(d * d) //nolint:gosec // a square
 			}
 		}
+		// the window's sums (the block's edges repeated beyond it): each
+		// row's over the window's width, then those over its height
+		for i := range size {
+			sq, out := w.squareDiff[i*size:][:size], w.rowSum[i*size:][:size]
+			for j := range size {
+				var sum uint32
+				for wj := -half; wj <= half; wj++ {
+					sum += sq[min(max(j+wj, 0), size-1)]
+				}
+				out[j] = sum
+			}
+		}
+		// the 16 subblocks' indexes: a row's part and a column's
+		h2, q := size/2, size/4
+		var subR, subC [tfBlock]int
+		for k := range size {
+			subR[k], subC[k] = k/h2*8+(k%h2)/q*2, k/h2*4+(k%h2)/q
+		}
 		for i := range size {
 			for j := range size {
 				var sum uint64
 				for wi := -half; wi <= half; wi++ {
-					y := min(max(i+wi, 0), size-1)
-					for wj := -half; wj <= half; wj++ {
-						x := min(max(j+wj, 0), size-1)
-						sum += uint64(w.squareDiff[y*size+x])
-					}
+					sum += uint64(w.rowSum[min(max(i+wi, 0), size-1)*size+j])
 				}
 				sum += uint64(w.lumaSSESum[i*size+j])
 				if t.bitDepth > 8 {
 					sum >>= uint((t.bitDepth - 8) * 2)
 				}
 				windowError := float64(sum) * invNumRef
-				h2 := size / 2
-				sub := (i/h2*2+j/h2)*4 + (i%h2)/(size/4)*2 + (j%h2)/(size/4)
+				sub := subR[i] + subC[j]
 				combined := weightFactor*windowError + float64(mses[sub])*invFactor
 				scaled := min(combined*dFactor[sub]*t.decay[p], 7)
 				weight := uint32(math.Exp(-scaled) * tfWeightScale)
