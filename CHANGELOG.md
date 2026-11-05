@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder finds scene cuts (a picture's luma far from the two
+  before it's) and ends a mini-GOP on the picture before one, its
+  temporal filters' windows at one: 0.5% smaller by PSNR-YUV, 0.6% by
+  SSIM and 0.2% by VMAF at speed 2 on the six clips (1.0%, 1.1%, 0.4% on
+  the three with a cut), at the same speed.
 - The AV1 encoder scales an inter frame's lambda by its layer, as SVT-AV1
   does: the leaves' 1.4 times, the frames kept for others' 1.18 times.
   0.2% smaller by PSNR-YUV and 0.4% by SSIM, VMAF within 0.1%, and 5-7%
