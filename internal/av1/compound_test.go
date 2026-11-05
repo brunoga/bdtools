@@ -55,7 +55,9 @@ func TestDistWeights(t *testing.T) {
 }
 
 // Compound blocks from two frames on one side: every picture coded from
-// the ones before it (MiniGOP 1), and in a mini-GOP's later frames.
+// the ones before it (MiniGOP 1) with a unidirectional pair, the anchors
+// of mini-GOPs (from the anchor and the key frame before) with either
+// pair.
 func TestSameDirCompound(t *testing.T) {
 	defer func(v bool) { dbgForceCompound, dbgForceInter, switchable = false, false, v }(switchable)
 	dbgForceCompound, dbgForceInter, switchable = true, true, false
@@ -71,8 +73,11 @@ func TestSameDirCompound(t *testing.T) {
 			checkDecodes(t, o, pics)
 			u, b := sameDirBlocks[0].Load()-u0, sameDirBlocks[1].Load()-b0
 			t.Logf("%d blocks unidirectional, %d bidirectional on one side", u, b)
-			if u == 0 {
+			if gop == 1 && u == 0 {
 				t.Fatal("no unidirectional compound block")
+			}
+			if u+b == 0 {
+				t.Fatal("no compound block from one side")
 			}
 		})
 	}
