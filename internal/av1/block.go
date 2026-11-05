@@ -717,11 +717,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 		t.b.maxLumaW, t.b.maxLumaH = startX+stepX*4, startY+stepY*4
 	}
 	src := f.src[plane][startY*stride+startX:]
-	for y := range h {
-		for x := range w {
-			t.resid[y*w+x] = int32(src[y*stride+x]) - int32(t.pred[y*w+x])
-		}
-	}
+	residual(src, stride, t.pred[:], t.resid[:], w, h)
 	// the visible part, for the distortion
 	vw, vh := w, h
 	pw, ph := f.width, f.height
@@ -801,7 +797,7 @@ func (t *tileEnc) transformBlock(plane, startX, startY, txSz, txType int) (float
 	for y := range h {
 		copy(rec[y*stride:y*stride+w], t.best[y*w:(y+1)*w])
 	}
-	t.writeCoeffs(&t.cost, &best, true) // the contexts
+	t.setCoeffCtx(&best)
 	if plane == 0 {
 		tt := uint8(best.txType) //nolint:gosec // a type
 		if best.eob == 0 {

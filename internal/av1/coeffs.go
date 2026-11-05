@@ -79,6 +79,33 @@ func (t *tileEnc) writeCoeffs(cd coder, tc *txCoded, update bool) {
 	if !update {
 		return
 	}
+	t.setLevelCtx(tc, culLevel, dcCategory)
+}
+
+// setCoeffCtx updates the level and dc contexts for a transform block's
+// coefficients as writeCoeffs does, without costing them.
+func (t *tileEnc) setCoeffCtx(tc *txCoded) {
+	cul, dcCat := 0, 0
+	if tc.eob > 0 {
+		n := min(int(txWidth[tc.txSz]), 32) * min(int(txHeight[tc.txSz]), 32)
+		for _, v := range t.levels[tc.off : tc.off+n] {
+			cul += int(abs32(v)) & 0xFFFFF
+		}
+		cul = min(63, cul)
+		switch v := t.levels[tc.off]; {
+		case v > 0:
+			dcCat = 2
+		case v < 0:
+			dcCat = 1
+		}
+	}
+	t.setLevelCtx(tc, cul, dcCat)
+}
+
+// setLevelCtx sets the level and dc contexts a transform block covers.
+func (t *tileEnc) setLevelCtx(tc *txCoded, culLevel, dcCategory int) {
+	plane, x4, y4 := tc.plane, tc.x4, tc.y4
+	w4, h4 := int(txWidth[tc.txSz])>>2, int(txHeight[tc.txSz])>>2
 	for i := range w4 {
 		t.aboveLevel[plane][x4+i] = uint8(culLevel) //nolint:gosec // at most 63
 		t.aboveDc[plane][x4+i] = uint8(dcCategory)  //nolint:gosec // 0..2

@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder updates the coefficient contexts after a transform
+  block's search without costing its levels again, and takes residuals
+  and adds reconstructions with AVX2 kernels: a transform block's search
+  6% faster (about 2.5% of the CPU at speed 2), the streams unchanged.
 - The AV1 encoder's integer motion search measures 8-bit pictures' SADs
   on 8-bit copies of their luma (VPSADBW), and keeps the motion vectors'
   rates for a whole superblock instead of a block's search: the motion
