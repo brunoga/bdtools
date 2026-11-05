@@ -114,9 +114,13 @@ func (e *Encoder) Encode(src *Source) ([]Unit, error) {
 		copy(c.Cb[y*cw:(y+1)*cw], src.Cb[y*src.StrideC:])
 		copy(c.Cr[y*cw:(y+1)*cw], src.Cr[y*src.StrideC:])
 	}
+	if prev := e.recent[e.nIn-1]; prev != nil {
+		e.diffs[e.nIn] = sceneDiff(c, prev, o.Width, o.Height, o.BitDepth)
+	}
 	e.queue = append(e.queue, &frameJob{disp: e.nIn, src: c})
 	e.recent[e.nIn] = c
 	delete(e.recent, e.nIn-recentSources)
+	delete(e.diffs, e.nIn-recentSources)
 	e.nIn++
 	return e.drain(false), nil
 }
@@ -142,6 +146,9 @@ func (e *Encoder) drain(flush bool) []Unit {
 					break
 				}
 				after = min(after, len(e.queue)-1)
+				if c := e.nextCut(first.disp, after); c >= 0 {
+					after = c - 1 - first.disp
+				}
 				if after > 0 && first.orig == nil {
 					window := make([]*Source, 0, 1+after)
 					for _, j := range e.queue[:1+after] {
@@ -178,6 +185,16 @@ func (e *Encoder) drain(flush bool) []Unit {
 		}
 		n = min(n, len(e.queue))
 		after = min(after, len(e.queue)-n)
+		// to the next scene cut at most, and the filter's pictures after
+		// the anchor to it
+		if c := e.nextCut(first.disp, n-1); c >= 0 {
+			n, after = c-first.disp, 0
+		} else if c := e.nextCut(first.disp+n-1, after); c >= 0 {
+			after = c - (first.disp + n)
+		}
+		if e.isCut(first.disp) {
+			e.tfPast = nil
+		}
 		var ahead []*Source
 		for _, j := range e.queue[n : n+after] {
 			ahead = append(ahead, j.src)

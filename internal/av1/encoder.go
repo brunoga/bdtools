@@ -106,6 +106,9 @@ type Encoder struct {
 	// temporal model's luma reconstructions of the frames kept.
 	recent map[int]*Source
 	tplRec map[int][]uint16
+	// diffs is the last pictures' differences from the ones before
+	// (sceneDiff), by display index.
+	diffs map[int]float64
 	// slots are the reference frame slots (the spec's eight).
 	slots [NUM_REF_FRAMES]*refFrameState
 	// lfFixed, when set, gives the loop filter levels and sharpness
@@ -136,7 +139,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.QIndex < 0 || o.QIndex > 255 {
 		return nil, errors.New("av1: q index 0..255")
 	}
-	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}, tplRec: map[int][]uint16{}}
+	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}, diffs: map[int]float64{}, tplRec: map[int][]uint16{}}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
 		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked, interIntra: !dbgNoInterIntra,
