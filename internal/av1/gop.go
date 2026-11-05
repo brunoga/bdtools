@@ -288,7 +288,7 @@ func (e *Encoder) plan(j *frameJob) step {
 			j.q = min(e.o.QIndex+leafQ, 255)
 		}
 	}
-	j.state = &refFrameState{disp: j.disp, depth: j.depth, done: make(chan struct{})}
+	j.state = &refFrameState{disp: j.disp, depth: j.depth, done: make(chan struct{}), rec8: &luma8Cache{}}
 	if j.key {
 		j.state.depth = 0
 	}
