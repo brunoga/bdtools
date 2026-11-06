@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-06
+
 ### Added
 
 - `tools/av1lfasm` generates the AV1 encoder's AVX2 loop filter kernel
@@ -1358,7 +1360,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/brunoga/bdtools/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/brunoga/bdtools/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/brunoga/bdtools/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/brunoga/bdtools/compare/v0.14.2...v0.15.0
