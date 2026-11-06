@@ -189,10 +189,7 @@ func (lf *loopFilter) filterEdges(p, pass, li int, edges []lfEdge, buf []uint16)
 	lvl := lf.level[li]
 	limit, blimit, thresh := lf.limit[lvl], lf.blimit[lvl], lf.thresh[lvl]
 	for _, e := range edges {
-		pos := int(e.pos)
-		for i := range 4 {
-			lf.sample(buf, pos+i*across, step, p, int(e.size), limit, blimit, thresh)
-		}
+		lf.filterSeg(buf, int(e.pos), step, across, p, int(e.size), limit, blimit, thresh)
 	}
 }
 
