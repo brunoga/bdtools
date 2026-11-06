@@ -5,8 +5,9 @@
 // func sseAVX2(a *uint16, as int, b *uint16, bs int, w, h int) int64
 // The sum of squared differences of two w by h blocks of samples of at
 // most 12 bits (w a multiple of 8; strides in samples). VPMADDWD squares
-// the 16-bit differences and sums pairs; each row's dword sums (at most
-// 16 squares a lane) are widened into four qword sums.
+// the 16-bit differences and sums pairs; each row's dword sums (w/4
+// squares a lane, unsigned: rows to 8192 samples of 10 bits, 512 of 12)
+// are widened into four qword sums.
 TEXT ·sseAVX2(SB), NOSPLIT, $0-56
 	MOVQ a+0(FP), SI
 	MOVQ as+8(FP), R8

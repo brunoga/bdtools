@@ -1162,16 +1162,6 @@ func (t *tileEnc) writeInterpFilter(cd coder) {
 // sseBlock is the squared error of a prediction (w wide) against the
 // source's block at (x0, y0) of plane.
 func (t *tileEnc) sseBlock(plane, x0, y0, w, h int, pred []uint16) int64 {
-	f := t.f
-	st := f.stride[plane]
-	src := f.src[plane]
-	var sum int64
-	for y := range h {
-		srow, prow := src[(y0+y)*st+x0:][:w], pred[y*w:][:w]
-		for x, v := range srow {
-			d := int64(v) - int64(prow[x])
-			sum += d * d
-		}
-	}
-	return sum
+	st := t.f.stride[plane]
+	return sse(t.f.src[plane][y0*st+x0:], st, pred, w, w, h)
 }

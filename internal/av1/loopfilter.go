@@ -313,15 +313,10 @@ func (f *frameEnc) planeSSE(p int, buf []uint16) int64 {
 	var wg sync.WaitGroup
 	for k := range n {
 		wg.Go(func() {
-			var se int64
-			for y := k * h / n; y < (k+1)*h/n; y++ {
-				a, b := f.src[p][y*stride:y*stride+w], buf[y*stride:y*stride+w]
-				for x := range a {
-					d := int64(a[x]) - int64(b[x])
-					se += d * d
-				}
+			y0, y1 := k*h/n, (k+1)*h/n
+			if y1 > y0 {
+				parts[k] = sse(f.src[p][y0*stride:], stride, buf[y0*stride:], stride, w, y1-y0)
 			}
-			parts[k] = se
 		})
 	}
 	wg.Wait()
