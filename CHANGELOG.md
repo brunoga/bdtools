@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's interpolation filter choice and deblocking level
+  search measure their squared errors with the AVX2 kernel: about 2% less
+  CPU at speed 2, the streams unchanged.
 - The AV1 encoder picks a candidate's interpolation filter by its
   prediction's squared error and rate (was its SATD, which prefers the
   smooth filters and loses textures: SVT-AV1 picks the sharp ones for 44%
