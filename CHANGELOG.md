@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- `tools/av1bench -report` reports the points kept alone: a missing one
+  is an error, not coded (with the binary at hand, which may not be the
+  configuration's).
+
 - The AV1 encoder at speed 2 and above searches its deep inter frames
   (the pyramid's depth 2 and below) as SVT-AV1's preset 4 does its
   non-base frames: the intra modes cut to that set (no angle deltas, no

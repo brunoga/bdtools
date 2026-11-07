@@ -81,6 +81,7 @@ func main() {
 	oursQ := flag.String("ours-q", "90,115,140,165,190", "our quantizer indexes")
 	svtCRF := flag.String("svt-crf", "24,30,36,42,48", "SVT-AV1's CRFs")
 	force := flag.Bool("force", false, "code the points again")
+	reportOnly := flag.Bool("report", false, "report the points kept alone: a missing one is an error")
 	cpuProfile := flag.String("cpuprofile", "", "a CPU profile of the run to this file")
 	memProfile := flag.String("memprofile", "", "an allocation profile of the run to this file")
 	flag.BoolVar(&keepStreams, "keep", false, "keep the coded streams (beside the results, .obu)")
@@ -144,7 +145,7 @@ func main() {
 		}
 		for _, f := range files {
 			for _, q := range qs {
-				p, err := measure(*res, c, f, q, *force)
+				p, err := measure(*res, c, f, q, *force, *reportOnly)
 				if err != nil {
 					fail(fmt.Errorf("%s %s q %d: %w", c, clipName(f), q, err))
 				}
@@ -185,7 +186,7 @@ func fail(err error) {
 
 // measure gives a configuration's point for a clip and quantizer, from
 // the results directory unless force.
-func measure(res, config, clip string, q int, force bool) (point, error) {
+func measure(res, config, clip string, q int, force, report bool) (point, error) {
 	dir := filepath.Join(res, strings.ReplaceAll(config, ":", "-"))
 	file := filepath.Join(dir, fmt.Sprintf("%s-%d.json", clipName(clip), q))
 	var p point
@@ -193,6 +194,9 @@ func measure(res, config, clip string, q int, force bool) (point, error) {
 		if b, err := os.ReadFile(file); err == nil { //nolint:gosec // the results' own file
 			return p, json.Unmarshal(b, &p)
 		}
+	}
+	if report {
+		return p, fmt.Errorf("%s: no point kept (-report)", file)
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return p, err
