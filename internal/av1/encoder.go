@@ -64,9 +64,17 @@ type EncoderOptions struct {
 type tools struct {
 	interCands                      int
 	filterRD, obmc, fewRefs, txTree bool
-	pruneSkip, pruneExt             bool // the partition search's prunings
-	extEst                          float64
-	fastCands                       bool // inter candidates costed with DCT_DCT, the best's transforms searched
+	// deep inter frames (depth 2 and below) searched as SVT-AV1's preset
+	// 4 does its non-base frames: the intra modes cut to its set (no
+	// angle deltas, no PAETH, FILTER_DC alone), the chroma angles off,
+	// the transforms the largest (no split search), deepLumaCands luma
+	// modes coded and deepTypeSearches with their transform types
+	// searched (0: as the other frames)
+	intraLite, chromaLite, txLargestDeep bool
+	deepLumaCands, deepTypeSearches      int
+	pruneSkip, pruneExt                  bool // the partition search's prunings
+	extEst                               float64
+	fastCands                            bool // inter candidates costed with DCT_DCT, the best's transforms searched
 	// the filters' and the temporal model's searches cut short: CDEF's
 	// damping from q, luma's deblocking levels the same, the model's
 	// vectors whole samples, a subset of the self-guided filter's sets
@@ -187,6 +195,12 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.Speed >= 2 {
 		// (OBMC is worth 0.2-0.3% here on every metric for 1.5% more CPU)
 		e.tools.fewRefs = true
+		// (on the six 240-picture clips, by BD-rate: 1.3% larger by
+		// PSNR-YUV, 1.2% by SSIM, 1.9% by VMAF for 19% less CPU; the intra
+		// set alone 0.4% for 3%, the chroma angles 0.1% for 0.4%, the
+		// transforms 0.8% for 14%, the candidates 0 for 2%)
+		e.tools.intraLite, e.tools.chromaLite, e.tools.txLargestDeep = true, true, true
+		e.tools.deepLumaCands, e.tools.deepTypeSearches = 2, 1
 		// (three, not two: 0.29% smaller by PSNR-YUV, 0.16% by SSIM, 0.45%
 		// by VMAF for 2% more CPU; all seven references, not four, 0.3%
 		// for 12%)
@@ -215,6 +229,13 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	key := j.key
 	fp := &frameParams{key: key, show: j.show, refresh: j.refresh, refIdx: j.refIdx, orderHint: j.disp, adapt: true,
 		qIndex: j.q, txSelect: true, cdefDamping: 3}
+	if !key && j.depth >= 2 {
+		fp.intraLite, fp.chromaLite = e.tools.intraLite, e.tools.chromaLite
+		fp.lumaCands, fp.typeSearches = e.tools.deepLumaCands, e.tools.deepTypeSearches
+		if e.tools.txLargestDeep {
+			fp.txSelect = false
+		}
+	}
 	src := j.src
 	miCols, miRows := 2*((e.o.Width+7)>>3), 2*((e.o.Height+7)>>3)
 	cl, rl := e.o.TileColsLog2, e.o.TileRowsLog2
