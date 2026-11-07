@@ -7,6 +7,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's temporal model costs a mini-GOP together with the
+  one after it, whose frames predict from its anchor: the anchors code
+  finer, the leaves coarser at a size. On the six 240-picture clips, by
+  BD-rate: at speed 0 2.3% smaller by PSNR-YUV and 0.9% by SSIM, 2.9%
+  larger by VMAF; at speed 2 1.7%, 0.3% and 3.3%. A mini-GOP's pictures
+  come out one mini-GOP later, and the encoder keeps the sources a frame
+  still to come can reference instead of a fixed number (peak memory
+  15% more at 1080p).
+
+### Changed
+
 - `tools/av1bench` takes 10-bit 4:2:0 clips (y4m `C420p10`) as well as
   8-bit ones: the encoder, SVT-AV1 and the scores at the clips' depth.
 
