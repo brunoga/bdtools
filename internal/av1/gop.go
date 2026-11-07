@@ -54,10 +54,6 @@ type step struct {
 	disp     int
 }
 
-// recentSources is how many source pictures are kept (for the temporal
-// model: a mini-GOP and the anchors before it).
-const recentSources = 40
-
 // dbgNoTPL turns the temporal model off. On the two 120-picture clips
 // it is 0.4% better scaling the superblocks' lambdas (Frozen II 0.9%),
 // and was 0.6% worse setting their q indexes (delta_q, the rows coded
@@ -119,8 +115,6 @@ func (e *Encoder) Encode(src *Source) ([]Unit, error) {
 	}
 	e.queue = append(e.queue, &frameJob{disp: e.nIn, src: c})
 	e.recent[e.nIn] = c
-	delete(e.recent, e.nIn-recentSources)
-	delete(e.diffs, e.nIn-recentSources)
 	e.nIn++
 	return e.drain(false), nil
 }
@@ -165,6 +159,7 @@ func (e *Encoder) drain(flush bool) []Unit {
 			}
 			// coded with the mini-GOP after it, once the temporal model
 			// has costed both
+			e.flushHeld(&out)
 			e.runKey(&out)
 			e.key = []step{e.plan(first)}
 			e.queue = e.queue[1:]
@@ -222,22 +217,78 @@ func (e *Encoder) drain(flush bool) []Unit {
 			byDisp(m).src = temporalFilter(window, k, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
 		}
 		if n == 1 {
+			e.flushHeld(&out)
 			e.runKey(&out)
 			last.show, last.depth = true, 1
-			e.run([]step{e.plan(last)}, &out)
+			steps := []step{e.plan(last)}
+			e.pruneSources(steps)
+			e.run(steps, &out)
 			continue
 		}
 		last.depth = 1
 		steps := []step{e.plan(last)}
 		e.pyramid(a, a+n, 2, byDisp, &steps)
-		e.tpl(append(e.key[:len(e.key):len(e.key)], steps...))
-		e.runKey(&out)
-		e.run(steps, &out)
+		// costed with the next mini-GOP, coded once that is planned
+		if e.held != nil {
+			e.tpl(append(append(e.key[:len(e.key):len(e.key)], e.held...), steps...))
+			e.runKey(&out)
+			e.run(e.held, &out)
+		}
+		e.held = steps
 	}
 	if flush {
+		e.flushHeld(&out)
 		e.runKey(&out)
 	}
 	return out
+}
+
+// flushHeld costs and codes the mini-GOP held for the next (and the key
+// frame before it), if any.
+func (e *Encoder) flushHeld(out *[]Unit) {
+	if e.held == nil {
+		return
+	}
+	e.tpl(append(e.key[:len(e.key):len(e.key)], e.held...))
+	e.runKey(out)
+	e.run(e.held, out)
+	e.held = nil
+}
+
+// pruneSources drops the sources (and the temporal model's
+// reconstructions) no frame to come can reference: of the pictures
+// before the steps' (planned, not coded), those the steps' frames do
+// not reference and no slot holds.
+func (e *Encoder) pruneSources(steps []step) {
+	keep := map[int]bool{}
+	for _, s := range e.slots {
+		if s != nil {
+			keep[s.disp] = true
+		}
+	}
+	lowest := e.nIn
+	for _, s := range steps {
+		lowest = min(lowest, s.disp)
+		if s.job == nil {
+			continue
+		}
+		for _, r := range s.job.refs {
+			if r != nil {
+				keep[r.disp] = true
+			}
+		}
+	}
+	for d := range e.recent {
+		if d < lowest && !keep[d] {
+			delete(e.recent, d)
+			delete(e.diffs, d)
+		}
+	}
+	for d := range e.tplRec {
+		if d < lowest && !keep[d] {
+			delete(e.tplRec, d)
+		}
+	}
 }
 
 // runKey codes the key frame planned (and not yet coded), if any.

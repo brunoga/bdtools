@@ -79,6 +79,7 @@ const tplMaxDelta = 48
 // tpl sets the coded frames of a mini-GOP's steps' superblock lambdas (or
 // q indexes) and the anchors' q.
 func (e *Encoder) tpl(steps []step) {
+	defer e.pruneSources(steps)
 	if dbgNoTPL || e.o.QIndex == 0 {
 		return
 	}
@@ -242,11 +243,6 @@ func (e *Encoder) tpl(steps []step) {
 	for _, tf := range frames {
 		if tf.job.refresh != 0 {
 			e.tplRec[tf.job.disp] = tf.rec
-		}
-	}
-	for d := range e.tplRec {
-		if d < e.nIn-recentSources {
-			delete(e.tplRec, d)
 		}
 	}
 }
