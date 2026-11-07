@@ -7,6 +7,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder at speed 2 and above searches its deep inter frames
+  (the pyramid's depth 2 and below) as SVT-AV1's preset 4 does its
+  non-base frames: the intra modes cut to that set (no angle deltas, no
+  PAETH, FILTER_DC alone), the chroma angles off, the transforms the
+  largest (no split search), two luma modes coded and one with its
+  transform types searched. On the six 240-picture clips at speed 2, by
+  BD-rate: 1.3% larger by PSNR-YUV, 1.2% by SSIM, 1.9% by VMAF for 19%
+  less CPU.
 - The AV1 encoder's temporal model costs a mini-GOP together with the
   one after it, whose frames predict from its anchor: the anchors code
   finer, the leaves coarser at a size. On the six 240-picture clips, by
