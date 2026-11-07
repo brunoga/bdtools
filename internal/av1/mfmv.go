@@ -20,6 +20,12 @@ func (f *frameEnc) saveMotionField(st *refFrameState) {
 	w8, h8 := f.miCols>>1, f.miRows>>1
 	st.mfRef = make([]int8, w8*h8)
 	st.mfMv = make([]mv, w8*h8)
+	st.depths = make([]uint8, w8*h8)
+	for y8 := range h8 {
+		for x8 := range w8 {
+			st.depths[y8*w8+x8] = squareDepth(int(f.mis[f.mi(2*y8, 2*x8)].miSize))
+		}
+	}
 	if f.inter != nil {
 		st.refHints = f.inter.orderHints
 	}

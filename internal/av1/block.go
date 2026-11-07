@@ -916,6 +916,36 @@ func levelEst(a int64, dsh uint, qs int64) (int64, int, bool) {
 	return e * e, 3 + 2*(bits.Len64(uint64(l))-1), true //nolint:gosec // l > 0
 }
 
+// rankEst estimates a transform's coefficients c (inv their scan
+// positions) quantized with steps dcQ and acQ, shifted by dsh: the
+// distortion, the levels' bits and the end of block.
+func (t *tileEnc) rankEst(c []int32, inv []uint16, dsh uint, dcQ, acQ int64) (d int64, nb, eob int) {
+	n := len(c)
+	if useAVX2 {
+		// every coefficient with the AC step, then the DC's put right
+		d, nb, eob = rankEstAVX2(&c[0], &inv[0], n, int(dsh), int(acQ))
+		da, ba, za := levelEst(int64(abs32(c[0])), dsh, acQ)
+		dd, bd, zd := levelEst(int64(abs32(c[0])), dsh, dcQ)
+		d, nb = d-da+dd, nb-ba+bd
+		if eob <= 1 && za != zd {
+			eob = b2i(zd)
+		}
+		return d, nb, eob
+	}
+	for j, v := range c {
+		qs := acQ
+		if j == 0 {
+			qs = dcQ
+		}
+		dj, bj, nz := levelEst(int64(abs32(v)), dsh, qs)
+		d, nb = d+dj, nb+bj
+		if nz {
+			eob = max(eob, int(inv[j])+1)
+		}
+	}
+	return d, nb, eob
+}
+
 // rankTxTypes is the best k of a transform's types by an estimate from
 // their forward transforms of t.resid (kept in t.txCoef): the distortion
 // of rounding to the quantizer, in the samples' scale, and lambda times a
@@ -940,30 +970,7 @@ func (t *tileEnc) rankTxTypes(plane, txSz int, types []int, k int) []int {
 		forwardTypes(t.resid[:w*h], txSz, types[i:i+1], &t.txCoef, &t.txCols)
 		t.txCoefOK |= 1 << uint(tt)
 		inv := invScanFor(txSz, tt)[:n]
-		var d int64
-		nb, eob := 0, 0
-		if useAVX2 {
-			// every coefficient with the AC step, then the DC's put right
-			d, nb, eob = rankEstAVX2(&c[0], &inv[0], n, int(dsh), int(acQ))
-			da, ba, za := levelEst(int64(abs32(c[0])), dsh, acQ)
-			dd, bd, zd := levelEst(int64(abs32(c[0])), dsh, dcQ)
-			d, nb = d-da+dd, nb-ba+bd
-			if eob <= 1 && za != zd {
-				eob = b2i(zd)
-			}
-		} else {
-			for j, v := range c {
-				qs := acQ
-				if j == 0 {
-					qs = dcQ
-				}
-				dj, bj, nz := levelEst(int64(abs32(v)), dsh, qs)
-				d, nb = d+dj, nb+bj
-				if nz {
-					eob = max(eob, int(inv[j])+1)
-				}
-			}
-		}
+		d, nb, eob := t.rankEst(c, inv, dsh, dcQ, acQ)
 		if tt == DCT_DCT && eob == 0 && pruneTxZero && t.b.isInter {
 			return types[i : i+1]
 		}
