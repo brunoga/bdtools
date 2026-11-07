@@ -7,6 +7,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder at speed 2 and above searches an inter frame's
+  superblocks at the block depths of the nearest reference's blocks
+  there and a step either side (two when that reference is more than
+  four pictures away, every depth past sixteen). On the six 240-picture
+  clips at speed 2, by BD-rate: 0.2% smaller by PSNR-YUV, SSIM and VMAF
+  for 4% less CPU.
+- `tools/av1bench -report` reports the points kept alone: a missing one
+  is an error, not coded (with the binary at hand, which may not be the
+  configuration's).
+
 - The AV1 encoder at speed 2 and above searches its deep inter frames
   (the pyramid's depth 2 and below) as SVT-AV1's preset 4 does its
   non-base frames: the intra modes cut to that set (no angle deltas, no
