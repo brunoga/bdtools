@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The AV1 encoder panicked on 2160p pictures when a motion search
+  reached a vector whose difference from its prediction has no class
+  (2048 samples or more): such a vector now costs as good as infinite
+  and is never chosen.
+
 ### Changed
 
 - The AV1 encoder at speed 2 and above searches an inter frame's

@@ -781,6 +781,10 @@ type mvCompCost struct {
 	cost int32
 }
 
+// mvDiffMax is the magnitude a motion vector difference's component
+// cannot reach (1 << 14 eighths: MV_CLASSES classes of CLASS0_SIZE).
+const mvDiffMax = CLASS0_SIZE << (MV_CLASSES + 2)
+
 // mvDiffCost is writeMvDiff's rate of d, its components' rates kept for
 // the generation (a superblock's: its search's CDFs are the same throughout).
 func (t *tileEnc) mvDiffCost(d mv) int64 {
@@ -797,6 +801,11 @@ func (t *tileEnc) mvDiffCost(d mv) int64 {
 	for comp, v := range [2]int32{d.row, d.col} {
 		if v == 0 {
 			continue
+		}
+		if v <= -mvDiffMax || v >= mvDiffMax {
+			// not codable (read_mv_component's classes end there): a
+			// 4K picture's vector against a far prediction can reach it
+			return math.MaxInt32
 		}
 		if v < -mvCostRange || v > mvCostRange {
 			t.cost.n = 0
