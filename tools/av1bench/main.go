@@ -7,11 +7,11 @@
 //
 //	av1bench -clips DIR -res DIR -run ours:0,svt:4,svt:8 -anchor svt:4
 //
-// The clips are 8-bit 4:2:0 y4m files. A configuration is ours:SPEED or
-// svt:PRESET, with @TAG for a variant (a build being tried, or SVT with
-// the parameters in $SVT_PARAMS, as -svtav1-params takes them): its points
-// are kept in -res and coded again only with -force. One encode runs at
-// a time, each with the whole machine.
+// The clips are 8- or 10-bit 4:2:0 y4m files. A configuration is
+// ours:SPEED or svt:PRESET, with @TAG for a variant (a build being tried,
+// or SVT with the parameters in $SVT_PARAMS, as -svtav1-params takes
+// them): its points are kept in -res and coded again only with -force.
+// One encode runs at a time, each with the whole machine.
 package main
 
 import (
@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/pprof"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -226,11 +227,16 @@ func measure(res, config, clip string, q int, force bool) (point, error) {
 	return p, os.WriteFile(file, b, 0o600)
 }
 
-// y4m reads an 8-bit 4:2:0 y4m file's pictures.
+// y4m reads an 8- or 10-bit 4:2:0 y4m file's pictures.
 type y4m struct {
-	r    *bufio.Reader
-	w, h int
-	buf  []byte
+	r      *bufio.Reader
+	w, h   int
+	depth  int // 8 or 10
+	buf    []byte
+	pic    []uint16
+	pixFmt string // ffmpeg's name of the pictures' format
+	planes int    // samples a picture
+	ys, cs int    // samples a luma and a chroma plane
 }
 
 func openY4M(f io.Reader) (*y4m, error) {
@@ -250,22 +256,54 @@ func openY4M(f io.Reader) (*y4m, error) {
 		case 'H':
 			y.h, _ = strconv.Atoi(f[1:])
 		case 'C':
-			if !strings.HasPrefix(f, "C420") || strings.Contains(f, "p10") {
-				return nil, fmt.Errorf("y4m colour space %s: 8-bit 4:2:0 only", f[1:])
+			switch {
+			case strings.HasPrefix(f, "C420p10"):
+				y.depth = 10
+			case strings.HasPrefix(f, "C420") && !strings.Contains(f, "p1"):
+				y.depth = 8
+			default:
+				return nil, fmt.Errorf("y4m colour space %s: 8- or 10-bit 4:2:0 only", f[1:])
 			}
 		}
 	}
-	y.buf = make([]byte, y.w*y.h*3/2)
+	if y.depth == 0 {
+		y.depth = 8
+	}
+	y.ys, y.cs = y.w*y.h, (y.w/2)*(y.h/2)
+	y.planes = y.ys + 2*y.cs
+	y.pixFmt = "yuv420p"
+	if y.depth == 10 {
+		y.pixFmt = "yuv420p10le"
+	}
+	y.buf = make([]byte, y.planes*((y.depth+7)/8))
+	y.pic = make([]uint16, y.planes)
 	return y, nil
 }
 
-// next gives the next picture's planes (valid until the next call).
-func (y *y4m) next() ([]byte, error) {
+// next gives the next picture's samples, luma then the chroma planes
+// (valid until the next call).
+func (y *y4m) next() ([]uint16, error) {
 	if _, err := y.r.ReadString('\n'); err != nil {
 		return nil, err
 	}
-	_, err := io.ReadFull(y.r, y.buf)
-	return y.buf, err
+	if _, err := io.ReadFull(y.r, y.buf); err != nil {
+		return nil, err
+	}
+	return y.samples(y.buf, y.pic), nil
+}
+
+// samples unpacks a picture's raw bytes (the y4m's format) into out.
+func (y *y4m) samples(b []byte, out []uint16) []uint16 {
+	if y.depth == 8 {
+		for i := range out {
+			out[i] = uint16(b[i])
+		}
+		return out
+	}
+	for i := range out {
+		out[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+	}
+	return out
 }
 
 func encodeOurs(clip, stream string, speed, q int) (point, error) {
@@ -280,7 +318,7 @@ func encodeOurs(clip, stream string, speed, q int) (point, error) {
 		return p, err
 	}
 	w, h := y.w, y.h
-	e, err := av1.NewEncoder(av1.EncoderOptions{Width: w, Height: h, BitDepth: 8, QIndex: q,
+	e, err := av1.NewEncoder(av1.EncoderOptions{Width: w, Height: h, BitDepth: y.depth, QIndex: q,
 		FPSNum: 24000, FPSDen: 1001, Primaries: 1, Transfer: 1, Matrix: 1, Speed: speed,
 		TileColsLog2: -1, TileRowsLog2: -1})
 	if err != nil {
@@ -309,13 +347,9 @@ func encodeOurs(clip, stream string, speed, q int) (point, error) {
 			return p, err
 		}
 		src := &av1.Source{Y: make([]uint16, w*h), Cb: make([]uint16, w*h/4), Cr: make([]uint16, w*h/4), StrideY: w, StrideC: w / 2}
-		for i := range src.Y {
-			src.Y[i] = uint16(b[i])
-		}
-		for i := range src.Cb {
-			src.Cb[i] = uint16(b[w*h+i])
-			src.Cr[i] = uint16(b[w*h*5/4+i])
-		}
+		copy(src.Y, b[:y.ys])
+		copy(src.Cb, b[y.ys:y.ys+y.cs])
+		copy(src.Cr, b[y.ys+y.cs:])
 		us, err := e.Encode(src)
 		if err != nil {
 			return p, err
@@ -371,7 +405,7 @@ func score(p *point, clip, stream string) error {
 	}
 	w, h := src.w, src.h
 	cmd := exec.CommandContext(context.Background(), "ffmpeg", "-v", "error", "-c:v", "libdav1d", "-i", stream, //nolint:gosec // the bench's own arguments
-		"-f", "rawvideo", "-pix_fmt", "yuv420p", "-fps_mode", "passthrough", "pipe:1")
+		"-f", "rawvideo", "-pix_fmt", src.pixFmt, "-fps_mode", "passthrough", "pipe:1")
 	cmd.Stderr = os.Stderr
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -385,16 +419,11 @@ func score(p *point, clip, stream string) error {
 	if err != nil {
 		return err
 	}
-	dec := make([]byte, w*h*3/2)
+	raw := make([]byte, len(src.buf))
+	dec := make([]uint16, src.planes)
 	n := 0
 	var su, sv float64
-	widen := func(b []byte) []uint16 {
-		o := make([]uint16, len(b))
-		for i, v := range b {
-			o[i] = uint16(v)
-		}
-		return o
-	}
+	peak := float64(int(1)<<src.depth - 1)
 	for {
 		s, err := src.next()
 		if errors.Is(err, io.EOF) {
@@ -403,13 +432,14 @@ func score(p *point, clip, stream string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := io.ReadFull(dr, dec); err != nil {
+		if _, err := io.ReadFull(dr, raw); err != nil {
 			return fmt.Errorf("decoded %d pictures of the clip's more: %w", n, err)
 		}
-		ys, cs := w*h, w*h/4
-		sc.Add(vmaf.Frame{W: w, H: h, BPC: 8, Y: widen(s[:ys])}, vmaf.Frame{W: w, H: h, BPC: 8, Y: widen(dec[:ys])})
-		su += planePSNR(s[ys:ys+cs], dec[ys:ys+cs])
-		sv += planePSNR(s[ys+cs:], dec[ys+cs:])
+		src.samples(raw, dec)
+		ys, cs := src.ys, src.cs
+		sc.Add(vmaf.Frame{W: w, H: h, BPC: src.depth, Y: slices.Clone(s[:ys])}, vmaf.Frame{W: w, H: h, BPC: src.depth, Y: slices.Clone(dec[:ys])})
+		su += planePSNR(s[ys:ys+cs], dec[ys:ys+cs], peak)
+		sv += planePSNR(s[ys+cs:], dec[ys+cs:], peak)
 		n++
 	}
 	if _, err := io.Copy(io.Discard, dr); err != nil {
@@ -433,13 +463,13 @@ func score(p *point, clip, stream string) error {
 	return nil
 }
 
-func planePSNR(a, b []byte) float64 {
+func planePSNR(a, b []uint16, peak float64) float64 {
 	var sse float64
 	for i, v := range a {
 		d := float64(v) - float64(b[i])
 		sse += d * d
 	}
-	return min(10*math.Log10(255*255/max(sse/float64(len(a)), 1e-16)), 60)
+	return min(10*math.Log10(peak*peak/max(sse/float64(len(a)), 1e-16)), 60)
 }
 
 // report prints each configuration's BD-rate against the anchor's, per
