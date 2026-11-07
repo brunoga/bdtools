@@ -5,6 +5,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `tools/av1bench` takes 10-bit 4:2:0 clips (y4m `C420p10`) as well as
+  8-bit ones: the encoder, SVT-AV1 and the scores at the clips' depth.
+
 ## [0.17.0] - 2026-11-06
 
 ### Added
