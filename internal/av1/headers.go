@@ -198,8 +198,15 @@ func (t *tiling) write(w *bitWriter, miCols, miRows int) {
 
 // frameParams is a frame header's settings.
 type frameParams struct {
-	key  bool
-	show bool // shown (else showable later, by show_existing_frame)
+	// intraLite restricts the intra search of a deep inter frame to the
+	// undirected modes and the directional ones at their nominal angle,
+	// FILTER_DC alone; chromaLite its chroma modes' angles
+	intraLite, chromaLite bool
+	// lumaCands and typeSearches, when not 0, are how many luma modes
+	// are coded and how many have their transform types searched
+	lumaCands, typeSearches int
+	key                     bool
+	show                    bool // shown (else showable later, by show_existing_frame)
 	// Inter frames: the slots refreshed, the slot each of the seven
 	// references is, mv precision and the frame's interpolation filter.
 	refresh uint8

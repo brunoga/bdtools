@@ -194,7 +194,11 @@ func (t *tileEnc) searchIntraBlock(r, c, size int) (float64, *blockDec) {
 	t.dctOnly = false
 	t.intraRanked = all
 	slices.SortStableFunc(all, func(a, b rankedDec) int { return cmp.Compare(a.j, b.j) })
-	for _, a := range all[:min(typeSearches, len(all))] {
+	ts := typeSearches
+	if f.fp.typeSearches > 0 {
+		ts = f.fp.typeSearches
+	}
+	for _, a := range all[:min(ts, len(all))] {
 		a.d.txTypes = nil
 		try(a.d)
 	}
@@ -579,21 +583,30 @@ func withAngles(cands []modeCand, n int, est func(mode, angle int) float64) []mo
 func (t *tileEnc) lumaCandidates() []modeCand {
 	b := &t.b
 	cands := t.lumaCands[:0]
-	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
+	lite := t.f.fp.intraLite
+	last, filters := PAETH_PRED, INTRA_FILTER_MODES
+	if lite {
+		last, filters = SMOOTH_H_PRED, 1
+	}
+	for mode := DC_PRED; mode <= last; mode++ {
 		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.lumaEstimate(mode, 0, -1)})
 	}
 	if t.filterIntraAllowed() {
-		for fm := range INTRA_FILTER_MODES {
+		for fm := range filters {
 			cands = append(cands, modeCand{mode: DC_PRED, filterMode: fm, cost: t.lumaEstimate(DC_PRED, 0, fm)})
 		}
 	}
-	if b.size >= BLOCK_8X8 && !dbgNoAngles {
+	if b.size >= BLOCK_8X8 && !dbgNoAngles && !lite {
 		cands = withAngles(cands, angleModes, func(m, a int) float64 { return t.lumaEstimate(m, a, -1) })
 	} else {
 		slices.SortStableFunc(cands, func(a, b modeCand) int { return cmp.Compare(a.cost, b.cost) })
 	}
 	t.lumaCands = cands
-	return cands[:min(lumaCands, len(cands))]
+	n := lumaCands
+	if t.f.fp.lumaCands > 0 {
+		n = t.f.fp.lumaCands
+	}
+	return cands[:min(n, len(cands))]
 }
 
 // chromaCandidates are the chroma modes worth coding in full.
@@ -603,7 +616,7 @@ func (t *tileEnc) chromaCandidates() []modeCand {
 	for mode := DC_PRED; mode <= PAETH_PRED; mode++ {
 		cands = append(cands, modeCand{mode: mode, filterMode: -1, cost: t.chromaEstimate(mode, 0)})
 	}
-	if b.size >= BLOCK_8X8 && !dbgNoAngles {
+	if b.size >= BLOCK_8X8 && !dbgNoAngles && !t.f.fp.chromaLite {
 		cands = withAngles(cands, 1, t.chromaEstimate)
 	}
 	if t.cflAllowed() {
