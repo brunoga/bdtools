@@ -102,6 +102,12 @@ type Encoder struct {
 	// key is the key frame's step, planned and coded with the mini-GOP
 	// after it.
 	key []step
+	// held is the mini-GOP planned and held to be costed with the next
+	// one: its anchor's importance counts the next's frames, which
+	// predict from it. (On the six 240-picture clips at speed 0, 2.3%
+	// smaller by PSNR-YUV and 0.9% by SSIM, 2.9% larger by VMAF: the
+	// anchors finer, the leaves coarser at a size.)
+	held []step
 	// tfPast is the sources of the pictures just before the queue's (back
 	// to the last key frame's), for the temporal filter's window.
 	tfPast []*Source
@@ -109,8 +115,9 @@ type Encoder struct {
 	// and the last frame coded in frame (tests).
 	keepRecon bool
 	recons    map[int]*[3][]uint16
-	// recent is the last pictures in, by display index; tplRec the
-	// temporal model's luma reconstructions of the frames kept.
+	// recent is the pictures in that a frame still to come may reference
+	// (pruneSources), by display index; tplRec the temporal model's luma
+	// reconstructions of the frames kept.
 	recent map[int]*Source
 	tplRec map[int][]uint16
 	// diffs is the last pictures' differences from the ones before
