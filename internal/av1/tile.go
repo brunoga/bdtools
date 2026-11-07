@@ -59,6 +59,9 @@ type frameEnc struct {
 	// delta_q_present; sbLambda each one's lambda's scale (nil: 1).
 	sbQ      []int
 	sbLambda []float64
+	// depthPass has the superblocks searched at the depths planDepths
+	// picks
+	depthPass bool
 	// cdf0 is the CDFs every tile starts from: the defaults, or those a
 	// reference kept (load_cdfs) with primary_ref_frame; savedCDF what the
 	// frame keeps for later frames.
@@ -91,8 +94,12 @@ type tileEnc struct {
 	resid, coef, dq, inv [64 * 64]int32
 	// txCoef are the forward transforms of the residual by type that
 	// rankTxTypes made, txCoefOK which (bit by type) are there
-	txCoef              [TX_TYPES][32 * 32]int32
-	txCoefOK            uint32
+	txCoef   [TX_TYPES][32 * 32]int32
+	txCoefOK uint32
+	// allowed, with useDepths, is the depths the superblock's 8x8
+	// regions may be searched at (bits by depth; planDepths)
+	allowed             [64]uint8
+	useDepths           bool
 	eobGain             [32 * 32]float64  // quantize's, by scan position
 	jointPred, jointTgt [128 * 128]uint16 // jointRefine's
 	txCols              fwdColCache
@@ -299,6 +306,10 @@ func (t *tileEnc) codeRow(r int, sync *rowSync) {
 			t.startSB(r, c)
 			t.clearDecoded(r, c)
 			t.cdefDone = false
+			t.useDepths = false
+			if t.f.depthPass {
+				t.planDepths(r, c)
+			}
 			t.save(&t.sbStart, r, c, BLOCK_64X64, 0)
 			*t.sbCDF = *t.live
 			t.mvGen++ // the motion vector rates kept are the last superblock's
@@ -850,6 +861,20 @@ func (t *tileEnc) searchPartition(r, c, bSize, _ int) (float64, *partNode) {
 		cands = []int{PARTITION_SPLIT}
 	}
 	d := depthOf(bSize)
+	if t.useDepths && bSize >= BLOCK_8X8 && dbgFixed == 0 {
+		// the depths the pass allows: the square coded whole (or in its
+		// shapes) or split
+		here, deeper := t.depthsAllow(r, c, bSize, d)
+		kept := cands[:0:0]
+		for _, p := range cands {
+			if p == PARTITION_SPLIT && deeper || p != PARTITION_SPLIT && here {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) > 0 {
+			cands = kept
+		}
+	}
 	start, best := t.snap(d, 0), t.snap(d, 1)
 	if len(cands) > 1 {
 		t.save(start, r, c, bSize, 3)

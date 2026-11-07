@@ -30,6 +30,9 @@ type refFrameState struct {
 	refHints [TOTAL_REFS_PER_FRAME]int
 	mfRef    []int8
 	mfMv     []mv
+	// depths is the depth (below the superblock, by the larger side)
+	// of the block at each 8x8 grid point (the depth pass's prior)
+	depths []uint8
 	// rec8 is the luma as 8-bit samples (an 8-bit frame's, for the
 	// motion search's SADs), made once on first use; nil for a
 	// reference made up for a search (none made)

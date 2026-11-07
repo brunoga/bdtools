@@ -72,9 +72,12 @@ type tools struct {
 	// searched (0: as the other frames)
 	intraLite, chromaLite, txLargestDeep bool
 	deepLumaCands, deepTypeSearches      int
-	pruneSkip, pruneExt                  bool // the partition search's prunings
-	extEst                               float64
-	fastCands                            bool // inter candidates costed with DCT_DCT, the best's transforms searched
+	// depthPass has the inter frames' superblocks searched at the depths
+	// the nearest reference's blocks there say (planDepths)
+	depthPass           bool
+	pruneSkip, pruneExt bool // the partition search's prunings
+	extEst              float64
+	fastCands           bool // inter candidates costed with DCT_DCT, the best's transforms searched
 	// the filters' and the temporal model's searches cut short: CDEF's
 	// damping from q, luma's deblocking levels the same, the model's
 	// vectors whole samples, a subset of the self-guided filter's sets
@@ -208,6 +211,9 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// transforms 0.8% for 14%, the candidates 0 for 2%)
 		e.tools.intraLite, e.tools.chromaLite, e.tools.txLargestDeep = true, true, true
 		e.tools.deepLumaCands, e.tools.deepTypeSearches = 2, 1
+		// (on the six 240-picture clips 0.2% smaller on every metric for
+		// 4% less CPU)
+		e.tools.depthPass = true
 		// (three, not two: 0.29% smaller by PSNR-YUV, 0.16% by SSIM, 0.45%
 		// by VMAF for 2% more CPU; all seven references, not four, 0.3%
 		// for 12%)
@@ -273,6 +279,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 		f.sbQ = j.sbQ
 	}
 	f.sbLambda = j.sbLambda
+	f.depthPass = e.tools.depthPass && !key
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {
