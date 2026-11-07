@@ -3,7 +3,10 @@ package av1
 // Inter blocks' syntax: the reference frame, the motion vector difference,
 // the variable transform size and the inter transform types.
 
-import "math/bits"
+import (
+	"math"
+	"math/bits"
+)
 
 // countRefs is count_refs: how many of the above and left blocks' two
 // references are ref.
@@ -100,8 +103,18 @@ func mvClass(z int) (class, offset int) {
 func (t *tileEnc) writeMvComponent(cd coder, ctx, comp int, v int32) {
 	c := t.cdf
 	hp := t.f.fp.highPrecisionMV
-	cd.symbol(b2i(v < 0), c.mvSign[ctx][comp][:])
 	z := int(abs32(v)) - 1
+	if z >= mvDiffMax-1 {
+		// not codable (the classes end there): a 4K picture's vector
+		// against a far prediction can reach it. A search costing it
+		// finds it as good as infinite; coding it is a search's bug.
+		if cc, ok := cd.(*costCoder); ok {
+			cc.n += math.MaxInt32
+			return
+		}
+		panic("av1: a motion vector difference out of range")
+	}
+	cd.symbol(b2i(v < 0), c.mvSign[ctx][comp][:])
 	class, off := mvClass(z)
 	cd.symbol(class, c.mvClass[ctx][comp][:])
 	if class == 0 {
