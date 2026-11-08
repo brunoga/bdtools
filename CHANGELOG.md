@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The built-in AV1 encoder takes `--crf` on SVT-AV1's scale (quantizer
+  index four times the CRF): it had NVENC AV1's mapping, which made the
+  HD default (16) a quantizer index of 38, a 31 Mbit/s stream at 11 CPU
+  seconds a 1080p picture; it is 64 now, the size of SVT-AV1's at the
+  same CRF.
+- The frame counts reported while converting with `--start`, `--end` or
+  `--duration` are the part converted, not the whole title.
+
 ### Added
 
 - `--tune vmaf` for the built-in AV1 encoder: the anchors a little

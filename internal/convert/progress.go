@@ -32,7 +32,16 @@ func (p *progress) begin(num, den, done int) {
 	if p.r.length <= 0 || num <= 0 || den <= 0 {
 		return
 	}
-	all := int((p.r.length.Seconds() * float64(num) / float64(den)) + 0.5)
+	// the part converted, with --start and --end or --duration
+	length := p.r.length
+	if t := p.r.Opts.Trim; !t.IsZero() {
+		end := t.End
+		if end == 0 || end > length {
+			end = length
+		}
+		length = max(end-t.Start, 0)
+	}
+	all := int((length.Seconds() * float64(num) / float64(den)) + 0.5)
 	p.total = all - done
 	verb := map[string]string{"decoded": "decode", "encoded": "encode"}[p.verb]
 	if done > 0 {
