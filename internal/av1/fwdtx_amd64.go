@@ -53,6 +53,24 @@ func fdct64ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *
 func fdct64RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fadst4ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst4Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst4Row4x8AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst4Row4x8FlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst4Row4x4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst4Row4x4FlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fadst8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
@@ -88,6 +106,48 @@ func fadst16RowFlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, co
 //go:noescape
 func fadst16RowH4FlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
+//go:noescape
+func fidentity4ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity4Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity4Row4x8AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity4Row4x4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity32ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fidentity32RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
 // fwdColAVX2 is the column pass of a 1D forward transform of a kind and
 // log2 of the size on eight adjacent columns of a residual (its rows
 // srcStride bytes apart, from src): each scaled up by up, transformed and
@@ -105,10 +165,20 @@ func fwdColAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride
 		fdct32ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dDCT<<3 | 6:
 		fdct64ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dADST<<3 | 2:
+		fadst4ColAVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, up, down)
 	case tx1dADST<<3 | 3:
 		fadst8ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dADST<<3 | 4:
 		fadst16ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 2:
+		fidentity4ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 3:
+		fidentity8ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 4:
+		fidentity16ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 5:
+		fidentity32ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	default:
 		return false
 	}
@@ -137,6 +207,12 @@ func fwdRowAVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int32
 		fadst16RowAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	case kind == tx1dADST && log2 == 4 && flip:
 		fadst16RowFlipAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && log2 == 3:
+		fidentity8RowAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && log2 == 4:
+		fidentity16RowAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && log2 == 5:
+		fidentity32RowAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	default:
 		return false
 	}
@@ -153,10 +229,18 @@ func fwdCol4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStrid
 		fdct8Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dDCT<<3 | 4:
 		fdct16Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dADST<<3 | 2:
+		fadst4Col4AVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, up, down)
 	case tx1dADST<<3 | 3:
 		fadst8Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dADST<<3 | 4:
 		fadst16Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 2:
+		fidentity4Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 3:
+		fidentity8Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dIdentity<<3 | 4:
+		fidentity16Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	default:
 		return false
 	}
@@ -179,20 +263,36 @@ func fwdRowH4AVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int
 		fadst16RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	case kind == tx1dADST && log2 == 4 && flip:
 		fadst16RowH4FlipAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && log2 == 3:
+		fidentity8RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && log2 == 4:
+		fidentity16RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	default:
 		return false
 	}
 	return true
 }
 
-// fwdRow4AVX2 is the row pass of the 4-point DCT on rows rows (8 or 4)
-// of four.
-func fwdRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
-	switch rows {
-	case 8:
+// fwdRow4AVX2 is the row pass of a 4-point transform of a kind on rows
+// rows (8 or 4) of four, read right to left when flip.
+func fwdRow4AVX2(kind, rows int, flip bool, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	switch {
+	case kind == tx1dDCT && rows == 8:
 		fdct4Row4x8AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
-	case 4:
+	case kind == tx1dDCT && rows == 4:
 		fdct4Row4x4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dADST && rows == 8 && !flip:
+		fadst4Row4x8AVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, 0, down)
+	case kind == tx1dADST && rows == 8 && flip:
+		fadst4Row4x8FlipAVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, 0, down)
+	case kind == tx1dADST && rows == 4 && !flip:
+		fadst4Row4x4AVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, 0, down)
+	case kind == tx1dADST && rows == 4 && flip:
+		fadst4Row4x4FlipAVX2(src, srcStride, dst, dstStride, &sinpiTable[cosBit-10][0], cosBit, 0, down)
+	case kind == tx1dIdentity && rows == 8:
+		fidentity4Row4x8AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dIdentity && rows == 4:
+		fidentity4Row4x4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	default:
 		return false
 	}

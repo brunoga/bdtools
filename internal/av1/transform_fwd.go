@@ -273,13 +273,14 @@ func fwdRows(buf []int32, txSz, kind int, flipLR bool, log2W, log2H int, coeffs 
 			}
 		case w >= 8 && th == 4:
 			ok = fwdRowH4AVX2(kind, log2W, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down)
-		case w == 4 && kind == tx1dDCT && th >= 8:
-			for r := 0; r < th; r += 8 {
-				fwdRow4AVX2(8, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+		case w == 4 && th >= 8:
+			if ok = fwdRow4AVX2(kind, 8, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down); ok {
+				for r := 8; r < th; r += 8 {
+					fwdRow4AVX2(kind, 8, flipLR, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+				}
 			}
-			ok = true
-		case w == 4 && kind == tx1dDCT && th == 4:
-			ok = fwdRow4AVX2(4, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down)
+		case w == 4 && th == 4:
+			ok = fwdRow4AVX2(kind, 4, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down)
 		}
 		if ok {
 			if rect {
