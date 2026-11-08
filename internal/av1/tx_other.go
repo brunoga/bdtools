@@ -36,7 +36,7 @@ func fwdRowH4AVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int
 	return false
 }
 
-func fwdRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+func fwdRow4AVX2(kind, rows int, flip bool, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
 	return false
 }
 
@@ -48,6 +48,6 @@ func invRowH4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStri
 	return false
 }
 
-func invRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
+func invRow4AVX2(kind, rows int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
 	return false
 }

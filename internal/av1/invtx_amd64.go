@@ -76,6 +76,48 @@ func iadst16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi
 //go:noescape
 func iadst16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
+//go:noescape
+func iidentity4ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity4Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity4Row4x8AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity4Row4x4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity32ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iidentity32RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
 // invColAVX2 is the column pass of a 1D inverse transform of a kind and
 // log2 of the size on eight adjacent columns (rows srcStride bytes apart,
 // from src): transformed with its intermediate results clamped to [lo,
@@ -97,6 +139,14 @@ func invColAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride
 		iadst8ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dADST<<3 | 4:
 		iadst16ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 2:
+		iidentity4ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 3:
+		iidentity8ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 4:
+		iidentity16ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 5:
+		iidentity32ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	default:
 		return false
 	}
@@ -122,6 +172,12 @@ func invRowAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride
 		iadst8RowAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dADST<<3 | 4:
 		iadst16RowAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 3:
+		iidentity8RowAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 4:
+		iidentity16RowAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 5:
+		iidentity32RowAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	default:
 		return false
 	}
@@ -142,6 +198,12 @@ func invCol4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStrid
 		iadst8Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dADST<<3 | 4:
 		iadst16Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 2:
+		iidentity4Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 3:
+		iidentity8Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 4:
+		iidentity16Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	default:
 		return false
 	}
@@ -160,20 +222,28 @@ func invRowH4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStri
 		iadst8RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dADST<<3 | 4:
 		iadst16RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 3:
+		iidentity8RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dIdentity<<3 | 4:
+		iidentity16RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	default:
 		return false
 	}
 	return true
 }
 
-// invRow4AVX2 is the row pass of the 4-point inverse DCT on rows rows (8
-// or 4) of four.
-func invRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
-	switch rows {
-	case 8:
+// invRow4AVX2 is the row pass of a 4-point inverse transform of a kind
+// on rows rows (8 or 4) of four.
+func invRow4AVX2(kind, rows int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
+	switch {
+	case kind == tx1dDCT && rows == 8:
 		idct4Row4x8AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
-	case 4:
+	case kind == tx1dDCT && rows == 4:
 		idct4Row4x4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case kind == tx1dIdentity && rows == 8:
+		iidentity4Row4x8AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case kind == tx1dIdentity && rows == 4:
+		iidentity4Row4x4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	default:
 		return false
 	}
@@ -183,5 +253,5 @@ func invRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int,
 // invAVX2 reports whether there are kernels for an inverse transform of
 // a kind and log2 of the size.
 func invAVX2(kind, log2 int) bool {
-	return (kind == tx1dDCT && log2 >= 2) || (kind == tx1dADST && (log2 == 3 || log2 == 4))
+	return (kind == tx1dDCT && log2 >= 2) || (kind == tx1dADST && (log2 == 3 || log2 == 4)) || (kind == tx1dIdentity && log2 >= 2 && log2 <= 5)
 }

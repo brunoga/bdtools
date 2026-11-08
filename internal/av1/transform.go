@@ -226,7 +226,7 @@ func inverseTransform(coeffs []int32, txSz, txType, bitDepth int, lossless bool,
 	// 32 bits up to 10 bits deep)
 	simd := useAVX2 && !lossless && bitDepth <= 10
 	rowsDone := false
-	if simd && invAVX2(int(rowKind), log2W) && (w >= 8 || rowKind == tx1dDCT) {
+	if simd && invAVX2(int(rowKind), log2W) && (w >= 8 || rowKind != tx1dADST) {
 		rowLo, rowHi := -1<<(rowRange-1), 1<<(rowRange-1)-1
 		rnd := 0
 		if rowShift > 0 {
@@ -255,7 +255,7 @@ func inverseTransform(coeffs []int32, txSz, txType, bitDepth int, lossless bool,
 			}
 			switch {
 			case w == 4:
-				invRow4AVX2(step, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+				invRow4AVX2(int(rowKind), step, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
 			case step == 4:
 				invRowH4AVX2(int(rowKind), log2W, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
 			default:

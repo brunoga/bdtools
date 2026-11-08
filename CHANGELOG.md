@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's 4-point forward ADST and its identity transforms,
+  forward and inverse, run as AVX2 kernels too, the same results: about
+  0.9% less CPU at speed 2. Every forward and inverse transform of the
+  sizes the encoder uses now has a kernel but the 4-point inverse ADST.
+
 - The AV1 encoder's 4-point inverse DCT, and the inverse transforms of
   blocks four wide or four tall, run as AVX2 kernels too, the same
   residuals: about 0.5% less CPU at speed 2.
