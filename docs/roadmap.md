@@ -25,7 +25,7 @@ worked on one at a time in the order below.
 | Need | Today | Go replacement |
 |---|---|---|
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
-| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder: key frames 4.5% smaller than SVT-AV1 preset 4's, sequences +5.7% (two 120-picture 1080p disc clips; +2.8% at `--preset veryslow`), and slow; to tune and speed up |
+| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder at speed 0: smaller than SVT-AV1 preset 4 by PSNR-YUV at 1080p (4%) and by every metric at 2160p; speed 2 within 1% by PSNR-YUV at 6.5 times preset 4's CPU. See [AV1: next steps](#av1-next-steps) |
 | Dolby Vision with the enhancement layer kept or re-encoded | none | Done: the Go HEVC encoder codes both layers |
 | Interlaced H.264 input | none | Done: field pictures and MBAFF decode in Go, deinterlaced |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |
@@ -113,6 +113,41 @@ Measurement:
 | 12. 2D to 3D | Started: the plan in [2d-to-3d.md](2d-to-3d.md); `internal/nn` reads PyTorch checkpoints as they are and has the layers of Video Depth Anything (each checked against PyTorch); `internal/depth` runs Video Depth Anything Small's streaming form from its published checkpoint, the same depth as PyTorch's (within 1e-3 on film frames: 25 ms a 1080p frame on an RTX 5090 through `internal/cuda`, 1.3 s on the CPU); `--to-3d` converts a film to any 3D layout (internal/stereo: depth shaped into disparity, the eyes rendered with the nearer covering the farther, holes filled from the background). Measured against native and studio-converted 3D discs by `tools/stereobench` (a semi-global matcher in Go), the default depth now the discs'. A faster GPU path is done (tensor cores, attention in one pass, the networks' inputs and the eyes on the GPU: about 100 pictures a second), and Blu-ray 3D images (`--output film.iso`). To do: layered glass and reflections, filling across a shot, the subtitles' 3D on a disc (a grading learnt from 27 films was tried: no gain; a learnt depth refinement, built in, gains 0.5 to 1 dB) |
 
 ## AV1: next steps
+
+### Standing (2026-11-07)
+
+The bench clips are now 240 pictures (keyint 250: on 120 the key frame
+had 1.7 times its share of the bytes, which flattered every finer key
+frame and anchor and the standing itself) of Blade Runner 2049, Children
+of Men, Free Solo, Godzilla vs. Kong, Raya and the Last Dragon and Toy
+Story 4 (Frozen II and Incredibles 2 were lost with their sources; the
+copies now live in `/mnt/media/av1bench-sources`), at 1080p 8-bit (tone
+mapped), and the five HDR ones also at 1080p 10-bit and at 2160p 10-bit
+as they are (120 pictures). BD-rate against SVT-AV1 2.3.0 preset 4,
+24 cores:
+
+| clips | config | PSNR-Y | PSNR-YUV | SSIM | VMAF | CPU s a picture (SVT) |
+|---|---|---|---|---|---|---|
+| 1080p 8-bit, six | speed 0 | -2.2% | -4.2% | +0.5% | +3.3% | 4.49 (0.30) |
+| 1080p 8-bit, six | speed 2 | +3.5% | +0.9% | +5.1% | +8.6% | 1.90 (0.30) |
+| 1080p 10-bit, five (v0.17.0) | speed 0 | +1.3% | -0.8% | +1.8% | +0.5% | 4.01 (0.32) |
+| 1080p 10-bit, five (v0.17.0) | speed 2 | +3.8% | +1.6% | +4.0% | +3.1% | 2.08 (0.32) |
+| 2160p 10-bit, five | speed 0 | -2.3% | -6.1% | -4.0% | -1.5% | 11.5 (0.96) |
+| 2160p 10-bit, five | speed 2 | +0.5% | -3.7% | -1.8% | +1.7% | 5.15 (0.96) |
+
+Speed 0 is smaller than preset 4 by every metric at 2160p and by PSNR
+at 1080p; speed 2 at 6.5 times preset 4's CPU (5.4 at 2160p), from 8
+times at v0.17.0: the temporal model looking a mini-GOP ahead (finer
+anchors, coarser leaves at a size: the VMAF trade), the deep inter
+frames searched as SVT-AV1's preset 4 does (19% less CPU), the partition
+depths from the nearest reference's blocks (4%), the model keeping its
+choices for a held mini-GOP (3%). What SVT-AV1 does per evaluation is
+the remaining gap: at preset 4 it fully codes 20 to 60 blocks a 64x64
+region where this codes hundreds, with AVX2 C at every stage; its light
+depth pre-decision, ported, lost 3.7% for 21% less CPU (no better than
+the speeds' own curve) and was not taken.
+
+### History
 
 `tools/av1bench` measures the encoder against SVT-AV1 (through ffmpeg's
 libsvtav1) on six 120-picture 1080p 8-bit clips (Blade Runner 2049,
