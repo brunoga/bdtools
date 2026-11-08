@@ -2,6 +2,7 @@ package m2ts
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -126,4 +127,18 @@ func FuzzReader(f *testing.F) {
 			}
 		}
 	})
+}
+
+func TestEncryptedStream(t *testing.T) {
+	// An AACS aligned unit: the first packet's copy permission bits set,
+	// its sync byte in place, everything past 16 bytes scrambled.
+	b := make([]byte, 192*3)
+	b[0], b[4] = 0xc0, 0x47
+	for i := 16; i < len(b); i++ {
+		b[i] = byte(i*73 + 11)
+	}
+	_, err := NewReader(bytes.NewReader(b)).ReadProgram()
+	if !errors.Is(err, ErrEncrypted) {
+		t.Fatalf("got %v, want ErrEncrypted", err)
+	}
 }
