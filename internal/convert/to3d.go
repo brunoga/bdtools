@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/brunoga/bdtools/internal/depth"
-	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
@@ -415,25 +414,54 @@ func download(url, file, want string) error {
 
 // DecodeFrames decodes a video's pictures (its first video track, as
 // --compare does) as 8-bit 4:2:0 frames, one after another, for tools
-// that look at the pictures themselves (the 2D to 3D benchmark). With
-// keep, only the pictures it keeps (by their time from the first
-// picture) are handed to fn; return ErrDecodeDone from fn to stop early.
+// that look at the pictures themselves (the 2D to 3D benchmark). A 3D
+// disc's (or MVC file's) two views come as one frame, the eyes side by
+// side at full width, as a full side-by-side file's do. With keep, only
+// the pictures it keeps (by their time from the first picture) are
+// handed to fn; return ErrDecodeDone from fn to stop early.
 func DecodeFrames(ctx context.Context, goos string, o Options, path string, keep func(time.Duration) bool, fn func(*mvc.Frame) error) error {
 	r := NewRunner(goos, o, func(string, ...any) {})
 	first, known := int64(0), false
-	err := r.decodeVideo(ctx, path, func(p *gpu.DecodedPicture) error {
+	err := r.decodePictures(ctx, path, true, func(p picture) error {
 		if !known {
-			first, known = p.PTS, true
+			first, known = p.pts, true
 		}
-		if keep != nil && !keep(ticks90k(p.PTS-first)) {
+		if keep != nil && !keep(ticks90k(p.pts-first)) {
 			return nil
 		}
-		return fn(pictureFrame8(picture{gpu: p, pts: p.PTS}))
+		if p.stereo != nil && p.stereo.Dependent != nil {
+			return fn(sideBySideFrame(p.stereo.Base, p.stereo.Dependent, p.pts))
+		}
+		if p.gpu == nil {
+			var t picTransform
+			p = picture{gpu: t.flatten(p), pts: p.pts}
+		}
+		return fn(pictureFrame8(p))
 	})
 	if errors.Is(err, ErrDecodeDone) {
 		return nil
 	}
 	return err
+}
+
+// sideBySideFrame is the two views as one frame, the left eye then the
+// right at full width.
+func sideBySideFrame(l, r *mvc.Frame, pts int64) *mvc.Frame {
+	w, h := l.Width, l.Height
+	cw, ch := (w+1)/2, (h+1)/2
+	f := &mvc.Frame{Width: 2 * w, Height: h, StrideY: 2 * w, StrideC: 2 * cw, PTS: pts,
+		Y: make([]byte, 2*w*h), Cb: make([]byte, 2*cw*ch), Cr: make([]byte, 2*cw*ch)}
+	for y := range h {
+		copy(f.Y[y*f.StrideY:], l.Y[y*l.StrideY:y*l.StrideY+w])
+		copy(f.Y[y*f.StrideY+w:], r.Y[y*r.StrideY:y*r.StrideY+w])
+	}
+	for y := range ch {
+		copy(f.Cb[y*f.StrideC:], l.Cb[y*l.StrideC:y*l.StrideC+cw])
+		copy(f.Cb[y*f.StrideC+cw:], r.Cb[y*r.StrideC:y*r.StrideC+cw])
+		copy(f.Cr[y*f.StrideC:], l.Cr[y*l.StrideC:y*l.StrideC+cw])
+		copy(f.Cr[y*f.StrideC+cw:], r.Cr[y*r.StrideC:y*r.StrideC+cw])
+	}
+	return f
 }
 
 // ErrDecodeDone stops DecodeFrames without an error, returned by its fn.
