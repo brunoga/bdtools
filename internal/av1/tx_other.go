@@ -27,3 +27,15 @@ func blendBlock(dst []uint16, dstStride int, intra, mask []uint16, w, h int) {
 }
 
 func sse(a []uint16, as int, b []uint16, bs int, w, h int) int64 { return sseGo(a, as, b, bs, w, h) }
+
+func fwdCol4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	return false
+}
+
+func fwdRowH4AVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	return false
+}
+
+func fwdRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	return false
+}
