@@ -196,6 +196,18 @@ func fwdCols(residual []int32, txSz, kind int, flipUD bool, log2W, log2H int, bu
 			return
 		}
 	}
+	// four columns (a block four wide), where there is a kernel
+	if useAVX2 && w == 4 {
+		_ = buf[th*w-1]
+		src, stride := 0, w*4
+		if flipUD {
+			src, stride = (h-1)*w, -w*4
+		}
+		cospi := &cospiArr(cosBit)[0]
+		if fwdCol4AVX2(kind, log2H, &residual[src], stride, &buf[0], w*4, cospi, cosBit, int(up), down) {
+			return
+		}
+	}
 	fwdColsGo(residual, txSz, kind, flipUD, log2W, log2H, buf)
 }
 
@@ -246,14 +258,30 @@ func fwdRows(buf []int32, txSz, kind int, flipLR bool, log2W, log2H int, coeffs 
 	down := int(-shift[2])
 	rect := log2W-log2H == 1 || log2H-log2W == 1
 	// eight rows at a time, where there is a kernel (which reads th rows
-	// of buf and writes th of coeffs)
-	if useAVX2 && w >= 8 && th >= 8 {
+	// of buf and writes th of coeffs); four rows for a block four tall;
+	// rows of four for one four wide
+	if useAVX2 {
 		_, _ = buf[th*w-1], coeffs[th*tw-1]
 		cospi := &cospiArr(cosBit)[0]
-		if fwdRowAVX2(kind, log2W, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down) {
-			for r := 8; r < th; r += 8 {
-				fwdRowAVX2(kind, log2W, flipLR, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+		ok := false
+		switch {
+		case w >= 8 && th >= 8:
+			if ok = fwdRowAVX2(kind, log2W, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down); ok {
+				for r := 8; r < th; r += 8 {
+					fwdRowAVX2(kind, log2W, flipLR, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+				}
 			}
+		case w >= 8 && th == 4:
+			ok = fwdRowH4AVX2(kind, log2W, flipLR, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down)
+		case w == 4 && kind == tx1dDCT && th >= 8:
+			for r := 0; r < th; r += 8 {
+				fwdRow4AVX2(8, &buf[r*w], w*4, &coeffs[r*tw], tw*4, cospi, cosBit, 0, down)
+			}
+			ok = true
+		case w == 4 && kind == tx1dDCT && th == 4:
+			ok = fwdRow4AVX2(4, &buf[0], w*4, &coeffs[0], tw*4, cospi, cosBit, 0, down)
+		}
+		if ok {
 			if rect {
 				for i, v := range coeffs[:th*tw] {
 					coeffs[i] = roundShift(int64(v)*5793, 12)
