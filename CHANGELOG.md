@@ -5,6 +5,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A Blu-ray image still under AACS is reported as encrypted ("only a
+  decrypted disc can be read") instead of "not a transport stream".
+
 ## [0.18.1] - 2026-11-08
 
 ### Changed

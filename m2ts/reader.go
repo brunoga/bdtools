@@ -128,6 +128,11 @@ func (r *Reader) ReadProgram() (*Program, error) {
 
 var errNoSync = errors.New("m2ts: not a transport stream")
 
+// ErrEncrypted is a Blu-ray stream still under AACS: its aligned units'
+// copy permission bits are set and all but their first 16 bytes
+// scrambled. Only decrypted discs can be read.
+var ErrEncrypted = errors.New("m2ts: the stream is encrypted (AACS): only a decrypted disc can be read")
+
 func (r *Reader) detect() error {
 	b, err := r.r.Peek(192 * 3)
 	if err != nil && len(b) < 192*2 {
@@ -141,6 +146,8 @@ func (r *Reader) detect() error {
 		r.pktSize = 192
 	case b[0] == 0x47 && b[188] == 0x47:
 		r.pktSize = 188
+	case b[4] == 0x47 && b[0]&0xc0 != 0:
+		return ErrEncrypted
 	default:
 		return errNoSync
 	}
