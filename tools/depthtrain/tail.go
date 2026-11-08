@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"math/rand/v2"
@@ -251,7 +252,108 @@ func newTailModel(ckpt string) (*tailModel, error) {
 }
 
 // step is a sample forward and back, its gradients added to gw: the loss.
-func (tm *tailModel) step(g *nn.GPU, t *tailSample, train bool) (float64, bool) {
+// output is the depth the tail gives sample t, at the sample's size.
+func (tm *tailModel) output(g *nn.GPU, t *tailSample) []float32 {
+	defer g.Release()
+	tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}}
+	for _, n := range tm.names {
+		tp.w[n] = g.Upload(tm.w[n])
+	}
+	out, err := g.Download(tp.bilinear(tp.forward(t), t.sample.h, t.sample.w))
+	if err != nil {
+		fail(err)
+	}
+	return out.Data
+}
+
+// step is one sample's loss, and when train, its gradient added to the
+// weights'. The depth is fitted to the disc's disparity by the sample's
+// own least squares, or by fixed, a fit over a stretch of samples.
+// lossGradFixed is lossGrad with the fit (a, b) given: the loss is the
+// mean of sqrt(r^2+1)-1 of the residual r = a y + b - d, its gradient
+// a r / sqrt(r^2+1) / n.
+func lossGradFixed(s *sample, out []float32, a, b float64, ph, pw int) (g *nn.Tensor, loss float64, ok bool) {
+	g = nn.New(1, ph, pw)
+	var n int
+	for r := range s.h {
+		for c := range s.w {
+			d := s.disp[r*s.w+c]
+			if math.IsNaN(float64(d)) {
+				continue
+			}
+			i := r*pw + c
+			res := a*float64(out[i]) + b - float64(d)
+			sq := math.Sqrt(res*res + 1)
+			loss += sq - 1
+			g.Data[i] = float32(a * res / sq)
+			n++
+		}
+	}
+	if n < 100 {
+		return nil, 0, false
+	}
+	for i := range g.Data {
+		g.Data[i] /= float32(n)
+	}
+	return g, loss / float64(n), true
+}
+
+// stretchFit is the least-squares fit of the depths of a stretch's
+// samples, together, to the disc's disparity: disparity = a depth + b.
+func stretchFit(ts []*tailSample, outs [][]float32) (a, b float64, n int) {
+	var sx, sy, sxx, sxy float64
+	for k, t := range ts {
+		s, z, pw := t.sample, outs[k], t.sample.w
+		for r := range s.h {
+			for c := range s.w {
+				d := s.disp[r*s.w+c]
+				if math.IsNaN(float64(d)) {
+					continue
+				}
+				x := float64(z[r*pw+c])
+				sx += x
+				sy += float64(d)
+				sxx += x * x
+				sxy += x * float64(d)
+				n++
+			}
+		}
+	}
+	if n < 100 {
+		return 0, 0, n
+	}
+	fn := float64(n)
+	a = (sxy - sx*sy/fn) / max(sxx-sx*sx/fn, 1e-9)
+	b = (sy - a*sx) / fn
+	return a, b, n
+}
+
+// stretches groups sample paths by the window they were recorded from
+// (NAME-000123.bht: NAME), each group in its pictures' order.
+func stretches(paths []string) [][]string {
+	groups := map[string][]string{}
+	var order []string
+	for _, p := range paths {
+		base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+		key := base
+		if i := strings.LastIndex(base, "-"); i > 0 {
+			key = base[:i]
+		}
+		if groups[key] == nil {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], p)
+	}
+	out := make([][]string, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		sort.Strings(g)
+		out = append(out, g)
+	}
+	return out
+}
+
+func (tm *tailModel) step(g *nn.GPU, t *tailSample, train bool, fixed *[2]float64) (float64, bool) {
 	defer g.Release()
 	tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}}
 	for _, n := range tm.names {
@@ -263,8 +365,15 @@ func (tm *tailModel) step(g *nn.GPU, t *tailSample, train bool) (float64, bool) 
 	if err != nil {
 		fail(err)
 	}
-	zero := make([]float32, len(out.Data))
-	gc, loss, ok := lossGrad(t.sample, out.Data, zero, t.sample.h, t.sample.w)
+	var gc *nn.Tensor
+	var loss float64
+	var ok bool
+	if fixed != nil {
+		gc, loss, ok = lossGradFixed(t.sample, out.Data, fixed[0], fixed[1], t.sample.h, t.sample.w)
+	} else {
+		zero := make([]float32, len(out.Data))
+		gc, loss, ok = lossGrad(t.sample, out.Data, zero, t.sample.h, t.sample.w)
+	}
 	if !ok {
 		return 0, false
 	}
@@ -377,7 +486,7 @@ func saveTail(tm *tailModel, path string) error {
 }
 
 // trainTail is main's for -tail.
-func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch, limit int) {
+func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch bool) {
 	g, err := nn.NewGPU()
 	if err != nil {
 		fail(err)
@@ -405,26 +514,63 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 	fmt.Printf("epoch 0: validation error after fitting %.3f px as the network gives it, %.3f with the tail\n", base, tuned)
 	steps := epochs * ((len(train) + batch - 1) / batch)
 	step := 0
+	var groups [][]string
+	if byStretch {
+		groups = stretches(train)
+		fmt.Printf("fitted a stretch at a time: %d stretches\n", len(groups))
+	}
 	for e := 1; e <= epochs; e++ {
-		r.Shuffle(len(train), func(i, j int) { train[i], train[j] = train[j], train[i] })
 		t0 := time.Now()
 		var lossSum float64
 		var n, k int
-		for t := range prefetchTail(train) {
-			if t == nil {
-				continue
+		update := func() {
+			rate := lr * (0.1 + 0.9*0.5*(1+math.Cos(math.Pi*float64(step)/float64(steps))))
+			tm.update(rate, float32(1/float64(k)))
+			k = 0
+			if step++; step%100 == 0 {
+				fmt.Printf("  step %d: loss %.4f (%.3f s a picture)\n", step, lossSum/float64(max(n, 1)), time.Since(t0).Seconds()/float64(max(n, 1)))
 			}
-			if loss, ok := tm.step(g, t, true); ok {
-				lossSum += loss
-				n++
-				k++
+		}
+		if byStretch {
+			r.Shuffle(len(groups), func(i, j int) { groups[i], groups[j] = groups[j], groups[i] })
+			for _, paths := range groups {
+				var ts []*tailSample
+				var outs [][]float32
+				for t := range prefetchTail(paths) {
+					if t != nil {
+						ts = append(ts, t)
+						outs = append(outs, tm.output(g, t))
+					}
+				}
+				a, b, cnt := stretchFit(ts, outs)
+				if cnt < 100 {
+					continue
+				}
+				fixed := [2]float64{a, b}
+				for _, t := range ts {
+					if loss, ok := tm.step(g, t, true, &fixed); ok {
+						lossSum += loss
+						n++
+						k++
+					}
+					if k == batch {
+						update()
+					}
+				}
 			}
-			if k == batch {
-				rate := lr * (0.1 + 0.9*0.5*(1+math.Cos(math.Pi*float64(step)/float64(steps))))
-				tm.update(rate, float32(1/float64(k)))
-				k = 0
-				if step++; step%100 == 0 {
-					fmt.Printf("  step %d: loss %.4f (%.3f s a picture)\n", step, lossSum/float64(max(n, 1)), time.Since(t0).Seconds()/float64(max(n, 1)))
+		} else {
+			r.Shuffle(len(train), func(i, j int) { train[i], train[j] = train[j], train[i] })
+			for t := range prefetchTail(train) {
+				if t == nil {
+					continue
+				}
+				if loss, ok := tm.step(g, t, true, nil); ok {
+					lossSum += loss
+					n++
+					k++
+				}
+				if k == batch {
+					update()
 				}
 			}
 		}

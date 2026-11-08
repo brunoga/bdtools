@@ -29,6 +29,20 @@ type CompareResult struct {
 // decodeVideo decodes a source's video (its 2D picture, or a 3D one's
 // base view), giving each picture to fn.
 func (r *Runner) decodeVideo(ctx context.Context, path string, fn func(*gpu.DecodedPicture) error) error {
+	return r.decodePictures(ctx, path, false, func(p picture) error {
+		d := p.gpu
+		if d == nil {
+			var t picTransform
+			d = t.flatten(p)
+		}
+		return fn(d)
+	})
+}
+
+// decodePictures is decodeVideo before the pictures are flattened: with
+// threeD, a 3D source's pictures come with both views (picture.stereo),
+// as decodeVideo's come as the base view alone.
+func (r *Runner) decodePictures(ctx context.Context, path string, threeD bool, fn func(picture) error) error {
 	r.flat = true
 	r.Opts.TwoD = true
 	var (
@@ -41,11 +55,12 @@ func (r *Runner) decodeVideo(ctx context.Context, path string, fn func(*gpu.Deco
 		if err != nil {
 			return err
 		}
-		sel, err := SelectTracks2D(tracks)
+		sel, err := selectDecode(tracks, threeD)
 		if err != nil {
 			return err
 		}
-		g := newMkvDemux(src, Selection{Base: sel.Base}, "", r.Report)
+		r.flat, r.Opts.TwoD = sel.Dependent.StreamID == "", sel.Dependent.StreamID == ""
+		g := newMkvDemux(src, Selection{Base: sel.Base, Dependent: sel.Dependent}, "", r.Report)
 		if err := g.start(); err != nil {
 			return err
 		}
@@ -59,16 +74,17 @@ func (r *Runner) decodeVideo(ctx context.Context, path string, fn func(*gpu.Deco
 		if err != nil {
 			return err
 		}
-		sel, err := SelectTracks2D(tracks)
+		sel, err := selectDecode(tracks, threeD)
 		if err != nil {
 			return err
 		}
+		r.flat, r.Opts.TwoD = sel.Dependent.StreamID == "", sel.Dependent.StreamID == ""
 		tmp, err := os.MkdirTemp(r.Opts.TempDir, "bdtools-compare-")
 		if err != nil {
 			return err
 		}
 		defer func() { _ = os.RemoveAll(tmp) }()
-		g := newGoDemux(src, Selection{Base: sel.Base}, tmp, r.Report)
+		g := newGoDemux(src, Selection{Base: sel.Base, Dependent: sel.Dependent}, tmp, r.Report)
 		if err := g.start(); err != nil {
 			return err
 		}
@@ -83,13 +99,25 @@ func (r *Runner) decodeVideo(ctx context.Context, path string, fn func(*gpu.Deco
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		d := p.gpu
-		if d == nil {
-			var t picTransform
-			d = t.flatten(p)
-		}
-		return fn(d)
+		return fn(p)
 	})
+}
+
+// selectDecode picks the tracks decodePictures decodes: the base view,
+// and with threeD a 3D source's dependent view too (the MVC kind; an
+// enhancement layer is not a view).
+func selectDecode(tracks []Track, threeD bool) (Selection, error) {
+	sel, err := SelectTracks2D(tracks)
+	if err != nil || !threeD {
+		return sel, err
+	}
+	for _, t := range tracks {
+		if t.Kind() == KindDependentView {
+			sel.Dependent = t
+			break
+		}
+	}
+	return sel, nil
 }
 
 // lumaFrame is a decoded picture's luma at depth bits.
