@@ -17,6 +17,12 @@ const (
 	crf3D  = 20 // a 3D disc, both views side by side: seen through glasses
 	crfUHD = 18 // Ultra HD, HDR10, HDR10+ or Dolby Vision, or SDR
 	crfHD  = 16 // 1080p and below, scored against the stricter HD model
+	// crfBuiltinAV1 is added for the AV1 encoder here, whose --crf is on
+	// SVT-AV1's scale: on a minute of a 1080p disc, the HD default's
+	// NVENC HEVC scored VMAF 97.95 (PSNR-Y 45.49) at 8.3 Mbit/s, the AV1
+	// 98.14 (45.72) at crf 16 and 97.06 (44.66) at crf 24, the match
+	// about crf 18, a quarter smaller.
+	crfBuiltinAV1 = 2
 )
 
 // sourceKind names the kind of source the defaults are chosen for, from
@@ -62,6 +68,9 @@ func (r *Runner) resolveDefaults(video Track, dv bool) {
 	auto = r.Opts.CRF == CRFAuto
 	if auto {
 		r.Opts.CRF = crf
+		if r.Opts.Codec == CodecAV1 && r.Opts.Encoder == EncoderBuiltin {
+			r.Opts.CRF += crfBuiltinAV1
+		}
 	}
 	note(auto, fmt.Sprintf("--crf %d", r.Opts.CRF))
 	if !r.flat {
