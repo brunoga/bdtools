@@ -25,7 +25,7 @@ worked on one at a time in the order below.
 | Need | Today | Go replacement |
 |---|---|---|
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
-| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder at speed 0: smaller than SVT-AV1 preset 4 by PSNR-YUV at 1080p (4%) and by every metric at 2160p; speed 2 within 1% by PSNR-YUV at 6.5 times preset 4's CPU. See [AV1: next steps](#av1-next-steps) |
+| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder at speed 0: smaller than SVT-AV1 preset 4 by PSNR-YUV (5%) and SSIM at 1080p and by every metric at 2160p; speed 2 at PSNR-YUV parity at 5.8 times preset 4's CPU, 8% behind by VMAF. See [AV1: next steps](#av1-next-steps) |
 | Dolby Vision with the enhancement layer kept or re-encoded | none | Done: the Go HEVC encoder codes both layers |
 | Interlaced H.264 input | none | Done: field pictures and MBAFF decode in Go, deinterlaced |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |
@@ -128,24 +128,29 @@ as they are (120 pictures). BD-rate against SVT-AV1 2.3.0 preset 4,
 
 | clips | config | PSNR-Y | PSNR-YUV | SSIM | VMAF | CPU s a picture (SVT) |
 |---|---|---|---|---|---|---|
-| 1080p 8-bit, six | speed 0 | -2.2% | -4.2% | +0.5% | +3.3% | 4.49 (0.30) |
-| 1080p 8-bit, six | speed 2 | +3.5% | +0.9% | +5.1% | +8.6% | 1.90 (0.30) |
+| 1080p 8-bit, six | speed 0 | -3.1% | -5.0% | -0.1% | +2.1% | 4.33 (0.30) |
+| 1080p 8-bit, six | speed 2 | +2.9% | +0.3% | +4.0% | +8.1% | 1.72 (0.30) |
 | 1080p 10-bit, five (v0.17.0) | speed 0 | +1.3% | -0.8% | +1.8% | +0.5% | 4.01 (0.32) |
 | 1080p 10-bit, five (v0.17.0) | speed 2 | +3.8% | +1.6% | +4.0% | +3.1% | 2.08 (0.32) |
 | 2160p 10-bit, five | speed 0 | -2.3% | -6.1% | -4.0% | -1.5% | 11.5 (0.96) |
 | 2160p 10-bit, five | speed 2 | +0.5% | -3.7% | -1.8% | +1.7% | 5.15 (0.96) |
 
 Speed 0 is smaller than preset 4 by every metric at 2160p and by PSNR
-at 1080p; speed 2 at 6.5 times preset 4's CPU (5.4 at 2160p), from 8
-times at v0.17.0: the temporal model looking a mini-GOP ahead (finer
-anchors, coarser leaves at a size: the VMAF trade), the deep inter
-frames searched as SVT-AV1's preset 4 does (19% less CPU), the partition
-depths from the nearest reference's blocks (4%), the model keeping its
-choices for a held mini-GOP (3%). What SVT-AV1 does per evaluation is
-the remaining gap: at preset 4 it fully codes 20 to 60 blocks a 64x64
-region where this codes hundreds, with AVX2 C at every stage; its light
-depth pre-decision, ported, lost 3.7% for 21% less CPU (no better than
-the speeds' own curve) and was not taken.
+and SSIM at 1080p; speed 2 is at PSNR-YUV parity at 5.8 times preset 4's
+CPU (5.4 at 2160p), from 8 times at v0.17.0 (v0.18.0: the temporal model
+looking a mini-GOP ahead, with finer anchors and coarser leaves at a
+size, which is the VMAF gap; the deep inter frames searched as SVT-AV1's
+preset 4 does, 19% less CPU; the partition depths from the nearest
+reference's blocks, 4%; the motion search started from the enclosing
+square's vector, 1% smaller; restoration to depth 2, 5%; the model
+keeping its choices for a held mini-GOP, 3%; AVX2 kernels for the
+remaining transforms, the dequantizer and the temporal filter's weights,
+4%). What SVT-AV1 does per evaluation is the remaining speed gap: at
+preset 4 it fully codes 20 to 60 blocks a 64x64 region where this codes
+hundreds, with AVX2 C at every stage; its light depth pre-decision,
+ported, lost 3.7% for 21% less CPU (no better than the speeds' own curve)
+and was not taken. Next: the VMAF gap at speed 2, then making the
+encoder a production output (long-film soak, 2160p, defaults).
 
 ### History
 
