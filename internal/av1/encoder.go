@@ -86,8 +86,10 @@ type tools struct {
 	// damping from q, luma's deblocking levels the same, the model's
 	// vectors whole samples, a subset of the self-guided filter's sets
 	cdefDampQ, lfBoth, tplFull, sgrSubset bool
-	// leafLR has the leaves (frames shown and kept for none) restored
-	leafLR bool
+	// leafLR has the leaves (frames shown and kept for none) restored;
+	// lrMaxDepth, when not 0, is the deepest frame restored
+	leafLR     bool
+	lrMaxDepth int
 	// anchorTiles is the least log2 of the tile columns of the key frames
 	// and anchors (which the mini-GOPs wait on, coded much of the time
 	// alone: a frame's superblock rows, each two superblocks behind the
@@ -226,6 +228,10 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// 5.2% less CPU, PSNR-YUV and SSIM within 0.03%, VMAF 0.33%
 		// larger)
 		e.tools.leafLR = false
+		// (restoration to depth 2, as well: on the six 240-picture clips
+		// 5.1% less CPU, 0.3% larger by PSNR-YUV, 0.7% by VMAF, 0.1%
+		// smaller by SSIM; to depth 1 5.8%, 0.4%, 1.7% and 0.2%)
+		e.tools.lrMaxDepth = 2
 		// (two tile columns: on the six clips 1.05 times the pictures a
 		// second, 360 pictures 1.06 times, 0.30% larger by PSNR-YUV, 0.27%
 		// by SSIM, 0.06% by VMAF; four 1.10 times on the 360, 0.5%)
@@ -359,7 +365,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	f.deblock(e.lfFixed)
 	deblocked := f.rec // CDEF filters into a new frame
 	f.cdef(e.cdefFixed)
-	f.noLR = !e.tools.leafLR && !key && j.refresh == 0
+	f.noLR = !e.tools.leafLR && !key && j.refresh == 0 || e.tools.lrMaxDepth > 0 && !key && j.depth > e.tools.lrMaxDepth
 	lr := f.restore(deblocked, e.lrFixed)
 	var tiles [][]byte
 	saved := f.cdf0
