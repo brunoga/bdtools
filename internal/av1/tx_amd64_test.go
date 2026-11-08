@@ -17,9 +17,6 @@ func TestInverseKernels(t *testing.T) {
 	rng := rand.New(rand.NewPCG(3, 5))
 	for txSz := range TX_SIZES_ALL {
 		w, h := int(txWidth[txSz]), int(txHeight[txSz])
-		if w < 8 {
-			continue
-		}
 		tw, th := min(w, 32), min(h, 32)
 		for tt := range TX_TYPES {
 			if !txTypeValid(txSz, tt) {
