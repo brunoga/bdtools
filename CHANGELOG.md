@@ -7,6 +7,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's motion search starts from the enclosing square's
+  vector as well. On the six 240-picture clips at speed 2: 1.0% smaller
+  by PSNR-YUV, 0.5% by SSIM, 1.5% by VMAF for 4% more CPU.
+
 - The AV1 encoder's temporal model, costing a mini-GOP for the second
   time (held, with the one after it), keeps the reference and vector
   each block of its deep frames chose the first time and codes them

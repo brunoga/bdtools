@@ -757,6 +757,22 @@ func (t *tileEnc) motionFor(ref int) (mv, float64) {
 	for i := range min(s.numMvFound, 4) {
 		starts = append(starts, s.refStackMv[i][0])
 	}
+	// the nearest enclosing square's vector (searched before: a square is
+	// coded whole before it is split), a start too. (On the six
+	// 240-picture clips at speed 2: 1.0% smaller by PSNR-YUV, 0.5% by
+	// SSIM, 1.5% by VMAF for 4% more CPU; with the search's range cut to
+	// 16 samples when there is one, 0.3%, -0.2%, 0.9% for the same CPU.)
+	for ps := size; ; {
+		ps = parentSquare(ps)
+		if ps < 0 {
+			break
+		}
+		n4 := int(num4x4BlocksWide[ps])
+		if e, ok := t.meSeen[meKey{ref: f.refs[ref], r: r &^ (n4 - 1), c: c &^ (n4 - 1), size: ps}]; ok {
+			starts = append(starts, e.m)
+			break
+		}
+	}
 	for _, r := range meRings {
 		for _, d := range [8][2]int32{{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 1}, {1, -1}, {1, 0}, {1, 1}} {
 			starts = append(starts, mv{row: d[0] * r * 8, col: d[1] * r * 8})
@@ -1173,4 +1189,20 @@ func (t *tileEnc) writeInterpFilter(cd coder) {
 func (t *tileEnc) sseBlock(plane, x0, y0, w, h int, pred []uint16) int64 {
 	st := t.f.stride[plane]
 	return sse(t.f.src[plane][y0*st+x0:], st, pred, w, w, h)
+}
+
+// parentSquare is the square a block's larger side makes doubled, or -1
+// past the superblock.
+func parentSquare(bSize int) int {
+	switch max(blockWidth[bSize], blockHeight[bSize]) {
+	case 4:
+		return BLOCK_8X8
+	case 8:
+		return BLOCK_16X16
+	case 16:
+		return BLOCK_32X32
+	case 32:
+		return BLOCK_64X64
+	}
+	return -1
 }
