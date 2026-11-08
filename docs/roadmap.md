@@ -25,7 +25,7 @@ worked on one at a time in the order below.
 | Need | Today | Go replacement |
 |---|---|---|
 | H.264 output (other than MVC) | x264, or the Go encoder (wired, behind) | Tune the Go encoder: +9% BD-rate against x264 medium --tune psnr on five disc clips, at 4x its CPU; speed next |
-| AV1 output | SVT-AV1, or the Go encoder (wired, behind) | The Go encoder at speed 0: smaller than SVT-AV1 preset 4 by PSNR-YUV (5%) and SSIM at 1080p and by every metric at 2160p; speed 2 at PSNR-YUV parity at 5.8 times preset 4's CPU, 8% behind by VMAF. See [AV1: next steps](#av1-next-steps) |
+| AV1 output | SVT-AV1, or the Go encoder (`--codec av1 --encoder builtin`) | The Go encoder at speed 0: smaller than SVT-AV1 preset 4 by PSNR-YUV (5%) and SSIM at 1080p and by every metric at 2160p; speed 2 (`--preset fast`) at PSNR-YUV parity at 5.8 times preset 4's CPU, 8% behind by VMAF (`--tune vmaf` leans the other way). Its `--crf` is SVT-AV1's scale, its defaults a quarter smaller than the HEVC ones at the same quality; soaked on 20 minutes of a 1080p disc and a 2160p HDR excerpt. See [AV1: next steps](#av1-next-steps) |
 | Dolby Vision with the enhancement layer kept or re-encoded | none | Done: the Go HEVC encoder codes both layers |
 | Interlaced H.264 input | none | Done: field pictures and MBAFF decode in Go, deinterlaced |
 | HEVC format range extensions input (4:2:2, 4:4:4) | ffmpeg | Range extension tools in the Go HEVC decoder (never on discs) |
@@ -149,8 +149,17 @@ remaining transforms, the dequantizer and the temporal filter's weights,
 preset 4 it fully codes 20 to 60 blocks a 64x64 region where this codes
 hundreds, with AVX2 C at every stage; its light depth pre-decision,
 ported, lost 3.7% for 21% less CPU (no better than the speeds' own curve)
-and was not taken. Next: the VMAF gap at speed 2, then making the
-encoder a production output (long-film soak, 2160p, defaults).
+and was not taken. After v0.18.0: the VMAF gap is the allocation's
+balance (the lookahead boosts anchors harder than SVT-AV1 does; PSNR
+rewards it, VMAF does not), so `--tune vmaf` moves it back (anchors'
+ratio 0.80, deblocking sharpness 4, no CDEF on the deep frames at speed
+2: 3.7% smaller by VMAF, 1.1% larger by PSNR-YUV); rate-distortion
+quantization, the sharpness of the filters and the temporal filter were
+ruled out as causes. Production: `--crf` is on SVT-AV1's scale (q = 4
+crf; it had NVENC's), the defaults are the HEVC ones plus 2 (matched by
+VMAF on a disc minute), and 20 minutes of a 1080p disc and a 2160p HDR
+minute went through the tool at speed 2 with steady memory (3 to 5 GB at
+1080p, 15.5 GB at 2160p) and consistent timelines.
 
 ### History
 
