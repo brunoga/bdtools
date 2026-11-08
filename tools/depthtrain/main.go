@@ -43,6 +43,7 @@ func main() {
 	limit := flag.Int("limit", 0, "use at most this many training samples (0: all)")
 	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
 	tailFrom := flag.String("tail", "", "learn the depth network's tail instead, from this checkpoint (.pth), on the GPU: the samples need their tail inputs (.bht)")
+	fitBy := flag.String("fit", "picture", "with -tail: the depth fitted to the disc's disparity a picture at a time, or a stretch (the pictures of one recorded window together: the depth's scale then has to hold across them)")
 	retuneBy := flag.String("retune", "", "write the -train samples into -out (a directory) with the depth these tail weights (-tail's) give, on the GPU")
 	flag.Parse()
 	if *retuneBy != "" {
@@ -50,7 +51,7 @@ func main() {
 		return
 	}
 	if *tailFrom != "" {
-		trainTail(*tailFrom, *trainDir, *valDir, *out, *epochs, *lr, *batch, *limit)
+		trainTail(*tailFrom, *trainDir, *valDir, *out, *epochs, *lr, *batch, *limit, *fitBy == "stretch")
 		return
 	}
 	train, err := list(*trainDir)
