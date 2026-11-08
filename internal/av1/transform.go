@@ -347,6 +347,25 @@ func dequantize(quant []int32, txSz int, dcQ, acQ, bitDepth int, out []int32) {
 	}
 	lo, hi := -int64(1)<<(7+bitDepth), int64(1)<<(7+bitDepth)-1
 	quant, out = quant[:n], out[:n]
+	if useAVX2 && bitDepth <= 10 {
+		// eight at a time with the AC step (the products fit 32 bits:
+		// levels within 1<<18, steps up to 10 bits deep), then the DC
+		shift := 0
+		for d := denom; d > 1; d >>= 1 {
+			shift++
+		}
+		dequantAVX2(&quant[0], &out[0], n, acQ, shift, int(lo), int(hi))
+		if v := quant[0]; v != 0 {
+			dq := int64(v) * int64(dcQ)
+			if dq < 0 {
+				dq = -((-dq & 0xFFFFFF) / denom)
+			} else {
+				dq = (dq & 0xFFFFFF) / denom
+			}
+			out[0] = int32(min(max(dq, lo), hi))
+		}
+		return
+	}
 	q := int64(dcQ)
 	for i, v := range quant {
 		if i == 1 {

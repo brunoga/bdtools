@@ -7,6 +7,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder dequantizes with an AVX2 kernel at 8 and 10 bits, the
+  same coefficients: about 1% less CPU at speed 2.
+
 - The AV1 encoder's temporal filter takes its weights from a table of
   the exponential (steps of 1/4096 of the scaled error) instead of
   computing one a sample: about 1% less CPU, the six 240-picture clips
