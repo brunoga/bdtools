@@ -225,32 +225,52 @@ func inverseTransform(coeffs []int32, txSz, txType, bitDepth int, lossless bool,
 	// eight rows or columns at a time, where there are kernels (exact in
 	// 32 bits up to 10 bits deep)
 	simd := useAVX2 && !lossless && bitDepth <= 10
-	if simd && w >= 8 && h >= 8 && invAVX2(int(rowKind), log2W) {
+	rowsDone := false
+	if simd && invAVX2(int(rowKind), log2W) && (w >= 8 || rowKind == tx1dDCT) {
 		rowLo, rowHi := -1<<(rowRange-1), 1<<(rowRange-1)-1
 		rnd := 0
 		if rowShift > 0 {
 			rnd = 1 << (rowShift - 1)
 		}
-		for i := 0; i < h; i += 8 {
-			out := residual[i*w : (i+8)*w]
+		// eight rows at a time (four for a block four tall, or the rows of
+		// four of one four wide)
+		step := 8
+		if h == 4 {
+			step = 4
+		}
+		rowsDone = true
+		for i := 0; i < h; i += step {
+			out := residual[i*w : (i+step)*w]
 			if i >= th {
 				clear(out)
 				continue
 			}
 			nz := int32(0)
-			for _, v := range coeffs[i*tw : (i+8)*tw] {
+			for _, v := range coeffs[i*tw : (i+step)*tw] {
 				nz |= v
 			}
 			if nz == 0 {
 				clear(out)
 				continue
 			}
-			invRowAVX2(int(rowKind), log2W, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+			switch {
+			case w == 4:
+				invRow4AVX2(step, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+			case step == 4:
+				invRowH4AVX2(int(rowKind), log2W, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+			default:
+				invRowAVX2(int(rowKind), log2W, &coeffs[i*tw], tw*4, &out[0], w*4, rowLo, rowHi, rnd, int(rowShift), int(colLo), int(colHi), b2i(rect))
+			}
 		}
-	} else {
+	}
+	if !rowsDone {
 		inverseRows(coeffs, residual, txSz, rowKind, lossless, log2W, log2H, rowShift, rowRange, colLo, colHi, rect)
 	}
-	if simd && w >= 8 && invAVX2(int(colKind), log2H) {
+	if simd && invAVX2(int(colKind), log2H) {
+		if w == 4 {
+			invCol4AVX2(int(colKind), log2H, &residual[0], w*4, &residual[0], w*4, int(colLo), int(colHi), 1<<(colShift-1), int(colShift), math.MinInt32, math.MaxInt32, 0)
+			return
+		}
 		for j := 0; j < w; j += 8 {
 			invColAVX2(int(colKind), log2H, &residual[j], w*4, &residual[j], w*4, int(colLo), int(colHi), 1<<(colShift-1), int(colShift), math.MinInt32, math.MaxInt32, 0)
 		}

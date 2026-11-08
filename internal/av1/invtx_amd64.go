@@ -5,16 +5,40 @@
 package av1
 
 //go:noescape
+func idct4ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func idct4Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func idct4Row4x8AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func idct4Row4x4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
 func idct8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func idct8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
 func idct8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
+func idct8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
 func idct16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
+func idct16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
 func idct16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func idct16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
 func idct32ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
@@ -32,13 +56,25 @@ func idct64RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi,
 func iadst8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
+func iadst8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
 func iadst8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iadst8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
 func iadst16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 //go:noescape
+func iadst16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
 func iadst16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
+
+//go:noescape
+func iadst16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int)
 
 // invColAVX2 is the column pass of a 1D inverse transform of a kind and
 // log2 of the size on eight adjacent columns (rows srcStride bytes apart,
@@ -47,6 +83,8 @@ func iadst16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, lo, hi
 // [clo, chi] into dst's rows. It reports whether there is a kernel.
 func invColAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
 	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 2:
+		idct4ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dDCT<<3 | 3:
 		idct8ColAVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
 	case tx1dDCT<<3 | 4:
@@ -90,8 +128,60 @@ func invRowAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride
 	return true
 }
 
+// invCol4AVX2 is invColAVX2 on four adjacent columns (a block four wide,
+// up to 16 tall).
+func invCol4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
+	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 2:
+		idct4Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dDCT<<3 | 3:
+		idct8Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dDCT<<3 | 4:
+		idct16Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dADST<<3 | 3:
+		iadst8Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dADST<<3 | 4:
+		iadst16Col4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	default:
+		return false
+	}
+	return true
+}
+
+// invRowH4AVX2 is invRowAVX2 on four rows (a block four tall, up to 16
+// wide).
+func invRowH4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
+	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 3:
+		idct8RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dDCT<<3 | 4:
+		idct16RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dADST<<3 | 3:
+		iadst8RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case tx1dADST<<3 | 4:
+		iadst16RowH4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	default:
+		return false
+	}
+	return true
+}
+
+// invRow4AVX2 is the row pass of the 4-point inverse DCT on rows rows (8
+// or 4) of four.
+func invRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, lo, hi, rnd, shift, clo, chi, rect int) bool {
+	switch rows {
+	case 8:
+		idct4Row4x8AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	case 4:
+		idct4Row4x4AVX2(src, srcStride, dst, dstStride, lo, hi, rnd, shift, clo, chi, rect)
+	default:
+		return false
+	}
+	return true
+}
+
 // invAVX2 reports whether there are kernels for an inverse transform of
 // a kind and log2 of the size.
 func invAVX2(kind, log2 int) bool {
-	return (kind == tx1dDCT && log2 >= 3) || (kind == tx1dADST && (log2 == 3 || log2 == 4))
+	return (kind == tx1dDCT && log2 >= 2) || (kind == tx1dADST && (log2 == 3 || log2 == 4))
 }
