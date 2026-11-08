@@ -333,7 +333,7 @@ func (f *frameEnc) deblock(fixed *[5]int) {
 		return
 	}
 	var level [4]int
-	sharp := 0
+	sharp := f.tools.lfSharp
 	if fixed != nil {
 		level, sharp = [4]int(fixed[:4]), fixed[4]
 	} else {

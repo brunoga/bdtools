@@ -313,6 +313,14 @@ func (f *frameEnc) cdef(fixed *cdefSettings) {
 				n++
 			}
 		}
+	} else if f.noCdef {
+		// no filtering: every strength 0
+		s = cdefSettings{damping: 3}
+		for i, v := range f.cdefIdx {
+			if v >= 0 {
+				f.cdefIdx[i] = 0
+			}
+		}
 	} else {
 		s = f.cdefSearch()
 	}

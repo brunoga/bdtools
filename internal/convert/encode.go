@@ -96,8 +96,8 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 		verb = "encoded"
 		r.Report.Report("decoding and encoding (h265, the encoder here, in process)")
 	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecAV1:
-		speed := av1Speed(r.Opts.Preset)
-		sink = &gpuSink{r: r, open: func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) { return openBuiltinAV1(cfg, w, speed) }}
+		speed, tune := av1Speed(r.Opts.Preset), r.Opts.Tune
+		sink = &gpuSink{r: r, open: func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) { return openBuiltinAV1(cfg, w, speed, tune) }}
 		verb = "encoded"
 		r.Report.Report("decoding and encoding (av1, the encoder here, in process)")
 	case r.Opts.NativeGPU:

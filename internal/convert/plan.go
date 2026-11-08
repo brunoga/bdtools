@@ -105,6 +105,9 @@ type Options struct {
 	// Preset is the encoder's speed/efficiency trade-off. x264 and x265 take
 	// the same preset names.
 	Preset string
+	// Tune is what the built-in AV1 encoder leans toward: psnr (the
+	// default) or vmaf.
+	Tune string
 	// Color is the colour signalling the output states, set from a 2D
 	// source's (an HDR film's BT.2020 and PQ); nil states none.
 	Color *gpu.ColorInfo

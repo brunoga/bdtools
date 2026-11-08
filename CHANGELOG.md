@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--tune vmaf` for the built-in AV1 encoder: the anchors a little
+  coarser, the deblocking sharper and, from speed 2, no CDEF on the deep
+  frames, for VMAF over PSNR. On the six 240-picture clips, against the
+  default (`--tune psnr`): at speed 2 3.7% smaller by VMAF and 0.2% by
+  SSIM, 0.6% larger by PSNR-Y and 1.1% by PSNR-YUV, 3.5% less CPU; at
+  speed 0 1.7% and 0.3% smaller, 0.2% smaller by PSNR-Y and 0.4% larger
+  by PSNR-YUV. The default is unchanged.
+
 ## [0.18.0] - 2026-11-08
 
 ### Changed
