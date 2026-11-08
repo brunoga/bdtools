@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The AV1 encoder's temporal filter takes its weights from a table of
+  the exponential (steps of 1/4096 of the scaled error) instead of
+  computing one a sample: about 1% less CPU, the six 240-picture clips
+  within 0.2% on every metric (smaller).
+
 - The AV1 encoder's 4-point forward ADST and its identity transforms,
   forward and inverse, run as AVX2 kernels too, the same results: about
   0.9% less CPU at speed 2. Every forward and inverse transform of the
