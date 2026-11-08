@@ -5,6 +5,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `tools/stereobench` measures 3D discs and MVC files directly: a 3D
+  source's two views come through `convert.DecodeFrames` as one full
+  side-by-side frame, as a side-by-side file's do.
+
 ### Fixed
 
 - A Blu-ray image still under AACS is reported as encrypted ("only a
