@@ -76,3 +76,42 @@ next:
 	MOVQ AX, ret+48(FP)
 	VZEROUPPER
 	RET
+
+// func dequantAVX2(quant, out *int32, n, qs, shift, lo, hi int)
+// Dequantizes n (a multiple of 8) levels with the step qs: out =
+// clamp(sign(v) * ((|v*qs|) & 0xFFFFFF) >> shift, lo, hi). The products
+// fit 32 bits for levels within 1<<18 and steps up to 10 bits deep.
+TEXT ·dequantAVX2(SB), NOSPLIT, $0-56
+	MOVQ quant+0(FP), SI
+	MOVQ out+8(FP), DI
+	MOVQ n+16(FP), CX
+	MOVQ qs+24(FP), AX
+	VMOVQ AX, X11
+	VPBROADCASTD X11, Y11 // qs
+	MOVQ shift+32(FP), AX
+	VMOVQ AX, X10 // shift
+	MOVQ lo+40(FP), AX
+	VMOVQ AX, X12
+	VPBROADCASTD X12, Y12 // lo
+	MOVQ hi+48(FP), AX
+	VMOVQ AX, X13
+	VPBROADCASTD X13, Y13 // hi
+	MOVL $0xFFFFFF, AX
+	VMOVQ AX, X14
+	VPBROADCASTD X14, Y14 // the mask
+dqloop:
+	VMOVDQU (SI), Y0
+	VPMULLD Y11, Y0, Y1 // v*qs
+	VPABSD Y1, Y1
+	VPAND Y14, Y1, Y1
+	VPSRLD X10, Y1, Y1
+	VPSIGND Y0, Y1, Y1 // the level's sign (zero stays zero)
+	VPMAXSD Y12, Y1, Y1
+	VPMINSD Y13, Y1, Y1
+	VMOVDQU Y1, (DI)
+	ADDQ $32, SI
+	ADDQ $32, DI
+	SUBQ $8, CX
+	JNZ dqloop
+	VZEROUPPER
+	RET

@@ -133,3 +133,51 @@ func TestForwardTypesKernels(t *testing.T) {
 		}
 	}
 }
+
+// The AVX2 dequantizer gives the Go one's coefficients exactly, on levels
+// across their range at every size, at 8 and 10 bits.
+func TestDequantKernel(t *testing.T) {
+	if !useAVX2 {
+		t.Skip("no AVX2")
+	}
+	rng := rand.New(rand.NewPCG(5, 8))
+	for txSz := range TX_SIZES_ALL {
+		n := min(int(txWidth[txSz]), 32) * min(int(txHeight[txSz]), 32)
+		for _, bd := range []int{8, 10} {
+			bdi := (bd - 8) >> 1
+			for trial := range 40 {
+				q := make([]int32, n)
+				for i := range q {
+					switch {
+					case trial == 0:
+						q[i] = 1 << 18
+					case trial == 1:
+						q[i] = -(1 << 18) * int32(1-2*(i&1))
+					case trial < 10:
+						if rng.IntN(6) == 0 {
+							q[i] = rng.Int32N(1<<19+1) - 1<<18
+						}
+					default:
+						q[i] = rng.Int32N(2001) - 1000
+					}
+				}
+				qi := rng.IntN(256)
+				if trial < 2 {
+					qi = 255 // the largest steps with the largest levels
+				}
+				dcQ, acQ := int(dcQlookup[bdi][qi]), int(acQlookup[bdi][qi])
+				got := make([]int32, n)
+				dequantize(q, txSz, dcQ, acQ, bd, got)
+				useAVX2 = false
+				want := make([]int32, n)
+				dequantize(q, txSz, dcQ, acQ, bd, want)
+				useAVX2 = true
+				for i := range n {
+					if got[i] != want[i] {
+						t.Fatalf("tx %d bd %d q %d trial %d: coefficient %d = %d, want %d", txSz, bd, qi, trial, i, got[i], want[i])
+					}
+				}
+			}
+		}
+	}
+}
