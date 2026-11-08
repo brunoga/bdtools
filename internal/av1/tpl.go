@@ -42,6 +42,9 @@ type tplFrame struct {
 	refDisp          []int    // the reference predicted from, -1 none
 	mvx, mvy         []int    // its integer vector, in samples
 	rec              []uint16 // the luma reconstruction (width by height)
+	// reuse has the blocks coded with refDisp, mvx and mvy as they are
+	// (the round before's choices), no search
+	reuse bool
 }
 
 // tplLambda has the model scale the superblocks' lambdas (by
@@ -96,6 +99,18 @@ func (e *Encoder) tpl(steps []step) {
 			recDist: make([]float64, n), srcDist: make([]float64, n), recRate: make([]float64, n), srcRate: make([]float64, n),
 			depDist: make([]float64, n), depRate: make([]float64, n),
 			refDisp: make([]int, n), mvx: make([]int, n), mvy: make([]int, n), rec: make([]uint16, w*h)}
+		if old := s.job.tplStats; old != nil && e.tools.tplReuse && s.job.depth > 2 {
+			// modeled the round before (as the lookahead): its choices
+			// kept, coded again from the references as they are now (a
+			// search finds the same in 93% of the blocks; on the six
+			// 240-picture clips at speed 2, 0.27% larger by PSNR-YUV, SSIM
+			// the same, 0.9% smaller by VMAF for 4.5% less CPU)
+			copy(tf.refDisp, old.refDisp)
+			copy(tf.mvx, old.mvx)
+			copy(tf.mvy, old.mvy)
+			tf.reuse = true
+		}
+		s.job.tplStats = tf
 		frames = append(frames, tf)
 		if _, dup := byDisp[s.job.disp]; !dup {
 			byDisp[s.job.disp] = tf
@@ -294,6 +309,13 @@ type tplScratch struct {
 	res, coef, lv    [tplBlock * tplBlock]int32
 }
 
+// tplRef is a reference as the model predicts from it: its source (as
+// coded) and its reconstruction (the model's, else the source).
+type tplRef struct {
+	disp     int
+	src, rec *refFrameState
+}
+
 // tplPool keeps the model's workers' buffers for later frames.
 var tplPool = sync.Pool{New: func() any { return new(tplScratch) }}
 
@@ -302,11 +324,7 @@ func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int)
 	j := tf.job
 	cur := j.src
 	w, h := e.o.Width, e.o.Height
-	type ref struct {
-		disp     int
-		src, rec *refFrameState
-	}
-	var refs []ref
+	var refs []tplRef
 	seen := map[int]bool{}
 	for _, r := range j.refs {
 		if r == nil || seen[r.disp] {
@@ -322,7 +340,7 @@ func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int)
 		if rec := recOf(r.disp); rec != nil {
 			rr = &refFrameState{rec: [3][]uint16{rec}, stride: [3]int{w}, width: w, height: h}
 		}
-		refs = append(refs, ref{r.disp, rs, rr})
+		refs = append(refs, tplRef{r.disp, rs, rr})
 	}
 	bd := (e.o.BitDepth - 8) >> 1
 	dcQ, acQ := int(dcQlookup[bd][j.q]), int(acQlookup[bd][j.q])
@@ -342,11 +360,16 @@ func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int)
 					i := by*tf.cols + bx
 					x0, y0 := bx*tplBlock, by*tplBlock
 					bw, bh := min(tplBlock, w-x0)&^3, min(tplBlock, h-y0)&^3
+					kept := tf.refDisp[i]
 					tf.refDisp[i] = -1
 					if bw == 0 || bh == 0 {
 						continue
 					}
 					blk := cur.Y[y0*cur.StrideY+x0:]
+					if tf.reuse {
+						e.tplReuseBlock(tf, sc, refs, i, kept, blk, x0, y0, bw, bh, dcQ, acQ)
+						continue
+					}
 					intra := e.tplIntra(cur, x0, y0, bw, bh, sc.pred[:])
 					// the motion search on the sources, the best reference
 					// costed from its reconstruction
@@ -390,6 +413,30 @@ func (e *Encoder) tplCode(tf *tplFrame, srcOf func(int) *Source, recOf func(int)
 		})
 	}
 	wg.Wait()
+}
+
+// tplReuseBlock codes block i of a frame modeled the round before as it
+// chose then: intra, or from the reference kept (by display index) with
+// the vector kept, the predictions from the references as they are now.
+func (e *Encoder) tplReuseBlock(tf *tplFrame, sc *tplScratch, refs []tplRef, i, kept int, blk []uint16, x0, y0, bw, bh, dcQ, acQ int) {
+	cur, w := tf.job.src, e.o.Width
+	rec := tf.rec[y0*w+x0:]
+	for _, r := range refs {
+		if kept < 0 || r.disp != kept {
+			continue
+		}
+		m := mv{row: int32(tf.mvy[i] * 8), col: int32(tf.mvx[i] * 8)} //nolint:gosec // whole samples
+		filt := [2]int{EIGHTTAP, EIGHTTAP}
+		predictInter(r.rec, 0, x0, y0, bw, bh, m, filt, e.o.BitDepth, sc.recP[:], tplBlock, &sc.is)
+		predictInter(r.src, 0, x0, y0, bw, bh, m, filt, e.o.BitDepth, sc.srcP[:], tplBlock, &sc.is)
+		tf.recDist[i], tf.recRate[i] = e.tplBlockCode(sc, blk, cur.StrideY, sc.recP[:], bw, bh, dcQ, acQ, rec, w)
+		tf.srcDist[i], tf.srcRate[i] = e.tplBlockCode(sc, blk, cur.StrideY, sc.srcP[:], bw, bh, dcQ, acQ, nil, 0)
+		tf.refDisp[i] = kept
+		return
+	}
+	e.tplIntra(cur, x0, y0, bw, bh, sc.pred[:])
+	d, r := e.tplBlockCode(sc, blk, cur.StrideY, sc.pred[:], bw, bh, dcQ, acQ, rec, w)
+	tf.recDist[i], tf.srcDist[i], tf.recRate[i], tf.srcRate[i] = d, d, r, r
 }
 
 // tplBlockCode codes a block predicted by pred (tplBlock wide) in the

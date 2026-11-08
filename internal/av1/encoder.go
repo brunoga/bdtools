@@ -74,7 +74,11 @@ type tools struct {
 	deepLumaCands, deepTypeSearches      int
 	// depthPass has the inter frames' superblocks searched at the depths
 	// the nearest reference's blocks there say (planDepths)
-	depthPass           bool
+	depthPass bool
+	// tplReuse has the temporal model keep, for a held mini-GOP's frames
+	// below depth 2, the reference and vector each block chose the round
+	// before (coded again from the references as they are), no search
+	tplReuse            bool
 	pruneSkip, pruneExt bool // the partition search's prunings
 	extEst              float64
 	fastCands           bool // inter candidates costed with DCT_DCT, the best's transforms searched
@@ -177,7 +181,7 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// PSNR-YUV and 0.26% by VMAF for 3% more CPU; the model's vectors
 		// to eighths 0.03% smaller by PSNR-YUV but 0.44% larger by SSIM
 		// and 0.46% by VMAF for 2%)
-		cdefDampQ: true, tplFull: true, leafLR: true}
+		cdefDampQ: true, tplFull: true, leafLR: true, tplReuse: true}
 	if o.Speed <= -1 {
 		e.tools.pruneSkip, e.tools.intraSkip, e.tools.candRatio, e.tools.fastCands = false, 0, 0, false
 		e.tools.filterRD = filterRD

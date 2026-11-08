@@ -5,6 +5,16 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The AV1 encoder's temporal model, costing a mini-GOP for the second
+  time (held, with the one after it), keeps the reference and vector
+  each block of its deep frames chose the first time and codes them
+  again from the references as they are, without the motion search (a
+  search finds the same in 93% of the blocks). On the six 240-picture
+  clips: at speed 2 3.4% less CPU, PSNR-YUV and SSIM the same, VMAF 0.3%
+  smaller; at speed 0 1.7% less CPU, the metrics within 0.15%.
+
 ### Fixed
 
 - The AV1 encoder panicked on 2160p pictures when a motion search

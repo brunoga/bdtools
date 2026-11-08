@@ -44,6 +44,10 @@ type frameJob struct {
 	// sbLambda their lambdas' scales (the model's, tplLambda), or nil
 	sbQ      []int
 	sbLambda []float64
+	// tplStats is the temporal model's statistics of the frame from the
+	// round before (a mini-GOP is modeled twice: as the next's lookahead,
+	// then held), whose choices the next round keeps (tplReuse)
+	tplStats *tplFrame
 }
 
 // step is a planned step of the stream: a frame coded, or one shown from
