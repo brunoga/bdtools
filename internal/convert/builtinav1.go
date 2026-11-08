@@ -11,7 +11,7 @@ import (
 
 // builtinAV1 is the AV1 encoder in this program as a gpu.Encoder: the
 // pictures drawn as NV12 or P010, taken into its planes. Its q index is
-// --crf's as the GPU encoders and SVT-AV1 take it (gpu.AV1QIndex).
+// --crf's as SVT-AV1 takes it (builtinAV1QIndex).
 type builtinAV1 struct {
 	enc *av1.Encoder
 	w   io.Writer
@@ -41,12 +41,23 @@ func av1Speed(preset string) int {
 	return 0
 }
 
+// builtinAV1QIndex is the built-in AV1 encoder's quantizer index for a
+// CRF: four times it, SVT-AV1's CRF scale. (On the six 240-picture bench
+// clips at speed 2 the encoder's streams are the size of SVT-AV1 preset
+// 4's at q = 4.06 crf - 2.8: crf 24 at q 94, 36 at 144, 48 at 192.
+// gpu.AV1QIndex is NVENC's AV1 against NVENC's HEVC QP, 7.1 crf - 76,
+// which here gave crf 16, the HD default, q 38: 31 Mbit/s and 11 CPU
+// seconds a 1080p picture.)
+func builtinAV1QIndex(crf int) int {
+	return max(1, min(255, 4*crf))
+}
+
 func openBuiltinAV1(cfg gpu.Config, w io.Writer, speed int, tune string) (gpu.Encoder, error) {
 	if cfg.Codec != gpu.AV1 {
 		return nil, fmt.Errorf("the built-in AV1 encoder codes AV1, not %v", cfg.Codec)
 	}
 	depth := max(cfg.BitDepth, 8)
-	o := av1.EncoderOptions{Width: cfg.Width, Height: cfg.Height, BitDepth: depth, QIndex: gpu.AV1QIndex(cfg.QP),
+	o := av1.EncoderOptions{Width: cfg.Width, Height: cfg.Height, BitDepth: depth, QIndex: builtinAV1QIndex(cfg.QP),
 		FPSNum: cfg.FPSNum, FPSDen: cfg.FPSDen, Keyint: cfg.GOP, TileColsLog2: -1, TileRowsLog2: -1, Speed: speed, Tune: tune}
 	if c := cfg.Color; c != nil {
 		o.Primaries, o.Transfer, o.Matrix, o.FullRange = c.Primaries, c.Transfer, c.Matrix, c.FullRange
