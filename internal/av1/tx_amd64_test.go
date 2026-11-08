@@ -93,3 +93,46 @@ func TestSSEKernel(t *testing.T) {
 		}
 	}
 }
+
+// The ranked forward transforms (forwardTypes, with its column cache)
+// are the same through the AVX2 kernels as through the Go code, at
+// every size and type.
+func TestForwardTypesKernels(t *testing.T) {
+	if !useAVX2 {
+		t.Skip("no AVX2")
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for txSz := range TX_SIZES_ALL {
+		w, h := int(txWidth[txSz]), int(txHeight[txSz])
+		if w > 32 || h > 32 {
+			continue // the cache's buffers are 32x32: never ranked
+		}
+		var types []int
+		for tt := range TX_TYPES {
+			if txTypeValid(txSz, tt) {
+				types = append(types, tt)
+			}
+		}
+		for trial := range 10 {
+			res := make([]int32, w*h)
+			for i := range res {
+				res[i] = rng.Int32N(2047) - 1023
+			}
+			var got, want [TX_TYPES][32 * 32]int32
+			var cc fwdColCache
+			forwardTypes(res, txSz, types, &got, &cc)
+			useAVX2 = false
+			var cc2 fwdColCache
+			forwardTypes(res, txSz, types, &want, &cc2)
+			useAVX2 = true
+			n := min(w, 32) * min(h, 32)
+			for _, tt := range types {
+				for i := range n {
+					if got[tt][i] != want[tt][i] {
+						t.Fatalf("tx %dx%d type %d trial %d: coefficient %d = %d, want %d", w, h, tt, trial, i, got[tt][i], want[tt][i])
+					}
+				}
+			}
+		}
+	}
+}

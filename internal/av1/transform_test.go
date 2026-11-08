@@ -418,9 +418,6 @@ func TestForwardKernels(t *testing.T) {
 	for txSz := range TX_SIZES_ALL {
 		log2W, log2H := int(txWidthLog2[txSz]), int(txHeightLog2[txSz])
 		w, h := 1<<log2W, 1<<log2H
-		if w < 8 && h < 8 {
-			continue
-		}
 		for tt := range TX_TYPES {
 			if !txTypeValid(txSz, tt) {
 				continue

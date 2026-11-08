@@ -5,16 +5,40 @@
 package av1
 
 //go:noescape
+func fdct4ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fdct4Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fdct4Row4x8AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fdct4Row4x4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fdct8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fdct8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
 func fdct8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fdct8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fdct16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fdct16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fdct16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fdct16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
 func fdct32ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
@@ -32,19 +56,37 @@ func fdct64RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *
 func fadst8ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fadst8Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fadst8RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst8RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
 func fadst8RowFlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fadst8RowH4FlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fadst16ColAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst16Col4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
 func fadst16RowAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 //go:noescape
+func fadst16RowH4AVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
 func fadst16RowFlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
+
+//go:noescape
+func fadst16RowH4FlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int)
 
 // fwdColAVX2 is the column pass of a 1D forward transform of a kind and
 // log2 of the size on eight adjacent columns of a residual (its rows
@@ -53,6 +95,8 @@ func fadst16RowFlipAVX2(src *int32, srcStride int, dst *int32, dstStride int, co
 // bytes apart). It reports whether there is a kernel.
 func fwdColAVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
 	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 2:
+		fdct4ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dDCT<<3 | 3:
 		fdct8ColAVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
 	case tx1dDCT<<3 | 4:
@@ -93,6 +137,62 @@ func fwdRowAVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int32
 		fadst16RowAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	case kind == tx1dADST && log2 == 4 && flip:
 		fadst16RowFlipAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	default:
+		return false
+	}
+	return true
+}
+
+// fwdCol4AVX2 is fwdColAVX2 on four adjacent columns (a block four wide,
+// up to 16 tall).
+func fwdCol4AVX2(kind, log2 int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	switch kind<<3 | log2 {
+	case tx1dDCT<<3 | 2:
+		fdct4Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dDCT<<3 | 3:
+		fdct8Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dDCT<<3 | 4:
+		fdct16Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dADST<<3 | 3:
+		fadst8Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	case tx1dADST<<3 | 4:
+		fadst16Col4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, up, down)
+	default:
+		return false
+	}
+	return true
+}
+
+// fwdRowH4AVX2 is fwdRowAVX2 on four rows (a block four tall, up to 16
+// wide).
+func fwdRowH4AVX2(kind, log2 int, flip bool, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	switch {
+	case kind == tx1dDCT && log2 == 3:
+		fdct8RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dDCT && log2 == 4:
+		fdct16RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dADST && log2 == 3 && !flip:
+		fadst8RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dADST && log2 == 3 && flip:
+		fadst8RowH4FlipAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dADST && log2 == 4 && !flip:
+		fadst16RowH4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case kind == tx1dADST && log2 == 4 && flip:
+		fadst16RowH4FlipAVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	default:
+		return false
+	}
+	return true
+}
+
+// fwdRow4AVX2 is the row pass of the 4-point DCT on rows rows (8 or 4)
+// of four.
+func fwdRow4AVX2(rows int, src *int32, srcStride int, dst *int32, dstStride int, cospi *int32, cosBit, up, down int) bool {
+	switch rows {
+	case 8:
+		fdct4Row4x8AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
+	case 4:
+		fdct4Row4x4AVX2(src, srcStride, dst, dstStride, cospi, cosBit, 0, down)
 	default:
 		return false
 	}
