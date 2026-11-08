@@ -60,8 +60,9 @@ type frameEnc struct {
 	sbQ      []int
 	sbLambda []float64
 	// depthPass has the superblocks searched at the depths planDepths
-	// picks
+	// picks; noCdef leaves the frame without CDEF
 	depthPass bool
+	noCdef    bool
 	// cdf0 is the CDFs every tile starts from: the defaults, or those a
 	// reference kept (load_cdfs) with primary_ref_frame; savedCDF what the
 	// frame keeps for later frames.

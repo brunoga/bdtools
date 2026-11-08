@@ -41,13 +41,13 @@ func av1Speed(preset string) int {
 	return 0
 }
 
-func openBuiltinAV1(cfg gpu.Config, w io.Writer, speed int) (gpu.Encoder, error) {
+func openBuiltinAV1(cfg gpu.Config, w io.Writer, speed int, tune string) (gpu.Encoder, error) {
 	if cfg.Codec != gpu.AV1 {
 		return nil, fmt.Errorf("the built-in AV1 encoder codes AV1, not %v", cfg.Codec)
 	}
 	depth := max(cfg.BitDepth, 8)
 	o := av1.EncoderOptions{Width: cfg.Width, Height: cfg.Height, BitDepth: depth, QIndex: gpu.AV1QIndex(cfg.QP),
-		FPSNum: cfg.FPSNum, FPSDen: cfg.FPSDen, Keyint: cfg.GOP, TileColsLog2: -1, TileRowsLog2: -1, Speed: speed}
+		FPSNum: cfg.FPSNum, FPSDen: cfg.FPSDen, Keyint: cfg.GOP, TileColsLog2: -1, TileRowsLog2: -1, Speed: speed, Tune: tune}
 	if c := cfg.Color; c != nil {
 		o.Primaries, o.Transfer, o.Matrix, o.FullRange = c.Primaries, c.Transfer, c.Matrix, c.FullRange
 	}

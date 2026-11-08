@@ -84,6 +84,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		crf      = fs.Int("crf", 0, "quality target, 0-51; lower is better (not comparable between codecs); default: by the source, 20 for 3D, 18 for Ultra HD, 16 for HD")
 		depth    = fs.Int("bit-depth", 0, "output bit depth: 8, or 10 for h265 and av1 (finer precision in the encoder: less banding, a few percent smaller); default: 10 when the codec and encoder can, 8 for --layout mvhevc")
 		preset   = fs.String("preset", "slow", "software encoder speed/efficiency preset")
+		tune     = fs.String("tune", "psnr", "what the built-in AV1 encoder leans toward: psnr or vmaf")
 		decThr   = fs.Int("decode-threads", 0, "pictures the MVC decoder works on at once (0 = all CPUs)")
 		gpuAPI   = fs.String("gpu-api", string(convert.GPUBuiltin), "how a GPU encoder is driven: builtin (its system library, in process; ffmpeg when that is missing) or ffmpeg")
 		vaapi    = fs.String("vaapi-device", "/dev/dri/renderD128", "render node for VAAPI encoding")
@@ -284,7 +285,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.GPUAPI = ga
 	o.Input, o.Output, o.TempDir, o.Playlist = *input, *output, *tempDir, *playlst
 	o.Layout, o.Encoder, o.Codec = convert.Layout(*layout), enc, cod
-	o.CRF, o.Preset, o.VAAPIDevice = *crf, *preset, *vaapi
+	o.CRF, o.Preset, o.Tune, o.VAAPIDevice = *crf, *preset, *tune, *vaapi
 	if !given["crf"] {
 		o.CRF = convert.CRFAuto
 	}

@@ -57,6 +57,14 @@ type EncoderOptions struct {
 	// four references and three candidates coded in full
 	// (1.88 times, 3.8%).
 	Speed int
+	// Tune is what the encoder leans toward: "" or "psnr" (the default:
+	// the allocation and filters by squared error), or "vmaf" (the
+	// anchors a little coarser, the deblocking sharper and, from speed
+	// 2, no CDEF on the deep frames: on the six 240-picture clips, at
+	// speed 2 3.7% smaller by VMAF and 0.2% by SSIM, 0.6% larger by
+	// PSNR-Y and 1.1% by PSNR-YUV, 3.5% less CPU; at speed 0 1.7%, 0.3%,
+	// -0.2% and 0.4%).
+	Tune string
 }
 
 // tools are the search's settings, by EncoderOptions.Speed (from the
@@ -75,6 +83,10 @@ type tools struct {
 	// depthPass has the inter frames' superblocks searched at the depths
 	// the nearest reference's blocks there say (planDepths)
 	depthPass bool
+	// lfSharp is the deblocking filter's sharpness; noCdefDeep leaves
+	// the frames below depth 2 without CDEF (Tune vmaf)
+	lfSharp    int
+	noCdefDeep bool
 	// tplReuse has the temporal model keep, for a held mini-GOP's frames
 	// below depth 2, the reference and vector each block chose the round
 	// before (coded again from the references as they are), no search
@@ -119,6 +131,8 @@ type Encoder struct {
 	// key is the key frame's step, planned and coded with the mini-GOP
 	// after it.
 	key []step
+	// qRatio is tplQRatio as this encoder has it (Tune).
+	qRatio [3]float64
 	// held is the mini-GOP planned and held to be costed with the next
 	// one: its anchor's importance counts the next's frames, which
 	// predict from it. (On the six 240-picture clips at speed 0, 2.3%
@@ -167,10 +181,15 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 	if o.BitDepth != 8 && o.BitDepth != 10 {
 		return nil, errors.New("av1: 8 or 10 bits")
 	}
+	switch o.Tune {
+	case "", "psnr", "vmaf":
+	default:
+		return nil, fmt.Errorf("av1: tune %q: psnr or vmaf", o.Tune)
+	}
 	if o.QIndex < 0 || o.QIndex > 255 {
 		return nil, errors.New("av1: q index 0..255")
 	}
-	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}, diffs: map[int]float64{}, tplRec: map[int][]uint16{}}
+	e := &Encoder{o: o, recons: map[int]*[3][]uint16{}, recent: map[int]*Source{}, diffs: map[int]float64{}, tplRec: map[int][]uint16{}, qRatio: tplQRatio}
 	e.seq = seqParams{
 		width: o.Width, height: o.Height, bitDepth: o.BitDepth,
 		edgeFilter: true, filterIntra: true, cdef: true, restoration: true, jntComp: !dbgNoJntComp, refFrameMvs: !dbgNoRefFrameMvs, warpedMotion: !dbgNoWarp, maskedCompound: !dbgNoMasked, interIntra: !dbgNoInterIntra,
@@ -237,6 +256,19 @@ func NewEncoder(o EncoderOptions) (*Encoder, error) {
 		// by SSIM, 0.06% by VMAF; four 1.10 times on the 360, 0.5%)
 		e.tools.anchorTiles = 1
 	}
+	if o.Tune == "vmaf" {
+		// (on the six 240-picture clips at speed 2, against the default:
+		// the anchors' ratio 0.80 alone 1.6% smaller by VMAF, 0.3% by
+		// PSNR-Y and 0.25% by SSIM, 0.33% larger by PSNR-YUV; with the
+		// sharpness 1.9%, 0.25%, 0.36% and 0.32%; CDEF off on the deep
+		// frames alone 1.7% smaller by VMAF, 0.7% larger by PSNR)
+		e.qRatio[1] = 0.80
+		e.tools.lfSharp = 4
+		// (at speed 0 CDEF off on the deep frames costs PSNR-YUV, 0.3%,
+		// for no VMAF: the ratio alone there is 1.7% smaller by VMAF and
+		// 0.3% by SSIM, 0.4% larger by PSNR-YUV)
+		e.tools.noCdefDeep = o.Speed >= 2
+	}
 	return e, nil
 }
 
@@ -290,6 +322,7 @@ func (e *Encoder) codeFrame(j *frameJob) []byte {
 	}
 	f.sbLambda = j.sbLambda
 	f.depthPass = e.tools.depthPass && !key
+	f.noCdef = e.tools.noCdefDeep && !key && j.depth >= 2
 	fp.primaryRef = PRIMARY_REF_NONE
 	f.cdf0 = newCDFs(fp.qIndex)
 	if r := j.refs[0]; !key && r != nil && r.cdf != nil && !dbgNoCDFCarry {

@@ -211,9 +211,9 @@ func (e *Encoder) tpl(steps []step) {
 		}
 		r0 := sumOwn / sumAll
 		if j.key || j.depth <= 2 {
-			k, r := tplQRatio[j.depth], r0
+			k, r := e.qRatio[j.depth], r0
 			if j.key {
-				k, r = tplQRatio[0], min(r0/0.7, 1)
+				k, r = e.qRatio[0], min(r0/0.7, 1)
 			}
 			leaf := min(e.o.QIndex+leafQ, 255)
 			target := float64(dcQlookup[bd][leaf]) * k * math.Sqrt(r)

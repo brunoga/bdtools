@@ -308,3 +308,24 @@ func TestSpeeds(t *testing.T) {
 		})
 	}
 }
+
+// TestTune: the tunes are psnr (the default) and vmaf, nothing else.
+func TestTune(t *testing.T) {
+	base := EncoderOptions{Width: 64, Height: 64, BitDepth: 8, QIndex: 100, Speed: 2}
+	for _, tune := range []string{"", "psnr", "vmaf"} {
+		o := base
+		o.Tune = tune
+		e, err := NewEncoder(o)
+		if err != nil {
+			t.Fatalf("tune %q: %v", tune, err)
+		}
+		if vmaf := tune == "vmaf"; (e.qRatio[1] != tplQRatio[1]) != vmaf || e.tools.noCdefDeep != vmaf || (e.tools.lfSharp != 0) != vmaf { // speed 2: CDEF off on the deep frames
+			t.Fatalf("tune %q: ratio %v sharp %d cdef %v", tune, e.qRatio, e.tools.lfSharp, e.tools.noCdefDeep)
+		}
+	}
+	o := base
+	o.Tune = "ssim"
+	if _, err := NewEncoder(o); err == nil {
+		t.Fatal("tune ssim accepted")
+	}
+}
