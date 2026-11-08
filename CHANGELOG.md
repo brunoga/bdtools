@@ -8,8 +8,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - The AV1 encoder's motion search starts from the enclosing square's
-  vector as well. On the six 240-picture clips at speed 2: 1.0% smaller
-  by PSNR-YUV, 0.5% by SSIM, 1.5% by VMAF for 4% more CPU.
+  vector as well. On the six 240-picture clips: at speed 2 1.0% smaller
+  by PSNR-YUV, 0.5% by SSIM, 1.5% by VMAF for 4% more CPU; at speed 0
+  0.9%, 0.7% and 0.8% smaller for the same CPU.
 - The AV1 encoder at speed 2 and above searches loop restoration for
   the key frames, anchors and depth 2 frames alone (the leaves were
   already left out). On the six 240-picture clips at speed 2: 5.1% less
