@@ -5,6 +5,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The built-in AV1 encoder's default `--crf` is the source kind's plus 2
+  (HD 18, Ultra HD 20, 3D 22): on a minute of a 1080p disc that matches
+  the NVENC HEVC default's quality (VMAF 97.95 against 98.14 at crf 16
+  and 97.06 at crf 24) at about a quarter less size.
+
 ### Fixed
 
 - The built-in AV1 encoder takes `--crf` on SVT-AV1's scale (quantizer
