@@ -528,7 +528,7 @@ func (t *tfCtx) apply(w *tfWorker, r, c int, mvs *[16]mv, mses *[16]int) {
 				sub := subR[i] + subC[j]
 				combined := weightFactor*windowError + float64(mses[sub])*invFactor
 				scaled := min(combined*dFactor[sub]*t.decay[p], 7)
-				weight := uint32(math.Exp(-scaled) * tfWeightScale)
+				weight := tfWeight(scaled)
 				w.accum[p][i*size+j] += weight * uint32(pred[i*size+j])
 				w.count[p][i*size+j] += uint16(weight) //nolint:gosec // at most 1000
 			}
@@ -610,4 +610,22 @@ func (e *Encoder) filterAnchor(gop []*frameJob, ahead []*Source) {
 	a := gop[len(gop)-1]
 	a.orig = a.src
 	a.src = temporalFilter(window, before, e.o.QIndex, e.o.BitDepth, e.o.Width, e.o.Height)
+}
+
+// tfWeightTable is exp(-x)*tfWeightScale for x in steps of 1/tfWeightStep
+// up to 7 (the weights' range), and tfWeight the weight of a scaled
+// error: the table's nearest entry (within one unit of the exponential's,
+// which is 2.2% of the filter's time computed; the picture is as good).
+const tfWeightStep = 4096
+
+var tfWeightTable = func() []uint16 {
+	t := make([]uint16, 7*tfWeightStep+2)
+	for i := range t {
+		t[i] = uint16(math.Exp(-float64(i)/tfWeightStep) * tfWeightScale) //nolint:gosec // at most tfWeightScale
+	}
+	return t
+}()
+
+func tfWeight(scaled float64) uint32 {
+	return uint32(tfWeightTable[int(scaled*tfWeightStep+0.5)])
 }
