@@ -7,6 +7,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The depth network's built-in tail is learnt anew from 35 official 3D
+  releases, fitted to each disc a stretch of pictures at a time instead
+  of a picture at a time (`tools/depthtrain -fit stretch`), so its
+  depth's scale holds across a shot; its mapping is 0.13% of the width a
+  unit (`stereo.TunedShape`). The made right eye on fifty clips of
+  twenty-five films held out of training: 28.42 to 28.59 dB, VMAF 34.6
+  to 35.4, its jitter 1.15 to 1.03 px; on Gravity's glass clips 27.45 to
+  28.11 dB (VMAF 40.9 to 45.6); on the twelve benchmark clips 27.37 to
+  27.35 dB (VMAF 30.4 to 31.1).
 - `tools/stereobench` measures 3D discs and MVC files directly: a 3D
   source's two views come through `convert.DecodeFrames` as one full
   side-by-side frame, as a side-by-side file's do.

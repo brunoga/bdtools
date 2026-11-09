@@ -74,13 +74,18 @@ var RefinedShape = Shape{Scale: 0.0010, Offset: -0.0075}
 
 // TunedShape is DefaultShape for Small's depth with its tail learnt from
 // the 3D discs (depth.BuiltinTail), found as DefaultShape was, on the
-// benchmark's twelve clips: the made right eye 27.3 dB and VMAF 30.0
-// against the refined depth's 27.4 and 31.0 there, but on the clips held
-// out of the choice better: the four glass clips 27.8 and 41.9 (26.9 and
-// 34.6), two films' 28.6 and 34.9 (27.9 and 31.3) and 24.5 and 25.5 (24.4
-// and 25.3). Refining the tuned depth by weights learnt on the depth as
-// it was loses.
-var TunedShape = Shape{Scale: 0.0012, Offset: -0.0090}
+// benchmark's twelve clips and checked on the wide set (fifty clips of
+// twenty-five other films) and the glass clips. The tail fitted to the
+// discs a stretch at a time (not a picture at a time) keeps its depth's
+// scale across a stretch, which wants a little more of it: 0.13% a unit
+// against 0.12%. The made right eye: the twelve clips 27.35 dB and VMAF
+// 31.1 (the picture-fitted tail at its shape 27.37 and 30.4), the wide
+// set 28.59 and 35.4 (28.42 and 34.6), the glass clips 28.11 and 45.6
+// (27.45 and 40.9), the eye's jitter 1.03 px against 1.15. Deeper
+// offsets lose on every set: the discs go farther back than this (their
+// 5th percentile -23 px at 1920 against ours -17), but a fixed mapping
+// placing the far end deeper misses more than it gains.
+var TunedShape = Shape{Scale: 0.0013, Offset: -0.0090}
 
 // The shapes of the other networks' depth (depth.Model.Size), each its
 // own scale, found as RefinedShape was. Base's depth refined (the weights
