@@ -151,5 +151,12 @@ func (m *Model) SetTail(w map[string]*nn.Tensor) error {
 			delete(m.dw, n)
 		}
 	}
+	// the position encodings' projections are of the attention weights
+	for _, p := range m.pes {
+		for _, t := range p {
+			m.be.Free(t)
+		}
+	}
+	m.pes = map[peKey][3]*nn.Tensor{}
 	return nil
 }
