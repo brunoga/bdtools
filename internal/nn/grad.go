@@ -1,5 +1,7 @@
 package nn
 
+import "math"
+
 // The layers' gradients, for training on the CPU: given a layer's input
 // and the loss's gradient at its output, the gradients at its input and
 // its parameters.
@@ -149,4 +151,178 @@ func ReLUBackward(y, dy *Tensor) *Tensor {
 		}
 	}
 	return dy
+}
+
+// LinearBackward is the gradients of Linear(x, w, b) given dy, the
+// gradient at its output: at x (x's shape), at w and at b.
+func LinearBackward(x, w, dy *Tensor) (dx, dw, db *Tensor) {
+	in, out := x.Dim(-1), w.Dim(0)
+	n := Numel(x.Shape) / in
+	dx, dw, db = New(x.Shape...), New(w.Shape...), New(out)
+	for p := range n {
+		xr, dyr, dxr := x.Data[p*in:(p+1)*in], dy.Data[p*out:(p+1)*out], dx.Data[p*in:(p+1)*in]
+		for o, g := range dyr {
+			db.Data[o] += g
+			wr, dwr := w.Data[o*in:(o+1)*in], dw.Data[o*in:(o+1)*in]
+			for i := range in {
+				dxr[i] += g * wr[i]
+				dwr[i] += g * xr[i]
+			}
+		}
+	}
+	return dx, dw, db
+}
+
+// LayerNormBackward is the gradients of LayerNorm(x, w, b, eps) given dy:
+// at x, at w and at b.
+func LayerNormBackward(x, w, dy *Tensor, eps float32) (dx, dw, db *Tensor) {
+	d := x.Dim(-1)
+	n := len(x.Data) / d
+	dx, dw, db = New(x.Shape...), New(d), New(d)
+	xhat, dxhat := make([]float64, d), make([]float64, d)
+	for r := range n {
+		row, g, out := x.Data[r*d:(r+1)*d], dy.Data[r*d:(r+1)*d], dx.Data[r*d:(r+1)*d]
+		var mean float64
+		for _, v := range row {
+			mean += float64(v)
+		}
+		mean /= float64(d)
+		var vr float64
+		for _, v := range row {
+			dv := float64(v) - mean
+			vr += dv * dv
+		}
+		inv := 1 / math.Sqrt(vr/float64(d)+float64(eps))
+		var m1, m2 float64
+		for j, v := range row {
+			xhat[j] = (float64(v) - mean) * inv
+			dxhat[j] = float64(g[j]) * float64(w.Data[j])
+			m1 += dxhat[j]
+			m2 += dxhat[j] * xhat[j]
+			dw.Data[j] += float32(float64(g[j]) * xhat[j])
+			db.Data[j] += g[j]
+		}
+		m1, m2 = m1/float64(d), m2/float64(d)
+		for j := range out {
+			out[j] = float32(inv * (dxhat[j] - m1 - xhat[j]*m2))
+		}
+	}
+	return dx, dw, db
+}
+
+// GroupNormBackward is the gradients of GroupNorm(x, groups, w, b, eps)
+// given dy: at x, at w and at b.
+func GroupNormBackward(x *Tensor, groups int, w, dy *Tensor, eps float32) (dx, dw, db *Tensor) {
+	c := x.Dim(0)
+	per := len(x.Data) / c
+	cg := c / groups
+	dx, dw, db = New(x.Shape...), New(c), New(c)
+	for g := range groups {
+		lo, hi := g*cg*per, (g+1)*cg*per
+		vals, gs := x.Data[lo:hi], dy.Data[lo:hi]
+		var mean float64
+		for _, v := range vals {
+			mean += float64(v)
+		}
+		mean /= float64(len(vals))
+		var vr float64
+		for _, v := range vals {
+			dv := float64(v) - mean
+			vr += dv * dv
+		}
+		inv := 1 / math.Sqrt(vr/float64(len(vals))+float64(eps))
+		var m1, m2 float64
+		for i, v := range vals {
+			ci := g*cg + i/per
+			xh, dxh := (float64(v)-mean)*inv, float64(gs[i])*float64(w.Data[ci])
+			m1 += dxh
+			m2 += dxh * xh
+			dw.Data[ci] += float32(float64(gs[i]) * xh)
+			db.Data[ci] += gs[i]
+		}
+		m1, m2 = m1/float64(len(vals)), m2/float64(len(vals))
+		for i, v := range vals {
+			ci := g*cg + i/per
+			xh, dxh := (float64(v)-mean)*inv, float64(gs[i])*float64(w.Data[ci])
+			dx.Data[lo+i] = float32(inv * (dxh - m1 - xh*m2))
+		}
+	}
+	return dx, dw, db
+}
+
+// GEGLUBackward is the gradient of GEGLU(x) at x given dy.
+func GEGLUBackward(x, dy *Tensor) *Tensor {
+	n, d := dy.Dim(0), dy.Dim(1)
+	dx := New(x.Shape...)
+	for r := range n {
+		src, out, g := x.Data[r*2*d:(r+1)*2*d], dx.Data[r*2*d:(r+1)*2*d], dy.Data[r*d:(r+1)*d]
+		for j, dyv := range g {
+			a, gv := float64(src[j]), float64(src[d+j])
+			cdf := 0.5 * (1 + math.Erf(gv/math.Sqrt2))
+			pdf := math.Exp(-0.5*gv*gv) / math.Sqrt(2*math.Pi)
+			out[j] = float32(float64(dyv) * gv * cdf)
+			out[d+j] = float32(float64(dyv) * a * (cdf + gv*pdf))
+		}
+	}
+	return dx
+}
+
+// TemporalAttentionBackward is the gradients of the CPU's
+// TemporalAttention(q, peQ, peK, peV, ks, vs, heads, scale) given dy: at
+// q and peQ, at peK and peV, and at every frame's keys and values.
+func TemporalAttentionBackward(q, peQ, peK, peV *Tensor, ks, vs []*Tensor, heads int, scale float32, dy *Tensor) (dq, dpeQ, dpeK, dpeV *Tensor, dks, dvs []*Tensor) {
+	d, c := q.Dim(0), q.Dim(1)
+	t := len(ks)
+	hd := c / heads
+	dq, dpeQ, dpeK, dpeV = New(d, c), New(c), New(t, c), New(t, c)
+	dks, dvs = make([]*Tensor, t), make([]*Tensor, t)
+	for f := range t {
+		dks[f], dvs[f] = New(d, c), New(d, c)
+	}
+	scores, dr := make([]float64, t), make([]float64, t)
+	for p := range d {
+		for h := range heads {
+			lo := h * hd
+			for f := range t {
+				var s float64
+				for i := lo; i < lo+hd; i++ {
+					s += float64(q.Data[p*c+i]+peQ.Data[i]) * float64(ks[f].Data[p*c+i]+peK.Data[f*c+i])
+				}
+				scores[f] = s * float64(scale)
+			}
+			mx := scores[0]
+			for _, v := range scores {
+				mx = max(mx, v)
+			}
+			var sum float64
+			for f, v := range scores {
+				scores[f] = math.Exp(v - mx)
+				sum += scores[f]
+			}
+			var sr float64
+			for f := range t {
+				scores[f] /= sum
+				dr[f] = 0
+				for i := lo; i < lo+hd; i++ {
+					dr[f] += float64(dy.Data[p*c+i]) * float64(vs[f].Data[p*c+i]+peV.Data[f*c+i])
+				}
+				sr += scores[f] * dr[f]
+			}
+			for f := range t {
+				ds := scores[f] * (dr[f] - sr) * float64(scale)
+				for i := lo; i < lo+hd; i++ {
+					qi := float64(q.Data[p*c+i] + peQ.Data[i])
+					dk, dv := float32(ds*qi), float32(scores[f]*float64(dy.Data[p*c+i]))
+					dks[f].Data[p*c+i] += dk
+					dpeK.Data[f*c+i] += dk
+					dvs[f].Data[p*c+i] += dv
+					dpeV.Data[f*c+i] += dv
+					dqv := float32(ds * float64(ks[f].Data[p*c+i]+peK.Data[f*c+i]))
+					dq.Data[p*c+i] += dqv
+					dpeQ.Data[i] += dqv
+				}
+			}
+		}
+	}
+	return dq, dpeQ, dpeK, dpeV, dks, dvs
 }

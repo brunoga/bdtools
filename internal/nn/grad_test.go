@@ -77,3 +77,62 @@ func TestConvTranspose2dKBackward(t *testing.T) {
 	checkGrad(t, "w", w, dw, loss, r)
 	checkGrad(t, "b", b, db, loss, r)
 }
+
+func TestLinearBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 6))
+	x, w, b := randTensor(r, 7, 9), randTensor(r, 5, 9), randTensor(r, 5)
+	dy := randTensor(r, 7, 5)
+	loss := func() float64 { return dotT(Linear(x, w, b), dy) }
+	dx, dw, db := LinearBackward(x, w, dy)
+	checkGrad(t, "x", x, dx, loss, r)
+	checkGrad(t, "w", w, dw, loss, r)
+	checkGrad(t, "b", b, db, loss, r)
+}
+
+func TestLayerNormBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 8))
+	x, w, b := randTensor(r, 6, 24), randTensor(r, 24), randTensor(r, 24)
+	dy := randTensor(r, 6, 24)
+	loss := func() float64 { return dotT(LayerNorm(x, w, b, 1e-5), dy) }
+	dx, dw, db := LayerNormBackward(x, w, dy, 1e-5)
+	checkGrad(t, "x", x, dx, loss, r)
+	checkGrad(t, "w", w, dw, loss, r)
+	checkGrad(t, "b", b, db, loss, r)
+}
+
+func TestGroupNormBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(9, 10))
+	x, w, b := randTensor(r, 8, 5, 6), randTensor(r, 8), randTensor(r, 8)
+	dy := randTensor(r, 8, 5, 6)
+	loss := func() float64 { return dotT(GroupNorm(x, 4, w, b, 1e-6), dy) }
+	dx, dw, db := GroupNormBackward(x, 4, w, dy, 1e-6)
+	checkGrad(t, "x", x, dx, loss, r)
+	checkGrad(t, "w", w, dw, loss, r)
+	checkGrad(t, "b", b, db, loss, r)
+}
+
+func TestGEGLUBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(11, 12))
+	x, dy := randTensor(r, 9, 10), randTensor(r, 9, 5)
+	loss := func() float64 { return dotT(CPU.GEGLU(x), dy) }
+	checkGrad(t, "x", x, GEGLUBackward(x, dy), loss, r)
+}
+
+func TestTemporalAttentionBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(13, 14))
+	const d, c, heads, frames = 5, 12, 3, 4
+	q, peQ, peK, peV := randTensor(r, d, c), randTensor(r, c), randTensor(r, frames, c), randTensor(r, frames, c)
+	ks, vs := make([]*Tensor, frames), make([]*Tensor, frames)
+	for f := range frames {
+		ks[f], vs[f] = randTensor(r, d, c), randTensor(r, d, c)
+	}
+	dy := randTensor(r, d, c)
+	loss := func() float64 { return dotT(CPU.TemporalAttention(q, peQ, peK, peV, ks, vs, heads, 0.4), dy) }
+	dq, dpeQ, dpeK, dpeV, dks, dvs := TemporalAttentionBackward(q, peQ, peK, peV, ks, vs, heads, 0.4, dy)
+	checkGrad(t, "q", q, dq, loss, r)
+	checkGrad(t, "peQ", peQ, dpeQ, loss, r)
+	checkGrad(t, "peK", peK, dpeK, loss, r)
+	checkGrad(t, "peV", peV, dpeV, loss, r)
+	checkGrad(t, "k2", ks[2], dks[2], loss, r)
+	checkGrad(t, "v1", vs[1], dvs[1], loss, r)
+}

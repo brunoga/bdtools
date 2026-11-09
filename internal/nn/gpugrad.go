@@ -1,6 +1,10 @@
 package nn
 
-import "github.com/brunoga/bdtools/internal/cuda"
+import (
+	"fmt"
+
+	"github.com/brunoga/bdtools/internal/cuda"
+)
 
 // The layers' gradients on the GPU, as grad.go's on the CPU (in single
 // precision whatever Half says).
@@ -115,4 +119,83 @@ func (g *GPU) sumK(m, k, n int, a, b *Tensor) *Tensor {
 func (g *GPU) gemm32(kernel string, m, n, k int, a uintptr, lda int, b uintptr, ldb int, c uintptr, ldc int) {
 	grid, block := cuda.Dim{X: (n + 127) / 128, Y: (m + 127) / 128, Z: 1}, cuda.Dim{X: 256}
 	g.launch(kernel, grid, block, 0, m, n, k, a, lda, int64(0), b, ldb, int64(0), c, ldc, int64(0), float32(1), uintptr(0), 0)
+}
+
+// colsum is the sums of x's columns, x seen as rows of cols values.
+func (g *GPU) colsum(x *Tensor, rows, cols int) *Tensor {
+	return g.rowsum(g.Transpose(&Tensor{Shape: []int{rows, cols}, dev: x.dev}), cols)
+}
+
+// LinearBackward is the gradients of Linear(x, w, b) given dy, the
+// gradient at its output: at x (x's shape), at w and at b.
+func (g *GPU) LinearBackward(x, w, dy *Tensor) (dx, dw, db *Tensor) {
+	in, out := x.Dim(-1), w.Dim(0)
+	n := Numel(x.Shape) / in
+	dx = g.tensor(x.Shape...)
+	g.gemm32("gemm_nn", n, in, out, ptr(dy), out, ptr(w), in, ptr(dx), in)
+	dyT := g.Transpose(&Tensor{Shape: []int{n, out}, dev: dy.dev})
+	xT := g.Transpose(&Tensor{Shape: []int{n, in}, dev: x.dev})
+	dw = g.sumK(out, in, n, dyT, xT)
+	db = g.rowsum(dyT, out)
+	return dx, dw, db
+}
+
+// LayerNormBackward is the gradients of LayerNorm(x, w, b, eps) given dy:
+// at x, at w and at b.
+func (g *GPU) LayerNormBackward(x, w, dy *Tensor, eps float32) (dx, dw, db *Tensor) {
+	d := x.Dim(-1)
+	rows := Numel(x.Shape) / d
+	dx, prod := g.tensor(x.Shape...), g.tensor(rows, d)
+	g.launch("layernorm_back", cuda.Dim{X: (rows + 7) / 8}, cuda.Dim{X: 256}, 0, rows, d, ptr(x), ptr(w), ptr(dy), ptr(dx), ptr(prod), eps)
+	return dx, g.colsum(prod, rows, d), g.colsum(dy, rows, d)
+}
+
+// GroupNormBackward is the gradients of GroupNorm(x, groups, w, b, eps)
+// given dy: at x, at w and at b.
+func (g *GPU) GroupNormBackward(x *Tensor, groups int, w, dy *Tensor, eps float32) (dx, dw, db *Tensor) {
+	c := x.Dim(0)
+	per := Numel(x.Shape) / c
+	dx, prod := g.tensor(x.Shape...), g.tensor(x.Shape...)
+	g.launch("groupnorm_back", cuda.Dim{X: groups}, cuda.Dim{X: 1024}, 0, c/groups, int64(per), ptr(x), ptr(w), ptr(dy), ptr(dx), ptr(prod), eps)
+	return dx, g.rowsum(prod, c), g.rowsum(dy, c)
+}
+
+// GEGLUBackward is the gradient of GEGLU(x) at x given dy.
+func (g *GPU) GEGLUBackward(x, dy *Tensor) *Tensor {
+	n, d := dy.Dim(0), dy.Dim(1)
+	dx := g.tensor(x.Shape...)
+	gr, bl := each(n * d)
+	g.launch("geglu_back", gr, bl, 0, int64(n*d), d, ptr(x), ptr(dy), ptr(dx))
+	return dx
+}
+
+// TemporalAttentionBackward is the gradients of TemporalAttention(q, peQ,
+// peK, peV, ks, vs, heads, scale) given dy: at q and peQ, at peK and peV,
+// and at the keys and values of the frames want says (nil for the others).
+func (g *GPU) TemporalAttentionBackward(q, peQ, peK, peV *Tensor, ks, vs []*Tensor, heads int, scale float32, dy *Tensor,
+	want []bool) (dq, dpeQ, dpeK, dpeV *Tensor, dks, dvs []*Tensor) {
+	d, c := q.Dim(0), q.Dim(1)
+	t := len(ks)
+	const maxFrames = 32 // kernels.cu's MAXFRAMES
+	dks, dvs = make([]*Tensor, t), make([]*Tensor, t)
+	if c > 1024 || t > maxFrames {
+		g.fail(fmt.Errorf("nn: a temporal attention %d channels wide over %d frames", c, t))
+		return g.tensor(d, c), g.tensor(c), g.tensor(t, c), g.tensor(t, c), dks, dvs
+	}
+	addrs, daddrs := make([]uint64, 2*maxFrames), make([]uint64, 2*maxFrames)
+	for f := range t {
+		addrs[f], addrs[maxFrames+f] = uint64(ptr(ks[f])), uint64(ptr(vs[f])) //nolint:gosec // G602: f < t <= maxFrames
+		if want[f] {
+			dks[f], dvs[f] = g.tensor(d, c), g.tensor(d, c)
+			daddrs[f], daddrs[maxFrames+f] = uint64(ptr(dks[f])), uint64(ptr(dvs[f])) //nolint:gosec // G602: as above
+		}
+	}
+	hd := c / heads
+	dq, r, ds := g.tensor(d, c), g.tensor(d, heads*t), g.tensor(d, heads*t)
+	g.launch("temporal_back", cuda.Dim{X: d}, cuda.Dim{X: c}, 4*(c+2*heads*t), d, c, hd, t, ptr(q), ptr(peQ), addrs,
+		ptr(peK), ptr(peV), scale, ptr(dy), ptr(dq), daddrs, ptr(r), ptr(ds))
+	dpeK, dpeV = g.tensor(t, c), g.tensor(t, c)
+	gr, bl := each(t * c)
+	g.launch("temporal_pe_back", gr, bl, 0, d, c, hd, t, ptr(q), ptr(peQ), ptr(dy), ptr(r), ptr(ds), scale, ptr(dpeK), ptr(dpeV))
+	return dq, g.colsum(dq, d, c), dpeK, dpeV, dks, dvs
 }
