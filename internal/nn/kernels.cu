@@ -1338,6 +1338,175 @@ extern "C" __global__ void bilinear_back(int c, int h, int w, int oh, int ow, fl
 	}
 }
 
+// layernorm_back: LayerNorm's gradients, a warp a row of d: dx, and prod
+// = dy xhat (xhat the row normalised), whose columns' sums are the
+// weight's gradient (dy's the bias's).
+extern "C" __global__ void layernorm_back(int rows, int d, const float *x, const float *w, const float *dy, float *dx,
+	float *prod, float eps) {
+	int row = blockIdx.x * (blockDim.x / 32) + threadIdx.x / 32, lane = threadIdx.x % 32;
+	if (row >= rows) return;
+	const float *r = x + (long long)row * d, *g = dy + (long long)row * d;
+	float *o = dx + (long long)row * d, *pr = prod + (long long)row * d;
+	float s = 0;
+	for (int i = lane; i < d; i += 32) s += r[i];
+	for (int k = 16; k > 0; k /= 2) s += __shfl_xor_sync(0xffffffff, s, k);
+	float mean = s / d, v = 0;
+	for (int i = lane; i < d; i += 32) {
+		float dv = r[i] - mean;
+		v += dv * dv;
+	}
+	for (int k = 16; k > 0; k /= 2) v += __shfl_xor_sync(0xffffffff, v, k);
+	float inv = rsqrtf(v / d + eps), m1 = 0, m2 = 0;
+	for (int i = lane; i < d; i += 32) {
+		float xh = (r[i] - mean) * inv, dxh = g[i] * w[i];
+		m1 += dxh;
+		m2 += dxh * xh;
+		pr[i] = g[i] * xh;
+	}
+	for (int k = 16; k > 0; k /= 2) {
+		m1 += __shfl_xor_sync(0xffffffff, m1, k);
+		m2 += __shfl_xor_sync(0xffffffff, m2, k);
+	}
+	m1 /= d;
+	m2 /= d;
+	for (int i = lane; i < d; i += 32) {
+		float xh = (r[i] - mean) * inv, dxh = g[i] * w[i];
+		o[i] = inv * (dxh - m1 - xh * m2);
+	}
+}
+
+// groupnorm_back: GroupNorm's gradients, a block a group of cg channels
+// of per values: dx, and prod = dy xhat, whose channels' sums are the
+// weight's gradient (dy's the bias's).
+extern "C" __global__ void groupnorm_back(int cg, long long per, const float *x, const float *w, const float *dy,
+	float *dx, float *prod, float eps) {
+	__shared__ double sh[32];
+	long long n = cg * per, base = (long long)blockIdx.x * n;
+	double s = 0;
+	for (long long i = threadIdx.x; i < n; i += blockDim.x) s += x[base + i];
+	double mean = blockSumD(s, sh) / n;
+	double v = 0;
+	for (long long i = threadIdx.x; i < n; i += blockDim.x) {
+		double dv = x[base + i] - mean;
+		v += dv * dv;
+	}
+	double var = blockSumD(v, sh) / n;
+	float inv = (float)(1.0 / sqrt(var + eps)), m = (float)mean;
+	double s1 = 0, s2 = 0;
+	for (long long i = threadIdx.x; i < n; i += blockDim.x) {
+		int c = blockIdx.x * cg + (int)(i / per);
+		float xh = (x[base + i] - m) * inv, dxh = dy[base + i] * w[c];
+		s1 += dxh;
+		s2 += dxh * xh;
+		prod[base + i] = dy[base + i] * xh;
+	}
+	float m1 = (float)(blockSumD(s1, sh) / n), m2 = (float)(blockSumD(s2, sh) / n);
+	for (long long i = threadIdx.x; i < n; i += blockDim.x) {
+		int c = blockIdx.x * cg + (int)(i / per);
+		float xh = (x[base + i] - m) * inv, dxh = dy[base + i] * w[c];
+		dx[base + i] = inv * (dxh - m1 - xh * m2);
+	}
+}
+
+// geglu_back: geglu's gradient at its input x [n, 2d] given dout [n, d].
+extern "C" __global__ void geglu_back(long long n, int d, const float *x, const float *dout, float *dx) {
+	EACH(n) {
+		long long r = i / d;
+		int c = i % d;
+		float a = x[r * 2 * d + c], g = x[r * 2 * d + d + c], dy = dout[i];
+		float cdf = 0.5f * (1.f + erff(g * GELU_K)), pdf = __expf(-0.5f * g * g) * 0.3989422804f;
+		dx[r * 2 * d + c] = dy * g * cdf;
+		dx[r * 2 * d + d + c] = dy * a * (cdf + g * pdf);
+	}
+}
+
+// gframes is frames, written.
+struct gframes {
+	float *k[MAXFRAMES], *v[MAXFRAMES];
+};
+
+// temporal_back: temporal's gradients at a position (a block; a thread a
+// channel) given dout: dq, and the frames' dk and dv where asked (df's
+// pointers not null); the attention's weights r and the scores'
+// gradients ds ([d, heads t] each) for temporal_pe_back.
+extern "C" __global__ void temporal_back(int d, int c, int hd, int t, const float *q, const float *peQ, frames fr,
+	const float *peK, const float *peV, float scale, const float *dout, float *dq, gframes df, float *rout, float *dsout) {
+	extern __shared__ float sh[]; // prod[c], r[heads][t], dr[heads][t]
+	int heads = c / hd;
+	float *prod = sh, *r = sh + c, *dr = r + heads * t;
+	int p = blockIdx.x, i = threadIdx.x, h = i / hd;
+	long long at = (long long)p * c + i;
+	float qi = q[at] + peQ[i], go = dout[at];
+	for (int f = 0; f < t; f++) {
+		prod[i] = qi * (fr.k[f][at] + peK[f * c + i]);
+		__syncthreads();
+		if (i % hd == 0) {
+			float s = 0;
+			for (int j = 0; j < hd; j++) s += prod[i + j];
+			r[h * t + f] = s * scale;
+		}
+		__syncthreads();
+	}
+	if (i < heads) {
+		float *rr = r + i * t, m = rr[0];
+		for (int f = 1; f < t; f++) m = fmaxf(m, rr[f]);
+		float s = 0;
+		for (int f = 0; f < t; f++) {
+			rr[f] = __expf(rr[f] - m);
+			s += rr[f];
+		}
+		for (int f = 0; f < t; f++) rr[f] /= s;
+	}
+	__syncthreads();
+	for (int f = 0; f < t; f++) {
+		prod[i] = go * (fr.v[f][at] + peV[f * c + i]);
+		__syncthreads();
+		if (i % hd == 0) {
+			float s = 0;
+			for (int j = 0; j < hd; j++) s += prod[i + j];
+			dr[h * t + f] = s;
+		}
+		__syncthreads();
+	}
+	if (i < heads) {
+		float *rr = r + i * t, *dd = dr + i * t, s = 0;
+		for (int f = 0; f < t; f++) s += rr[f] * dd[f];
+		for (int f = 0; f < t; f++) dd[f] = rr[f] * (dd[f] - s);
+	}
+	__syncthreads();
+	float dqi = 0;
+	for (int f = 0; f < t; f++) {
+		float ds = dr[h * t + f] * scale;
+		dqi += ds * (fr.k[f][at] + peK[f * c + i]);
+		if (df.k[f]) df.k[f][at] = ds * qi;
+		if (df.v[f]) df.v[f][at] = r[h * t + f] * go;
+	}
+	dq[at] = dqi;
+	for (int j = i; j < heads * t; j += c) {
+		rout[(long long)p * heads * t + j] = r[j];
+		dsout[(long long)p * heads * t + j] = dr[j];
+	}
+}
+
+// temporal_pe_back: the position encodings' gradients from temporal_back's
+// r and ds, a thread a frame's channel: dpeK[f, i] = scale sum_p ds[p, h,
+// f] (q[p, i] + peQ[i]) and dpeV[f, i] = sum_p r[p, h, f] dout[p, i].
+extern "C" __global__ void temporal_pe_back(int d, int c, int hd, int t, const float *q, const float *peQ, const float *dout,
+	const float *r, const float *ds, float scale, float *dpeK, float *dpeV) {
+	int heads = c / hd;
+	EACH((long long)t * c) {
+		int f = i / c, ch = i % c, h = ch / hd;
+		float pq = peQ[ch], sk = 0, sv = 0;
+		for (int p = 0; p < d; p++) {
+			long long at = (long long)p * heads * t + h * t + f;
+			sk += ds[at] * (q[(long long)p * c + ch] + pq);
+			sv += r[at] * dout[(long long)p * c + ch];
+		}
+		dpeK[i] = sk * scale;
+		dpeV[i] = sv;
+	}
+}
+
 // Semi-global matching (stereo.MatchBoth's, the same integers and the
 // same doubles, so the same disparities): the eyes' luma halved, a 5x5
 // census, the costs at 2R+1 disparities, summed along eight paths, each
