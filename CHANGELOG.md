@@ -15,6 +15,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A Blu-ray image still under AACS is reported as encrypted ("only a
   decrypted disc can be read") instead of "not a transport stream".
+- `tools/stereobench` on a disc reads past the first clip of a title
+  split into many (a disc's clips each have their own clock), and swaps
+  the eyes when the disc says its base view is the right eye, as a
+  conversion does.
 
 ## [0.18.1] - 2026-11-08
 

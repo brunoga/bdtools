@@ -85,6 +85,13 @@ func (r *Runner) decodePictures(ctx context.Context, path string, threeD bool, f
 		}
 		defer func() { _ = os.RemoveAll(tmp) }()
 		g := newGoDemux(src, Selection{Base: sel.Base, Dependent: sel.Dependent}, tmp, r.Report)
+		// A disc's clips each have their own clock, and its pictures'
+		// timestamps carry their clip: the playlist's timeline places them.
+		r.timeline = g.timeline
+		// Take the eye order from the disc unless it was given explicitly.
+		if src.knownEye && !r.SwapLRSet {
+			r.Opts.SwapLR = src.baseViewIsRight
+		}
 		if err := g.start(); err != nil {
 			return err
 		}
