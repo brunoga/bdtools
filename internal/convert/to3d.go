@@ -426,15 +426,23 @@ func DecodeFrames(ctx context.Context, goos string, o Options, path string, keep
 		if !known {
 			first, known = p.pts, true
 		}
-		if keep != nil && !keep(ticks90k(p.pts-first)) {
+		t := pictureTime(r.timeline, first, p.pts)
+		if keep != nil && !keep(t) {
 			return nil
 		}
+		pts := int64(t * 90000 / time.Second)
 		if p.stereo != nil && p.stereo.Dependent != nil {
-			return fn(sideBySideFrame(p.stereo.Base, p.stereo.Dependent, p.pts))
+			l, rt := p.stereo.Base, p.stereo.Dependent
+			if r.Opts.SwapLR {
+				l, rt = rt, l
+			}
+			return fn(sideBySideFrame(l, rt, pts))
 		}
 		if p.gpu == nil {
 			var t picTransform
-			p = picture{gpu: t.flatten(p), pts: p.pts}
+			p = picture{gpu: t.flatten(p), pts: pts}
+		} else {
+			p.pts = pts
 		}
 		return fn(pictureFrame8(p))
 	})
@@ -442,6 +450,17 @@ func DecodeFrames(ctx context.Context, goos string, o Options, path string, keep
 		return nil
 	}
 	return err
+}
+
+// pictureTime places a decoded picture on its source's timeline: by the
+// demuxer's timeline when it has one (a disc's clips each have their own
+// clock, and their pictures' timestamps carry the clip's index above the
+// clock: see goDemux.tag), else from the first picture.
+func pictureTime(timeline func(pts int64) time.Duration, first, pts int64) time.Duration {
+	if timeline != nil {
+		return timeline(pts)
+	}
+	return ticks90k(pts - first)
 }
 
 // sideBySideFrame is the two views as one frame, the left eye then the

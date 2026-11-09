@@ -2,6 +2,7 @@ package convert
 
 import (
 	"testing"
+	"time"
 
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -41,5 +42,23 @@ func TestSideBySideFrame(t *testing.T) {
 		if f.Cb[x] != want || f.Cr[x] != want+1 {
 			t.Fatalf("chroma[%d] = %d %d, want %d %d", x, f.Cb[x], f.Cr[x], want, want+1)
 		}
+	}
+}
+
+func TestPictureTime(t *testing.T) {
+	// Without a timeline, time runs from the first picture.
+	if got := pictureTime(nil, 90000, 90000*3); got != 2*time.Second {
+		t.Errorf("no timeline: %v, want 2s", got)
+	}
+	// With one, a tagged timestamp (clip 1, at its own clock's 90000) is
+	// where the demuxer's timeline puts it, not hours away.
+	tl := func(pts int64) time.Duration {
+		if pts>>40 != 1 || pts&(1<<40-1) != 90000 {
+			t.Errorf("timeline given %#x", pts)
+		}
+		return 10 * time.Minute
+	}
+	if got := pictureTime(tl, 0, 1<<40|90000); got != 10*time.Minute {
+		t.Errorf("timeline: %v, want 10m", got)
 	}
 }
