@@ -15,7 +15,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the frozen encoder run on each frame and the head's temporal modules
   given the frames before as a stream would, with gradients at every
   head weight (`nn.Tape`, the head written once against an ops
-  interface) (#291, #292, #293).
+  interface); a window starts over where the network's stream does, at
+  a cut or a change of the bars (#291, #292, #293, #295).
 
 ### Changed
 

@@ -58,6 +58,7 @@ type TailInput struct {
 	Feat0, Feat1, P3 *nn.Tensor
 	H, W             int
 	Input            *nn.Tensor
+	Fresh            bool // the stream's first frame (after Reset): the frames before are not its window's
 }
 
 // Load reads a checkpoint (video_depth_anything_vits.pth, or another
@@ -224,7 +225,7 @@ func (m *Model) Infer(x *nn.Tensor) *nn.Tensor {
 	tap := m.Tap
 	if tap != nil {
 		tap = func(t TailInput) {
-			t.Input = x
+			t.Input, t.Fresh = x, m.n == 0
 			m.Tap(t)
 		}
 	}

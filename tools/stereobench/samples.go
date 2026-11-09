@@ -37,7 +37,9 @@ import (
 // NAME.bds): the picture and the K-1 before it (fewer at a clip's start),
 // each as the network took it, its three channels put back to RGB bytes
 // (the normalisation undone, rounded), for learning the network's head
-// with its temporal modules:
+// with its temporal modules; the window holds only the frames of the
+// picture's stream (since the last cut or change of the bars), as the
+// network's does:
 //
 //	"BHW1", K, H, W (uint32: the frames, the network's input size)
 //	K frames, oldest first, 3*H*W bytes each (R, G and B planes)
@@ -46,11 +48,16 @@ import (
 var windowLen int
 
 // pushInput keeps the frame's network input (x, the backend's, [3, H,
-// W]) as bytes, the last windowLen of them.
-func (c *clipBench) pushInput(be nn.Backend, x *nn.Tensor) {
+// W]) as bytes, the last windowLen of them. A fresh frame (the network's
+// stream restarted: a cut, or the bars changed and with them the input's
+// size) starts the window over, as it does the network's.
+func (c *clipBench) pushInput(be nn.Backend, x *nn.Tensor, fresh bool) {
 	d, err := be.Download(x)
 	if err != nil {
 		fail(err)
+	}
+	if fresh || d.Dim(1) != c.inH || d.Dim(2) != c.inW {
+		c.inputs = c.inputs[:0]
 	}
 	c.inH, c.inW = d.Dim(1), d.Dim(2)
 	c.inputs = append(c.inputs, inputBytes(d))

@@ -61,6 +61,9 @@ func readWindow(path string) (*windowSample, error) {
 		}
 		ws.frames = append(ws.frames, fr)
 	}
+	if _, err := r.ReadByte(); err != io.EOF {
+		return nil, fmt.Errorf("%s: more than %d frames of %dx%d", path, hdr.K, hdr.W, hdr.H)
+	}
 	return ws, nil
 }
 
