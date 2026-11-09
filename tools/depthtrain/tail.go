@@ -121,6 +121,7 @@ func readTail(path string) (*tailSample, error) {
 // the optimiser's state, in the whole checkpoint.
 type headModel struct {
 	w, gw map[string]*nn.Tensor
+	w0    map[string]*nn.Tensor // the weights as the checkpoint had them (-anchor)
 	m, v  map[string][]float32
 	t     int
 	names []string
@@ -134,13 +135,14 @@ func newHeadModel(ckpt string, names []string) (*headModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	hm := &headModel{w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, learn: map[string]bool{}, all: all}
+	hm := &headModel{w: map[string]*nn.Tensor{}, w0: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, learn: map[string]bool{}, all: all}
 	for _, n := range names {
 		t, ok := all[n]
 		if !ok {
 			return nil, fmt.Errorf("%s: no weight %s", ckpt, n)
 		}
 		hm.w[n] = t.Clone()
+		hm.w0[n] = t
 		hm.all[n] = hm.w[n]
 		hm.learn[n] = true
 		hm.names = append(hm.names, n)
@@ -353,6 +355,12 @@ func moments(v []float32) (mean, sd float64) {
 }
 
 // update is Adam's step on the gradients times scale, which it then zeroes.
+// anchor is -anchor: how hard each update pulls the weights back towards
+// the checkpoint's, as a multiple of the learning rate (decoupled, like
+// weight decay, but to the weights as they were rather than to zero), so
+// that where the discs say nothing the network stays as it was.
+var anchor float64
+
 func (hm *headModel) update(lr float64, scale float32) {
 	const b1, b2, eps = 0.9, 0.999, 1e-8
 	hm.t++
@@ -363,12 +371,14 @@ func (hm *headModel) update(lr float64, scale float32) {
 		if g == nil {
 			continue
 		}
-		p, mv, vv := hm.w[n].Data, hm.m[n], hm.v[n]
+		p, p0, mv, vv := hm.w[n].Data, hm.w0[n].Data, hm.m[n], hm.v[n]
+		pull := float32(lr * anchor)
 		for i := range p {
 			gi := g.Data[i] * scale
 			mv[i] = b1*mv[i] + (1-b1)*gi
 			vv[i] = b2*vv[i] + (1-b2)*gi*gi
 			p[i] -= float32(lr * (float64(mv[i]) / c1) / (math.Sqrt(float64(vv[i])/c2) + eps))
+			p[i] -= pull * (p[i] - p0[i])
 		}
 		clear(g.Data)
 	}
