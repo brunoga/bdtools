@@ -17,16 +17,55 @@ import (
 	"github.com/brunoga/bdtools/internal/nn"
 )
 
-// Learning the depth network's tail (-tail CHECKPOINT): the head's last
-// stages (depth.TailNames) from the inputs stereobench -samples recorded
-// beside each sample (NAME.bht), the encoder and the rest of the head as
-// the checkpoint has them. The loss is the refinement's (the error left
-// after fitting the depth to the disc's disparity a picture at a time),
-// plus a term holding the depth's mean and deviation to the network's
-// own, so the depth's mapping to disparity (stereo.Shape) still holds.
+// Learning the depth network's head, or a part of it, from the inputs
+// stereobench -samples recorded beside each sample, the encoder and the
+// rest of the head as the checkpoint has them: -tail CHECKPOINT learns
+// the tail (depth.TailNames) from the tail's inputs (NAME.bht); -head
+// CHECKPOINT learns a set of the head's weights (-learn) from the
+// pictures' windows (NAME.bhw; head.go). The loss is the refinement's
+// (the error left after fitting the depth to the disc's disparity a
+// picture at a time, or a stretch at a time), plus a term holding the
+// depth's mean and deviation to the network's own, so the depth's
+// mapping to disparity (stereo.Shape) still holds.
 
 // tailMoments is the weight of the moments' term.
 const tailMoments = 1.0
+
+// An item is a training sample as a mode reads it: the sample, and the
+// mode's inputs.
+type item interface{ base() *sample }
+
+// A mode reads the samples' inputs and runs the network on them.
+type mode interface {
+	// read is the item of a sample (NAME.bds, the mode's inputs beside it).
+	read(path string) (item, error)
+	// output is the depth the weights as they are give the item, at the
+	// sample's size (no gradients).
+	output(g *nn.GPU, it item) []float32
+	// step is the item's loss and, when train, its gradients added to the
+	// weights' (fixed the fit to use, if not the picture's own).
+	step(g *nn.GPU, it item, train bool, fixed *[2]float64) (float64, bool)
+	// updated says the weights changed.
+	updated()
+}
+
+// prefetch reads items ahead, in order (nil for one unreadable).
+func prefetchItems(md mode, paths []string) <-chan item {
+	ch := make(chan item, 4)
+	go func() {
+		for _, p := range paths {
+			it, err := md.read(p)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "depthtrain:", err)
+				ch <- nil
+				continue
+			}
+			ch <- it
+		}
+		close(ch)
+	}()
+	return ch
+}
 
 // tailSample is a sample with its tail inputs.
 type tailSample struct {
@@ -34,6 +73,8 @@ type tailSample struct {
 	in   [3]*nn.Tensor
 	h, w int // the network's input
 }
+
+func (t *tailSample) base() *sample { return t.sample }
 
 func readTail(path string) (*tailSample, error) {
 	s, err := read(path)
@@ -76,199 +117,147 @@ func readTail(path string) (*tailSample, error) {
 	return t, nil
 }
 
-func prefetchTail(paths []string) <-chan *tailSample {
-	ch := make(chan *tailSample, 4)
-	go func() {
-		for _, p := range paths {
-			s, err := readTail(p)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "depthtrain:", err)
-			}
-			ch <- s
-		}
-		close(ch)
-	}()
-	return ch
+// headModel is the learnt weights (on the CPU), their gradients, and
+// the optimiser's state, in the whole checkpoint.
+type headModel struct {
+	w, gw map[string]*nn.Tensor
+	m, v  map[string][]float32
+	t     int
+	names []string
+	learn map[string]bool
+	all   map[string]*nn.Tensor // the whole checkpoint, the learnt weights' tensors in it
 }
 
-// tape is the forward pass's record, run backwards for the gradients.
-type tape struct {
-	g    *nn.GPU
-	back []func()
-	grad map[*nn.Tensor]*nn.Tensor // the gradient at each tensor
-	w    map[string]*nn.Tensor     // the weights, on the GPU
-	gw   map[string]*nn.Tensor     // their gradients, on the GPU
-}
-
-// addGrad adds d to t's gradient.
-func (tp *tape) addGrad(t, d *nn.Tensor) {
-	if old := tp.grad[t]; old != nil {
-		tp.g.Add(old, d)
-		return
-	}
-	tp.grad[t] = d
-}
-
-func (tp *tape) addW(name string, d *nn.Tensor) {
-	if d == nil {
-		return
-	}
-	if old := tp.gw[name]; old != nil {
-		tp.g.Add(old, d)
-		return
-	}
-	tp.gw[name] = d
-}
-
-func (tp *tape) conv(x *nn.Tensor, name string, stride, pad int) *nn.Tensor {
-	w, b := tp.w[name+".weight"], tp.w[name+".bias"]
-	y := tp.g.Conv2d(x, w, b, stride, pad)
-	tp.back = append(tp.back, func() {
-		dy := tp.grad[y]
-		if dy == nil {
-			return
-		}
-		dx, dw, db := tp.g.Conv2dBackward(x, w, dy, stride, pad)
-		tp.addGrad(x, dx)
-		tp.addW(name+".weight", dw)
-		if b != nil {
-			tp.addW(name+".bias", db)
-		}
-	})
-	return y
-}
-
-func (tp *tape) convT(x *nn.Tensor, name string) *nn.Tensor {
-	w, b := tp.w[name+".weight"], tp.w[name+".bias"]
-	y := tp.g.ConvTranspose2dK(x, w, b)
-	tp.back = append(tp.back, func() {
-		dy := tp.grad[y]
-		if dy == nil {
-			return
-		}
-		dx, dw, db := tp.g.ConvTranspose2dKBackward(x, w, dy)
-		tp.addGrad(x, dx)
-		tp.addW(name+".weight", dw)
-		if b != nil {
-			tp.addW(name+".bias", db)
-		}
-	})
-	return y
-}
-
-func (tp *tape) relu(x *nn.Tensor) *nn.Tensor {
-	y := tp.g.ReLU(tp.g.Clone(x))
-	tp.back = append(tp.back, func() {
-		if dy := tp.grad[y]; dy != nil {
-			tp.addGrad(x, tp.g.ReLUBackward(y, tp.g.Clone(dy)))
-		}
-	})
-	return y
-}
-
-func (tp *tape) add(a, b *nn.Tensor) *nn.Tensor {
-	y := tp.g.Add(tp.g.Clone(a), b)
-	tp.back = append(tp.back, func() {
-		if dy := tp.grad[y]; dy != nil {
-			tp.addGrad(a, tp.g.Clone(dy))
-			tp.addGrad(b, tp.g.Clone(dy))
-		}
-	})
-	return y
-}
-
-func (tp *tape) bilinear(x *nn.Tensor, oh, ow int) *nn.Tensor {
-	y := tp.g.Bilinear(x, oh, ow)
-	tp.back = append(tp.back, func() {
-		if dy := tp.grad[y]; dy != nil {
-			tp.addGrad(x, tp.g.BilinearBackward(dy, x.Dim(1), x.Dim(2)))
-		}
-	})
-	return y
-}
-
-// residual is depth's ResidualConvUnit: x + conv2(relu(conv1(relu(x)))).
-func (tp *tape) residual(pre string, x *nn.Tensor) *nn.Tensor {
-	h := tp.conv(tp.relu(x), pre+"conv1", 1, 1)
-	h = tp.conv(tp.relu(h), pre+"conv2", 1, 1)
-	return tp.add(h, x)
-}
-
-// fusion is depth's FeatureFusionBlock.
-func (tp *tape) fusion(k int, x, skip *nn.Tensor, oh, ow int) *nn.Tensor {
-	pre := fmt.Sprintf("head.scratch.refinenet%d.", k)
-	out := x
-	if skip != nil {
-		out = tp.add(x, tp.residual(pre+"resConfUnit1.", skip))
-	}
-	out = tp.residual(pre+"resConfUnit2.", out)
-	out = tp.bilinear(out, oh, ow)
-	return tp.conv(out, pre+"out_conv", 1, 0)
-}
-
-// forward is the tail (as depth's head has it from P3 on) and Infer's
-// last step: the depth, [1, H, W].
-func (tp *tape) forward(t *tailSample) *nn.Tensor {
-	f0, f1, p3 := tp.g.Upload(t.in[0]), tp.g.Upload(t.in[1]), tp.g.Upload(t.in[2])
-	l0 := tp.convT(tp.conv(f0, "head.projects.0", 1, 0), "head.resize_layers.0")
-	l1 := tp.convT(tp.conv(f1, "head.projects.1", 1, 0), "head.resize_layers.1")
-	rn0 := tp.conv(l0, "head.scratch.layer1_rn", 1, 1)
-	rn1 := tp.conv(l1, "head.scratch.layer2_rn", 1, 1)
-	p2 := tp.fusion(2, p3, rn1, rn0.Dim(1), rn0.Dim(2))
-	p1 := tp.fusion(1, p2, rn0, 2*rn0.Dim(1), 2*rn0.Dim(2))
-	out := tp.conv(p1, "head.scratch.output_conv1", 1, 1)
-	out = tp.bilinear(out, t.h, t.w)
-	out = tp.relu(tp.conv(out, "head.scratch.output_conv2.0", 1, 1))
-	out = tp.relu(tp.conv(out, "head.scratch.output_conv2.2", 1, 0))
-	return tp.relu(tp.bilinear(out, t.h, t.w))
-}
-
-// tailModel is the tail's weights (on the CPU), their gradients, and the
-// optimiser's state.
-type tailModel struct {
-	w, gw  map[string]*nn.Tensor
-	m, v   map[string][]float32
-	t      int
-	names  []string
-	loaded map[string]*nn.Tensor // the whole checkpoint
-}
-
-func newTailModel(ckpt string) (*tailModel, error) {
+// newHeadModel is the checkpoint's weights, those named learnt.
+func newHeadModel(ckpt string, names []string) (*headModel, error) {
 	all, err := nn.LoadPTH(ckpt)
 	if err != nil {
 		return nil, err
 	}
-	tm := &tailModel{w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, loaded: all}
-	for _, n := range depth.TailNames {
+	hm := &headModel{w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, learn: map[string]bool{}, all: all}
+	for _, n := range names {
+		t, ok := all[n]
+		if !ok {
+			return nil, fmt.Errorf("%s: no weight %s", ckpt, n)
+		}
+		hm.w[n] = t.Clone()
+		hm.all[n] = hm.w[n]
+		hm.learn[n] = true
+		hm.names = append(hm.names, n)
+		hm.m[n], hm.v[n] = make([]float32, len(t.Data)), make([]float32, len(t.Data))
+	}
+	return hm, nil
+}
+
+// expand is the layers' weights and biases, those the checkpoint has.
+func expand(all map[string]*nn.Tensor, layers []string) []string {
+	var names []string
+	for _, l := range layers {
 		for _, suf := range []string{".weight", ".bias"} {
-			if t, ok := all[n+suf]; ok {
-				tm.w[n+suf] = t.Clone()
-				tm.names = append(tm.names, n+suf)
-				tm.m[n+suf], tm.v[n+suf] = make([]float32, len(t.Data)), make([]float32, len(t.Data))
+			if _, ok := all[l+suf]; ok {
+				names = append(names, l+suf)
 			}
 		}
 	}
-	return tm, nil
+	return names
 }
 
-// step is a sample forward and back, its gradients added to gw: the loss.
-// output is the depth the tail gives sample t, at the sample's size.
-func (tm *tailModel) output(g *nn.GPU, t *tailSample) []float32 {
+// isLearnt says whether a weight is learnt.
+func (hm *headModel) isLearnt(name string) bool { return hm.learn[name] }
+
+// none learns nothing: for a pass without gradients.
+func none(string) bool { return false }
+
+// tailMode learns the tail from its recorded inputs.
+type tailMode struct{ hm *headModel }
+
+func (md tailMode) read(path string) (item, error) { return readTail(path) }
+func (tailMode) updated()                          {}
+
+// forward is the tail on the item's inputs, the depth at the sample's
+// size.
+func (md tailMode) forward(tp *nn.Tape, learn func(string) bool, t *tailSample) *nn.Tensor {
+	p := depth.TapeParams(tp, md.hm.all, learn)
+	in := depth.TailInput{Feat0: tp.Upload(t.in[0]), Feat1: tp.Upload(t.in[1]), P3: tp.Upload(t.in[2]), H: t.h, W: t.w}
+	return tp.Bilinear(depth.Tail(tp, p, in), t.sample.h, t.sample.w) // the sample's size (half the picture's)
+}
+
+func (md tailMode) output(g *nn.GPU, it item) []float32 {
 	defer g.Release()
-	tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}}
-	for _, n := range tm.names {
-		tp.w[n] = g.Upload(tm.w[n])
-	}
-	out, err := g.Download(tp.bilinear(tp.forward(t), t.sample.h, t.sample.w))
+	out, err := g.Download(md.forward(nn.NewTape(g), none, it.(*tailSample)))
 	if err != nil {
 		fail(err)
 	}
 	return out.Data
 }
 
-// step is one sample's loss, and when train, its gradient added to the
-// weights'. The depth is fitted to the disc's disparity by the sample's
-// own least squares, or by fixed, a fit over a stretch of samples.
+func (md tailMode) step(g *nn.GPU, it item, train bool, fixed *[2]float64) (float64, bool) {
+	defer g.Release()
+	t := it.(*tailSample)
+	learn := none
+	if train {
+		learn = md.hm.isLearnt
+	}
+	tp := nn.NewTape(g)
+	d := md.forward(tp, learn, t)
+	return md.hm.finish(g, tp, d, t.sample, train, fixed)
+}
+
+// finish is the rest of a step once the depth d (the tape's, at the
+// sample's size) is made: the loss, and when train, the backward pass
+// and the gradients gathered.
+func (hm *headModel) finish(g *nn.GPU, tp *nn.Tape, d *nn.Tensor, s *sample, train bool, fixed *[2]float64) (float64, bool) {
+	out, err := g.Download(d)
+	if err != nil {
+		fail(err)
+	}
+	gc, loss, ok := hm.loss(s, out.Data, train, fixed)
+	if !ok || !train {
+		return loss, ok
+	}
+	tp.Backward(d, g.Upload(gc.Reshape(1, s.h, s.w)))
+	for n, gt := range tp.Grads() {
+		dg, err := g.Download(gt)
+		if err != nil {
+			fail(err)
+		}
+		if hm.gw[n] == nil {
+			hm.gw[n] = nn.New(dg.Shape...)
+		}
+		acc(hm.gw[n], dg)
+	}
+	return loss, true
+}
+
+// loss is a sample's loss given the depth out (at the sample's size)
+// and, when train, its gradient at out: the fit error (the sample's own
+// fit, or fixed's) plus the moments' term, (mean - mean0)^2 + (sd -
+// sd0)^2 over sd0^2, the network's own depth's.
+func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float64) (gc *nn.Tensor, loss float64, ok bool) {
+	if fixed != nil {
+		gc, loss, ok = lossGradFixed(s, out, fixed[0], fixed[1], s.h, s.w)
+	} else {
+		zero := make([]float32, len(out))
+		gc, loss, ok = lossGrad(s, out, zero, s.h, s.w)
+	}
+	if !ok {
+		return nil, 0, false
+	}
+	m0, s0 := moments(s.depth)
+	m1, s1 := moments(out)
+	n := float64(len(out))
+	loss += tailMoments * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
+	if !train {
+		return nil, loss, true
+	}
+	for i, v := range out {
+		dm := 2 * (m1 - m0) / n
+		ds := 2 * (s1 - s0) * (float64(v) - m1) / (n * max(s1, 1e-9))
+		gc.Data[i] += float32(tailMoments * (dm + ds) / (s0 * s0))
+	}
+	return gc, loss, true
+}
+
 // lossGradFixed is lossGrad with the fit (a, b) given: the loss is the
 // mean of sqrt(r^2+1)-1 of the residual r = a y + b - d, its gradient
 // a r / sqrt(r^2+1) / n.
@@ -281,11 +270,10 @@ func lossGradFixed(s *sample, out []float32, a, b float64, ph, pw int) (g *nn.Te
 			if math.IsNaN(float64(d)) {
 				continue
 			}
-			i := r*pw + c
-			res := a*float64(out[i]) + b - float64(d)
-			sq := math.Sqrt(res*res + 1)
-			loss += sq - 1
-			g.Data[i] = float32(a * res / sq)
+			res := a*float64(out[r*pw+c]) + b - float64(d)
+			q := math.Sqrt(res*res + 1)
+			loss += q - 1
+			g.Data[r*pw+c] = float32(a * res / q)
 			n++
 		}
 	}
@@ -300,10 +288,10 @@ func lossGradFixed(s *sample, out []float32, a, b float64, ph, pw int) (g *nn.Te
 
 // stretchFit is the least-squares fit of the depths of a stretch's
 // samples, together, to the disc's disparity: disparity = a depth + b.
-func stretchFit(ts []*tailSample, outs [][]float32) (a, b float64, n int) {
+func stretchFit(ss []*sample, outs [][]float32) (a, b float64, n int) {
 	var sx, sy, sxx, sxy float64
-	for k, t := range ts {
-		s, z, pw := t.sample, outs[k], t.sample.w
+	for k, s := range ss {
+		z, pw := outs[k], s.w
 		for r := range s.h {
 			for c := range s.w {
 				d := s.disp[r*s.w+c]
@@ -329,7 +317,7 @@ func stretchFit(ts []*tailSample, outs [][]float32) (a, b float64, n int) {
 }
 
 // stretches groups sample paths by the window they were recorded from
-// (NAME-000123.bht: NAME), each group in its pictures' order.
+// (NAME-000123.bds: NAME), each group in its pictures' order.
 func stretches(paths []string) [][]string {
 	groups := map[string][]string{}
 	var order []string
@@ -353,60 +341,6 @@ func stretches(paths []string) [][]string {
 	return out
 }
 
-func (tm *tailModel) step(g *nn.GPU, t *tailSample, train bool, fixed *[2]float64) (float64, bool) {
-	defer g.Release()
-	tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}}
-	for _, n := range tm.names {
-		tp.w[n] = g.Upload(tm.w[n])
-	}
-	d := tp.forward(t)
-	d = tp.bilinear(d, t.sample.h, t.sample.w) // the sample's size (half the picture's)
-	out, err := g.Download(d)
-	if err != nil {
-		fail(err)
-	}
-	var gc *nn.Tensor
-	var loss float64
-	var ok bool
-	if fixed != nil {
-		gc, loss, ok = lossGradFixed(t.sample, out.Data, fixed[0], fixed[1], t.sample.h, t.sample.w)
-	} else {
-		zero := make([]float32, len(out.Data))
-		gc, loss, ok = lossGrad(t.sample, out.Data, zero, t.sample.h, t.sample.w)
-	}
-	if !ok {
-		return 0, false
-	}
-	// the moments' term: (mean - mean0)^2 + (sd - sd0)^2, over sd0^2
-	m0, s0 := moments(t.depth)
-	m1, s1 := moments(out.Data)
-	n := float64(len(out.Data))
-	loss += tailMoments * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
-	if !train {
-		return loss, true
-	}
-	for i, v := range out.Data {
-		dm := 2 * (m1 - m0) / n
-		ds := 2 * (s1 - s0) * (float64(v) - m1) / (n * max(s1, 1e-9))
-		gc.Data[i] += float32(tailMoments * (dm + ds) / (s0 * s0))
-	}
-	tp.grad[d] = g.Upload(gc.Reshape(1, t.sample.h, t.sample.w))
-	for i := len(tp.back) - 1; i >= 0; i-- {
-		tp.back[i]()
-	}
-	for n, gt := range tp.gw {
-		dg, err := g.Download(gt)
-		if err != nil {
-			fail(err)
-		}
-		if tm.gw[n] == nil {
-			tm.gw[n] = nn.New(dg.Shape...)
-		}
-		acc(tm.gw[n], dg)
-	}
-	return loss, true
-}
-
 func moments(v []float32) (mean, sd float64) {
 	var s, ss float64
 	for _, x := range v {
@@ -419,17 +353,17 @@ func moments(v []float32) (mean, sd float64) {
 }
 
 // update is Adam's step on the gradients times scale, which it then zeroes.
-func (tm *tailModel) update(lr float64, scale float32) {
+func (hm *headModel) update(lr float64, scale float32) {
 	const b1, b2, eps = 0.9, 0.999, 1e-8
-	tm.t++
-	c1 := 1 - math.Pow(b1, float64(tm.t))
-	c2 := 1 - math.Pow(b2, float64(tm.t))
-	for _, n := range tm.names {
-		g := tm.gw[n]
+	hm.t++
+	c1 := 1 - math.Pow(b1, float64(hm.t))
+	c2 := 1 - math.Pow(b2, float64(hm.t))
+	for _, n := range hm.names {
+		g := hm.gw[n]
 		if g == nil {
 			continue
 		}
-		p, mv, vv := tm.w[n].Data, tm.m[n], tm.v[n]
+		p, mv, vv := hm.w[n].Data, hm.m[n], hm.v[n]
 		for i := range p {
 			gi := g.Data[i] * scale
 			mv[i] = b1*mv[i] + (1-b1)*gi
@@ -440,28 +374,20 @@ func (tm *tailModel) update(lr float64, scale float32) {
 	}
 }
 
-// validateTail is the mean fit error of the network's depth as it was
-// (the sample's) and of the tail's.
-func validateTail(g *nn.GPU, tm *tailModel, paths []string) (base, tuned float64) {
+// validateMode is the mean fit error of the network's depth as it was (the
+// sample's) and of the weights as they are.
+func validateMode(g *nn.GPU, md mode, paths []string) (base, tuned float64) {
 	var n int
-	for t := range prefetchTail(paths) {
-		if t == nil {
+	for it := range prefetchItems(md, paths) {
+		if it == nil {
 			continue
 		}
-		e0, ok := fitError(t.sample, t.depth, t.sample.w) // not t.w, the network's input
+		s := it.base()
+		e0, ok := fitError(s, s.depth, s.w)
 		if !ok {
 			continue
 		}
-		tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}}
-		for _, nm := range tm.names {
-			tp.w[nm] = g.Upload(tm.w[nm])
-		}
-		d, err := g.Download(tp.bilinear(tp.forward(t), t.sample.h, t.sample.w))
-		g.Release()
-		if err != nil {
-			fail(err)
-		}
-		e1, _ := fitError(t.sample, d.Data, t.sample.w)
+		e1, _ := fitError(s, md.output(g, it), s.w)
 		base += e0
 		tuned += e1
 		n++
@@ -469,13 +395,13 @@ func validateTail(g *nn.GPU, tm *tailModel, paths []string) (base, tuned float64
 	return base / float64(max(n, 1)), tuned / float64(max(n, 1))
 }
 
-// saveTail writes the tail's weights as depth.ReadTail reads them.
-func saveTail(tm *tailModel, path string) error {
+// saveHead writes the learnt weights as depth.ReadTail reads them.
+func saveHead(hm *headModel, path string) error {
 	f, err := os.Create(path + ".tmp") //nolint:gosec // the operator's file
 	if err != nil {
 		return err
 	}
-	if err := depth.WriteTail(f, tm.w); err != nil {
+	if err := depth.WriteTail(f, hm.w); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -492,10 +418,22 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 		fail(err)
 	}
 	defer g.Close()
-	tm, err := newTailModel(ckpt)
+	all, err := nn.LoadPTH(ckpt)
 	if err != nil {
 		fail(err)
 	}
+	hm, err := newHeadModel(ckpt, expand(all, depth.TailNames))
+	if err != nil {
+		fail(err)
+	}
+	fmt.Printf("the tail: %d weights' tensors, on %s\n", len(hm.names), g.Name())
+	trainLoop(g, hm, tailMode{hm}, trainDir, valDir, out, epochs, lr, batch, limit, byStretch)
+}
+
+// trainLoop learns hm's weights in a mode: epochs passes over the
+// training samples, Adam at a rate decayed along a cosine to a tenth,
+// the weights saved to out after each pass.
+func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch bool) {
 	train, err := list(trainDir)
 	if err != nil {
 		fail(err)
@@ -509,9 +447,9 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 	if limit > 0 && limit < len(train) {
 		train = train[:limit]
 	}
-	fmt.Printf("the tail: %d weights' tensors; %d training pictures, %d validation, on %s\n", len(tm.names), len(train), len(val), g.Name())
-	base, tuned := validateTail(g, tm, val)
-	fmt.Printf("epoch 0: validation error after fitting %.3f px as the network gives it, %.3f with the tail\n", base, tuned)
+	fmt.Printf("%d training pictures, %d validation\n", len(train), len(val))
+	base, tuned := validateMode(g, md, val)
+	fmt.Printf("epoch 0: validation error after fitting %.3f px as the network gives it, %.3f with the weights\n", base, tuned)
 	steps := epochs * ((len(train) + batch - 1) / batch)
 	step := 0
 	var groups [][]string
@@ -525,7 +463,8 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 		var n, k int
 		update := func() {
 			rate := lr * (0.1 + 0.9*0.5*(1+math.Cos(math.Pi*float64(step)/float64(steps))))
-			tm.update(rate, float32(1/float64(k)))
+			hm.update(rate, float32(1/float64(k)))
+			md.updated()
 			k = 0
 			if step++; step%100 == 0 {
 				fmt.Printf("  step %d: loss %.4f (%.3f s a picture)\n", step, lossSum/float64(max(n, 1)), time.Since(t0).Seconds()/float64(max(n, 1)))
@@ -534,21 +473,23 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 		if byStretch {
 			r.Shuffle(len(groups), func(i, j int) { groups[i], groups[j] = groups[j], groups[i] })
 			for _, paths := range groups {
-				var ts []*tailSample
+				var items []item
+				var ss []*sample
 				var outs [][]float32
-				for t := range prefetchTail(paths) {
-					if t != nil {
-						ts = append(ts, t)
-						outs = append(outs, tm.output(g, t))
+				for it := range prefetchItems(md, paths) {
+					if it != nil {
+						items = append(items, it)
+						ss = append(ss, it.base())
+						outs = append(outs, md.output(g, it))
 					}
 				}
-				a, b, cnt := stretchFit(ts, outs)
+				a, b, cnt := stretchFit(ss, outs)
 				if cnt < 100 {
 					continue
 				}
 				fixed := [2]float64{a, b}
-				for _, t := range ts {
-					if loss, ok := tm.step(g, t, true, &fixed); ok {
+				for _, it := range items {
+					if loss, ok := md.step(g, it, true, &fixed); ok {
 						lossSum += loss
 						n++
 						k++
@@ -560,11 +501,11 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 			}
 		} else {
 			r.Shuffle(len(train), func(i, j int) { train[i], train[j] = train[j], train[i] })
-			for t := range prefetchTail(train) {
-				if t == nil {
+			for it := range prefetchItems(md, train) {
+				if it == nil {
 					continue
 				}
-				if loss, ok := tm.step(g, t, true, nil); ok {
+				if loss, ok := md.step(g, it, true, nil); ok {
 					lossSum += loss
 					n++
 					k++
@@ -574,10 +515,10 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 				}
 			}
 		}
-		base, tuned := validateTail(g, tm, val)
-		fmt.Printf("epoch %d: loss %.4f; validation error after fitting %.3f px as the network gives it, %.3f with the tail (%v)\n",
+		base, tuned := validateMode(g, md, val)
+		fmt.Printf("epoch %d: loss %.4f; validation error after fitting %.3f px as the network gives it, %.3f with the weights (%v)\n",
 			e, lossSum/float64(max(n, 1)), base, tuned, time.Since(t0).Round(time.Second))
-		if err := saveTail(tm, out); err != nil {
+		if err := saveHead(hm, out); err != nil {
 			fail(err)
 		}
 	}
@@ -596,6 +537,7 @@ func retune(tail, dir, out string) {
 	if err != nil {
 		fail(err)
 	}
+	md := tailMode{&headModel{all: w}} // the tail's weights are all the tail reads
 	paths, err := list(dir)
 	if err != nil {
 		fail(err)
@@ -603,21 +545,14 @@ func retune(tail, dir, out string) {
 	if err := os.MkdirAll(out, 0o750); err != nil {
 		fail(err)
 	}
-	n, i := 0, -1
-	for t := range prefetchTail(paths) { // in order
-		i++
-		if t == nil {
+	n := 0
+	for i, p := range paths { // in order
+		t, err := readTail(p)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "depthtrain:", err)
 			continue
 		}
-		tp := &tape{g: g, grad: map[*nn.Tensor]*nn.Tensor{}, w: map[string]*nn.Tensor{}}
-		for nm, x := range w {
-			tp.w[nm] = g.Upload(x)
-		}
-		d, err := g.Download(tp.bilinear(tp.forward(t), t.sample.h, t.sample.w))
-		g.Release()
-		if err != nil {
-			fail(err)
-		}
+		d := md.output(g, t)
 		b, err := os.ReadFile(paths[i])
 		if err != nil {
 			fail(err)
@@ -627,7 +562,7 @@ func retune(tail, dir, out string) {
 		le := binary.LittleEndian
 		pw, ph, top := int(le.Uint32(b[4:])), int(le.Uint32(b[8:])), int(le.Uint32(b[12:]))
 		at := 20 + 3*pw*ph + 4*top*pw
-		for j, v := range d.Data {
+		for j, v := range d {
 			le.PutUint32(b[at+4*j:], math.Float32bits(v))
 		}
 		if err := os.WriteFile(filepath.Join(out, filepath.Base(paths[i])), b, 0o600); err != nil { //nolint:gosec // the operator's directory

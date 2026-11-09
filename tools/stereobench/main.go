@@ -97,6 +97,7 @@ func main() {
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
+	flag.IntVar(&windowLen, "window", 0, "with -samples, also write each measured picture's window (it and the pictures before it, this many in all, as the depth network took them: NAME.bhw) for learning the network's head")
 	parallaxFlag := flag.String("parallax", "", "the parallax probe: steps (pictures back, e.g. 2,4,8) to measure each picture's motion parallax against, and how much it adds to the network's depth")
 	parallaxPath := flag.String("parallax-csv", "", "with -parallax: each picture's measures to this CSV file")
 	madeFlag := flag.String("made", "", "other converters' pairs to score beside ours: NAME=DIR[,NAME=DIR...], each DIR holding full side-by-side files named as the clips, made from their left eyes (see made.go)")
@@ -364,6 +365,9 @@ type clipBench struct {
 	// the depth network's tail inputs of the frame, when it is sampled
 	wantTail bool
 	tail     *tailInput
+	// the last windowLen frames as the network took them, newest last
+	inputs   [][]byte
+	inH, inW int
 	discD    []float32
 	oursD    []float32
 	sums     struct {
@@ -413,6 +417,9 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 		m.Tap = func(t depth.TailInput) {
 			if c.wantTail {
 				c.tail = downloadTail(m.Backend(), t)
+			}
+			if windowLen > 0 {
+				c.pushInput(m.Backend(), t.Input)
 			}
 		}
 	}
@@ -506,6 +513,11 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 		}
 		if c.tail != nil {
 			if err := writeTail(c.res.name, c.k-1, c.tail); err != nil {
+				return err
+			}
+		}
+		if len(c.inputs) > 0 {
+			if err := writeWindow(c.res.name, c.k-1, c.inputs, c.inH, c.inW); err != nil {
 				return err
 			}
 		}
