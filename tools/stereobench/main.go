@@ -419,7 +419,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 				c.tail = downloadTail(m.Backend(), t)
 			}
 			if windowLen > 0 {
-				c.pushInput(m.Backend(), t.Input)
+				c.pushInput(m.Backend(), t.Input, t.Fresh)
 			}
 		}
 	}
