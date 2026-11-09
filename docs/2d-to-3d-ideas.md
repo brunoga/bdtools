@@ -236,6 +236,18 @@ synthesis of photographs. Reflection separation from motion is older
 computer vision (Xue 2015). None is used in automatic video conversion
 scored against a real right eye.
 
+**What we already know.** A probe in October 2026 (`tools/glassprobe`,
+scratch) found the porthole clip's disc depth is a single layer that
+would score 34.2 dB against our 25.7, so on that clip the single depth's
+error dominates and layers are not the main win: the reflection's depth
+has to be right first. Feathering the hole's near side by 1 to 2 px was
+tried on 2026-10-26 and lost 0.1 to 0.3 dB against the disc, so a soft
+edge has to come from a real matte, not a blur. The fusion-path weights
+learnt on 2026-11-09 read the reflected Earth as geometry and inverted
+the porthole's depth order (correlation 0.42 to -0.12): reflections are
+where a learnt head drifts first, because the matcher is unsure there and
+the discs give no supervision.
+
 **Experiment plan.**
 
 1. Measure where the loss is: on the glass set, segment each picture into
@@ -246,7 +258,8 @@ scored against a real right eye.
 2. Edges first, since they are everywhere: render the right eye with a
    soft alpha at depth discontinuities (a matting pass on the depth
    edges) instead of a hard boundary, and bench right-eye PSNR and VMAF
-   on all sets. Low cost, in the renderer only.
+   on all sets. Low cost, in the renderer only. A plain feather already
+   lost (above); the matte has to follow the picture's own edge.
 3. Reflections second: a two-layer depth for glass and mirror regions,
    with the second layer's depth from the head trained on the discs'
    disparity where the disc shows a reflection depth. Needs a segmenter
