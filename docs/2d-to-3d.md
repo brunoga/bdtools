@@ -341,6 +341,61 @@ What that teaches:
 
   Less data, and a little better where the films are many; the glass
   (four shots of one film) a little worse. These weights are built in.
+- **A wider benchmark, and the tail fitted a stretch at a time.** Fifty
+  clips (4 seconds at 25 and 60 minutes) of twenty-five more official 3D
+  releases, native, studio-converted and animated, none in any training
+  set (`~/mvc-scratch/3dbench/wide`), beside the twelve. On them the
+  depth's scale and place matter more than on the twelve: with the tail
+  above, one picture in 8, the disc's own depth makes the right eye at
+  38.4 dB, ours fitted to it a picture at a time 34.0, fitted once a
+  clip 32.0, and as the fixed mapping places it 28.4 (VMAF 34.6), under
+  a flat picture's 28.8 (46.4): the loss from a fixed scale and offset
+  (3.6 dB) is bigger than the loss within a clip (2.0) and the depth's
+  own errors cost the rest (4.4). Tried against it:
+  - *More input resolution* (700 and 924 on the short side, not 518):
+    the twelve's correlation 0.851 to 0.847 and 0.839; only the glass
+    clips gain (0.774 to 0.820). Not a lever.
+  - *The network run on the mirrored picture too, the two depths
+    averaged:* fitted +0.1 dB on every set, our own eye +0.03, at twice
+    the network's cost. Not kept.
+  - *The tail learnt again from 35 of the real releases now in hand*
+    (5,172 pictures, the same recipe): the validation error 6.30 to
+    6.29 px and every set within 0.05 dB. The data was not the limit.
+  - *The tail fitted to the disc a stretch at a time* (`tools/depthtrain
+    -fit stretch`: one scale and offset for the 2-second stretch's
+    pictures, so the depth's scale has to hold across them): the
+    picture-at-a-time validation error is worse (6.39 px), as it must be,
+    but the eye fitted once a clip is better on every set (the twelve
+    29.3 to 29.5 dB, the glass 28.5 to 29.0, the wide set 32.0 to 32.1),
+    its jitter lower (1.15 to 1.03 px on the wide set), and with its
+    mapping re-found (0.13% a unit, the far end 0.90% behind the screen,
+    the best of a 3 x 3 grid about the old on all three sets at once):
+
+    | right eye PSNR / VMAF | picture-fitted tail | stretch-fitted tail |
+    |---|---|---|
+    | the twelve clips (one picture in 8) | 27.37 / 30.4 | 27.35 / 31.1 |
+    | the four glass clips | 27.45 / 40.9 | 28.11 / 45.6 |
+    | the wide set (fifty clips, twenty-five films) | 28.42 / 34.6 | 28.59 / 35.4 |
+    | Avatar: Fire and Ash (25 clips) | 25.74 / 31.1 | 25.83 / 31.6 |
+    | depth correlation (twelve, glass, wide, Avatar) | .851 .774 .826 .745 | .848 .776 .819 .747 |
+
+    These weights are built in. Ten epochs instead of six: the twelve
+    and the wide set the same within 0.05 dB, the glass 0.2 dB better;
+    not worth the pull towards one film. (Avatar's row is both tails
+    measured now; the picture-fitted tail's 24.50 / 27.8 above was
+    measured in October, since when the 10-bit source's path changed.)
+  - *The mapping's far end deeper*, as the discs are (their 5th
+    percentile -23 px at 1920, ours pinned at the offset, -17): every
+    step of 0.15% deeper loses 0.3 to 1.5 dB on every set. The discs
+    put their far end anywhere from -5 to -52 px a clip, a choice their
+    pictures do not tell (see the grading above), and a fixed mapping
+    that reaches for it misses more than it gains.
+
+  Measuring the discs directly (not clips cut from them) found two
+  faults in the bench, both fixed: a disc whose title is split into many
+  clips (Disney's) was read only to the first clip's end, and a disc
+  whose base view is the right eye (Blade Runner 2049) was measured with
+  its eyes swapped, its depth correlation -0.7 (now 0.93).
 - **Whole films the choices never saw.** Furiosa (taken for a studio
   conversion; it is not one, see below) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
