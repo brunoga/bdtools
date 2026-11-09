@@ -52,10 +52,12 @@ type Model struct {
 // TailInput is what the head's tail (Tail) takes: the encoder's first two
 // features as maps ([C, ph, pw]: the projections' inputs), and the
 // fusion's third stage after its temporal module ([F, H, W]), with the
-// network's input size (the depth's).
+// network's input size (the depth's). Tap is also given the frame as the
+// network took it (Input, [3, H, W]; Head alone leaves it nil).
 type TailInput struct {
 	Feat0, Feat1, P3 *nn.Tensor
 	H, W             int
+	Input            *nn.Tensor
 }
 
 // Load reads a checkpoint (video_depth_anything_vits.pth, or another
@@ -219,7 +221,14 @@ func (m *Model) Infer(x *nn.Tensor) *nn.Tensor {
 	if m.n > 0 {
 		win = window(m.cache)
 	}
-	d, states := Head(m.be, m, feats, ph, pw, win, m.Tap)
+	tap := m.Tap
+	if tap != nil {
+		tap = func(t TailInput) {
+			t.Input = x
+			m.Tap(t)
+		}
+	}
+	d, states := Head(m.be, m, feats, ph, pw, win, tap)
 	for _, s := range states {
 		m.be.Keep(s.K)
 		m.be.Keep(s.V)

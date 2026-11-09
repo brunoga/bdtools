@@ -45,8 +45,7 @@ func TestStretchFitIsFit(t *testing.T) {
 	// one sample's stretch fit is its own fit
 	r := rand.New(rand.NewPCG(9, 10))
 	s := testSample(r)
-	ts := &tailSample{sample: s}
-	a, b, n := stretchFit([]*tailSample{ts}, [][]float32{s.depth})
+	a, b, n := stretchFit([]*sample{s}, [][]float32{s.depth})
 	a2, b2, n2 := fit(s, s.depth, s.w)
 	if n != n2 || math.Abs(a-a2) > 1e-9 || math.Abs(b-b2) > 1e-9 {
 		t.Fatalf("stretch fit %v %v %d, fit %v %v %d", a, b, n, a2, b2, n2)
@@ -54,8 +53,8 @@ func TestStretchFitIsFit(t *testing.T) {
 }
 
 func TestStretches(t *testing.T) {
-	g := stretches([]string{"d/film@25m-000010.bht", "d/film@25m-000002.bht", "d/film@60m-000001.bht", "d/other-000001.bht"})
-	if len(g) != 3 || len(g[0]) != 2 || g[0][0] != "d/film@25m-000002.bht" || len(g[1]) != 1 || len(g[2]) != 1 {
+	g := stretches([]string{"d/film@25m-000010.bds", "d/film@25m-000002.bds", "d/film@60m-000001.bds", "d/other-000001.bds"})
+	if len(g) != 3 || len(g[0]) != 2 || g[0][0] != "d/film@25m-000002.bds" || len(g[1]) != 1 || len(g[2]) != 1 {
 		t.Fatalf("groups %v", g)
 	}
 }

@@ -5,6 +5,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- The depth network's head can be learnt from the discs, not just its
+  tail: `tools/depthtrain -head CHECKPOINT -learn tail|fusion|head`
+  learns the weights named from each sample's window (its picture and
+  the seven before it as the network took them, which
+  `tools/stereobench -samples DIR -window 8` records beside the sample),
+  the frozen encoder run on each frame and the head's temporal modules
+  given the frames before as a stream would, with gradients at every
+  head weight (`nn.Tape`, the head written once against an ops
+  interface) (#291, #292, #293).
+
 ### Changed
 
 - The depth network's built-in tail is learnt anew from 35 official 3D

@@ -43,8 +43,11 @@ func main() {
 	limit := flag.Int("limit", 0, "use at most this many training samples (0: all)")
 	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
 	tailFrom := flag.String("tail", "", "learn the depth network's tail instead, from this checkpoint (.pth), on the GPU: the samples need their tail inputs (.bht)")
-	fitBy := flag.String("fit", "picture", "with -tail: the depth fitted to the disc's disparity a picture at a time, or a stretch (the pictures of one recorded window together: the depth's scale then has to hold across them)")
+	fitBy := flag.String("fit", "picture", "with -tail or -head: the depth fitted to the disc's disparity a picture at a time, or a stretch (the pictures of one recorded window together: the depth's scale then has to hold across them)")
 	retuneBy := flag.String("retune", "", "write the -train samples into -out (a directory) with the depth these tail weights (-tail's) give, on the GPU")
+	headFrom := flag.String("head", "", "learn a set of the depth network's head's weights (-learn) instead, from this checkpoint (.pth), on the GPU: the samples need their windows (.bhw, stereobench -samples -window)")
+	learn := flag.String("learn", "head", "with -head, the weights learnt: tail (depth.TailNames), fusion (the tail and the fusion path to the coarsest features) or head (the whole head, its temporal modules too)")
+	half := flag.Bool("half", false, "with -head, the matrix products' inputs in half precision (the tensor cores): faster, the gradients still single")
 	flag.Parse()
 	if *retuneBy != "" {
 		retune(*retuneBy, *trainDir, *out)
@@ -52,6 +55,10 @@ func main() {
 	}
 	if *tailFrom != "" {
 		trainTail(*tailFrom, *trainDir, *valDir, *out, *epochs, *lr, *batch, *limit, *fitBy == "stretch")
+		return
+	}
+	if *headFrom != "" {
+		trainHead(*headFrom, *learn, *trainDir, *valDir, *out, *epochs, *lr, *batch, *limit, *fitBy == "stretch", *half)
 		return
 	}
 	train, err := list(*trainDir)

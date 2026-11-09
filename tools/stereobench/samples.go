@@ -33,6 +33,61 @@ import (
 //	three tensors (Feat0, Feat1, P3), each: ndim (uint32), its dims
 //	(uint32), its values (float32)
 
+// With -window K, a file of the picture's window (NAME.bhw beside
+// NAME.bds): the picture and the K-1 before it (fewer at a clip's start),
+// each as the network took it, its three channels put back to RGB bytes
+// (the normalisation undone, rounded), for learning the network's head
+// with its temporal modules:
+//
+//	"BHW1", K, H, W (uint32: the frames, the network's input size)
+//	K frames, oldest first, 3*H*W bytes each (R, G and B planes)
+
+// windowLen is -window: the frames a window holds (0: none written).
+var windowLen int
+
+// pushInput keeps the frame's network input (x, the backend's, [3, H,
+// W]) as bytes, the last windowLen of them.
+func (c *clipBench) pushInput(be nn.Backend, x *nn.Tensor) {
+	d, err := be.Download(x)
+	if err != nil {
+		fail(err)
+	}
+	c.inH, c.inW = d.Dim(1), d.Dim(2)
+	c.inputs = append(c.inputs, inputBytes(d))
+	if len(c.inputs) > windowLen {
+		c.inputs = c.inputs[1:]
+	}
+}
+
+// inputBytes is the network's input as RGB bytes: its normalisation
+// (stereo's netInput: ImageNet's mean and deviation) undone, rounded.
+func inputBytes(x *nn.Tensor) []byte {
+	mean := [3]float32{0.485, 0.456, 0.406}
+	std := [3]float32{0.229, 0.224, 0.225}
+	n := x.Dim(1) * x.Dim(2)
+	out := make([]byte, 3*n)
+	for c := range 3 {
+		for i, v := range x.Data[c*n : (c+1)*n] {
+			out[c*n+i] = byte(math.Round(float64(min(max(v*std[c]+mean[c], 0), 1)) * 255))
+		}
+	}
+	return out
+}
+
+func writeWindow(clip string, k int, frames [][]byte, h, w int) error {
+	f, err := os.Create(filepath.Join(samplesDir, strings.ReplaceAll(fmt.Sprintf("%s-%06d.bhw", clip, k), "/", "_"))) //nolint:gosec // the operator's directory
+	if err != nil {
+		return err
+	}
+	b := bufio.NewWriterSize(f, 1<<20)
+	_, _ = b.WriteString("BHW1")
+	_ = binary.Write(b, binary.LittleEndian, []uint32{uint32(len(frames)), uint32(h), uint32(w)}) //nolint:gosec // small counts
+	for _, fr := range frames {
+		_, _ = b.Write(fr)
+	}
+	return errors.Join(b.Flush(), f.Close())
+}
+
 // tailInput is a depth.TailInput on the CPU.
 type tailInput struct {
 	t    [3]*nn.Tensor
