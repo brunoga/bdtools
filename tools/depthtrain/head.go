@@ -85,6 +85,14 @@ func (ws *windowSample) input(i int) *nn.Tensor {
 // learnSets are -learn's: the layers learnt.
 var learnSets = map[string]func(all map[string]*nn.Tensor) []string{
 	"tail": func(all map[string]*nn.Tensor) []string { return expand(all, depth.TailNames) },
+	"fusion3": func(all map[string]*nn.Tensor) []string {
+		layers := append(slices.Clone(depth.TailNames),
+			"head.projects.2", "head.scratch.layer3_rn",
+			"head.scratch.refinenet3.resConfUnit1.conv1", "head.scratch.refinenet3.resConfUnit1.conv2",
+			"head.scratch.refinenet3.resConfUnit2.conv1", "head.scratch.refinenet3.resConfUnit2.conv2",
+			"head.scratch.refinenet3.out_conv")
+		return expand(all, layers)
+	},
 	"fusion": func(all map[string]*nn.Tensor) []string {
 		layers := append(slices.Clone(depth.TailNames),
 			"head.projects.2", "head.scratch.layer3_rn",
@@ -173,7 +181,7 @@ func (md headMode) step(g *nn.GPU, it item, train bool, fixed *[2]float64) (floa
 func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch, half bool) {
 	set, ok := learnSets[learn]
 	if !ok {
-		fail(fmt.Errorf("-learn %q: tail, fusion or head", learn))
+		fail(fmt.Errorf("-learn %q: tail, fusion3, fusion or head", learn))
 	}
 	g, err := nn.NewGPU()
 	if err != nil {

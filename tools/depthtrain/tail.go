@@ -121,6 +121,7 @@ func readTail(path string) (*tailSample, error) {
 // the optimiser's state, in the whole checkpoint.
 type headModel struct {
 	w, gw map[string]*nn.Tensor
+	w0    map[string]*nn.Tensor // the weights as the checkpoint had them (-anchor)
 	m, v  map[string][]float32
 	t     int
 	names []string
@@ -134,13 +135,14 @@ func newHeadModel(ckpt string, names []string) (*headModel, error) {
 	if err != nil {
 		return nil, err
 	}
-	hm := &headModel{w: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, learn: map[string]bool{}, all: all}
+	hm := &headModel{w: map[string]*nn.Tensor{}, w0: map[string]*nn.Tensor{}, gw: map[string]*nn.Tensor{}, m: map[string][]float32{}, v: map[string][]float32{}, learn: map[string]bool{}, all: all}
 	for _, n := range names {
 		t, ok := all[n]
 		if !ok {
 			return nil, fmt.Errorf("%s: no weight %s", ckpt, n)
 		}
 		hm.w[n] = t.Clone()
+		hm.w0[n] = t
 		hm.all[n] = hm.w[n]
 		hm.learn[n] = true
 		hm.names = append(hm.names, n)
@@ -232,7 +234,8 @@ func (hm *headModel) finish(g *nn.GPU, tp *nn.Tape, d *nn.Tensor, s *sample, tra
 // loss is a sample's loss given the depth out (at the sample's size)
 // and, when train, its gradient at out: the fit error (the sample's own
 // fit, or fixed's) plus the moments' term, (mean - mean0)^2 + (sd -
-// sd0)^2 over sd0^2, the network's own depth's.
+// sd0)^2 over sd0^2, the network's own depth's, and the keep term where
+// the disc is unsure.
 func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float64) (gc *nn.Tensor, loss float64, ok bool) {
 	if fixed != nil {
 		gc, loss, ok = lossGradFixed(s, out, fixed[0], fixed[1], s.h, s.w)
@@ -247,8 +250,34 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	m1, s1 := moments(out)
 	n := float64(len(out))
 	loss += tailMoments * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
+	var kg []float32
+	var nk int
+	if keep > 0 {
+		// where the disc is unsure, the robust residual to the network's
+		// own depth as recorded, in units of its deviation
+		kg = make([]float32, len(out))
+		var kl float64
+		for i, v := range out {
+			if !math.IsNaN(float64(s.disp[i])) || math.IsNaN(float64(s.depth[i])) {
+				continue
+			}
+			r := (float64(v) - float64(s.depth[i])) / s0
+			q := math.Sqrt(r*r + 1)
+			kl += q - 1
+			kg[i] = float32(r / q / s0)
+			nk++
+		}
+		if nk > 0 {
+			loss += keep * kl / float64(nk)
+		}
+	}
 	if !train {
 		return nil, loss, true
+	}
+	if nk > 0 {
+		for i := range out {
+			gc.Data[i] += float32(keep/float64(nk)) * kg[i]
+		}
 	}
 	for i, v := range out {
 		dm := 2 * (m1 - m0) / n
@@ -353,6 +382,18 @@ func moments(v []float32) (mean, sd float64) {
 }
 
 // update is Adam's step on the gradients times scale, which it then zeroes.
+// keep is -keep: the weight of holding the depth, where the disc is
+// unsure (a reflection, glass, the sky), to the network's own as it was
+// recorded, so that the discs' silence there does not free the network
+// to read those regions anew.
+var keep float64
+
+// anchor is -anchor: how hard each update pulls the weights back towards
+// the checkpoint's, as a multiple of the learning rate (decoupled, like
+// weight decay, but to the weights as they were rather than to zero), so
+// that where the discs say nothing the network stays as it was.
+var anchor float64
+
 func (hm *headModel) update(lr float64, scale float32) {
 	const b1, b2, eps = 0.9, 0.999, 1e-8
 	hm.t++
@@ -363,12 +404,14 @@ func (hm *headModel) update(lr float64, scale float32) {
 		if g == nil {
 			continue
 		}
-		p, mv, vv := hm.w[n].Data, hm.m[n], hm.v[n]
+		p, p0, mv, vv := hm.w[n].Data, hm.w0[n].Data, hm.m[n], hm.v[n]
+		pull := float32(lr * anchor)
 		for i := range p {
 			gi := g.Data[i] * scale
 			mv[i] = b1*mv[i] + (1-b1)*gi
 			vv[i] = b2*vv[i] + (1-b2)*gi*gi
 			p[i] -= float32(lr * (float64(mv[i]) / c1) / (math.Sqrt(float64(vv[i])/c2) + eps))
+			p[i] -= pull * (p[i] - p0[i])
 		}
 		clear(g.Data)
 	}
