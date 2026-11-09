@@ -7,6 +7,9 @@ Blu-ray 3D a disc player plays. As with everything else here, in Go: the
 depth network, the view synthesis and the encoders, with the GPU driven from
 Go as NVENC already is.
 
+Ideas for what the conversion could still take from a 2D film, written up
+to be picked one by one, are in [2d-to-3d-ideas.md](2d-to-3d-ideas.md).
+
 ## Can a conversion look like a 3D film?
 
 Two kinds of conversion are on the market, and they are not alike.
