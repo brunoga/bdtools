@@ -228,6 +228,19 @@ are noisy but a shot has hundreds of frames to agree on one focal length.
 **Cost.** Medium. Step 1 is analysis with an offline Python model. Step 2
 depends on whether we port a metric head or only a face-size estimator.
 
+**First step done (2026-11-10, Depth Pro on the 5,165 training
+pictures, `tools/shapeprobe`).** With the disc's disparity fitted as
+interaxial times focal length over Depth Pro's metric distance, plus a
+convergence, the mapping is no more consistent across shots than with
+our relative depth: one mapping for all leaves 8.33 px (ours 7.01), one
+a film 7.58 (ours 6.07), one a stretch 3.85 (ours 3.36). The fitted
+interaxial varies wildly between stretches (mean 29 mm, deviation 31 mm)
+and the convergence too (deviation 15 px), so the per-shot variation of
+the mapping is not the network's own scale ambiguity that a metric
+depth would remove; it is the stereographer's choice, or beyond what a
+single-frame metric model can tell on film frames (animation, effects,
+anamorphic lenses). A metric scale is not the lever for the mapping.
+
 **Risks.** Metric models are trained mostly on real photographs and fail
 on effects shots, animation and miniatures, which are common in 3D
 titles. Animation needs its own scale rule (the disc's own convention), so
@@ -363,6 +376,15 @@ about, which the stereographer converges on.
    discs; bench depth correlation and pixel error.
 
 **Cost.** Low for step 1, medium for step 2.
+
+**First step done (2026-11-10, `tools/shapeprobe`).** The depth where the
+picture is sharpest (weighted by the luma's local contrast) anchored to
+one fitted disparity, with the global scale: 7.26 px against one shape
+for all's 7.01. The best of the anchoring rules (the farthest 7.48, the
+median 7.91, the nearest 8.86), but still worse than a constant, so the
+focused subject is not where the stereographer puts the screen, or not
+consistently enough to use. Step 2 (the blur map as an input to the head)
+is untried.
 
 **Risks.** Deep-focus films and animation have no defocus; the feature is
 simply absent there. Compression softens fine detail and confuses
