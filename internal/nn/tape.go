@@ -225,6 +225,114 @@ func (tp *Tape) Add(a, b *Tensor) *Tensor {
 	return y
 }
 
+// Attention is the GPU's, recorded.
+func (tp *Tape) Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
+	y := tp.GPU.Attention(q, k, v, heads, scale)
+	if tp.rec(y, q, k, v) {
+		tp.back = append(tp.back, func() {
+			if dy := tp.Grad(y); dy != nil {
+				dq, dk, dv := tp.AttentionBackward(q, k, v, heads, scale, dy)
+				tp.add(q, dq)
+				tp.add(k, dk)
+				tp.add(v, dv)
+			}
+		})
+	}
+	return y
+}
+
+// GELU is the GPU's on a copy of x: x stays as it was.
+func (tp *Tape) GELU(x *Tensor) *Tensor {
+	y := tp.GPU.GELU(tp.GPU.Clone(x))
+	if tp.rec(y, x) {
+		tp.back = append(tp.back, func() {
+			if dy := tp.Grad(y); dy != nil {
+				tp.add(x, tp.GELUBackward(x, dy))
+			}
+		})
+	}
+	return y
+}
+
+// AddScaled is the GPU's on a copy of x: x + y s, x as it was.
+func (tp *Tape) AddScaled(x, y, s *Tensor) *Tensor {
+	out := tp.GPU.AddScaled(tp.GPU.Clone(x), y, s)
+	if tp.rec(out, x, y, s) {
+		tp.back = append(tp.back, func() {
+			if dy := tp.Grad(out); dy != nil {
+				tp.add(x, tp.GPU.Clone(dy))
+				dyIn, ds := tp.AddScaledBackward(y, s, dy)
+				tp.add(y, dyIn)
+				tp.addParam(s, ds)
+			}
+		})
+	}
+	return out
+}
+
+// Split3 is the GPU's, recorded.
+func (tp *Tape) Split3(x *Tensor) (q, k, v *Tensor) {
+	q, k, v = tp.GPU.Split3(x)
+	if tp.needs[x.dev] {
+		tp.needs[q.dev], tp.needs[k.dev], tp.needs[v.dev] = true, true, true
+		tp.back = append(tp.back, func() {
+			dq, dk, dv := tp.Grad(q), tp.Grad(k), tp.Grad(v)
+			if dq == nil && dk == nil && dv == nil {
+				return
+			}
+			zero := func(t *Tensor) *Tensor {
+				if t != nil {
+					return t
+				}
+				return tp.Upload(New(q.Shape...))
+			}
+			dq, dk, dv = zero(dq), zero(dk), zero(dv)
+			dx := tp.tensor(x.Shape...)
+			n, d := q.Dim(0), q.Dim(1)
+			gr, bl := each(n * d)
+			tp.launch("join3", gr, bl, 0, int64(n*d), d, ptr(dq), ptr(dk), ptr(dv), ptr(dx))
+			tp.add(x, dx)
+		})
+	}
+	return q, k, v
+}
+
+// Rows is the GPU's view, recorded: the gradient at the view lands in
+// the rows from on of the gradient at x.
+func (tp *Tape) Rows(x *Tensor, from int) *Tensor {
+	y := tp.GPU.Rows(x, from)
+	if tp.needs[x.dev] {
+		tp.needs[y.dev] = true
+		tp.back = append(tp.back, func() {
+			dy := tp.Grad(y)
+			if dy == nil {
+				return
+			}
+			gx := tp.grad[x.dev]
+			if gx == nil {
+				gx = tp.Upload(New(x.Shape...))
+				tp.grad[x.dev] = gx
+			}
+			tp.GPU.Add(tp.GPU.Rows(gx, from), dy)
+		})
+	}
+	return y
+}
+
+// Tokens is the GPU's, recorded for the patches (the class token and
+// the position embedding get no gradient: they are not learnt).
+func (tp *Tape) Tokens(patches, cls, pos *Tensor) *Tensor {
+	y := tp.GPU.Tokens(patches, cls, pos)
+	if tp.rec(y, patches) {
+		tp.back = append(tp.back, func() {
+			if dy := tp.Grad(y); dy != nil {
+				tp.add(patches, tp.GPU.Transpose(tp.GPU.Rows(dy, 1)))
+			}
+		})
+	}
+	return y
+}
+
 // Clone is the GPU's, recorded.
 func (tp *Tape) Clone(x *Tensor) *Tensor {
 	y := tp.GPU.Clone(x)

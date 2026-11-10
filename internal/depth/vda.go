@@ -9,7 +9,6 @@ package depth
 import (
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/brunoga/bdtools/internal/nn"
 )
@@ -75,8 +74,7 @@ func Load(file string) (*Model, error) {
 // in them: every DINOv2's are 64 channels each (the small model's 384 in
 // 6), a model narrower than 64's 12 (the tests').
 func New(w map[string]*nn.Tensor) (*Model, error) {
-	cls, ok := w["pretrained.cls_token"]
-	if !ok {
+	if _, ok := w["pretrained.cls_token"]; !ok {
 		return nil, errors.New("depth: not a Video Depth Anything checkpoint (no pretrained.cls_token)")
 	}
 	for _, k := range []string{"pretrained.pos_embed", "pretrained.patch_embed.proj.weight", "head.scratch.output_conv2.2.weight"} {
@@ -84,24 +82,36 @@ func New(w map[string]*nn.Tensor) (*Model, error) {
 			return nil, fmt.Errorf("depth: the checkpoint has no %s", k)
 		}
 	}
-	dim := cls.Dim(-1)
+	blocks, heads, dim, err := arch(w)
+	if err != nil {
+		return nil, err
+	}
+	m := &Model{w: w, heads: heads, dim: dim, blocks: blocks}
+	m.Use(nn.CPU)
+	return m, nil
+}
+
+// arch is the encoder's depth, heads and width from its weights.
+func arch(w map[string]*nn.Tensor) (blocks, heads, dim int, err error) {
+	cls := w["pretrained.cls_token"]
+	if cls == nil {
+		return 0, 0, 0, fmt.Errorf("depth: no class token")
+	}
+	dim = cls.Dim(-1)
 	hd := 64
 	if dim < 64 {
 		hd = 12
 	}
 	if dim%hd != 0 {
-		return nil, fmt.Errorf("depth: an encoder %d wide is not in heads of %d", dim, hd)
+		return 0, 0, 0, fmt.Errorf("depth: an encoder %d wide is not in heads of %d", dim, hd)
 	}
-	blocks := 0
 	for w[fmt.Sprintf("pretrained.blocks.%d.norm1.weight", blocks)] != nil {
 		blocks++
 	}
 	if _, ok := intermediate[blocks]; !ok {
-		return nil, fmt.Errorf("depth: an encoder of %d blocks (Small's 12 and Large's 24 are known)", blocks)
+		return 0, 0, 0, fmt.Errorf("depth: an encoder of %d blocks (Small's 12 and Large's 24 are known)", blocks)
 	}
-	m := &Model{w: w, heads: dim / hd, dim: dim, blocks: blocks}
-	m.Use(nn.CPU)
-	return m, nil
+	return blocks, dim / hd, dim, nil
 }
 
 // Size is the model's: "small", "base" or "large" (by its encoder's
@@ -271,62 +281,23 @@ func (m *Model) posEmbed(ph, pw int) *nn.Tensor {
 	if p, ok := m.pos[[2]int{ph, pw}]; ok {
 		return p
 	}
-	pe := m.w["pretrained.pos_embed"]
-	n := pe.Dim(1) - 1
-	side := int(math.Round(math.Sqrt(float64(n))))
-	d := m.dim
-	grid := nn.New(d, side, side) // [D, 37, 37], channels first
-	for i := range n {
-		for c := range d {
-			grid.Data[c*n+i] = pe.Data[(1+i)*d+c]
-		}
-	}
-	r := nn.BicubicScale(grid, (float64(ph)+0.1)/float64(side), (float64(pw)+0.1)/float64(side))
-	out := nn.New(1+ph*pw, d)
-	copy(out.Data[:d], pe.Data[:d])
-	for i := range ph * pw {
-		for c := range d {
-			out.Data[(1+i)*d+c] = r.Data[c*ph*pw+i]
-		}
-	}
-	d2 := m.be.Upload(out)
+	d2 := m.be.Upload(positionEmbedding(m.w["pretrained.pos_embed"], ph, pw))
 	m.be.Keep(d2)
 	m.pos[[2]int{ph, pw}] = d2
 	return d2
 }
 
-// encode runs DINOv2: the patch tokens of the intermediate blocks'
-// outputs, normed ([ph pw, D] each).
-func (m *Model) encode(x *nn.Tensor, ph, pw int) [4]*nn.Tensor {
-	d, be := m.dim, m.be
-	p := be.Conv2d(x, m.t("pretrained.patch_embed.proj.weight"), m.t("pretrained.patch_embed.proj.bias"), patch, 0)
-	tok := be.Tokens(p.Reshape(d, ph*pw), m.t("pretrained.cls_token"), m.posEmbed(ph, pw))
-	var out [4]*nn.Tensor
-	k := 0
-	hd := d / m.heads
-	at := intermediate[m.blocks]
-	for b := range m.blocks {
-		pre := fmt.Sprintf("pretrained.blocks.%d.", b)
-		// x + ls1 * attn(norm1(x))
-		h := be.LayerNorm(tok, m.t(pre+"norm1.weight"), m.t(pre+"norm1.bias"), 1e-6)
-		qkv := be.Linear(h, m.t(pre+"attn.qkv.weight"), m.opt(pre+"attn.qkv.bias"))
-		q, kk, v := be.Split3(qkv)
-		a := be.Attention(q, kk, v, m.heads, float32(1/math.Sqrt(float64(hd))))
-		a = be.Linear(a, m.t(pre+"attn.proj.weight"), m.opt(pre+"attn.proj.bias"))
-		be.AddScaled(tok, a, m.t(pre+"ls1.gamma"))
-		// x + ls2 * mlp(norm2(x))
-		h = be.LayerNorm(tok, m.t(pre+"norm2.weight"), m.t(pre+"norm2.bias"), 1e-6)
-		h = be.GELU(be.Linear(h, m.t(pre+"mlp.fc1.weight"), m.opt(pre+"mlp.fc1.bias")))
-		h = be.Linear(h, m.t(pre+"mlp.fc2.weight"), m.opt(pre+"mlp.fc2.bias"))
-		be.AddScaled(tok, h, m.t(pre+"ls2.gamma"))
-		if k < 4 && b == at[k] {
-			n := be.LayerNorm(tok, m.t("pretrained.norm.weight"), m.t("pretrained.norm.bias"), 1e-6)
-			out[k] = be.Rows(n, 1)
-			k++
-		}
-	}
-	return out
+// encode runs DINOv2 (Encoder) on the backend.
+func (m *Model) encode(x *nn.Tensor, _, _ int) [4]*nn.Tensor {
+	return Encoder(m.be, m, x)
 }
+
+// Pos is the encoder's position embedding for a grid of patches, the
+// backend's (Params).
+func (m *Model) Pos(ph, pw int) *nn.Tensor { return m.posEmbed(ph, pw) }
+
+// Arch is the encoder's depth, heads and width (Params).
+func (m *Model) Arch() (blocks, heads, dim int) { return m.blocks, m.heads, m.dim }
 
 // Encode runs the encoder on a frame x ([3, H, W], the backend's): its
 // features for the head ([ph pw, C] each, the backend's; see Head).

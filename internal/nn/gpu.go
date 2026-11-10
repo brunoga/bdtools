@@ -69,6 +69,7 @@ func NewGPU() (*GPU, error) {
 		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp",
 		"im2col", "col2im", "rowsum", "relu_back", "convt_bx", "convt_bw", "sumparts", "fill", "bilinear_back",
 		"layernorm_back", "groupnorm_back", "geglu_back", "temporal_back", "temporal_pe_back",
+		"gelu_back", "softmax_back", "mul", "mulcols", "join3",
 		"sgm_half", "sgm_census", "sgm_cost", "sgm_rows", "sgm_down", "sgm_pick", "sgm_valid",
 		"scale_h", "scale_v", "tonemap"} {
 		if g.k[name], err = m.Kernel(name); err != nil {

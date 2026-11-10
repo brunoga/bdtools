@@ -136,3 +136,29 @@ func TestTemporalAttentionBackward(t *testing.T) {
 	checkGrad(t, "k2", ks[2], dks[2], loss, r)
 	checkGrad(t, "v1", vs[1], dvs[1], loss, r)
 }
+
+func TestGELUBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(31, 32))
+	x, dy := randTensor(r, 7, 9), randTensor(r, 7, 9)
+	loss := func() float64 { return dotT(GELU(x.Clone()), dy) }
+	checkGrad(t, "gelu dx", x, GELUBackward(x, dy), loss, r)
+}
+
+func TestAddScaledBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(33, 34))
+	x, y, s, dy := randTensor(r, 6, 8), randTensor(r, 6, 8), randTensor(r, 8), randTensor(r, 6, 8)
+	loss := func() float64 { return dotT(CPU.AddScaled(x.Clone(), y, s), dy) }
+	dyIn, ds := AddScaledBackward(y, s, dy)
+	checkGrad(t, "addscaled dy", y, dyIn, loss, r)
+	checkGrad(t, "addscaled ds", s, ds, loss, r)
+}
+
+func TestAttentionBackward(t *testing.T) {
+	r := rand.New(rand.NewPCG(35, 36))
+	q, k, v, dy := randTensor(r, 9, 8), randTensor(r, 11, 8), randTensor(r, 11, 8), randTensor(r, 9, 8)
+	loss := func() float64 { return dotT(Attention(q, k, v, 2, 0.6), dy) }
+	dq, dk, dv := AttentionBackward(q, k, v, 2, 0.6, dy)
+	checkGrad(t, "attention dq", q, dq, loss, r)
+	checkGrad(t, "attention dk", k, dk, loss, r)
+	checkGrad(t, "attention dv", v, dv, loss, r)
+}
