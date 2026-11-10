@@ -44,8 +44,9 @@ func main() {
 	useGPU := flag.Bool("gpu", true, "train on the GPU when there is one")
 	tailFrom := flag.String("tail", "", "learn the depth network's tail instead, from this checkpoint (.pth), on the GPU: the samples need their tail inputs (.bht)")
 	fitBy := flag.String("fit", "picture", "with -tail or -head: the depth fitted to the disc's disparity a picture at a time, a stretch (the pictures of one recorded window together: the depth's scale then has to hold across them), or fixed (no fit: the depth mapped as the converter maps it, -scale and -offset, so that the network learns to put it where the mapping expects it)")
-	mapScale := flag.Float64("scale", stereo.TunedShape.Scale, "with -fit fixed, the mapping's scale (stereo.Shape's)")
+	mapScale := flag.Float64("scale", stereo.TunedShape.Scale, "with -fit fixed or -map, the mapping's scale (stereo.Shape's)")
 	mapOffset := flag.Float64("offset", stereo.TunedShape.Offset, "with -fit fixed, the mapping's offset (stereo.Shape's)")
+	flag.Float64Var(&mapWeight, "map", 0, "with -fit picture or stretch, add the mapping's residual (-scale, -offset) to the fit's at this weight, so that the depth keeps to where the mapping expects it (0: not at all)")
 	retuneBy := flag.String("retune", "", "write the -train samples into -out (a directory) with the depth these tail weights (-tail's) give, on the GPU")
 	headFrom := flag.String("head", "", "learn a set of the depth network's head's weights (-learn) instead, from this checkpoint (.pth), on the GPU: the samples need their windows (.bhw, stereobench -samples -window)")
 	learn := flag.String("learn", "head", "with -head, the weights learnt: tail (depth.TailNames), fusion3 (the tail and the third fusion block with its projection), fusion (the tail and the fusion path to the coarsest features), head (the whole head, its temporal modules too) or blocksN (the whole head and the encoder's last N blocks)")
@@ -54,10 +55,14 @@ func main() {
 	flag.Float64Var(&anchor, "anchor", 0, "with -tail or -head, pull the weights back towards the checkpoint's by this multiple of the learning rate each step (0: not at all)")
 	half := flag.Bool("half", false, "with -head, the matrix products' inputs in half precision (the tensor cores): faster, the gradients still single")
 	flag.Parse()
+	if mapWeight > 0 {
+		mapping = &[2]float64{*mapScale, *mapOffset}
+	}
 	switch *fitBy {
 	case "picture", "stretch":
 	case "fixed":
 		mapping = &[2]float64{*mapScale, *mapOffset}
+		fixedFit = true
 	default:
 		fail(fmt.Errorf("-fit %q: picture, stretch or fixed", *fitBy))
 	}
