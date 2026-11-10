@@ -153,6 +153,91 @@ func ReLUBackward(y, dy *Tensor) *Tensor {
 	return dy
 }
 
+// GELUBackward is the gradient of GELU at its input x given dy.
+func GELUBackward(x, dy *Tensor) *Tensor {
+	dx := New(x.Shape...)
+	for i, v := range x.Data {
+		f := float64(v)
+		cdf := 0.5 * (1 + math.Erf(f/math.Sqrt2))
+		pdf := math.Exp(-0.5*f*f) / math.Sqrt(2*math.Pi)
+		dx.Data[i] = float32(float64(dy.Data[i]) * (cdf + f*pdf))
+	}
+	return dx
+}
+
+// AddScaledBackward is the gradients of AddScaled(x, y, s) = x + y s (s a
+// channel's) given dy: at y and at s (at x it is dy itself).
+func AddScaledBackward(y, s, dy *Tensor) (dyIn, ds *Tensor) {
+	d := y.Dim(-1)
+	dyIn, ds = New(y.Shape...), New(d)
+	acc := make([]float64, d)
+	for i, v := range y.Data {
+		dyIn.Data[i] = dy.Data[i] * s.Data[i%d]
+		acc[i%d] += float64(dy.Data[i]) * float64(v)
+	}
+	for c, v := range acc {
+		ds.Data[c] = float32(v)
+	}
+	return dyIn, ds
+}
+
+// AttentionBackward is the gradients of Attention(q, k, v, heads, scale)
+// given dy: at q, at k and at v.
+func AttentionBackward(q, k, v *Tensor, heads int, scale float32, dy *Tensor) (dq, dk, dv *Tensor) {
+	nq, nk, d := q.Dim(0), k.Dim(0), q.Dim(1)
+	hd := d / heads
+	dq, dk, dv = New(nq, d), New(nk, d), New(nk, d)
+	dqa, dka, dva := make([]float64, nq*d), make([]float64, nk*d), make([]float64, nk*d)
+	p, dp := make([]float64, nk), make([]float64, nk)
+	for h := range heads {
+		o := h * hd
+		for i := range nq {
+			m := math.Inf(-1)
+			for j := range nk {
+				var s float64
+				for c := range hd {
+					s += float64(q.Data[i*d+o+c]) * float64(k.Data[j*d+o+c])
+				}
+				p[j] = s * float64(scale)
+				m = max(m, p[j])
+			}
+			var sum float64
+			for j := range nk {
+				p[j] = math.Exp(p[j] - m)
+				sum += p[j]
+			}
+			var dot float64
+			for j := range nk {
+				p[j] /= sum
+				var s float64
+				for c := range hd {
+					s += float64(dy.Data[i*d+o+c]) * float64(v.Data[j*d+o+c])
+				}
+				dp[j] = s
+				dot += p[j] * s
+			}
+			for j := range nk {
+				g := p[j] * (dp[j] - dot) * float64(scale)
+				for c := range hd {
+					dva[j*d+o+c] += p[j] * float64(dy.Data[i*d+o+c])
+					dqa[i*d+o+c] += g * float64(k.Data[j*d+o+c])
+					dka[j*d+o+c] += g * float64(q.Data[i*d+o+c])
+				}
+			}
+		}
+	}
+	for i, x := range dqa {
+		dq.Data[i] = float32(x)
+	}
+	for i, x := range dka {
+		dk.Data[i] = float32(x)
+	}
+	for i, x := range dva {
+		dv.Data[i] = float32(x)
+	}
+	return dq, dk, dv
+}
+
 // LinearBackward is the gradients of Linear(x, w, b) given dy, the
 // gradient at its output: at x (x's shape), at w and at b.
 func LinearBackward(x, w, dy *Tensor) (dx, dw, db *Tensor) {

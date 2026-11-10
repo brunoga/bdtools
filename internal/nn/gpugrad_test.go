@@ -149,3 +149,48 @@ func TestGPUHeadGradients(t *testing.T) {
 		g.Release()
 	}
 }
+
+// TestGPUEncoderGradients checks the encoder's backward passes on the
+// GPU against the CPU's.
+func TestGPUEncoderGradients(t *testing.T) {
+	g, err := NewGPU()
+	if errors.Is(err, cuda.ErrUnavailable) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	r := rand.New(rand.NewPCG(7, 8))
+	near := func(name string, got, want *Tensor) {
+		t.Helper()
+		d, err := g.Download(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var worst, scale float64
+		for i, v := range want.Data {
+			worst = max(worst, math.Abs(float64(d.Data[i]-v)))
+			scale = max(scale, math.Abs(float64(v)))
+		}
+		if worst > 2e-4*max(scale, 1) {
+			t.Errorf("%s: %g off (largest %g)", name, worst, scale)
+		}
+	}
+	x, dy := randTensor(r, 300, 96), randTensor(r, 300, 96)
+	near("gelu dx", g.GELUBackward(g.Upload(x), g.Upload(dy)), GELUBackward(x, dy))
+	y, s := randTensor(r, 300, 96), randTensor(r, 96)
+	dyIn, ds := AddScaledBackward(y, s, dy)
+	gy, gs := g.AddScaledBackward(g.Upload(y), g.Upload(s), g.Upload(dy))
+	near("addscaled dy", gy, dyIn)
+	near("addscaled ds", gs, ds)
+	// attention with heads of 64 channels, as the encoder's, and of 8
+	for _, c := range []struct{ nq, nk, d, heads int }{{37, 50, 128, 2}, {200, 200, 24, 3}} {
+		q, k, v, dy := randTensor(r, c.nq, c.d), randTensor(r, c.nk, c.d), randTensor(r, c.nk, c.d), randTensor(r, c.nq, c.d)
+		dq, dk, dv := AttentionBackward(q, k, v, c.heads, 0.3, dy)
+		gq, gk, gv := g.AttentionBackward(g.Upload(q), g.Upload(k), g.Upload(v), c.heads, 0.3, g.Upload(dy))
+		near("attention dq", gq, dq)
+		near("attention dk", gk, dk)
+		near("attention dv", gv, dv)
+	}
+}

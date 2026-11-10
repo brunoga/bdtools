@@ -1409,6 +1409,51 @@ extern "C" __global__ void groupnorm_back(int cg, long long per, const float *x,
 }
 
 // geglu_back: geglu's gradient at its input x [n, 2d] given dout [n, d].
+// gelu_back: dx = dy gelu'(x).
+extern "C" __global__ void gelu_back(long long n, const float *x, const float *dy, float *dx) {
+	EACH(n) {
+		float v = x[i];
+		float cdf = 0.5f * (1.f + erff(v * GELU_K));
+		float pdf = 0.3989422804f * __expf(-0.5f * v * v);
+		dx[i] = dy[i] * (cdf + v * pdf);
+	}
+}
+
+// softmax_back: a row of probabilities p (softmax of scale times the
+// scores) and the gradient dp at them: dp <- scale p (dp - sum p dp), the
+// gradient at the scores. A block a row.
+extern "C" __global__ void softmax_back(int n, const float *p, float *dp, float scale) {
+	__shared__ float sh[32];
+	const float *pr = p + (long long)blockIdx.x * n;
+	float *dr = dp + (long long)blockIdx.x * n;
+	float s = 0;
+	for (int i = threadIdx.x; i < n; i += blockDim.x) s += pr[i] * dr[i];
+	s = blockSum(s, sh);
+	for (int i = threadIdx.x; i < n; i += blockDim.x) dr[i] = scale * pr[i] * (dr[i] - s);
+}
+
+// mul: a *= b.
+extern "C" __global__ void mul(long long n, float *a, const float *b) {
+	EACH(n) a[i] *= b[i];
+}
+
+// mulcols: x *= s per channel of d.
+extern "C" __global__ void mulcols(long long n, int d, float *x, const float *s) {
+	EACH(n) x[i] *= s[i % d];
+}
+
+// join3: split3's inverse: x [n, 3d] from q, k and v [n, d].
+extern "C" __global__ void join3(long long n, int d, const float *q, const float *k, const float *v, float *x) {
+	EACH(n) {
+		long long r = i / d;
+		int c = i % d;
+		float *row = x + r * 3 * d;
+		row[c] = q[i];
+		row[d + c] = k[i];
+		row[2 * d + c] = v[i];
+	}
+}
+
 extern "C" __global__ void geglu_back(long long n, int d, const float *x, const float *dout, float *dx) {
 	EACH(n) {
 		long long r = i / d;

@@ -169,6 +169,67 @@ func (g *GPU) GEGLUBackward(x, dy *Tensor) *Tensor {
 	return dx
 }
 
+// GELUBackward is the gradient of GELU at its input x given dy.
+func (g *GPU) GELUBackward(x, dy *Tensor) *Tensor {
+	n := Numel(x.Shape)
+	dx := g.tensor(x.Shape...)
+	gr, bl := each(n)
+	g.launch("gelu_back", gr, bl, 0, int64(n), ptr(x), ptr(dy), ptr(dx))
+	return dx
+}
+
+// AddScaledBackward is the gradients of AddScaled(x, y, s) = x + y s (s a
+// channel's) given dy: at y and at s (at x it is dy itself).
+func (g *GPU) AddScaledBackward(y, s, dy *Tensor) (dyIn, ds *Tensor) {
+	n, d := Numel(y.Shape), y.Dim(-1)
+	gr, bl := each(n)
+	dyIn = g.Clone(dy)
+	g.launch("mulcols", gr, bl, 0, int64(n), d, ptr(dyIn), ptr(s))
+	prod := g.Clone(dy)
+	g.launch("mul", gr, bl, 0, int64(n), ptr(prod), ptr(y))
+	ds = g.colsum(prod, n/d, d)
+	return dyIn, ds
+}
+
+// gemm32b is gemm32 in batches, each operand its stride apart.
+func (g *GPU) gemm32b(kernel string, m, n, k int, a uintptr, lda, sa int, b uintptr, ldb, sb int, c uintptr, ldc, sc, batch int) {
+	grid, block := cuda.Dim{X: (n + 127) / 128, Y: (m + 127) / 128, Z: batch}, cuda.Dim{X: 256}
+	g.launch(kernel, grid, block, 0, m, n, k, a, lda, int64(sa), b, ldb, int64(sb), c, ldc, int64(sc), float32(1), uintptr(0), 0)
+}
+
+// transposeEach transposes each of x's batch matrices [r, c].
+func (g *GPU) transposeEach(x *Tensor, batch, r, c int) *Tensor {
+	y := g.tensor(batch, c, r)
+	for b := range batch {
+		off := uintptr(4 * b * r * c)
+		g.launch("transpose", cuda.Dim{X: (c + 31) / 32, Y: (r + 31) / 32}, cuda.Dim{X: 32, Y: 8}, 0, r, c, ptr(x)+off, ptr(y)+off)
+	}
+	return y
+}
+
+// AttentionBackward is the gradients of Attention(q, k, v, heads, scale)
+// given dy: at q, at k and at v. The scores are made again (never kept
+// by the forward pass).
+func (g *GPU) AttentionBackward(q, k, v *Tensor, heads int, scale float32, dy *Tensor) (dq, dk, dv *Tensor) {
+	nq, nk, d := q.Dim(0), k.Dim(0), q.Dim(1)
+	hd := d / heads
+	p := g.tensor(heads, nq, nk)
+	g.gemm32b("gemm_nt", nq, nk, hd, ptr(q), d, hd, ptr(k), d, hd, ptr(p), nk, nq*nk, heads)
+	g.launch("softmax", cuda.Dim{X: heads * nq}, cuda.Dim{X: 256}, 0, nk, ptr(p), scale)
+	dp := g.tensor(heads, nq, nk)
+	g.gemm32b("gemm_nt", nq, nk, hd, ptr(dy), d, hd, ptr(v), d, hd, ptr(dp), nk, nq*nk, heads)
+	pt := g.transposeEach(p, heads, nq, nk)
+	dv = g.tensor(nk, d)
+	g.gemm32b("gemm_nn", nk, hd, nq, ptr(pt), nq, nk*nq, ptr(dy), d, hd, ptr(dv), d, hd, heads)
+	g.launch("softmax_back", cuda.Dim{X: heads * nq}, cuda.Dim{X: 256}, 0, nk, ptr(p), ptr(dp), scale)
+	dq = g.tensor(nq, d)
+	g.gemm32b("gemm_nn", nq, hd, nk, ptr(dp), nk, nq*nk, ptr(k), d, hd, ptr(dq), d, hd, heads)
+	dst := g.transposeEach(dp, heads, nq, nk)
+	dk = g.tensor(nk, d)
+	g.gemm32b("gemm_nn", nk, hd, nq, ptr(dst), nq, nk*nq, ptr(q), d, hd, ptr(dk), d, hd, heads)
+	return dq, dk, dv
+}
+
 // TemporalAttentionBackward is the gradients of TemporalAttention(q, peQ,
 // peK, peV, ks, vs, heads, scale) given dy: at q and peQ, at peK and peV,
 // and at the keys and values of the frames want says (nil for the others).

@@ -29,17 +29,88 @@ type Ops interface {
 	Bilinear(x *nn.Tensor, oh, ow int) *nn.Tensor
 	Transpose(x *nn.Tensor) *nn.Tensor
 	TemporalAttention(q, peQ, peK, peV *nn.Tensor, ks, vs []*nn.Tensor, heads int, scale float32) *nn.Tensor
+	// the encoder's
+	Attention(q, k, v *nn.Tensor, heads int, scale float32) *nn.Tensor
+	GELU(x *nn.Tensor) *nn.Tensor
+	AddScaled(x, y, s *nn.Tensor) *nn.Tensor
+	Tokens(patches, cls, pos *nn.Tensor) *nn.Tensor
+	Split3(x *nn.Tensor) (*nn.Tensor, *nn.Tensor, *nn.Tensor)
+	Rows(x *nn.Tensor, from int) *nn.Tensor
 }
 
-// Params are the head's weights, as the ops' tensors: T a weight by its
-// checkpoint name, Opt one that may be absent (a bias: nil then), and PE
+// Params are the network's weights, as the ops' tensors: T a weight by
+// its checkpoint name, Opt one that may be absent (a bias: nil then), PE
 // a temporal attention block's position encodings projected by its
 // query, key and value weights, for a window of t frames: the query's
-// (the last place's, [C]) and the keys' and values' ([t, C]).
+// (the last place's, [C]) and the keys' and values' ([t, C]); Pos the
+// encoder's position embedding for a grid of patches ([1 + ph pw, D],
+// the class token's first), and Arch the encoder's depth, heads and
+// width.
 type Params interface {
 	T(name string) *nn.Tensor
 	Opt(name string) *nn.Tensor
 	PE(block string, c, t int) [3]*nn.Tensor
+	Pos(ph, pw int) *nn.Tensor
+	Arch() (blocks, heads, dim int)
+}
+
+// Encoder runs DINOv2 on o with p: x the frame as the network takes it
+// ([3, H, W], o's tensor); the patch tokens of the intermediate blocks'
+// outputs, normed ([ph pw, D] each).
+func Encoder(o Ops, p Params, x *nn.Tensor) [4]*nn.Tensor {
+	ph, pw := x.Dim(1)/patch, x.Dim(2)/patch
+	blocks, heads, d := p.Arch()
+	pe := o.Conv2d(x, p.T("pretrained.patch_embed.proj.weight"), p.T("pretrained.patch_embed.proj.bias"), patch, 0)
+	tok := o.Tokens(pe.Reshape(d, ph*pw), p.T("pretrained.cls_token"), p.Pos(ph, pw))
+	var out [4]*nn.Tensor
+	k := 0
+	hd := d / heads
+	at := intermediate[blocks]
+	for b := range blocks {
+		pre := fmt.Sprintf("pretrained.blocks.%d.", b)
+		// x + ls1 * attn(norm1(x))
+		h := o.LayerNorm(tok, p.T(pre+"norm1.weight"), p.T(pre+"norm1.bias"), 1e-6)
+		q, kk, v := o.Split3(o.Linear(h, p.T(pre+"attn.qkv.weight"), p.Opt(pre+"attn.qkv.bias")))
+		a := o.Attention(q, kk, v, heads, float32(1/math.Sqrt(float64(hd))))
+		a = o.Linear(a, p.T(pre+"attn.proj.weight"), p.Opt(pre+"attn.proj.bias"))
+		tok = o.AddScaled(tok, a, p.T(pre+"ls1.gamma"))
+		// x + ls2 * mlp(norm2(x))
+		h = o.LayerNorm(tok, p.T(pre+"norm2.weight"), p.T(pre+"norm2.bias"), 1e-6)
+		h = o.GELU(o.Linear(h, p.T(pre+"mlp.fc1.weight"), p.Opt(pre+"mlp.fc1.bias")))
+		h = o.Linear(h, p.T(pre+"mlp.fc2.weight"), p.Opt(pre+"mlp.fc2.bias"))
+		tok = o.AddScaled(tok, h, p.T(pre+"ls2.gamma"))
+		if k < 4 && b == at[k] {
+			n := o.LayerNorm(tok, p.T("pretrained.norm.weight"), p.T("pretrained.norm.bias"), 1e-6)
+			out[k] = o.Rows(n, 1)
+			k++
+		}
+	}
+	return out
+}
+
+// positionEmbedding is the encoder's position embedding (pe, the
+// checkpoint's [1, 1 + side^2, D]) for a grid of ph x pw patches, the
+// patches' part scaled to it bicubically as DINOv2 does: [1 + ph pw, D],
+// the class token's first.
+func positionEmbedding(pe *nn.Tensor, ph, pw int) *nn.Tensor {
+	d := pe.Dim(-1)
+	n := pe.Dim(1) - 1
+	side := int(math.Round(math.Sqrt(float64(n))))
+	grid := nn.New(d, side, side) // channels first
+	for i := range n {
+		for c := range d {
+			grid.Data[c*n+i] = pe.Data[(1+i)*d+c]
+		}
+	}
+	r := nn.BicubicScale(grid, (float64(ph)+0.1)/float64(side), (float64(pw)+0.1)/float64(side))
+	out := nn.New(1+ph*pw, d)
+	copy(out.Data[:d], pe.Data[:d])
+	for i := range ph * pw {
+		for c := range d {
+			out.Data[(1+i)*d+c] = r.Data[c*ph*pw+i]
+		}
+	}
+	return out
 }
 
 // KV is a frame's keys and values for a temporal attention block ([D, C]
@@ -284,6 +355,27 @@ type tapeParams struct {
 	learn func(string) bool
 	on    map[string]*nn.Tensor
 	pes   map[peKey][3]*nn.Tensor
+	pos   map[[2]int]*nn.Tensor
+}
+
+func (p *tapeParams) Pos(ph, pw int) *nn.Tensor {
+	if t, ok := p.pos[[2]int{ph, pw}]; ok {
+		return t
+	}
+	if p.pos == nil {
+		p.pos = map[[2]int]*nn.Tensor{}
+	}
+	t := p.tp.Upload(positionEmbedding(p.w["pretrained.pos_embed"], ph, pw))
+	p.pos[[2]int{ph, pw}] = t
+	return t
+}
+
+func (p *tapeParams) Arch() (blocks, heads, dim int) {
+	blocks, heads, dim, err := arch(p.w)
+	if err != nil {
+		panic(err)
+	}
+	return blocks, heads, dim
 }
 
 func (p *tapeParams) T(name string) *nn.Tensor {

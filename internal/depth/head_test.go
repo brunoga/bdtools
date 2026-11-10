@@ -148,3 +148,122 @@ func TestHeadOnTape(t *testing.T) {
 	}
 	g.Release()
 }
+
+// TestEncoderOnTape checks the encoder run on a tape with the head: the
+// same depth as the model's, gradients at the last block's weights (every
+// one reached), and the loss's derivative along those gradients against
+// the loss's differences on the CPU, through three frames of the tiny
+// model.
+func TestEncoderOnTape(t *testing.T) {
+	g := gpu(t)
+	m, err := Load("testdata/tiny.pth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io, err := nn.LoadPTH("testdata/tiny-io.pth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frames []*nn.Tensor
+	for i := range 3 {
+		frames = append(frames, io[fmt.Sprintf("in.%d", i)])
+	}
+	blocks, _, _ := m.Arch()
+	last := fmt.Sprintf("pretrained.blocks.%d.", blocks-1)
+	learnt := func(name string) bool {
+		return strings.HasPrefix(name, last) || strings.HasPrefix(name, "pretrained.norm.") || strings.HasPrefix(name, "head.")
+	}
+	r := rand.New(rand.NewPCG(41, 42))
+	want := m.Frame(frames[0])
+	dy := nn.New(1, want.Dim(0), want.Dim(1))
+	for i := range dy.Data {
+		dy.Data[i] = float32(r.NormFloat64())
+	}
+	loss := func() float64 {
+		m.Use(nn.CPU)
+		out := headStream(nn.CPU, m, m.Encode, frames)
+		var s float64
+		for i, v := range out.Data {
+			s += float64(v) * float64(dy.Data[i])
+		}
+		return s
+	}
+	m.Use(g)
+	tp := nn.NewTape(g)
+	p := TapeParams(tp, m.Weights(), learnt)
+	enc := func(x *nn.Tensor) [4]*nn.Tensor { return Encoder(tp, p, x) }
+	out := headStream(tp, p, enc, frames)
+	got, err := g.Download(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Use(nn.CPU)
+	if d := compare(got, headStream(nn.CPU, m, m.Encode, frames)); d > 1e-4 {
+		t.Errorf("the tape's depth differs by %.3g of the range", d)
+	}
+	tp.Backward(out, g.Upload(dy))
+	grads := map[string]*nn.Tensor{}
+	for name, d := range tp.Grads() {
+		if grads[name], err = g.Download(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name := range m.Weights() {
+		if (strings.HasPrefix(name, last) || strings.HasPrefix(name, "pretrained.norm.")) && grads[name] == nil {
+			t.Errorf("%s: no gradient", name)
+		}
+	}
+	for _, set := range []struct {
+		name string
+		of   func(string) bool
+	}{
+		{"the last block", func(n string) bool { return strings.HasPrefix(n, last) }},
+		{"the last block's attention", func(n string) bool { return strings.HasPrefix(n, last+"attn.") }},
+		{"its mlp", func(n string) bool { return strings.HasPrefix(n, last+"mlp.") }},
+		{"the encoder's norm", func(n string) bool { return strings.HasPrefix(n, "pretrained.norm.") }},
+	} {
+		var peak float64
+		for _, name := range slices.Sorted(maps.Keys(grads)) {
+			if set.of(name) {
+				for _, v := range grads[name].Data {
+					peak = max(peak, math.Abs(float64(v)))
+				}
+			}
+		}
+		var pred float64
+		dir := map[string][]float32{}
+		for _, name := range slices.Sorted(maps.Keys(grads)) {
+			if !set.of(name) {
+				continue
+			}
+			d := grads[name]
+			v := make([]float32, len(d.Data))
+			for i := range v {
+				v[i] = float32(float64(d.Data[i]) / peak)
+				pred += float64(d.Data[i]) * float64(v[i])
+			}
+			dir[name] = v
+		}
+		// a step big enough for the change to stand above the single
+		// precision loss's round-off (a block's few weights move it
+		// little), small enough for the curve (softmaxes, layer norms)
+		const eps = 3e-3
+		move := func(sign float64) {
+			for name, v := range dir {
+				w := m.Weights()[name].Data
+				for i := range w {
+					w[i] += float32(sign * eps * float64(v[i]))
+				}
+			}
+		}
+		move(1)
+		up := loss()
+		move(-2)
+		down := loss()
+		move(1)
+		if by := (up - down) / (2 * eps); math.Abs(pred-by) > 5e-2*math.Abs(by) {
+			t.Errorf("%s: the gradients say %v along a direction, the differences %v", set.name, pred, by)
+		}
+	}
+	g.Release()
+}
