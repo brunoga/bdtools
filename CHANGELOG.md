@@ -12,7 +12,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   head and the encoder's last N blocks, the picture's encoder run on the
   tape (`nn.Tape` gained the encoder's attention, GELU, layer scale,
   split and view ops with their gradients; `depth.Encoder` runs DINOv2
-  on any ops as `depth.Head` does) (#305).
+  on any ops as `depth.Head` does) (#305); `-fit fixed` trains against
+  the converter's mapping itself (no fit: the network learns to put its
+  depth where the mapping expects it), and `-from FILE` with `-head`
+  starts from a tail file's weights (#306).
 - The depth network's head can be learnt from the discs, not just its
   tail: `tools/depthtrain -head CHECKPOINT -learn tail|fusion|head`
   learns the weights named from each sample's window (its picture and
