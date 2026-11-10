@@ -252,23 +252,36 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	loss += tailMoments * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
 	var kg []float32
 	var nk int
-	if keep > 0 {
-		// where the disc is unsure, the robust residual to the network's
-		// own depth as recorded, in units of its deviation
+	if keep > 0 || hold > 0 {
+		// the robust residual to the network's own depth as recorded, in
+		// the disc's pixels (the stretch's fit, or the deviation's worth
+		// of pixels without one), weighted hold everywhere and keep more
+		// where the disc is unsure
+		a := 8 / s0
+		if fixed != nil {
+			a = math.Abs(fixed[0])
+		}
 		kg = make([]float32, len(out))
 		var kl float64
 		for i, v := range out {
-			if !math.IsNaN(float64(s.disp[i])) || math.IsNaN(float64(s.depth[i])) {
+			if math.IsNaN(float64(s.depth[i])) {
 				continue
 			}
-			r := (float64(v) - float64(s.depth[i])) / s0
+			wgt := hold
+			if math.IsNaN(float64(s.disp[i])) {
+				wgt += keep
+			}
+			if wgt == 0 {
+				continue
+			}
+			r := a * (float64(v) - float64(s.depth[i]))
 			q := math.Sqrt(r*r + 1)
-			kl += q - 1
-			kg[i] = float32(r / q / s0)
+			kl += wgt * (q - 1)
+			kg[i] = float32(wgt * a * r / q)
 			nk++
 		}
 		if nk > 0 {
-			loss += keep * kl / float64(nk)
+			loss += kl / float64(nk)
 		}
 	}
 	if !train {
@@ -276,7 +289,7 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	}
 	if nk > 0 {
 		for i := range out {
-			gc.Data[i] += float32(keep/float64(nk)) * kg[i]
+			gc.Data[i] += kg[i] / float32(nk)
 		}
 	}
 	for i, v := range out {
@@ -385,8 +398,9 @@ func moments(v []float32) (mean, sd float64) {
 // keep is -keep: the weight of holding the depth, where the disc is
 // unsure (a reflection, glass, the sky), to the network's own as it was
 // recorded, so that the discs' silence there does not free the network
-// to read those regions anew.
-var keep float64
+// to read those regions anew; hold is -hold, the same everywhere, against
+// the network reading anew what the discs show too rarely to teach.
+var keep, hold float64
 
 // anchor is -anchor: how hard each update pulls the weights back towards
 // the checkpoint's, as a multiple of the learning rate (decoupled, like
