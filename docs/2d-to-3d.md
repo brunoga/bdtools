@@ -399,6 +399,47 @@ What that teaches:
   clips (Disney's) was read only to the first clip's end, and a disc
   whose base view is the right eye (Blade Runner 2049) was measured with
   its eyes swapped, its depth correlation -0.7 (now 0.93).
+- **The whole head learnt, not just its tail.** The network's head (the
+  four fusion blocks and the four temporal modules, 164 tensors, 6.9M
+  values against the tail's 36 and 2.3M) learnt from the same 37
+  releases, each picture with the seven before it as the network took
+  them (`tools/stereobench -samples -window 8`, `tools/depthtrain -head
+  -learn head -fit stretch`, the frozen encoder run on every frame, the
+  head on the current one with its gradients taped), 4 passes at a
+  tenth of the tail's rate: the validation error 6.39 to 6.04 px. At the
+  tail's mapping the eye was better on the twelve (27.73 dB) and the
+  wide set, but worse on the glass clips (27.56) and Avatar (25.61): the
+  porthole's reflected Earth read as geometry, the visor's bright Earth
+  limb as a near edge. Most of that loss was the mapping, not the depth:
+  the depth fitted to the disc was as good or better on those sets
+  (Avatar's error 4.13 to 3.99 px), its range just wider. With the
+  mapping re-found (0.115% a unit, the far end 0.82% behind the screen,
+  a coarse then a fine grid on all four sets):
+
+  | right eye PSNR / VMAF | stretch-fitted tail | whole head |
+  |---|---|---|
+  | the twelve clips (one picture in 8) | 27.35 / 31.1 | 27.63 / 32.0 |
+  | the four glass clips | 28.11 / 45.6 | 28.23 / 48.1 |
+  | the wide set (fifty clips, twenty-five films) | 28.59 / 35.4 | 28.66 / 36.2 |
+  | Avatar: Fire and Ash (25 clips) | 25.83 / 31.6 | 25.65 / 29.2 |
+  | depth correlation (twelve, glass, wide, Avatar) | .848 .776 .819 .781 | .860 .708 .831 .776 |
+
+  Avatar wants a shallower mapping than the rest (0.10% and 0.60%,
+  where it gives 25.90 / 32.8 with either set of weights and the other
+  sets lose a dB or more): one fixed mapping is a compromise between
+  films, and Avatar is the film that loses by it. Tried against the
+  glass loss before the mapping was found to be most of it: learning
+  the tail and the third fusion block only (the porthole's order kept,
+  the visor clips still lost), holding the depth to the network's own
+  where the disc is unsure, or everywhere (`-keep`, `-hold`: at a
+  weight that matters they fight the fit nearly everywhere, since the
+  matcher is unsure over much of each picture, and lose on every set),
+  and pulling the weights back towards the checkpoint's (`-anchor`:
+  the learnt weights moved only 6%, less than the tail's 16%, so drift
+  was not the cause). The head's weights are built in (the binary 25 MB
+  bigger). Found on the way: the recorder kept a window's frames across
+  a cut or a change of the bars, where the converter restarts the
+  network; 236 of 5,165 windows held frames of two sizes (fixed).
 - **Whole films the choices never saw.** Furiosa (taken for a studio
   conversion; it is not one, see below) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips

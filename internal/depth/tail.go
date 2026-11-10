@@ -33,9 +33,12 @@ var TailNames = []string{
 
 const tailMagic = "BDTL1"
 
-// The built-in tail, for Video Depth Anything Small: learnt by
-// tools/depthtrain -tail (6 passes, batch 4, rate 1e-4) from 7,423
-// pictures of 53 3D films, the benchmark's held out (docs/2d-to-3d.md).
+// The built-in head, for Video Depth Anything Small: the whole head (its
+// fusion blocks and temporal modules, 164 tensors), learnt by
+// tools/depthtrain -head -learn head -fit stretch (4 passes, batch 4,
+// rate 1e-5) from 5,165 pictures' windows of 37 official 3D releases,
+// the benchmark's held out (docs/2d-to-3d.md). "Tail" throughout is the
+// name of the file and of SetTail: any of the head's weights may be in it.
 //
 //go:embed tail.bin
 var builtinTail []byte

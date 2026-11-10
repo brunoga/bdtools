@@ -72,20 +72,23 @@ var DefaultShape = Shape{Scale: 0.0012, Offset: -0.0075}
 // 25.7 and 26.8).
 var RefinedShape = Shape{Scale: 0.0010, Offset: -0.0075}
 
-// TunedShape is DefaultShape for Small's depth with its tail learnt from
+// TunedShape is DefaultShape for Small's depth with its head learnt from
 // the 3D discs (depth.BuiltinTail), found as DefaultShape was, on the
 // benchmark's twelve clips and checked on the wide set (fifty clips of
-// twenty-five other films) and the glass clips. The tail fitted to the
-// discs a stretch at a time (not a picture at a time) keeps its depth's
-// scale across a stretch, which wants a little more of it: 0.13% a unit
-// against 0.12%. The made right eye: the twelve clips 27.35 dB and VMAF
-// 31.1 (the picture-fitted tail at its shape 27.37 and 30.4), the wide
-// set 28.59 and 35.4 (28.42 and 34.6), the glass clips 28.11 and 45.6
-// (27.45 and 40.9), the eye's jitter 1.03 px against 1.15. Deeper
+// twenty-five other films), the glass clips and Avatar 3. The whole head
+// learnt (not the tail alone) reads the scene a little differently and
+// wants a little less scale and a shallower offset: 0.115% a unit and
+// -0.82% of the width against the tail's 0.13% and -0.90%. The made
+// right eye: the twelve clips 27.63 dB and VMAF 32.0 (the tail alone at
+// its shape 27.35 and 31.1), the wide set 28.66 and 36.2 (28.59 and
+// 35.4), the glass clips 28.23 and 48.1 (28.11 and 45.6), Avatar 3 25.65
+// and 29.2 (25.83 and 31.6: that film wants a shallower shape still,
+// 0.10% and -0.60%, where it gives 25.90 and the other sets lose a dB
+// or more; one fixed shape is a compromise between films). Deeper
 // offsets lose on every set: the discs go farther back than this (their
 // 5th percentile -23 px at 1920 against ours -17), but a fixed mapping
 // placing the far end deeper misses more than it gains.
-var TunedShape = Shape{Scale: 0.0013, Offset: -0.0090}
+var TunedShape = Shape{Scale: 0.00115, Offset: -0.0082}
 
 // The shapes of the other networks' depth (depth.Model.Size), each its
 // own scale, found as RefinedShape was. Base's depth refined (the weights
