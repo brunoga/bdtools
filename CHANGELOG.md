@@ -15,7 +15,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   on any ops as `depth.Head` does) (#305); `-fit fixed` trains against
   the converter's mapping itself (no fit: the network learns to put its
   depth where the mapping expects it), and `-from FILE` with `-head`
-  starts from a tail file's weights (#306).
+  starts from a tail file's weights (#306); `-map W` adds the mapping's
+  residual to a fit's at a weight (#307).
 - The depth network's head can be learnt from the discs, not just its
   tail: `tools/depthtrain -head CHECKPOINT -learn tail|fusion|head`
   learns the weights named from each sample's window (its picture and

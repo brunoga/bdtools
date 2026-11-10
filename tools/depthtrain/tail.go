@@ -250,8 +250,19 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	m1, s1 := moments(out)
 	n := float64(len(out))
 	momentsW := tailMoments
-	if mapping != nil {
+	if fixedFit {
 		momentsW = 0 // the mapping holds the depth's scale and place
+	}
+	if mapWeight > 0 && !fixedFit {
+		m := mapOf(s)
+		if g2, l2, ok := lossGradFixed(s, out, m[0], m[1], s.h, s.w); ok {
+			loss += mapWeight * l2
+			if train {
+				for i, v := range g2.Data {
+					gc.Data[i] += float32(mapWeight) * v
+				}
+			}
+		}
 	}
 	loss += momentsW * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
 	var kg []float32
@@ -411,6 +422,16 @@ var keep, hold float64
 // loss its residual to the disc with no fit at all, so that the network
 // learns to put its depth where the mapping expects it.
 var mapping *[2]float64
+
+// fixedFit says -fit fixed: the mapping's residual is the loss, no fit
+// (mapping set, fixedFit false: -map's, the mapping's residual added to
+// the fit's at a weight).
+var fixedFit bool
+
+// mapWeight is -map: with a fit, the weight of the mapping's residual
+// added to the fit's, so that the depth keeps to where the mapping
+// expects it while its shape follows the disc.
+var mapWeight float64
 
 // mapOf is the mapping in a sample's half-size pixels.
 func mapOf(s *sample) [2]float64 {
@@ -610,7 +631,7 @@ func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, 
 					continue
 				}
 				var fixed *[2]float64
-				if mapping != nil {
+				if fixedFit {
 					m := mapOf(it.base())
 					fixed = &m
 				}
