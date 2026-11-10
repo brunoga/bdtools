@@ -17,9 +17,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   head weight (`nn.Tape`, the head written once against an ops
   interface); a window starts over where the network's stream does, at
   a cut or a change of the bars; `-keep W` holds the depth to the
-  network's own where the disc is unsure, `-anchor R` pulls the weights
-  back towards the checkpoint's, and `-learn fusion3` learns the tail
-  and the third fusion block only (#291, #292, #293, #295, #297).
+  network's own where the disc is unsure and `-hold W` everywhere, in
+  the disc's pixels, `-anchor R` pulls the weights back towards the
+  checkpoint's, and `-learn fusion3` learns the tail and the third
+  fusion block only (#291, #292, #293, #295, #297, #300).
 
 ### Changed
 
