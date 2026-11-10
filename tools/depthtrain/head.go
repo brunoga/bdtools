@@ -215,7 +215,7 @@ func (md headMode) step(g *nn.GPU, it item, train bool, fixed *[2]float64) (floa
 }
 
 // trainHead is main's for -head.
-func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch, half bool) {
+func trainHead(ckpt, learn, from, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, fitBy string, half bool) {
 	g, err := nn.NewGPU()
 	if err != nil {
 		fail(err)
@@ -235,6 +235,24 @@ func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64
 	}
 	g.Half = half && m.HalfSafe()
 	m.Use(g)
+	if from != "" {
+		// start from these weights (a tail file's, any of the network's
+		// names): the model's, and the learnt ones' starting point
+		w, err := depth.ReadTail(from)
+		if err != nil {
+			fail(err)
+		}
+		if err := m.SetTail(w); err != nil {
+			fail(err)
+		}
+		for _, n := range hm.names {
+			if t, ok := w[n]; ok {
+				hm.w[n] = t.Clone()
+				hm.w0[n] = t
+				hm.all[n] = hm.w[n]
+			}
+		}
+	}
 	var enc bool
 	for _, n := range names {
 		enc = enc || strings.HasPrefix(n, "pretrained.")
@@ -246,5 +264,5 @@ func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64
 		params += len(hm.w[n].Data)
 	}
 	fmt.Printf("the %s: %d weights' tensors, %d values, on %s\n", learn, len(hm.names), params, g.Name())
-	trainLoop(g, hm, md, trainDir, valDir, out, epochs, lr, batch, limit, byStretch)
+	trainLoop(g, hm, md, trainDir, valDir, out, epochs, lr, batch, limit, fitBy)
 }

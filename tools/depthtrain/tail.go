@@ -249,7 +249,11 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	m0, s0 := moments(s.depth)
 	m1, s1 := moments(out)
 	n := float64(len(out))
-	loss += tailMoments * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
+	momentsW := tailMoments
+	if mapping != nil {
+		momentsW = 0 // the mapping holds the depth's scale and place
+	}
+	loss += momentsW * ((m1-m0)*(m1-m0) + (s1-s0)*(s1-s0)) / (s0 * s0)
 	var kg []float32
 	var nk int
 	if keep > 0 || hold > 0 {
@@ -295,7 +299,7 @@ func (hm *headModel) loss(s *sample, out []float32, train bool, fixed *[2]float6
 	for i, v := range out {
 		dm := 2 * (m1 - m0) / n
 		ds := 2 * (s1 - s0) * (float64(v) - m1) / (n * max(s1, 1e-9))
-		gc.Data[i] += float32(tailMoments * (dm + ds) / (s0 * s0))
+		gc.Data[i] += float32(momentsW * (dm + ds) / (s0 * s0))
 	}
 	return gc, loss, true
 }
@@ -402,6 +406,17 @@ func moments(v []float32) (mean, sd float64) {
 // the network reading anew what the discs show too rarely to teach.
 var keep, hold float64
 
+// mapping is -fit fixed's: the depth mapped to disparity as the
+// converter maps it (stereo.Shape's scale and offset of the width), the
+// loss its residual to the disc with no fit at all, so that the network
+// learns to put its depth where the mapping expects it.
+var mapping *[2]float64
+
+// mapOf is the mapping in a sample's half-size pixels.
+func mapOf(s *sample) [2]float64 {
+	return [2]float64{mapping[0] * float64(s.w), mapping[1] * float64(s.w)}
+}
+
 // anchor is -anchor: how hard each update pulls the weights back towards
 // the checkpoint's, as a multiple of the learning rate (decoupled, like
 // weight decay, but to the weights as they were rather than to zero), so
@@ -433,7 +448,7 @@ func (hm *headModel) update(lr float64, scale float32) {
 
 // validateMode is the mean fit error of the network's depth as it was (the
 // sample's) and of the weights as they are.
-func validateMode(g *nn.GPU, md mode, paths []string) (base, tuned float64) {
+func validateMode(g *nn.GPU, md mode, paths []string) (base, tuned, mapped float64) {
 	var n int
 	for it := range prefetchItems(md, paths) {
 		if it == nil {
@@ -444,12 +459,43 @@ func validateMode(g *nn.GPU, md mode, paths []string) (base, tuned float64) {
 		if !ok {
 			continue
 		}
-		e1, _ := fitError(s, md.output(g, it), s.w)
+		out := md.output(g, it)
+		e1, _ := fitError(s, out, s.w)
+		if mapping != nil {
+			m := mapOf(s)
+			mapped += mapError(s, out, s.w, m[0], m[1])
+		}
 		base += e0
 		tuned += e1
 		n++
 	}
-	return base / float64(max(n, 1)), tuned / float64(max(n, 1))
+	return base / float64(max(n, 1)), tuned / float64(max(n, 1)), mapped / float64(max(n, 1))
+}
+
+// mapError is the mean error of the depth z mapped by a z + b against
+// the disc, in pixels, over the sure pixels.
+func mapError(s *sample, z []float32, pw int, a, b float64) float64 {
+	var e float64
+	var n int
+	for r := range s.h {
+		for c := range s.w {
+			if d := s.disp[r*s.w+c]; !math.IsNaN(float64(d)) {
+				e += math.Abs(a*float64(z[r*pw+c]) + b - float64(d))
+				n++
+			}
+		}
+	}
+	return e / float64(max(n, 1))
+}
+
+// validation is the validation line's figures.
+func validation(g *nn.GPU, md mode, val []string) string {
+	base, tuned, mapped := validateMode(g, md, val)
+	s := fmt.Sprintf("validation error after fitting %.3f px as the network gives it, %.3f with the weights", base, tuned)
+	if mapping != nil {
+		s += fmt.Sprintf(", %.3f with the mapping", mapped)
+	}
+	return s
 }
 
 // saveHead writes the learnt weights as depth.ReadTail reads them.
@@ -469,7 +515,7 @@ func saveHead(hm *headModel, path string) error {
 }
 
 // trainTail is main's for -tail.
-func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch bool) {
+func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, fitBy string) {
 	g, err := nn.NewGPU()
 	if err != nil {
 		fail(err)
@@ -484,13 +530,15 @@ func trainTail(ckpt, trainDir, valDir, out string, epochs int, lr float64, batch
 		fail(err)
 	}
 	fmt.Printf("the tail: %d weights' tensors, on %s\n", len(hm.names), g.Name())
-	trainLoop(g, hm, tailMode{hm}, trainDir, valDir, out, epochs, lr, batch, limit, byStretch)
+	trainLoop(g, hm, tailMode{hm}, trainDir, valDir, out, epochs, lr, batch, limit, fitBy)
 }
 
 // trainLoop learns hm's weights in a mode: epochs passes over the
 // training samples, Adam at a rate decayed along a cosine to a tenth,
-// the weights saved to out after each pass.
-func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch bool) {
+// the weights saved to out after each pass; fitBy the depth's fit to the
+// disc, a picture or a stretch at a time, or fixed (the mapping's).
+func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, fitBy string) {
+	byStretch := fitBy == "stretch"
 	train, err := list(trainDir)
 	if err != nil {
 		fail(err)
@@ -505,8 +553,7 @@ func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, 
 		train = train[:limit]
 	}
 	fmt.Printf("%d training pictures, %d validation\n", len(train), len(val))
-	base, tuned := validateMode(g, md, val)
-	fmt.Printf("epoch 0: validation error after fitting %.3f px as the network gives it, %.3f with the weights\n", base, tuned)
+	fmt.Printf("epoch 0: %s\n", validation(g, md, val))
 	steps := epochs * ((len(train) + batch - 1) / batch)
 	step := 0
 	var groups [][]string
@@ -562,7 +609,12 @@ func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, 
 				if it == nil {
 					continue
 				}
-				if loss, ok := md.step(g, it, true, nil); ok {
+				var fixed *[2]float64
+				if mapping != nil {
+					m := mapOf(it.base())
+					fixed = &m
+				}
+				if loss, ok := md.step(g, it, true, fixed); ok {
 					lossSum += loss
 					n++
 					k++
@@ -572,9 +624,7 @@ func trainLoop(g *nn.GPU, hm *headModel, md mode, trainDir, valDir, out string, 
 				}
 			}
 		}
-		base, tuned := validateMode(g, md, val)
-		fmt.Printf("epoch %d: loss %.4f; validation error after fitting %.3f px as the network gives it, %.3f with the weights (%v)\n",
-			e, lossSum/float64(max(n, 1)), base, tuned, time.Since(t0).Round(time.Second))
+		fmt.Printf("epoch %d: loss %.4f; %s (%v)\n", e, lossSum/float64(max(n, 1)), validation(g, md, val), time.Since(t0).Round(time.Second))
 		if err := saveHead(hm, out); err != nil {
 			fail(err)
 		}
