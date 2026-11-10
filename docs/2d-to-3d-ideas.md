@@ -73,6 +73,27 @@ naming already does this.
 **Cost.** Low. The data exists, the recorder already writes the features,
 and the predictor is tiny. Two to three days to a first number.
 
+**First step done (2026-11-10, `tools/shapeprobe`).** On the 5,176
+training pictures (37 films, 875 two-second stretches, the network's
+depth as recorded), the mean robust residual of the mapping in half-size
+pixels: one shape for all 7.01; one a film 6.08 (an oracle); one a
+stretch 3.36 (the oracle, 52% less); the stretch's offset alone with
+the global scale 4.52, its scale alone 5.13: the screen plane's place is
+the bigger half. Shots vary more within a film (offset sd 0.0085 of the
+width) than films do between them (0.0056). Predicting the stretch's
+shape with a film held out: ridge regression on cheap statistics
+(depth percentiles and moments, luma, bars) 6.87; on the encoder's
+pooled tokens (DINOv2's four intermediate layers, 1,536 values) with
+them 6.61, 6% better than one shape for all, a tenth of the oracle's
+gain (a picture at a time, six times the samples: 6.58, the same). Rules anchoring one depth statistic of the shot to a fixed
+disparity (the farthest, the median, the nearest, the centre) are all
+worse than one shape for all (7.5 to 8.9), as per-picture normalisation
+was in October. So a shot's own content, pooled, tells little of the
+stereographer's choice; the gain the oracle shows is real but needs
+something else: the scene's context across cuts (idea 2), a metric
+scale that removes the network's own per-shot ambiguity (idea 4), or
+a learnt head on the spatial features rather than their mean (untried).
+
 **Risks.** Stereographers differ between films, so the predictable part
 may be small. If the leave-one-release-out error is not clearly better
 than the fixed default, this stops there. Post-converted titles may follow
