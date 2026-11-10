@@ -118,10 +118,41 @@ var learnSets = map[string]func(all map[string]*nn.Tensor) []string{
 	},
 }
 
+// learnSet is -learn's weights: a set by name, or blocksN, the whole
+// head and the encoder's last N blocks with its norm.
+func learnSet(learn string, all map[string]*nn.Tensor) ([]string, bool) {
+	if set, ok := learnSets[learn]; ok {
+		return set(all), true
+	}
+	var n int
+	if _, err := fmt.Sscanf(learn, "blocks%d", &n); err != nil || n < 1 || fmt.Sprintf("blocks%d", n) != learn {
+		return nil, false
+	}
+	blocks := 0
+	for all[fmt.Sprintf("pretrained.blocks.%d.norm1.weight", blocks)] != nil {
+		blocks++
+	}
+	if n > blocks {
+		return nil, false
+	}
+	names := learnSets["head"](all)
+	for name := range all {
+		var b int
+		if _, err := fmt.Sscanf(name, "pretrained.blocks.%d.", &b); err == nil && b >= blocks-n {
+			names = append(names, name)
+		} else if strings.HasPrefix(name, "pretrained.norm.") {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names, true
+}
+
 // headMode learns a set of the head's weights from the pictures' windows.
 type headMode struct {
-	hm *headModel
-	m  *depth.Model // the whole network on the GPU, its learnt weights the model's
+	hm  *headModel
+	m   *depth.Model // the whole network on the GPU, its learnt weights the model's
+	enc bool         // some of the encoder's weights are learnt: the picture's encoder on the tape
 }
 
 func (md headMode) read(path string) (item, error) { return readWindow(path) }
@@ -151,7 +182,13 @@ func (md headMode) states(g *nn.GPU, ws *windowSample) [][8]depth.KV {
 func (md headMode) forward(g *nn.GPU, tp *nn.Tape, learn func(string) bool, ws *windowSample) *nn.Tensor {
 	win := depth.StartWindow(md.states(g, ws))
 	p := depth.TapeParams(tp, md.m.Weights(), learn)
-	feats := md.m.Encode(g.Upload(ws.input(len(ws.frames) - 1)))
+	x := g.Upload(ws.input(len(ws.frames) - 1))
+	var feats [4]*nn.Tensor
+	if md.enc {
+		feats = depth.Encoder(tp, p, x)
+	} else {
+		feats = md.m.Encode(x)
+	}
 	d, _ := depth.Head(tp, p, feats, ws.h/14, ws.w/14, win, nil)
 	return tp.Bilinear(d, ws.sample.h, ws.sample.w)
 }
@@ -179,10 +216,6 @@ func (md headMode) step(g *nn.GPU, it item, train bool, fixed *[2]float64) (floa
 
 // trainHead is main's for -head.
 func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64, batch, limit int, byStretch, half bool) {
-	set, ok := learnSets[learn]
-	if !ok {
-		fail(fmt.Errorf("-learn %q: tail, fusion3, fusion or head", learn))
-	}
 	g, err := nn.NewGPU()
 	if err != nil {
 		fail(err)
@@ -192,13 +225,21 @@ func trainHead(ckpt, learn, trainDir, valDir, out string, epochs int, lr float64
 	if err != nil {
 		fail(err)
 	}
-	hm, err := newHeadModel(ckpt, set(m.Weights()))
+	names, ok := learnSet(learn, m.Weights())
+	if !ok {
+		fail(fmt.Errorf("-learn %q: tail, fusion3, fusion, head or blocksN (N the encoder's last blocks, learnt with the head)", learn))
+	}
+	hm, err := newHeadModel(ckpt, names)
 	if err != nil {
 		fail(err)
 	}
 	g.Half = half && m.HalfSafe()
 	m.Use(g)
-	md := headMode{hm, m}
+	var enc bool
+	for _, n := range names {
+		enc = enc || strings.HasPrefix(n, "pretrained.")
+	}
+	md := headMode{hm, m, enc}
 	md.updated()
 	var params int
 	for _, n := range hm.names {
