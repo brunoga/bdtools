@@ -24,6 +24,15 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The depth network's whole head (its fusion blocks and temporal
+  modules) is built in learnt from 37 official 3D releases, each picture
+  with its window, and the depth's mapping re-found for it (`stereo.
+  TunedShape` 0.00115 / -0.0082): the made right eye on the benchmark's
+  twelve clips 27.35 to 27.63 dB (VMAF 31.1 to 32.0), the glass clips
+  28.11 to 28.23 (45.6 to 48.1), the wide set 28.59 to 28.66 (35.4 to
+  36.2); Avatar: Fire and Ash 25.83 to 25.65 (31.6 to 29.2), that film
+  wanting a shallower mapping than the rest. The binary is 25 MB bigger
+  (#302).
 - The depth network's built-in tail is learnt anew from 35 official 3D
   releases, fitted to each disc a stretch of pictures at a time instead
   of a picture at a time (`tools/depthtrain -fit stretch`), so its
