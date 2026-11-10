@@ -30,15 +30,24 @@ type pic struct {
 	n, sx, sy, sxx, sxy float64
 	// the sure pixels' depth and disparity, subsampled, for the residuals
 	x, y []float32
-	feat []float64
-	tok  []float64 // the encoder's pooled tokens (NAME.bfe), if any
+	// the same pixels' metric feature f/Z (Depth Pro's, NAME.bmd: the
+	// focal length in pixels of the half-size picture over the depth in
+	// metres), if any; the fit's scale is then the interaxial in metres
+	xm                       []float32
+	nm, sxm, sym, sxxm, sxym float64
+	feat                     []float64
+	tok                      []float64 // the encoder's pooled tokens (NAME.bfe), if any
+	grid                     []float64 // the last two layers' tokens on an 8x8 grid (NAME.bfg), if any
 }
+
+const gridN = 8
 
 const step = 3 // every third pixel each way
 
 func main() {
 	ckpt := flag.String("ckpt", os.ExpandEnv("$HOME/.cache/bdtools/video_depth_anything_vits.pth"), "the depth network's checkpoint")
 	extract := flag.Bool("features", false, "write each sample's pooled encoder tokens (NAME.bfe, from its window's last frame) and stop")
+	quick := flag.Bool("quick", false, "the fits and the metric comparison only, not the regressions")
 	flag.Parse()
 	if flag.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "shapeprobe [-features] DIR")
@@ -62,6 +71,9 @@ func main() {
 		}
 		if t, err := readFeatures(strings.TrimSuffix(p, ".bds") + ".bfe"); err == nil {
 			pc.tok = t
+		}
+		if t, err := readFeatures(strings.TrimSuffix(p, ".bds") + ".bfg"); err == nil {
+			pc.grid = t
 		}
 		pics = append(pics, pc)
 	}
@@ -105,7 +117,7 @@ func main() {
 	for _, an := range []struct {
 		name string
 		i    int
-	}{{"the farthest (p5)", 0}, {"the median", 2}, {"the nearest (p95)", 4}, {"the centre's median", 12}} {
+	}{{"the farthest (p5)", 0}, {"the median", 2}, {"the nearest (p95)", 4}, {"the centre's median", 12}, {"the sharpest (focus)", 13}} {
 		// c = mean over stretches of (offset_s + scale * anchor_s)
 		var c, n float64
 		for s, ps := range byStretch {
@@ -116,6 +128,68 @@ func main() {
 		report("global scale, offset anchoring "+an.name, func(p *pic) (float64, float64) {
 			return allA, c - allA*stretchFeat(byStretch[p.stretch])[an.i]
 		})
+	}
+
+	// the metric depth's mapping: disparity = B f/Z + c, a stretch's and
+	// a film's B (the interaxial, metres) and c
+	var withM []*pic
+	for _, p := range pics {
+		if p.xm != nil {
+			withM = append(withM, p)
+		}
+	}
+	if len(withM) > 0 {
+		fmt.Printf("\n%d pictures with metric depth (Depth Pro): disparity = B f/Z + c\n", len(withM))
+		mStretch, mFilm := group(withM, func(p *pic) string { return p.stretch }), group(withM, func(p *pic) string { return p.film })
+		msf, mff := mfits(mStretch), mfits(mFilm)
+		mA, mB := mfit(withM)
+		fmt.Printf("all pictures at once: B %.4f m, c %.2f px\n", mA, mB)
+		mreport := func(name string, f func(p *pic) (float64, float64)) {
+			var robust, abs, n float64
+			for _, p := range withM {
+				a, b := f(p)
+				r, m := mresid(p, a, b)
+				robust += r
+				abs += m
+				n++
+			}
+			fmt.Printf("%-42s robust %.3f  |r| %.3f px\n", name, robust/n, abs/n)
+		}
+		oreport := func(name string, f func(p *pic) (float64, float64)) {
+			var robust, abs, n float64
+			for _, p := range withM {
+				a, b := f(p)
+				r, m := resid(p, a*float64(p.w), b*float64(p.w))
+				robust += r
+				abs += m
+				n++
+			}
+			fmt.Printf("%-42s robust %.3f  |r| %.3f px\n", name, robust/n, abs/n)
+		}
+		oStretch, oFilm := fits(group(withM, func(p *pic) string { return p.stretch })), fits(group(withM, func(p *pic) string { return p.film }))
+		oA, oB := fit(withM)
+		fmt.Println("the same pictures, our depth:")
+		oreport("  ours: one shape for all", func(p *pic) (float64, float64) { return oA, oB })
+		oreport("  ours: one a film (oracle)", func(p *pic) (float64, float64) { f := oFilm[p.film]; return f[0], f[1] })
+		oreport("  ours: one a stretch (oracle)", func(p *pic) (float64, float64) { f := oStretch[p.stretch]; return f[0], f[1] })
+		fmt.Println("metric depth:")
+		mreport("  metric: one mapping for all", func(p *pic) (float64, float64) { return mA, mB })
+		mreport("  metric: one a film (oracle)", func(p *pic) (float64, float64) { f := mff[p.film]; return f[0], f[1] })
+		mreport("  metric: one a stretch (oracle)", func(p *pic) (float64, float64) { f := msf[p.stretch]; return f[0], f[1] })
+		var ba, bc []float64
+		for _, f := range msf {
+			ba, bc = append(ba, f[0]), append(bc, f[1])
+		}
+		fmt.Printf("stretches' interaxial B: mean %.4f m sd %.4f; convergence c: mean %.2f px sd %.2f\n", mean(ba), sd(ba), mean(bc), sd(bc))
+		var fa, fc []float64
+		for _, f := range mff {
+			fa, fc = append(fa, f[0]), append(fc, f[1])
+		}
+		fmt.Printf("films' interaxial B: mean %.4f m sd %.4f; convergence c: mean %.2f px sd %.2f\n", mean(fa), sd(fa), mean(fc), sd(fc))
+	}
+
+	if *quick {
+		return
 	}
 
 	// the spread: scale and offset across films and across stretches within a film
@@ -248,6 +322,64 @@ func main() {
 		})
 	}
 	perPicture(withTok, films, report)
+
+	// the spatial grid, in the dual
+	var withGrid []*pic
+	for _, p := range pics {
+		if p.grid != nil {
+			withGrid = append(withGrid, p)
+		}
+	}
+	if len(withGrid) == 0 {
+		return
+	}
+	fmt.Printf("\n%d pictures with the grid (%d values)\n", len(withGrid), len(withGrid[0].grid))
+	byStretch = group(withGrid, func(p *pic) string { return p.stretch })
+	names = keys(byStretch)
+	Z = make([][]float64, len(names))
+	ya, yb = make([]float64, len(names)), make([]float64, len(names))
+	film = make([]string, len(names))
+	for i, s := range names {
+		ps := byStretch[s]
+		g := make([]float64, len(ps[0].grid))
+		for _, p := range ps {
+			for j, v := range p.grid {
+				g[j] += v / float64(len(ps))
+			}
+		}
+		Z[i] = append(append(stretchFeat(ps), stretchTok(ps)...), g...)
+		ya[i], yb[i] = strFit[s][0], strFit[s][1]
+		film[i] = ps[0].film
+	}
+	standardise(Z)
+	for _, lambda := range []float64{30000, 100000, 300000, 1000000} {
+		pred := map[string][2]float64{}
+		for _, hold := range films {
+			var train, test []int
+			for i := range names {
+				if film[i] == hold {
+					test = append(test, i)
+				} else {
+					train = append(train, i)
+				}
+			}
+			if len(test) == 0 {
+				continue
+			}
+			wa, ba := ridgeDual(Z, ya, lambda, train)
+			wb, bb := ridgeDual(Z, yb, lambda, train)
+			for _, i := range test {
+				pred[names[i]] = [2]float64{dot(wa, Z[i]) + ba, dot(wb, Z[i]) + bb}
+			}
+		}
+		report(fmt.Sprintf("ridge from the grid too, film held out, l=%g", lambda), func(p *pic) (float64, float64) {
+			f, ok := pred[p.stretch]
+			if !ok {
+				return allA, allB
+			}
+			return f[0], f[1]
+		})
+	}
 }
 
 // perPicture is the ridge regression a picture at a time (six times the
@@ -383,7 +515,7 @@ func extractFeatures(ckpt string, paths []string) {
 	done := 0
 	for _, p := range paths {
 		out := strings.TrimSuffix(p, ".bds") + ".bfe"
-		if _, err := os.Stat(out); err == nil {
+		if _, err := os.Stat(strings.TrimSuffix(p, ".bds") + ".bfg"); err == nil {
 			continue
 		}
 		fr, h, w, err := lastFrame(strings.TrimSuffix(p, ".bds") + ".bhw")
@@ -399,8 +531,9 @@ func extractFeatures(ckpt string, paths []string) {
 			}
 		}
 		feats := m.Encode(g.Upload(x))
-		var pooled []float32
-		for _, f := range feats {
+		var pooled, grid []float32
+		ph, pw := h/14, w/14
+		for k, f := range feats {
 			d, err := g.Download(f)
 			if err != nil {
 				fail(err)
@@ -413,8 +546,35 @@ func extractFeatures(ckpt string, paths []string) {
 				}
 			}
 			pooled = append(pooled, v...)
+			if k < 2 {
+				continue
+			}
+			// the tokens pooled on a gridN x gridN grid of cells
+			cell := make([]float32, gridN*gridN*cols)
+			cnt := make([]float32, gridN*gridN)
+			for t := range rows {
+				ci := (t/pw)*gridN/ph*gridN + (t%pw)*gridN/pw
+				cnt[ci]++
+				for c := range cols {
+					cell[ci*cols+c] += d.Data[t*cols+c]
+				}
+			}
+			for ci := range cnt {
+				for c := range cols {
+					cell[ci*cols+c] /= max(cnt[ci], 1)
+				}
+			}
+			grid = append(grid, cell...)
 		}
 		g.Release()
+		gf, err := os.Create(strings.TrimSuffix(p, ".bds") + ".bfg") //nolint:gosec // the operator's directory
+		if err != nil {
+			fail(err)
+		}
+		_, _ = gf.WriteString("BFE1")
+		_ = binary.Write(gf, binary.LittleEndian, uint32(len(grid))) //nolint:gosec // small
+		_ = binary.Write(gf, binary.LittleEndian, grid)
+		_ = gf.Close()
 		f, err := os.Create(out) //nolint:gosec // the operator's directory
 		if err != nil {
 			fail(err)
@@ -453,6 +613,36 @@ func lastFrame(path string) (frame []byte, h, w int, err error) {
 		return nil, 0, 0, err
 	}
 	return frame, h, w, nil
+}
+
+func readMetric(path string) (d []float32, h, w int, fpx float32, err error) {
+	f, err := os.Open(path) //nolint:gosec // the operator's files
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	defer func() { _ = f.Close() }()
+	r := bufio.NewReaderSize(f, 1<<20)
+	var hdr struct {
+		Magic [4]byte
+		H, W  uint32
+		F     float32
+	}
+	if err := binary.Read(r, binary.LittleEndian, &hdr); err != nil || string(hdr.Magic[:]) != "BMD1" {
+		return nil, 0, 0, 0, fmt.Errorf("%s: not a metric depth", path)
+	}
+	d = make([]float32, hdr.H*hdr.W)
+	if err := binary.Read(r, binary.LittleEndian, d); err != nil {
+		return nil, 0, 0, 0, err
+	}
+	return d, int(hdr.H), int(hdr.W), hdr.F, nil
+}
+
+func bilinear(d []float32, h, w int, u, v float64) float32 {
+	u, v = math.Min(math.Max(u, 0), float64(w-1)), math.Min(math.Max(v, 0), float64(h-1))
+	x0, y0 := int(u), int(v)
+	x1, y1 := min(x0+1, w-1), min(y0+1, h-1)
+	fx, fy := float32(u-float64(x0)), float32(v-float64(y0))
+	return (d[y0*w+x0]*(1-fx)+d[y0*w+x1]*fx)*(1-fy) + (d[y1*w+x0]*(1-fx)+d[y1*w+x1]*fx)*fy
 }
 
 func readFeatures(path string) ([]float64, error) {
@@ -552,6 +742,37 @@ func read(path string) (*pic, error) {
 	if len(ds) == 0 {
 		return nil, fmt.Errorf("%s: no depth", path)
 	}
+	if md, mh, mw, fpx, err := readMetric(strings.TrimSuffix(path, ".bds") + ".bmd"); err == nil {
+		// the metric depth covers the active rows, resized; sample it
+		// bilinearly at the sure pixels
+		top, bottom := int(hdr.Top), int(hdr.Bottom)
+		fh := float64(fpx) * float64(w) / float64(mw)
+		p.xm = make([]float32, 0, len(p.x))
+		k := 0
+		for rr := top; rr < bottom && rr < h; rr += step {
+			for c := 0; c < w; c += step {
+				i := rr*w + c
+				if math.IsNaN(float64(depth[i])) || math.IsNaN(float64(disp[i])) {
+					continue
+				}
+				u := (float64(c)+0.5)/float64(w)*float64(mw) - 0.5
+				v := (float64(rr-top)+0.5)/float64(bottom-top)*float64(mh) - 0.5
+				z := bilinear(md, mh, mw, u, v)
+				xv := float32(fh / math.Max(float64(z), 0.05))
+				p.xm = append(p.xm, xv)
+				q := float64(p.y[k])
+				p.nm++
+				p.sxm += float64(xv)
+				p.sym += q
+				p.sxxm += float64(xv) * float64(xv)
+				p.sxym += float64(xv) * q
+				k++
+			}
+		}
+		if k != len(p.x) {
+			return nil, fmt.Errorf("%s: metric pixels %d of %d", path, k, len(p.x))
+		}
+	}
 	sort.Slice(ds, func(i, j int) bool { return ds[i] < ds[j] })
 	pct := func(q float64) float64 { return float64(ds[int(q*float64(len(ds)-1))]) }
 	var dm, dv float64
@@ -577,7 +798,28 @@ func read(path string) (*pic, error) {
 	if len(cs) > 0 {
 		centre = float64(cs[len(cs)/2])
 	}
-	p.feat = []float64{pct(0.05), pct(0.25), pct(0.5), pct(0.75), pct(0.95), dm, dv, lm / 255, math.Sqrt(math.Max(lyy/nl-lm*lm, 0)) / 255, dark / nl, float64(hdr.Bottom-hdr.Top) / float64(h), float64(w) / float64(h), centre}
+	// where the picture is sharpest: the depth weighted by the luma's
+	// local contrast (the Laplacian's magnitude, squared), the focused
+	// subject's depth if the shot has a shallow focus
+	var fs, fw float64
+	for rr := int(hdr.Top) + 2; rr+2 < int(hdr.Bottom) && rr+2 < h; rr += 2 {
+		for c := 2; c+2 < w; c += 2 {
+			i := rr*w + c
+			d := depth[i]
+			if math.IsNaN(float64(d)) {
+				continue
+			}
+			lap := 4*float64(y[i]) - float64(y[i-1]) - float64(y[i+1]) - float64(y[i-w]) - float64(y[i+w])
+			wt := lap * lap
+			fs += wt * float64(d)
+			fw += wt
+		}
+	}
+	focus := pct(0.5)
+	if fw > 0 {
+		focus = fs / fw
+	}
+	p.feat = []float64{pct(0.05), pct(0.25), pct(0.5), pct(0.75), pct(0.95), dm, dv, lm / 255, math.Sqrt(math.Max(lyy/nl-lm*lm, 0)) / 255, dark / nl, float64(hdr.Bottom-hdr.Top) / float64(h), float64(w) / float64(h), centre, focus}
 	return p, nil
 }
 
@@ -621,6 +863,37 @@ func fit(ps []*pic) (scale, offset float64) {
 	b := (sy - a*sx) / n
 	w := float64(ps[0].w)
 	return a / w, b / w
+}
+
+// mfit is the LS fit of disparity = B x + c over the pictures' metric
+// feature x = f/Z, B in metres and c in half-size pixels.
+func mfit(ps []*pic) (b, c float64) {
+	var n, sx, sy, sxx, sxy float64
+	for _, p := range ps {
+		n, sx, sy, sxx, sxy = n+p.nm, sx+p.sxm, sy+p.sym, sxx+p.sxxm, sxy+p.sxym
+	}
+	b = (sxy - sx*sy/n) / math.Max(sxx-sx*sx/n, 1e-9)
+	c = (sy - b*sx) / n
+	return b, c
+}
+
+func mfits(g map[string][]*pic) map[string][2]float64 {
+	out := map[string][2]float64{}
+	for k, ps := range g {
+		b, c := mfit(ps)
+		out[k] = [2]float64{b, c}
+	}
+	return out
+}
+
+func mresid(p *pic, b, c float64) (robust, abs float64) {
+	for i := range p.xm {
+		r := b*float64(p.xm[i]) + c - float64(p.y[i])
+		robust += math.Sqrt(r*r+1) - 1
+		abs += math.Abs(r)
+	}
+	n := float64(len(p.xm))
+	return robust / n, abs / n
 }
 
 // offsetFor is the LS offset of the pictures with the scale given.
