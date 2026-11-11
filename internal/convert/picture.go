@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/brunoga/bdtools/internal/dovi"
@@ -104,6 +105,7 @@ type gpuPictures struct {
 	next     func() (base, dep []byte, pts int64, err error)
 	num, den int
 	static   hdr.Static
+	staticMu sync.Mutex          // static is set as access units are read and read by the tone mapper's goroutine
 	dynamic  map[int64]dynamicMD // by timestamp, until the picture comes out
 	report   Reporter
 	// composeFEL composes a Dolby Vision full enhancement layer into the
@@ -185,12 +187,14 @@ func (g *gpuPictures) run(each func(picture) error) error {
 		}
 		if g.codec == gpu.DecodeHEVC {
 			md := hdr.ParseHEVC(base)
+			g.staticMu.Lock()
 			if g.static.Mastering == nil {
 				g.static.Mastering = md.Static.Mastering
 			}
 			if g.static.Light == nil {
 				g.static.Light = md.Static.Light
 			}
+			g.staticMu.Unlock()
 			// Dolby Vision's RPU: in the enhancement layer's access unit
 			// on a disc, in the picture's own in Matroska.
 			rpu := dovi.FindRPU(dep)
@@ -278,9 +282,13 @@ func normalRate(num, den int) (int, int) {
 	}
 	return num, den
 }
-func (g *gpuPictures) errors() int           { return 0 }
-func (g *gpuPictures) dependentFrames() int  { return 0 }
-func (g *gpuPictures) hdrStatic() hdr.Static { return g.static }
+func (g *gpuPictures) errors() int          { return 0 }
+func (g *gpuPictures) dependentFrames() int { return 0 }
+func (g *gpuPictures) hdrStatic() hdr.Static {
+	g.staticMu.Lock()
+	defer g.staticMu.Unlock()
+	return g.static
+}
 
 // drawFlat draws a 2D picture into an encoder's picture, converting between
 // 8 and 10 bits when the two differ.
