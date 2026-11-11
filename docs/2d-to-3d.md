@@ -440,6 +440,41 @@ What that teaches:
   bigger). Found on the way: the recorder kept a window's frames across
   a cut or a change of the bars, where the converter restarts the
   network; 236 of 5,165 windows held frames of two sizes (fixed).
+- **The encoder's last blocks learnt too: a better depth, not a better
+  eye.** With the encoder's gradients on the tape (`tools/depthtrain
+  -learn blocksN`), the whole head and the last two blocks (194 tensors,
+  10.5M values) learnt as the head was, 4 passes at 1e-5, 0.35 s a
+  picture: the validation error 6.04 to 6.07 px (6.02 after three
+  passes; the training loss 2.13 against the head's 2.49, so the blocks
+  begin to learn the 37 films), and the depth better by every fitted
+  measure where it was weakest (the glass clips' correlation 0.71 to
+  0.81, their fit error 3.38 to 3.00 px; the wide set 0.83 to 0.84), but
+  no mapping in a nine-point grid gives a better right eye than the
+  head alone: the glass clips lose 0.8 dB at every point, the rest
+  within 0.1. Each retrain moves the depth's range and a fixed mapping
+  has to be re-found and compromised between films (as the head's was,
+  against Avatar). Tried against that:
+  - *The mapping as the loss* (`-fit fixed`: the depth mapped as the
+    converter maps it, its residual to the disc, no fit): the network
+    cannot learn the per-shot part of the mapping (the stereographer's,
+    which the probes above found unpredictable), so the gradient is
+    noise that wrecks the depth: the validation error with the mapping
+    9.48 to 9.22 px, after fitting 6.04 to 10.26; the twelve clips
+    27.63 to 26.27 dB, the glass correlation 0.71 to 0.44. With the
+    encoder's blocks the same (26.52 dB).
+  - *The mapping's residual added to the fit's at a weight* (`-map
+    0.3`, the blocks, 3 passes from the head's weights): the best
+    validation error of any run after fitting (5.97 px) and nothing
+    with the mapping (9.55); the twelve clips 27.27 / 28.1, the glass
+    26.90 / 38.8, the wide set 28.82 / 36.9, Avatar 25.56 / 29.8.
+
+  So the head's weights of the row above stay built in. What the round
+  says: the depth network can still learn (the fitted measures keep
+  improving), the fixed mapping is the lid on what the eye gains from
+  it, and the mapping's per-shot part is not the network's to learn.
+  The gain the probes measured for one mapping a shot (half the
+  mapping's residual) has to come from somewhere other than a picture's
+  content.
 - **Whole films the choices never saw.** Furiosa (taken for a studio
   conversion; it is not one, see below) and Avatar: Fire and Ash (shot in 3D), each converted whole from
   its 3D disc's left eye beside the disc's own 3D, and scored on clips
