@@ -1,7 +1,8 @@
 // Package probe identifies a video source from the little of it that a
 // pre-download sample contains: a disc image's BDMV metadata, a Matroska
-// file's header, or an MP4 or QuickTime file's movie box. It reports what
-// the container states and never guesses.
+// file's header, an MP4 or QuickTime file's movie box, or a bare transport
+// stream's program tables. It reports what the container states and never
+// guesses.
 //
 // A Blu-ray image keeps its UDF directory at the front and its BDMV
 // metadata (playlists, clip info) at the end, so the first and last pieces
@@ -37,6 +38,9 @@ const (
 	KindDisc          // UDF/BDMV image or directory
 	KindMatroska      // Matroska file
 	KindMP4           // MP4 or QuickTime file
+	// KindTransportStream is a bare transport stream (.m2ts, .mts, .ts): a
+	// Blu-ray clip or an MVC remux on its own.
+	KindTransportStream
 )
 
 // Layout is how a source carries its views.
@@ -168,8 +172,8 @@ func Matroska(r io.Reader, label string) (res *Result, err error) {
 }
 
 // Path probes whatever is at path, choosing by extension and by whether it
-// is a directory: a BDMV folder or .iso image, a .mkv/.mk3d file, or an
-// .mp4/.mov/.m4v file.
+// is a directory: a BDMV folder or .iso image, a .mkv/.mk3d file, an
+// .mp4/.mov/.m4v file, or an .m2ts/.mts/.ts transport stream.
 func Path(path string) (*Result, error) {
 	st, err := os.Stat(path)
 	if err != nil {
@@ -198,8 +202,15 @@ func Path(path string) (*Result, error) {
 		}
 		defer func() { _ = f.Close() }()
 		return MP4(f, st.Size(), path)
+	case ext == ".m2ts" || ext == ".mts" || ext == ".ts":
+		f, err := os.Open(path) //nolint:gosec // the caller's path is the point
+		if err != nil {
+			return nil, fmt.Errorf("probe: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		return M2TS(f, st.Size(), path)
 	}
-	return nil, fmt.Errorf("probe: %s is not a disc image, a BDMV folder, a Matroska file or an MP4", path)
+	return nil, fmt.Errorf("probe: %s is not a disc image, a BDMV folder, a Matroska file, an MP4 or a transport stream", path)
 }
 
 // --- discs ---------------------------------------------------------------------

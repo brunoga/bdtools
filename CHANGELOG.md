@@ -7,6 +7,13 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `probe.M2TS` probes a bare transport stream (.m2ts, .mts, .ts: a
+  Blu-ray clip or an MVC remux on its own, 192- or 188-byte packets)
+  from its program tables at the start of the file, so the first piece
+  of a download is enough: the streams named as a disc's, a dependent
+  view making it 3D in MVC; a read the sample cannot serve is a
+  `*MissingDataError` as `probe.Image`'s. `probe.Path` sends those
+  extensions to it (#310).
 - The depth network's encoder can be learnt from the discs too:
   `tools/depthtrain -head CHECKPOINT -learn blocksN` learns the whole
   head and the encoder's last N blocks, the picture's encoder run on the
