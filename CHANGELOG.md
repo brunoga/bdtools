@@ -68,6 +68,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A data race between the stream's static HDR metadata being set as access
+  units are read and the tone mapper reading it on the enhancement layer
+  composer's goroutine (#312).
 - A Blu-ray image still under AACS is reported as encrypted ("only a
   decrypted disc can be read") instead of "not a transport stream".
 - `tools/stereobench` on a disc reads past the first clip of a title
