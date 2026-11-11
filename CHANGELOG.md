@@ -17,6 +17,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   depth where the mapping expects it), and `-from FILE` with `-head`
   starts from a tail file's weights (#306); `-map W` adds the mapping's
   residual to a fit's at a weight (#307).
+- `tools/stereobench` reports the right eye's PSNR over the regions
+  where the disc's own match is unsure (glass, reflections, sky), and
+  their share of the picture (#309).
 - The depth network's head can be learnt from the discs, not just its
   tail: `tools/depthtrain -head CHECKPOINT -learn tail|fusion|head`
   learns the weights named from each sample's window (its picture and
