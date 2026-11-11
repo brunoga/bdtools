@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-11
+
 ### Added
 
 - `probe.M2TS` probes a bare transport stream (.m2ts, .mts, .ts: a
@@ -1542,7 +1544,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/brunoga/bdtools/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/brunoga/bdtools/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/brunoga/bdtools/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/brunoga/bdtools/compare/v0.16.0...v0.17.0
