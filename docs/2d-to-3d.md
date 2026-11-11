@@ -679,6 +679,15 @@ begin and end at cuts. `--3d-preview` shows what each depth looks like
 before; the file is part of what an interrupted conversion must match to
 resume.
 
+A whole film may want its own grade: the discs' mappings differ between
+films more than any picture tells (the mapping probes above), and the
+built-in mapping is the compromise that scores best across the sets.
+Avatar: Fire and Ash, say, scores best (25.90 dB against 25.65) at 0.87
+of the built-in depth with the screen 0.17% of the width nearer, which
+against the defaults is `--3d-depth 1.3 --3d-screen 0.17`; a film's
+own 3D release, where one exists, is the way to find its grade, as
+`tools/stereobench` does.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything

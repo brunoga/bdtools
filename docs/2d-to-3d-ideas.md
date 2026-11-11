@@ -304,6 +304,18 @@ the discs give no supervision.
 **Cost.** Low for step 2, high for step 3 (a new output of the network
 and a new renderer path), medium for step 4.
 
+**First step done (2026-11-10, `tools/stereobench`'s unsure columns).**
+With the disc's own unsure match as the proxy for glass, reflections and
+the textureless (49% of the glass pictures, 61% of the twelve's), our
+right eye scores better there than over the whole picture: the glass
+clips 33.6 dB against 28.2, the twelve 31.6 against 27.6, the porthole
+28.6 against 24.9. Those regions are smooth, and a wrong disparity costs
+little in them; the loss sits in the textured, sure regions (the
+porthole's face and ring). The disc's own depth gets 37.6 there against
+our 33.6, so there is a gap, but not the main one. Layered rendering is
+not the lever for the bench; the porthole's loss is the depth order of
+what is behind the glass, a single-depth question (see above).
+
 **Risks.** Two-layer supervision from the discs is sparse: the disparity
 measurement itself is unsure in exactly these regions. Step 1 may show
 the edges, not the reflections, carry most of the loss, in which case

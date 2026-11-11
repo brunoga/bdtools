@@ -73,9 +73,12 @@ type clipResult struct {
 	epeCurve, bad2Curve  float64    // after fitting a monotone curve, not a line
 	disc, ours           [3]float64 // p5, median, p95 disparity
 	psnr, holePSNR, vmaf map[string]float64
-	holes                map[string]float64 // the share of the area filled
-	clipA, clipB         float64            // the clip's fit: disparity = a depth + b
-	raw                  [3]float64         // the network's depth, p5, median, p95
+	// the right eye's PSNR where the disc's own match is unsure (glass,
+	// reflections, sky, the textureless), and that share of the picture
+	unsurePSNR, unsure map[string]float64
+	holes              map[string]float64 // the share of the area filled
+	clipA, clipB       float64            // the clip's fit: disparity = a depth + b
+	raw                [3]float64         // the network's depth, p5, median, p95
 	// each method's pair measured as a pair (made.go): correlation, error
 	// left, detail, jitter and the share revealed; NaN where not measured
 	pair     map[string][5]float64
@@ -374,6 +377,7 @@ type clipBench struct {
 		matched, corr, epe, bad2 float64
 		epeCurve, bad2Curve      float64
 		mse, holeMSE, holeN      map[string]float64
+		unsureMSE, unsureN       map[string]float64
 		n                        map[string]float64
 	}
 	// the measured pictures, rendered once all are in (the clip's fit
@@ -411,6 +415,7 @@ type nextRecord struct {
 func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c := &clipBench{every: every, scorers: map[string]*vmaf.Scorer{}, made: map[string]map[int][2]*mvc.Frame{}, madeN: map[string]int{}}
 	c.res = clipResult{name: name, psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{},
+		unsurePSNR: map[string]float64{}, unsure: map[string]float64{},
 		pair: map[string][5]float64{}, leftPSNR: map[string]float64{}}
 	c.conv = stereo.NewConverter(m, shape)
 	if samplesDir != "" {
@@ -427,6 +432,7 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c.conv.KeepCredits = keepCredits
 	c.conv.Refine = refine
 	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
+	c.sums.unsureMSE, c.sums.unsureN = map[string]float64{}, map[string]float64{}
 	return c
 }
 
@@ -637,7 +643,7 @@ func (c *clipBench) finish() (clipResult, error) {
 			if name == "fitted" {
 				fittedEye = eye
 			}
-			var se, hse, hn, cnt float64
+			var se, hse, hn, use, un, cnt float64
 			for y := r.top; y < r.bottom; y++ {
 				for x := margin; x < w-margin; x++ {
 					i := y*w + x
@@ -648,12 +654,18 @@ func (c *clipBench) finish() (clipResult, error) {
 						hse += diff * diff
 						hn++
 					}
+					if !r.dm.Valid[(y/2)*r.dm.W+x/2] {
+						use += diff * diff
+						un++
+					}
 				}
 			}
 			sums.mse[name] += se
 			sums.n[name] += cnt
 			sums.holeMSE[name] += hse
 			sums.holeN[name] += hn
+			sums.unsureMSE[name] += use
+			sums.unsureN[name] += un
 			sc := c.scorers[name]
 			if sc == nil {
 				var err error
@@ -688,6 +700,8 @@ func (c *clipBench) finish() (clipResult, error) {
 		res.psnr[name] = psnr(sums.mse[name] / sums.n[name])
 		res.holePSNR[name] = psnr(sums.holeMSE[name] / max(sums.holeN[name], 1))
 		res.holes[name] = sums.holeN[name] / sums.n[name]
+		res.unsurePSNR[name] = psnr(sums.unsureMSE[name] / max(sums.unsureN[name], 1))
+		res.unsure[name] = sums.unsureN[name] / sums.n[name]
 		var v []float64
 		for _, sc := range c.scorers[name].Scores() {
 			v = append(v, sc.VMAF)
@@ -930,6 +944,7 @@ func percentiles(v []float32) [3]float64 {
 // clip's equally).
 func mean(all []clipResult) clipResult {
 	r := clipResult{name: "mean", psnr: map[string]float64{}, holePSNR: map[string]float64{}, vmaf: map[string]float64{}, holes: map[string]float64{},
+		unsurePSNR: map[string]float64{}, unsure: map[string]float64{},
 		pair: map[string][5]float64{}, leftPSNR: map[string]float64{}}
 	n := float64(len(all))
 	for _, m := range methods {
@@ -973,6 +988,8 @@ func mean(all []clipResult) clipResult {
 			r.holePSNR[m] += c.holePSNR[m] / n
 			r.vmaf[m] += c.vmaf[m] / n
 			r.holes[m] += c.holes[m] / n
+			r.unsurePSNR[m] += c.unsurePSNR[m] / n
+			r.unsure[m] += c.unsure[m] / n
 		}
 	}
 	return r
@@ -988,9 +1005,9 @@ func report(r clipResult) {
 		fmt.Printf("network depth p5/median/p95 %.3f / %.3f / %.3f; the clip's fit: disparity = %.2f depth %+.2f px\n",
 			r.raw[0], r.raw[1], r.raw[2], r.clipA, r.clipB)
 	}
-	fmt.Printf("%-8s %7s %7s %6s %7s\n", "right", "PSNR", "holes", "area", "VMAF")
+	fmt.Printf("%-8s %7s %7s %6s %7s %7s %6s\n", "right", "PSNR", "holes", "area", "VMAF", "unsure", "area")
 	for _, m := range methods {
-		fmt.Printf("%-8s %7.2f %7.2f %5.1f%% %7.2f\n", m, r.psnr[m], r.holePSNR[m], 100*r.holes[m], r.vmaf[m])
+		fmt.Printf("%-8s %7.2f %7.2f %5.1f%% %7.2f %7.2f %5.1f%%\n", m, r.psnr[m], r.holePSNR[m], 100*r.holes[m], r.vmaf[m], r.unsurePSNR[m], 100*r.unsure[m])
 	}
 	fmt.Printf("%-8s %7s %7s %7s %7s %8s %7s\n", "pair", "corr", "error", "detail", "jitter", "revealed", "left")
 	for _, m := range methods {
@@ -1014,7 +1031,7 @@ func writeCSV(path string, all []clipResult) error {
 	w := csv.NewWriter(f)
 	head := []string{"clip", "pictures", "matched", "corr", "epe", "bad2", "epe_curve", "bad2_curve", "disc_p5", "disc_p50", "disc_p95", "ours_p5", "ours_p50", "ours_p95"}
 	for _, m := range methods {
-		head = append(head, m+"_psnr", m+"_hole_psnr", m+"_holes", m+"_vmaf", m+"_pair_corr", m+"_pair_error", m+"_detail", m+"_jitter", m+"_revealed")
+		head = append(head, m+"_psnr", m+"_hole_psnr", m+"_holes", m+"_vmaf", m+"_pair_corr", m+"_pair_error", m+"_detail", m+"_jitter", m+"_revealed", m+"_unsure_psnr", m+"_unsure")
 	}
 	_ = w.Write(head)
 	ff := func(v float64) string { return strconv.FormatFloat(v, 'f', 4, 64) }
@@ -1023,7 +1040,7 @@ func writeCSV(path string, all []clipResult) error {
 			ff(c.disc[0]), ff(c.disc[1]), ff(c.disc[2]), ff(c.ours[0]), ff(c.ours[1]), ff(c.ours[2])}
 		for _, m := range methods {
 			p := c.pair[m]
-			row = append(row, ff(c.psnr[m]), ff(c.holePSNR[m]), ff(c.holes[m]), ff(c.vmaf[m]), ff(p[0]), ff(p[1]), ff(p[2]), ff(p[3]), ff(p[4]))
+			row = append(row, ff(c.psnr[m]), ff(c.holePSNR[m]), ff(c.holes[m]), ff(c.vmaf[m]), ff(p[0]), ff(p[1]), ff(p[2]), ff(p[3]), ff(p[4]), ff(c.unsurePSNR[m]), ff(c.unsure[m]))
 		}
 		_ = w.Write(row)
 	}
