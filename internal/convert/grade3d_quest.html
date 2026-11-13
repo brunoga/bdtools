@@ -172,7 +172,7 @@ $('vr').onclick = async () => {
   let lastQ = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null, lastAt = performance.now();
   const report = setInterval(() => {
     if (!session) { clearInterval(report); return; }
-    let text = how + ' ' + rate;
+    let text = how + ' ' + rate + (glNote ? ' ' + glNote : '');
     if (video.getVideoPlaybackQuality) {
       const q = video.getVideoPlaybackQuality(), dt = (performance.now() - lastAt) / 1000;
       text += ' ' + ((q.totalVideoFrames - lastQ.totalVideoFrames) / dt).toFixed(1) + ' fps, dropped ' + (q.droppedVideoFrames - lastQ.droppedVideoFrames);
@@ -186,7 +186,7 @@ $('vr').onclick = async () => {
     session.requestAnimationFrame(frame);
     controllers(session, xrFrame);
   });
-  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR (' + how + ')'); hud(); });
+  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); hud(); });
 };
 let vrHow = '';
 
@@ -240,9 +240,11 @@ function nudge(dd, ds) {
 }
 
 // without media layers: the video as a texture on a quad, each eye its half
+let glNote = ''; // what the WebGL path has to say, into the readout
 function webglScreen(session, space, W, H, Y, Z) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2', { xrCompatible: true });
+  if (!gl) { glNote = 'no WebGL2'; return; }
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
   const vs = `#version 300 es
     in vec2 p; in vec2 uv; uniform mat4 mvp; out vec2 v; void main(){ v = uv; gl_Position = mvp * vec4(p, 0.0, 1.0); }`;
@@ -250,8 +252,13 @@ function webglScreen(session, space, W, H, Y, Z) {
     precision mediump float; in vec2 v; uniform sampler2D tex; uniform float half_; out vec4 o;
     void main(){ o = texture(tex, vec2(half_ + v.x * 0.5, 1.0 - v.y)); }`;
   const prog = gl.createProgram();
-  for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); gl.attachShader(prog, s); }
+  for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) glNote = 'shader: ' + gl.getShaderInfoLog(s);
+    gl.attachShader(prog, s);
+  }
   gl.linkProgram(prog); gl.useProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) glNote = 'link: ' + gl.getProgramInfoLog(prog);
   const quad = new Float32Array([-W/2, Y-H/2, 0, 0,  W/2, Y-H/2, 1, 0,  -W/2, Y+H/2, 0, 1,  W/2, Y+H/2, 1, 1]);
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
   const p = gl.getAttribLocation(prog, 'p'), uv = gl.getAttribLocation(prog, 'uv');
@@ -262,29 +269,39 @@ function webglScreen(session, space, W, H, Y, Z) {
   const uMVP = gl.getUniformLocation(prog, 'mvp'), uHalf = gl.getUniformLocation(prog, 'half_');
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
   const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
-  // the texture taken from the video on its new frames only (24 a
-  // second), not at the headset's rate
-  let fresh = true;
-  if (video.requestVideoFrameCallback) {
-    const onFrame = () => { fresh = true; video.requestVideoFrameCallback(onFrame); };
-    video.requestVideoFrameCallback(onFrame);
-  }
+  // the texture taken from the video when its time has moved (a new
+  // frame), not at the headset's rate
+  let lastT = -1, uploads = 0, draws = 0;
+  glNote = glNote || 'gl ok';
   session.requestAnimationFrame(function draw(t, frame) {
     if (!session) return;
     session.requestAnimationFrame(draw);
-    const pose = frame.getViewerPose(space);
-    if (!pose) return;
-    const layer = session.renderState.baseLayer;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-    if (video.readyState >= 2 && fresh) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); fresh = !video.requestVideoFrameCallback; }
-    for (const view of pose.views) {
-      const vp = layer.getViewport(view);
-      gl.viewport(vp.x, vp.y, vp.width, vp.height);
-      gl.uniformMatrix4fv(uMVP, false, mul(mul(view.projectionMatrix, view.transform.inverse.matrix), model));
-      gl.uniform1f(uHalf, view.eye === 'right' ? 0.5 : 0);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
+    try {
+      const pose = frame.getViewerPose(space);
+      if (!pose) return;
+      const layer = session.renderState.baseLayer;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.clearColor(0.04, 0.04, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+      if (video.readyState >= 2 && video.currentTime !== lastT) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+        lastT = video.currentTime; uploads++;
+      }
+      draws++;
+      if (draws % 144 === 0) {
+        const err = gl.getError();
+        glNote = (err ? 'gl error ' + err + ', ' : 'gl ok, ') + uploads + ' uploads, ' + draws + ' draws, ' + video.videoWidth + 'x' + video.videoHeight + ', ready ' + video.readyState;
+      }
+    } catch (e) { glNote = 'draw: ' + e.message; return; }
+    try {
+      const pose = frame.getViewerPose(space), layer = session.renderState.baseLayer;
+      for (const view of pose.views) {
+        const vp = layer.getViewport(view);
+        gl.viewport(vp.x, vp.y, vp.width, vp.height);
+        gl.uniformMatrix4fv(uMVP, false, mul(mul(view.projectionMatrix, view.transform.inverse.matrix), model));
+        gl.uniform1f(uHalf, view.eye === 'right' ? 0.5 : 0);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    } catch (e) { glNote = 'views: ' + e.message; }
   });
 }
 </script>
