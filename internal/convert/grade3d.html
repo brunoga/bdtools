@@ -479,9 +479,9 @@ let vrHow = '';
 // presses what is under it.
 const panel = (() => {
   const canvas = document.createElement('canvas');
-  canvas.width = 800; canvas.height = 1100;
+  canvas.width = 800; canvas.height = 1220;
   const ctx = canvas.getContext('2d');
-  const W = 1.2, H = 1.65; // metres
+  const W = 1.2, H = 1.83; // metres
   // placed to the right, 2.6 m away, turned 38 degrees towards the viewer
   const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.55, cz = -2.4;
   const c = Math.cos(ang), sn = Math.sin(ang);
@@ -553,6 +553,8 @@ const panel = (() => {
           ['mix', () => send({ op: 'ref', view: 'mix' }), v === 'mix'], ['diff', () => send({ op: 'ref', view: 'diff' }), v === 'diff'],
           ['align', () => send({ op: 'align' })]], 64, 10);
       }
+      text('screen size ' + (4 * screenScale).toFixed(1) + ' m (' + Math.round(2 * Math.atan(2 * screenScale / 3.5) * 180 / Math.PI) + '° of view)', 30, y + 20, '26px sans-serif', '#9a9a9a'); y += 46;
+      row([['smaller', () => { screenScale = Math.max(0.5, screenScale - 0.1); pl.draw(); }], ['bigger', () => { screenScale = Math.min(2.2, screenScale + 0.1); pl.draw(); }]], 56, 10);
       const stretch = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'no stretch here (the defaults)';
       text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
       if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch })); }
@@ -654,6 +656,7 @@ function nudgeKnobs(dd, ds) {
 
 // without media layers: the video as a texture on a quad, each eye its half
 let glNote = ''; // what the WebGL path has to say, into the readout
+let screenScale = 1; // the screen's size in VR, 1 the 4 m screen
 let glSource = null; // what the WebGL path draws: image() the picture when it changed, else null
 
 // videoSource draws the video element: a new picture when its time moved
@@ -758,7 +761,8 @@ function webglScreen(session, space, W, H, Y, Z) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   let panelVersion = -1;
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
-  const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
+  // the screen's size: scaled about its centre, at eye height, by screenScale
+  const model = () => { const k = screenScale; return new Float32Array([k,0,0,0, 0,k,0,0, 0,0,1,0, 0,Y - Y * k,Z,1]); };
   // the texture taken from the source when it has a new picture, not at
   // the headset's rate
   let uploads = 0, draws = 0;
@@ -801,7 +805,7 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
-        gl.uniformMatrix4fv(uMVP, false, mul(pv, model));
+        gl.uniformMatrix4fv(uMVP, false, mul(pv, model()));
         gl.uniform1f(uHalf, view.eye === 'right' ? 0.5 : 0); gl.uniform1f(uScale, 0.5);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         // the panel
