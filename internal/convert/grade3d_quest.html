@@ -38,6 +38,7 @@ video { display:block; width:100%; max-height:calc(100vh - 60px); background:#00
 //   left stick left/right: the cut before/after
 //   X: ten seconds back, Y: ten seconds on
 //   left trigger: the view, ours, the film's own 3D, the mix (--3d-reference)
+//   both grips held a second: out of VR
 const $ = id => document.getElementById(id);
 const video = $('v');
 let st = null, mime = null;
@@ -53,7 +54,7 @@ function fmt(s) {
 function hud() {
   if (!st) return;
   $('hud').textContent = fmt(st.t) + (st.playing ? ' ▶ ' : ' ❚❚ ') + 'depth ' + st.knobs.depth.toFixed(2) + ' screen ' + st.knobs.screen.toFixed(2) + (st.knobs.flat ? ' flat' : '') +
-    (st.ref && st.ref.on ? '  ' + st.ref.view.toUpperCase() : '') +
+    (st.ref && st.ref.on ? '  ' + st.ref.view.toUpperCase() : '') + (vrHow ? '  [' + vrHow + ']' : '') +
     (st.length > 0 ? '  lag ' + lag().toFixed(2) + ' s' : '');
 }
 function lag() {
@@ -103,11 +104,12 @@ async function start() {
       queue.push(value); pump();
     }
   })();
-  // stay at the live edge: a little faster when behind, a jump when far
+  // stay at the live edge: a jump when far behind; out of VR, a little
+  // faster when behind (in VR a change of rate shows as judder)
   setInterval(() => {
     const l = lag();
-    if (l > 1.5) { const b = video.buffered; video.currentTime = b.end(b.length - 1) - 0.15; }
-    else if (l > 0.4) video.playbackRate = 1.1;
+    if (l > (session ? 2 : 1.5)) { const b = video.buffered; video.currentTime = b.end(b.length - 1) - 0.15; }
+    else if (!session && l > 0.5) video.playbackRate = 1.05;
     else video.playbackRate = 1;
     if (video.paused) video.play().catch(() => {});
     hud();
@@ -135,23 +137,31 @@ $('vr').onclick = async () => {
     session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
   } catch (e) { say('no VR session: ' + e.message); return; }
   const space = await session.requestReferenceSpace('local-floor');
-  if (window.XRMediaBinding && session.renderState) {
+  // a 4 m wide, 16:9 screen, 3.5 m away, eye height
+  const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
+  let how = 'WebGL';
+  if (window.XRMediaBinding) {
     // the browser shows the video itself, each half to its eye, at the
-    // video's own pixels: a 4 m wide screen, 3.5 m away
-    const binding = new XRMediaBinding(session);
-    const layer = binding.createQuadLayer(video, { space, layout: 'stereo-left-right', width: 4,
-      transform: new XRRigidTransform({ x: 0, y: 1.7, z: -3.5 }) });
-    session.updateRenderState({ layers: [layer] });
-  } else {
-    say('this browser has no media layers: the picture is drawn through WebGL');
-    webglScreen(session, space);
+    // video's own pixels
+    try {
+      const binding = new XRMediaBinding(session);
+      const layer = binding.createQuadLayer(video, { space, layout: 'stereo-left-right', width: W, height: H,
+        transform: new XRRigidTransform({ x: 0, y: Y, z: Z }) });
+      session.updateRenderState({ layers: [layer] });
+      how = 'media layer';
+    } catch (e) { how = 'WebGL (no media layer: ' + e.message + ')'; }
   }
+  if (how.startsWith('WebGL')) webglScreen(session, space, W, H, Y, Z);
+  vrHow = how;
+  say('in VR through the ' + how + '; hold both grips a second to leave');
   session.requestAnimationFrame(function frame(t, xrFrame) {
+    if (!session) return;
     session.requestAnimationFrame(frame);
     controllers(session, xrFrame);
   });
-  session.addEventListener('end', () => { session = null; });
+  session.addEventListener('end', () => { session = null; vrHow = ''; say(''); hud(); });
 };
+let vrHow = '';
 
 // the controllers: an action on a button's press, the sticks repeating
 // while held past their middle
@@ -161,7 +171,16 @@ function fire(key, every, fn) {
   if (last !== undefined && now - last < every) return;
   held.set(key, now); fn();
 }
+let gripsSince = 0; // both grips held: when it began
 function controllers(session, xrFrame) {
+  let grips = 0;
+  for (const src of session.inputSources) {
+    if (src.gamepad && src.gamepad.buttons[1] && src.gamepad.buttons[1].pressed) grips++;
+  }
+  if (grips === 2) {
+    if (!gripsSince) gripsSince = performance.now();
+    else if (performance.now() - gripsSince > 1000) { gripsSince = 0; session.end(); return; }
+  } else gripsSince = 0;
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
@@ -194,7 +213,7 @@ function nudge(dd, ds) {
 }
 
 // without media layers: the video as a texture on a quad, each eye its half
-function webglScreen(session, space) {
+function webglScreen(session, space, W, H, Y, Z) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2', { xrCompatible: true });
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
@@ -206,7 +225,6 @@ function webglScreen(session, space) {
   const prog = gl.createProgram();
   for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); gl.attachShader(prog, s); }
   gl.linkProgram(prog); gl.useProgram(prog);
-  const W = 4, H = 4 * 1080 / 1920, Y = 1.7, Z = -3.5;
   const quad = new Float32Array([-W/2, Y-H/2, 0, 0,  W/2, Y-H/2, 1, 0,  -W/2, Y+H/2, 0, 1,  W/2, Y+H/2, 1, 1]);
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
   const p = gl.getAttribLocation(prog, 'p'), uv = gl.getAttribLocation(prog, 'uv');
@@ -217,14 +235,22 @@ function webglScreen(session, space) {
   const uMVP = gl.getUniformLocation(prog, 'mvp'), uHalf = gl.getUniformLocation(prog, 'half_');
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
   const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
+  // the texture taken from the video on its new frames only (24 a
+  // second), not at the headset's rate
+  let fresh = true;
+  if (video.requestVideoFrameCallback) {
+    const onFrame = () => { fresh = true; video.requestVideoFrameCallback(onFrame); };
+    video.requestVideoFrameCallback(onFrame);
+  }
   session.requestAnimationFrame(function draw(t, frame) {
+    if (!session) return;
     session.requestAnimationFrame(draw);
     const pose = frame.getViewerPose(space);
     if (!pose) return;
     const layer = session.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-    if (video.readyState >= 2) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    if (video.readyState >= 2 && fresh) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); fresh = !video.requestVideoFrameCallback; }
     for (const view of pose.views) {
       const vp = layer.getViewport(view);
       gl.viewport(vp.x, vp.y, vp.width, vp.height);
