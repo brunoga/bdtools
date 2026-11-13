@@ -44,7 +44,7 @@ var bdtoolsIcon []byte
 const (
 	// gradeQP is the live stream's quantiser: a good picture at a rate a
 	// home network carries.
-	gradeQP = 20
+	gradeQP = 18
 	// gradeGOP is its keyframe interval in frames: how long a player
 	// joining waits for a picture it can start from.
 	gradeGOP = 24
