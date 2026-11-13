@@ -759,8 +759,11 @@ command starts from a file written before. The page shows where the
 picture's nearest and farthest come out, in percent of the width and in
 pixels, the cuts seen so far on the timeline, and the stretches.
 
-A headset grades without a phone in hand: `http://HOST:8420/quest` in
-the Quest's browser plays the stream through the page's own media
+A headset grades without a phone in hand: `https://HOST:8421/quest` in
+the Quest's browser (the server's HTTPS side, on the next port, with a
+certificate of its own making that the browser is told to accept once:
+WebXR runs on a secure page only, and a plain HTTP page on a LAN
+address is not one) plays the stream through the page's own media
 source (`/stream.mp4`, the same pictures as a fragmented MP4), held at
 its live edge, under a tenth of a second behind; Enter VR puts it on a
 4 m screen as a stereo layer, each half to its eye. The controllers

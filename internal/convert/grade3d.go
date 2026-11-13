@@ -11,6 +11,7 @@ package convert
 
 import (
 	"context"
+	"crypto/tls"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,9 @@ var grade3DPage []byte
 
 //go:embed grade3d_quest.html
 var grade3DQuestPage []byte
+
+//go:embed icon.svg
+var bdtoolsIcon []byte
 
 const (
 	// gradeQP is the live stream's quantiser: a good picture at a rate a
@@ -104,6 +108,7 @@ type grader struct {
 	events  map[chan struct{}]struct{}
 	ver     int
 	addr    string
+	tlsAddr string // the HTTPS side, "" when none
 
 	ref *gradeRef // the film's own 3D, when given
 
@@ -226,10 +231,24 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	}
 	g.addr = reachable(ln.Addr().String())
 	srv := &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second}
-	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.Serve(ln) }()
+	go func() { _ = srv.Serve(ln) }()
 	r.Report.Report("--3d-grade: the controls at http://%s/, the 3D stream at http://%s/stream.ts (full side by side); the grade goes to %s",
 		g.addr, g.addr, r.Opts.Output)
+	// the secure side, for a headset's VR (a page on a LAN address allows
+	// WebXR over HTTPS only)
+	var tlsSrv *http.Server
+	if tlsAddr, err := nextPort(ln.Addr().String()); err == nil {
+		if cfg, err := gradeTLS(); err != nil {
+			r.Report.Report("--3d-grade: no HTTPS (%v): a headset's VR needs it", err)
+		} else if tln, err := tls.Listen("tcp", tlsAddr, cfg); err != nil {
+			r.Report.Report("--3d-grade: no HTTPS on %s (%v): a headset's VR needs it", tlsAddr, err)
+		} else {
+			tlsSrv = &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second, TLSConfig: cfg}
+			go func() { _ = tlsSrv.Serve(tln) }()
+			g.tlsAddr = reachable(tln.Addr().String())
+			r.Report.Report("--3d-grade: for a headset, https://%s/quest (its certificate is this machine's own: accept it once)", g.tlsAddr)
+		}
+	}
 	err = g.play(ctx)
 	g.mu.Lock()
 	saveErr := g.saveLocked()
@@ -240,6 +259,9 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	shut, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shut)
+	if tlsSrv != nil {
+		_ = tlsSrv.Shutdown(shut)
+	}
 	if err == nil || errors.Is(err, context.Canceled) {
 		err = saveErr
 	}
@@ -810,6 +832,7 @@ type gradeState struct {
 	Width    int            `json:"width"`
 	Title    string         `json:"title"`
 	Ref      *gradeRefState `json:"ref"`
+	Secure   string         `json:"secure"` // the HTTPS side's address, for VR
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -837,7 +860,7 @@ func (g *grader) state() gradeState {
 	defer g.mu.Unlock()
 	st := gradeState{Ver: g.ver, T: g.pos.Seconds(), Length: g.src.length.Seconds(), Frame: g.frameOr().Seconds(),
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
-		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2,
+		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
 		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
@@ -976,6 +999,11 @@ func (g *grader) handler() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(grade3DPage)
+	})
+	mux.HandleFunc("GET /icon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "max-age=86400")
+		_, _ = w.Write(bdtoolsIcon)
 	})
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
