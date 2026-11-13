@@ -34,6 +34,11 @@ tr.cur td { color:var(--acc); }
 .stat { font-variant-numeric: tabular-nums; }
 .ok { color:var(--ok); } .warn { color:var(--warn); }
 kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0 5px; font:12px ui-monospace, monospace; }
+#preview { position:relative; background:#000; border-radius:6px; overflow:hidden; margin:8px auto 0; aspect-ratio: 16/9; width:min(100%, calc(42vh * 16 / 9)); }
+#preview.both { aspect-ratio: 32/9; width:min(100%, calc(42vh * 32 / 9)); }
+#preview video, #preview canvas { position:absolute; top:0; left:0; height:100%; width:100%; object-fit:fill; }
+#preview.left video { width:200%; }
+#preview.off { display:none; }
 @media (max-width:600px) { .clock { font-size:26px; } .knob { grid-template-columns: 70px 1fr 80px; } }
 </style>
 </head>
@@ -44,6 +49,17 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
   <span id="clients">0 players</span>
   <span id="saved"></span>
 </div>
+
+<div class="row dim" style="font-size:13px; margin-top:10px">
+  <span>preview:</span>
+  <label><input type="radio" name="pv" value="left" checked> left eye</label>
+  <label><input type="radio" name="pv" value="both"> both</label>
+  <label><input type="radio" name="pv" value="anaglyph"> red-cyan</label>
+  <label><input type="radio" name="pv" value="off"> off</label>
+  <label style="margin-left:12px"><input type="checkbox" id="hud" checked> readout in the stream</label>
+  <span id="lag"></span>
+</div>
+<div id="preview"><video id="v" muted playsinline autoplay></video><canvas id="cv" hidden></canvas></div>
 
 <div id="bar"><div class="head" id="head"></div></div>
 
@@ -159,6 +175,7 @@ function render() {
   $('saved').textContent = st.saved ? 'saved' : 'unsaved';
   $('saved').className = st.saved ? 'ok' : 'warn';
   $('file').textContent = st.file;
+  if (document.activeElement !== $('hud')) $('hud').checked = st.hud;
   const w = st.width > 0 ? st.width : 1920;
   $('extremes').textContent = st.knobs.flat ? 'flat' :
     'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
@@ -195,6 +212,70 @@ function render() {
     tb.appendChild(tr);
   });
 }
+
+// the live preview: the stream as a fragmented MP4 into a media source,
+// held at its live edge; the left eye alone (the video twice as wide,
+// its right half clipped), both eyes, or a red-cyan anaglyph drawn from
+// the two halves
+const video = $('v'), cv = $('cv');
+let previewMode = 'left', started = false;
+function lag() { const b = video.buffered; return b.length ? b.end(b.length - 1) - video.currentTime : 0; }
+async function startPreview() {
+  if (started) return;
+  started = true;
+  let info;
+  for (;;) {
+    try { info = await (await fetch('/stream.json')).json(); } catch (e) { info = { ready: false }; }
+    if (info.ready) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!('MediaSource' in window) || !MediaSource.isTypeSupported(info.mime)) { $('lag').textContent = 'no preview: this browser cannot play ' + info.mime; return; }
+  const ms = new MediaSource();
+  video.src = URL.createObjectURL(ms);
+  await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
+  const sb = ms.addSourceBuffer(info.mime);
+  const queue = [];
+  const pump = () => { if (!sb.updating && queue.length && ms.readyState === 'open') sb.appendBuffer(queue.shift()); };
+  sb.addEventListener('updateend', () => {
+    const b = sb.buffered;
+    if (b.length && video.currentTime - b.start(0) > 20 && !sb.updating) { try { sb.remove(b.start(0), video.currentTime - 10); } catch (e) {} }
+    pump();
+  });
+  const reader = (await fetch('/stream.mp4')).body.getReader();
+  (async () => { for (;;) { const { value, done } = await reader.read(); if (done) return; queue.push(value); pump(); } })();
+  setInterval(() => {
+    const l = lag();
+    if (l > 1.5) { const b = video.buffered; video.currentTime = b.end(b.length - 1) - 0.15; }
+    else video.playbackRate = l > 0.4 ? 1.1 : 1;
+    if (video.paused) video.play().catch(() => {});
+    $('lag').textContent = 'preview ' + l.toFixed(2) + ' s behind';
+  }, 250);
+}
+function setPreview(mode) {
+  previewMode = mode;
+  $('preview').className = mode;
+  cv.hidden = mode !== 'anaglyph';
+  video.style.visibility = mode === 'anaglyph' ? 'hidden' : '';
+  if (mode !== 'off') startPreview();
+}
+document.querySelectorAll('input[name=pv]').forEach(r => r.onchange = () => setPreview(r.value));
+$('hud').onchange = () => send({ op: 'hud', n: $('hud').checked ? 1 : 0 });
+// the anaglyph: the left half's red, the right half's green and blue, at a quarter size
+(function anaglyph() {
+  requestAnimationFrame(anaglyph);
+  if (previewMode !== 'anaglyph' || video.readyState < 2 || !video.videoWidth) return;
+  const w = video.videoWidth / 4, h = video.videoHeight / 2;
+  if (cv.width !== w) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, video.videoWidth / 2, video.videoHeight, 0, 0, w, h);
+  const L = ctx.getImageData(0, 0, w, h);
+  ctx.drawImage(video, video.videoWidth / 2, 0, video.videoWidth / 2, video.videoHeight, 0, 0, w, h);
+  const R = ctx.getImageData(0, 0, w, h);
+  const a = L.data, b = R.data;
+  for (let i = 0; i < a.length; i += 4) { b[i] = a[i]; }
+  ctx.putImageData(R, 0, 0);
+})();
+setPreview('left');
 
 function connect() {
   const es = new EventSource('/events');

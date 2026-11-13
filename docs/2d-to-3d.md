@@ -749,6 +749,14 @@ paused picture keeps its depth, so a turn of a knob shows at the next
 picture's time; the only wait is the player's own buffer (Kodi's a few
 seconds by default, under one with its cache turned down).
 
+The page shows the stream itself above the knobs (the left eye, both
+eyes, or a red-cyan anaglyph for a depth check on a laptop), a tenth of
+a second behind, and the stream carries a readout drawn into the bottom
+of both eyes at the screen's depth: the time, the play state, the knobs,
+the stretch and the view, so the projector and a headset show the state
+while a hand turns the knobs (a box on the page turns it off for clean
+viewing).
+
 A turn of a knob grades a stretch: from the last cut when one is within
 two seconds (a hand reacts to a shot a moment late), else from the
 picture shown, eased in over a second (`ramp=1`), to the next stretch

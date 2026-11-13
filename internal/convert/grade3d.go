@@ -104,6 +104,7 @@ type grader struct {
 	near    float64       // its disparity's extremes, percent of the width
 	far     float64
 	saved   bool
+	noHUD   bool // the readout left out of the stream
 	clients map[*gradeClient]struct{}
 	events  map[chan struct{}]struct{}
 	ver     int
@@ -603,8 +604,40 @@ func (g *grader) emit(ctx context.Context, l, rr *mvc.Frame) error {
 	}
 	g.next = g.next.Add(g.frame)
 	g.last = [2]*mvc.Frame{l, rr}
+	if text := g.hudText(); text != "" {
+		l, rr = copyFrame(l), copyFrame(rr)
+		drawHUD([]*mvc.Frame{l, rr}, text)
+	}
 	sf := &mvc.StereoFrame{Base: l, Dependent: rr}
 	return g.enc.Encode(func(dst *gpu.Picture) { drawFramed(dst, sf, false, LayoutFullSBS) })
+}
+
+// hudText is the readout drawn into the stream: the time, the play
+// state, the knobs, the stretch and the view; "" when left out.
+func (g *grader) hudText() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.noHUD {
+		return ""
+	}
+	k := g.knobsAtLocked(g.pos)
+	state := "||"
+	if g.want.playing {
+		state = ">"
+	}
+	text := fmt.Sprintf("%s %s  depth %.2f  screen %+.2f", clock(g.pos)[:len(clock(g.pos))-1], state, k.Depth, k.Screen)
+	if k.Flat {
+		text += "  flat"
+	}
+	if i := shotAt(g.shots, g.pos); i >= 0 {
+		text += fmt.Sprintf("  stretch %d/%d", i+1, len(g.shots))
+	}
+	if g.ref != nil {
+		if v := g.ref.view(); v != viewOurs {
+			text += "  " + v
+		}
+	}
+	return text
 }
 
 // gradeWriter takes the encoder's access units into the stream.
@@ -833,6 +866,7 @@ type gradeState struct {
 	Title    string         `json:"title"`
 	Ref      *gradeRefState `json:"ref"`
 	Secure   string         `json:"secure"` // the HTTPS side's address, for VR
+	HUD      bool           `json:"hud"`    // the readout drawn into the stream
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -860,7 +894,7 @@ func (g *grader) state() gradeState {
 	defer g.mu.Unlock()
 	st := gradeState{Ver: g.ver, T: g.pos.Seconds(), Length: g.src.length.Seconds(), Frame: g.frameOr().Seconds(),
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
-		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr,
+		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
 		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
@@ -884,7 +918,8 @@ func (g *grader) state() gradeState {
 // before/after), knobs (knobs), reset (the stretch to the defaults),
 // delete (i: a stretch), save, ref (view: ours, disc, mix or diff; or n
 // 1 for disc, 0 for ours), align (the reference aligned to the film by
-// their pictures) or refoffset (t: seconds the reference runs ahead).
+// their pictures), refoffset (t: seconds the reference runs ahead) or
+// hud (n 1: the readout drawn into the stream, 0: not).
 type gradeCommand struct {
 	Op    string      `json:"op"`
 	T     float64     `json:"t"`
@@ -954,6 +989,9 @@ func (g *grader) command(c gradeCommand) error {
 		err := g.saveLocked()
 		g.mu.Unlock()
 		return err
+	case "hud":
+		g.noHUD = c.N == 0
+		g.want.regrade = true
 	case "ref", "align", "refoffset":
 		g.mu.Unlock()
 		if g.ref == nil {
