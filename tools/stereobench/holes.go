@@ -14,9 +14,10 @@ import (
 )
 
 // The hole filler's training data (-holes DIR): for each measured
-// picture, the right eye rendered from the left by the disc's own
-// disparity (so its holes are true disocclusions), cut into crops around
-// where the holes are, each with the disc's right eye there (the truth):
+// picture, the right eye rendered from the left by the network's depth
+// fitted to the disc (holes of the shape a conversion makes, placed as
+// the disc's geometry has them), cut into crops around where the holes
+// are, each with the disc's right eye there (the truth):
 //
 //	"BHL1", W, H (uint32 little-endian: the crop's size, a multiple of 16)
 //	rendered Y   W*H bytes
@@ -35,18 +36,43 @@ var (
 )
 
 const (
-	holeCrop  = 384
-	holeBlock = 64
-	holeCrops = 2
-	holeLeast = 0.003
+	holeCrop   = 384
+	holeBlock  = 64
+	holeCrops  = 2
+	holeLeast  = 0.003
+	holeMargin = 0.03
 )
 
-// writeHoles writes a picture's crops: how many.
-func writeHoles(clip string, k int, left, right *mvc.Frame, full []float32, top, bottom int) (int, error) {
-	eye, holes := stereo.Render(left, full, -1)
+// writeHoles writes a picture's crops: how many. The eye is rendered by
+// the disparity given (the network's depth fitted to the disc: holes of
+// the shape a conversion makes, not the matcher's pixel-to-pixel noise,
+// which opens holes a pixel wide everywhere); holes a pixel wide are
+// dropped, and those within holeMargin of the picture's sides (the eye
+// looking past the frame) left out.
+func writeHoles(clip string, k int, left, right *mvc.Frame, disp []float32, top, bottom int) (int, error) {
 	w, h := left.Width, left.Height
 	if w < holeCrop || bottom-top < holeCrop {
 		return 0, nil
+	}
+	eye, holes := stereo.Render(left, disp, -1)
+	margin := int(holeMargin * float64(w))
+	for y := range h {
+		row := holes[y*w : (y+1)*w]
+		for x := 0; x < w; {
+			if !row[x] {
+				x++
+				continue
+			}
+			a := x
+			for x < w && row[x] {
+				x++
+			}
+			if x-a < 2 || a < margin || x > w-margin {
+				for i := a; i < x; i++ {
+					row[i] = false
+				}
+			}
+		}
 	}
 	// the holes by block
 	bw, bh := (w+holeBlock-1)/holeBlock, (h+holeBlock-1)/holeBlock

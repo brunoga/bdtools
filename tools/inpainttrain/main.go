@@ -38,6 +38,8 @@ func main() {
 	batch := flag.Int("batch", 8, "crops an update")
 	limit := flag.Int("limit", 0, "use only this many training crops (0: all)")
 	chroma := flag.Float64("chroma", 0.5, "the chroma's weight in the loss")
+	debug := flag.Bool("debug", false, "print the gradients' and the weights' sizes by layer")
+	lossKind := flag.String("loss", "l2", "the error in the holes the filler learns to lower: l2 (squared, PSNR's) or l1 (absolute)")
 	flag.Parse()
 	if *trainDir == "" || *valDir == "" {
 		fail(errors.New("give -train and -val"))
@@ -56,6 +58,7 @@ func main() {
 		m.InpaintWeights = *iw
 	}
 	m.chroma = float32(*chroma)
+	m.l1 = *lossKind == "l1"
 	train, err := list(*trainDir)
 	if err != nil {
 		fail(err)
@@ -86,6 +89,9 @@ func main() {
 			lossSum += loss
 			n++
 			if k++; k == *batch {
+				if *debug && step < 2 {
+					m.sizes()
+				}
 				rate := *lr * (0.1 + 0.9*0.5*(1+math.Cos(math.Pi*float64(step)/float64(steps))))
 				m.update(rate, float32(1/float64(k)))
 				k = 0
@@ -214,6 +220,7 @@ func prefetch(paths []string) <-chan *sample {
 type model struct {
 	stereo.InpaintWeights
 	chroma float32
+	l1     bool
 	gw, gb map[string]*nn.Tensor
 	mw, vw map[string]*nn.Tensor
 	mb, vb map[string]*nn.Tensor
@@ -295,9 +302,10 @@ func (m *model) step(g *nn.GPU, s *sample, train bool) float64 {
 }
 
 // loss is a crop's loss given the corrections delta ([3, h, w]) and its
-// gradient there: the absolute error of the corrected eye against the
-// disc's in the holes, Y in Y's units and the chroma in its own at
-// m.chroma, each over the holes' count.
+// gradient there: the error of the corrected eye against the disc's in
+// the holes, squared (or absolute, l1), Y in Y's units and the chroma in
+// its own at m.chroma, each over the holes' count. The loss given back
+// is Y's mean absolute error, whichever is learnt.
 func (m *model) loss(s *sample, delta []float32) (float64, *nn.Tensor) {
 	w, h := s.w, s.h
 	grad := nn.New(3, h, w)
@@ -305,6 +313,12 @@ func (m *model) loss(s *sample, delta []float32) (float64, *nn.Tensor) {
 		return 0, grad
 	}
 	inv := 1 / float32(s.n)
+	d := func(e float32) float32 { // the error's gradient: squared, or absolute
+		if m.l1 {
+			return sign(e)
+		}
+		return 2 * e
+	}
 	var loss float64
 	for r := range h {
 		for c := range w {
@@ -315,12 +329,11 @@ func (m *model) loss(s *sample, delta []float32) (float64, *nn.Tensor) {
 			ci := (r/2)*s.eye.StrideC + c/2
 			e := (float32(s.eye.Y[i])-16)/219 + delta[i] - (float32(s.disc.Y[i])-16)/219
 			loss += float64(abs(e))
-			grad.Data[i] = sign(e) * inv
+			grad.Data[i] = d(e) * inv
 			ecb := (float32(s.eye.Cb[ci])-128)/112 + delta[h*w+i] - (float32(s.disc.Cb[ci])-128)/112
 			ecr := (float32(s.eye.Cr[ci])-128)/112 + delta[2*h*w+i] - (float32(s.disc.Cr[ci])-128)/112
-			loss += float64(m.chroma * (abs(ecb) + abs(ecr)))
-			grad.Data[h*w+i] = m.chroma * sign(ecb) * inv
-			grad.Data[2*h*w+i] = m.chroma * sign(ecr) * inv
+			grad.Data[h*w+i] = m.chroma * d(ecb) * inv
+			grad.Data[2*h*w+i] = m.chroma * d(ecr) * inv
 		}
 	}
 	return loss / float64(s.n), grad
@@ -404,4 +417,21 @@ func validate(g *nn.GPU, m *model, paths []string) (base, filled float64) {
 	}
 	psnr := func(mse float64) float64 { return 10 * math.Log10(255*255/max(mse, 1e-9)) }
 	return psnr(se0 / max(n, 1)), psnr(se1 / max(n, 1))
+}
+
+// sizes prints each layer's weights' and gradients' root mean squares.
+func (m *model) sizes() {
+	rms := func(t *nn.Tensor) float64 {
+		if t == nil {
+			return 0
+		}
+		var ss float64
+		for _, v := range t.Data {
+			ss += float64(v) * float64(v)
+		}
+		return math.Sqrt(ss / float64(max(len(t.Data), 1)))
+	}
+	for _, l := range stereo.InpaintLayers {
+		fmt.Printf("    %-4s w %.4g gw %.3g  b %.4g gb %.3g\n", l.Name, rms(m.W[l.Name]), rms(m.gw[l.Name]), rms(m.B[l.Name]), rms(m.gb[l.Name]))
+	}
 }

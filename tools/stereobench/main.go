@@ -555,7 +555,16 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 	}
 	full := discDisparity(dm, w, left.Height)
 	if holesDir != "" {
-		n, err := writeHoles(c.res.name, c.k-1, left, right, full, top, bottom)
+		// the eye rendered by the network's depth fitted to the disc: holes
+		// of the shape a conversion makes, where the disc's eye says what
+		// belongs in them
+		fitted := make([]float32, len(raw))
+		for i, v := range raw {
+			if !math.IsNaN(float64(v)) {
+				fitted[i] = float32(a*float64(v) + b)
+			}
+		}
+		n, err := writeHoles(c.res.name, c.k-1, left, right, fitted, top, bottom)
 		if err != nil {
 			return err
 		}
@@ -660,7 +669,8 @@ func (c *clipBench) finish() (clipResult, error) {
 				}
 				if name == "ours" && r.next != nil {
 					next0 = r.next.left
-					next1, h1 := stereo.Render(r.next.left, r.next.disp, -1)
+					var h1 []bool
+					next1, h1 = stereo.Render(r.next.left, r.next.disp, -1)
 					if filler != nil {
 						if err := fillHoles(c.conv.Model.Backend(), next1, h1, r.top, r.bottom); err != nil {
 							return res, err
