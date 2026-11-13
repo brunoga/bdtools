@@ -5,6 +5,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `--3d-grade`'s panel in VR has sliders for the depth and the screen,
+  dragged with the trigger held; the picture is shown through mipmaps
+  at a higher render scale, and the stream's quantiser is 18 (was 20).
+
 ### Added
 
 - An icon for bdtools (`internal/convert/icon.svg`: a disc seen by two
