@@ -39,7 +39,9 @@ video { display:block; width:100%; max-height:calc(100vh - 60px); background:#00
 //   X: ten seconds back, Y: ten seconds on
 //   left trigger: the view, ours, the film's own 3D, the mix (--3d-reference)
 //   both grips held a second: out of VR
-// ?webgl=1 draws the picture through WebGL even when media layers exist.
+// In VR the page decodes the stream itself (WebCodecs) and draws it
+// through WebGL; ?layer=1 uses the browser's media layer from the video
+// element, ?webgl=1 WebGL from the video element (diagnostics).
 const $ = id => document.getElementById(id);
 const video = $('v');
 let st = null, mime = null;
@@ -144,11 +146,16 @@ function vrCheck() {
 vrCheck();
 $('vr').onclick = async () => {
   tele('enter VR: video ' + video.videoWidth + 'x' + video.videoHeight + ' ready ' + video.readyState + ' paused ' + video.paused);
-  // the layers feature only for the media layer path: a session with it
-  // refuses a plain WebGL layer
-  const forceGL = new URLSearchParams(location.search).get('webgl') === '1';
+  // the picture's path in VR: the page's own decoder (WebCodecs) drawn
+  // through WebGL, by default; ?layer=1 the browser's media layer from
+  // the video element, ?webgl=1 WebGL from the video element (both
+  // starve in VR: a video element behind a VR session is composited at
+  // a few frames a second). The layers feature only for the media
+  // layer: a session with it refuses a plain WebGL layer.
+  const q = new URLSearchParams(location.search);
+  const mode = q.get('layer') === '1' ? 'layer' : q.get('webgl') === '1' ? 'webgl' : ('VideoDecoder' in window ? 'codecs' : 'layer');
   try {
-    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: forceGL ? [] : ['layers'] });
+    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: mode === 'layer' ? ['layers'] : [] });
   } catch (e) { say('no VR session: ' + e.message); tele('requestSession failed: ' + e.message); return; }
   tele('session: features ' + (session.enabledFeatures ? Array.from(session.enabledFeatures).join(',') : '?') + ' | rates ' + (session.supportedFrameRates ? Array.from(session.supportedFrameRates).join('/') : '?') + ' | frameRate ' + session.frameRate);
   const space = await session.requestReferenceSpace('local-floor');
@@ -164,7 +171,7 @@ $('vr').onclick = async () => {
   session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); tele('left VR: ' + how + ' ' + rate + ' ' + glNote); hud(); });
   // a 4 m wide, 16:9 screen, 3.5 m away, eye height
   const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
-  if (window.XRMediaBinding && !forceGL) {
+  if (mode === 'layer' && window.XRMediaBinding) {
     // the browser shows the video itself, each half to its eye, at the
     // video's own pixels
     try {
@@ -177,10 +184,13 @@ $('vr').onclick = async () => {
     } catch (e) { how = 'WebGL (no media layer: ' + e.message + ')'; tele('media layer failed: ' + e.message); }
   }
   if (how.startsWith('WebGL')) {
-    try { webglScreen(session, space, W, H, Y, Z); } catch (e) { glNote = 'setup: ' + e.message; tele('webgl setup failed: ' + e.message + ' ' + (e.stack || '')); }
+    try {
+      if (mode === 'codecs') { how = 'WebCodecs'; glSource = codecsSource(session); } else { glSource = videoSource(); }
+      webglScreen(session, space, W, H, Y, Z);
+    } catch (e) { glNote = 'setup: ' + e.message; tele('webgl setup failed: ' + e.message + ' ' + (e.stack || '')); }
   }
   vrHow = how;
-  tele('path: ' + how + (forceGL ? ' (forced)' : ''));
+  tele('path: ' + how + ' (mode ' + mode + ')');
   // the display's rate a multiple of the film's 24: 72 (each picture
   // three refreshes) or 120, not the 90 a Quest wakes at, where every
   // fourth picture is held a refresh longer and the film judders; asked
@@ -266,6 +276,72 @@ function nudge(dd, ds) {
 
 // without media layers: the video as a texture on a quad, each eye its half
 let glNote = ''; // what the WebGL path has to say, into the readout
+let glSource = null; // what the WebGL path draws: image() the picture when it changed, else null
+
+// videoSource draws the video element: a new picture when its time moved
+function videoSource() {
+  let lastT = -1;
+  return { image() { if (video.readyState < 2 || video.currentTime === lastT) return null; lastT = video.currentTime; return video; }, stats() { return ''; }, stop() {} };
+}
+
+// codecsSource decodes the raw frame feed in the page (WebCodecs) and
+// paces the frames by their times, a little behind the newest
+function codecsSource(session) {
+  let decoder = null, reader = null, stopped = false;
+  const queue = []; // decoded frames in order
+  let base = null; // performance.now() minus the first frame's time
+  let decoded = 0, shown = 0, dropped = 0, current = null;
+  const bufferMs = 120;
+  (async () => {
+    const info = await (await fetch('/stream.json')).json();
+    const desc = Uint8Array.from(atob(info.avcc), c => c.charCodeAt(0));
+    decoder = new VideoDecoder({
+      output: f => { decoded++; if (queue.length > 8) { queue.shift().close(); dropped++; } queue.push(f); },
+      error: e => { tele('decoder error: ' + e.message); glNote = 'decoder: ' + e.message; },
+    });
+    const config = { codec: info.codec, description: desc, codedWidth: info.width, codedHeight: info.height, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true };
+    try {
+      const sup = await VideoDecoder.isConfigSupported(config);
+      tele('decoder config ' + info.codec + ' supported ' + sup.supported);
+    } catch (e) { tele('isConfigSupported: ' + e.message); }
+    decoder.configure(config);
+    video.pause();
+    reader = (await fetch('/stream.raw')).body.getReader();
+    let buf = new Uint8Array(0);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done || stopped) break;
+      const b = new Uint8Array(buf.length + value.length); b.set(buf); b.set(value, buf.length); buf = b;
+      for (;;) {
+        if (buf.length < 13) break;
+        const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        const n = dv.getUint32(0), pts = Number(dv.getBigUint64(4)), key = buf[12] === 1;
+        if (buf.length < 13 + n) break;
+        const data = buf.slice(13, 13 + n);
+        buf = buf.subarray(13 + n);
+        if (decoder.state === 'configured') {
+          try { decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: Math.round(pts * 1e6 / 90000), data })); }
+          catch (e) { tele('decode: ' + e.message); }
+        }
+      }
+    }
+  })().catch(e => tele('codecs feed: ' + e.message));
+  return {
+    image() {
+      const now = performance.now();
+      if (queue.length && base === null) base = now + bufferMs - queue[0].timestamp / 1000;
+      let next = null;
+      while (queue.length && queue[0].timestamp / 1000 + base <= now) { if (next) next.close(); next = queue.shift(); }
+      if (!next) return null;
+      if (current) current.close();
+      current = next; shown++;
+      return current;
+    },
+    stats() { return 'decoded ' + decoded + ' shown ' + shown + ' dropped ' + dropped + ' queue ' + queue.length + (decoder ? ' decoder ' + decoder.state + ' q' + decoder.decodeQueueSize : ''); },
+    stop() { stopped = true; try { reader && reader.cancel(); } catch (e) {} try { decoder && decoder.close(); } catch (e) {} for (const f of queue) f.close(); queue.length = 0; if (current) { current.close(); current = null; } video.play().catch(() => {}); },
+  };
+}
+
 function webglScreen(session, space, W, H, Y, Z) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2', { xrCompatible: true });
@@ -297,29 +373,28 @@ function webglScreen(session, space, W, H, Y, Z) {
   const uMVP = gl.getUniformLocation(prog, 'mvp'), uHalf = gl.getUniformLocation(prog, 'half_');
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
   const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
-  // the texture taken from the video when its time has moved (a new
-  // frame), not at the headset's rate
-  let lastT = -1, uploads = 0, draws = 0;
+  // the texture taken from the source when it has a new picture, not at
+  // the headset's rate
+  let uploads = 0, draws = 0;
   glNote = glNote || 'gl ok';
+  session.addEventListener('end', () => { if (glSource) glSource.stop(); });
   session.requestAnimationFrame(function draw(t, frame) {
     if (!session) return;
     session.requestAnimationFrame(draw);
+    let pose, layer;
     try {
-      const pose = frame.getViewerPose(space);
+      pose = frame.getViewerPose(space);
       if (!pose) return;
-      const layer = session.renderState.baseLayer;
+      layer = session.renderState.baseLayer;
       gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       gl.clearColor(0.04, 0.04, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
-      if (video.readyState >= 2 && video.currentTime !== lastT) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-        lastT = video.currentTime; uploads++;
-      }
+      const img = glSource ? glSource.image() : null;
+      if (img) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); uploads++; }
       draws++;
       if (draws % 144 === 0) {
         const err = gl.getError();
-        glNote = (err ? 'gl error ' + err + ', ' : 'gl ok, ') + uploads + ' uploads, ' + draws + ' draws, ' + video.videoWidth + 'x' + video.videoHeight + ', ready ' + video.readyState;
+        glNote = (err ? 'gl error ' + err + ', ' : 'gl ok, ') + uploads + ' uploads, ' + draws + ' draws' + (glSource ? ', ' + glSource.stats() : '');
         if (draws % 720 === 0) {
-          // a pixel of the frame, to see whether anything is drawn
           const px = new Uint8Array(4);
           gl.readPixels(Math.floor(base.framebufferWidth / 4), Math.floor(base.framebufferHeight / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
           tele('webgl: ' + glNote + ', views ' + pose.views.length + ', pixel ' + Array.from(px).join(','));
@@ -327,7 +402,6 @@ function webglScreen(session, space, W, H, Y, Z) {
       }
     } catch (e) { glNote = 'draw: ' + e.message; tele('webgl draw error: ' + e.message); return; }
     try {
-      const pose = frame.getViewerPose(space), layer = session.renderState.baseLayer;
       for (const view of pose.views) {
         const vp = layer.getViewport(view);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);

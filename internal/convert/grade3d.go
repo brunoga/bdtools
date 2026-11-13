@@ -13,6 +13,8 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,6 +171,33 @@ func (c *gradeClient) mp4Sink(params []byte, width, height int) {
 			started = true
 		}
 		return live.Frame(au, pts, key)
+	}
+}
+
+// rawSink is a player of the raw frames (a browser decoding them itself,
+// WebCodecs): from the first keyframe, each frame as its length (4 bytes,
+// big-endian), its time (8 bytes, 90 kHz), a keyframe flag (1 byte) and
+// the access unit as an MP4 sample (mp4.AVCSample's); the decoder's
+// configuration comes from /stream.json.
+func (c *gradeClient) rawSink(_ []byte, _, _ int) {
+	w := chanWriter{c.ch}
+	started := false
+	c.sink = func(au []byte, pts int64, key bool) error {
+		if !started {
+			if !key {
+				return nil
+			}
+			started = true
+		}
+		sample := mp4.AVCSample(au)
+		hdr := make([]byte, 13)
+		binary.BigEndian.PutUint32(hdr, uint32(len(sample))) //nolint:gosec // a frame's size
+		binary.BigEndian.PutUint64(hdr[4:], uint64(pts))     //nolint:gosec // a time
+		if key {
+			hdr[12] = 1
+		}
+		_, err := w.Write(append(hdr, sample...))
+		return err
 	}
 }
 
@@ -1082,11 +1111,14 @@ func (g *grader) handler() http.Handler {
 	mux.HandleFunc("GET /events", g.serveEvents)
 	mux.HandleFunc("GET /stream.ts", g.serveStream)
 	mux.HandleFunc("GET /stream.mp4", g.serveMP4)
+	mux.HandleFunc("GET /stream.raw", func(w http.ResponseWriter, r *http.Request) {
+		g.serveClient(w, r, "application/octet-stream", (*gradeClient).rawSink)
+	})
 	mux.HandleFunc("GET /stream.json", func(w http.ResponseWriter, _ *http.Request) {
 		g.mu.Lock()
 		params, width, height := g.params, g.width, g.height
 		g.mu.Unlock()
-		sps, _, ok := avcParams(params)
+		sps, pps, ok := avcParams(params)
 		w.Header().Set("Content-Type", "application/json")
 		if !ok {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -1094,6 +1126,7 @@ func (g *grader) handler() http.Handler {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ready": true, "mime": `video/mp4; codecs="` + mp4.AVCCodec(sps) + `"`,
+			"codec": mp4.AVCCodec(sps), "avcc": base64.StdEncoding.EncodeToString(mp4.AVCC(sps, pps)),
 			"width": width, "height": height})
 	})
 	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, _ *http.Request) {

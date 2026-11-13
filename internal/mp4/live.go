@@ -30,9 +30,7 @@ func (l *Live) Init(sps, pps []byte, w, h int) error {
 	if len(sps) < 4 || len(pps) == 0 {
 		return errors.New("mp4: a live stream needs its SPS and PPS")
 	}
-	avcC := bytes.Join([][]byte{
-		{1, sps[1], sps[2], sps[3], 0xff, 0xe1}, u16(len(sps)), sps, {1}, u16(len(pps)), pps,
-	}, nil)
+	avcC := AVCC(sps, pps)
 	entry := bytes.Join([][]byte{
 		make([]byte, 6), u16(1),
 		u16(0), u16(0), make([]byte, 12),
@@ -64,10 +62,10 @@ func (l *Live) Init(sps, pps []byte, w, h int) error {
 	return err
 }
 
-// Frame writes an access unit (Annex B) shown, and decoded, at pts (90
-// kHz), key when it is a keyframe. Its parameter sets are left out (the
-// header carries them).
-func (l *Live) Frame(au []byte, pts int64, key bool) error {
+// AVCSample is an H.264 access unit (Annex B) as an MP4 sample: its
+// NAL units each after its length (4 bytes), the parameter sets left
+// out (an avcC carries them).
+func AVCSample(au []byte) []byte {
 	var sample []byte
 	for _, nal := range SplitAnnexB(au) {
 		if t := nal[0] & 0x1f; t == 7 || t == 8 {
@@ -76,6 +74,22 @@ func (l *Live) Frame(au []byte, pts int64, key bool) error {
 		sample = binary.BigEndian.AppendUint32(sample, uint32(len(nal))) //nolint:gosec // a NAL unit length
 		sample = append(sample, nal...)
 	}
+	return sample
+}
+
+// AVCC is an avcC box's body for an SPS and a PPS (NAL units without
+// start codes): a decoder's configuration.
+func AVCC(sps, pps []byte) []byte {
+	return bytes.Join([][]byte{
+		{1, sps[1], sps[2], sps[3], 0xff, 0xe1}, u16(len(sps)), sps, {1}, u16(len(pps)), pps,
+	}, nil)
+}
+
+// Frame writes an access unit (Annex B) shown, and decoded, at pts (90
+// kHz), key when it is a keyframe. Its parameter sets are left out (the
+// header carries them).
+func (l *Live) Frame(au []byte, pts int64, key bool) error {
+	sample := AVCSample(au)
 	if l.n == 0 {
 		l.start = pts
 	}
