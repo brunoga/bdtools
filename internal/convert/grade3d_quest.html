@@ -35,6 +35,7 @@ video { display:block; width:100%; max-height:calc(100vh - 60px); background:#00
 //   A: a picture on, B: a picture back
 //   left stick left/right: the cut before/after
 //   X: ten seconds back, Y: ten seconds on
+//   left trigger: the film's own 3D instead (--3d-reference)
 const $ = id => document.getElementById(id);
 const video = $('v');
 let st = null, mime = null;
@@ -50,6 +51,7 @@ function fmt(s) {
 function hud() {
   if (!st) return;
   $('hud').textContent = fmt(st.t) + (st.playing ? ' ▶ ' : ' ❚❚ ') + 'depth ' + st.knobs.depth.toFixed(2) + ' screen ' + st.knobs.screen.toFixed(2) + (st.knobs.flat ? ' flat' : '') +
+    (st.ref && st.ref.on ? '  DISC' : '') +
     (st.length > 0 ? '  lag ' + lag().toFixed(2) + ' s' : '');
 }
 function lag() {
@@ -163,6 +165,7 @@ function controllers(session, xrFrame) {
       if (ax[0] > 0.6) fire('screen+', 150, () => nudge(0, 0.1)); else held.delete('screen+');
       if (ax[0] < -0.6) fire('screen-', 150, () => nudge(0, -0.1)); else held.delete('screen-');
     } else if (src.handedness === 'left') {
+      edge('ltrig', b(0), () => send({ op: 'ref', n: st && st.ref && st.ref.on ? 0 : 1 }));
       edge('X', b(4), () => send({ op: 'step', n: -240 }));
       edge('Y', b(5), () => send({ op: 'step', n: 240 }));
       edge('lstick-', ax[0] < -0.6, () => send({ op: 'jump', dir: -1 }));

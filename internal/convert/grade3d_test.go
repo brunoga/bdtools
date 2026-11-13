@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/brunoga/bdtools/mvc"
 )
 
 // TestWriteShots3D writes stretches and reads them back as --3d-shots does.
@@ -130,5 +132,34 @@ func TestDepthExtremes(t *testing.T) {
 	}
 	if n, f := depthExtremes(d, s, true); n != 0 || f != 0 {
 		t.Errorf("flat: %g %g", n, f)
+	}
+}
+
+// TestThumbnailDistance: a picture is nearest itself, farther from the
+// same picture moved, and a lighter copy is as near.
+func TestThumbnailDistance(t *testing.T) {
+	pic := func(shift int, lift byte) *mvc.Frame {
+		w, h := 320, 180
+		f := &mvc.Frame{Width: w, Height: h, StrideY: w, StrideC: w / 2, Y: make([]byte, w*h), Cb: make([]byte, w*h/4), Cr: make([]byte, w*h/4)}
+		for y := range h {
+			for x := range w {
+				v := byte(0)
+				if (x+shift)/40%2 == (y/40)%2 {
+					v = 200
+				}
+				f.Y[y*w+x] = v/2 + lift
+			}
+		}
+		return f
+	}
+	a := thumbnail(pic(0, 0))
+	if d := thumbnailDistance(a, thumbnail(pic(0, 0))); d != 0 {
+		t.Errorf("itself: %g", d)
+	}
+	if d := thumbnailDistance(a, thumbnail(pic(0, 30))); d > 1e-3 {
+		t.Errorf("lighter: %g", d)
+	}
+	if d := thumbnailDistance(a, thumbnail(pic(20, 0))); d < 10 {
+		t.Errorf("moved: %g", d)
 	}
 }

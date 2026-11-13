@@ -102,6 +102,8 @@ type grader struct {
 	ver     int
 	addr    string
 
+	ref *gradeRef // the film's own 3D, when given
+
 	// the stream
 	enc    gpu.Encoder
 	params []byte // its parameter sets, for a player joining late
@@ -109,6 +111,7 @@ type grader struct {
 	height int
 	outPTS int64
 	next   time.Time // when the next picture goes out
+	last   [2]*mvc.Frame
 	target time.Duration
 	seeks  int
 }
@@ -191,6 +194,14 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	g := &grader{r: r, src: src, model: m, conv: c, wake: make(chan struct{}, 1),
 		clients: map[*gradeClient]struct{}{}, events: map[chan struct{}]struct{}{}, saved: true}
 	c.Shot = g.shotShape
+	if r.Opts.Reference3D != "" {
+		if g.ref, err = r.openReference(ctx, g); err != nil {
+			return err
+		}
+		defer g.ref.stop()
+		defer g.ref.src.close()
+		r.Report.Report("--3d-grade: the film's own 3D to compare with: %s (%s)", r.Opts.Reference3D, g.ref.layout)
+	}
 	if r.Opts.Shots3D != "" {
 		if g.shots, err = readShots3D(r.Opts.Shots3D); err != nil {
 			return err
@@ -281,7 +292,8 @@ func (g *grader) pictures(next func() ([]byte, []byte, int64, error)) (pictureSo
 	return g.r.pictures(g.src.video, next)
 }
 
-// waitSeek holds (the stream kept alive) until the page asks for a place.
+// waitSeek holds (the stream kept alive with the last pair shown) until
+// the page asks for a place.
 func (g *grader) waitSeek(ctx context.Context) (time.Duration, error) {
 	for {
 		g.mu.Lock()
@@ -295,26 +307,38 @@ func (g *grader) waitSeek(ctx context.Context) (time.Duration, error) {
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		case <-g.wake:
-		case <-time.After(time.Second):
+		case <-time.After(time.Until(g.next)):
+			if g.last[0] != nil {
+				if err := g.emit(ctx, g.last[0], g.last[1]); err != nil {
+					return 0, err
+				}
+			} else {
+				g.next = time.Now().Add(time.Second)
+			}
 		}
 	}
 }
 
-// seek gives the film's access units from the keyframe before pos (by
-// its bytes: a place is tried, the time there read, the place moved).
-// A nil next means nothing can be read there.
+// seek gives the film's access units from the keyframe before pos.
 func (g *grader) seek(pos time.Duration) (next func() ([]byte, []byte, int64, error), done func(), err error) {
-	length := g.src.length
+	return g.src.seek(pos, g.frameOr())
+}
+
+// seek gives a source's access units from the keyframe before pos (by
+// its bytes: a place is tried, the time there read, the place moved);
+// frame is a picture's time. A nil next means nothing can be read there.
+func (s *liveSource) seek(pos, frame time.Duration) (next func() ([]byte, []byte, int64, error), done func(), err error) {
+	length := s.length
 	if length <= 0 {
-		n, d, err := g.src.feed(0)
+		n, d, err := s.feed(0)
 		return n, d, err
 	}
-	pos = min(max(pos, 0), length-g.frameOr())
+	pos = min(max(pos, 0), length-frame)
 	const aim = 2 * time.Second
 	frac := pos.Seconds() / length.Seconds()
 	for try := 0; ; try++ {
 		frac = min(max(frac, 0), 0.999)
-		n, d, err := g.src.feed(frac)
+		n, d, err := s.feed(frac)
 		if err != nil {
 			return nil, func() {}, err
 		}
@@ -327,7 +351,7 @@ func (g *grader) seek(pos time.Duration) (next func() ([]byte, []byte, int64, er
 			}
 			return nil, func() {}, nil
 		}
-		t := g.src.clock(pts)
+		t := s.clock(pts)
 		if try >= 5 || (t <= pos && pos-t <= 4*aim) || (frac <= 0 && t > pos) {
 			first := true
 			return func() ([]byte, []byte, int64, error) {
@@ -393,10 +417,16 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	l, rr, s := g.conv.Eyes(e)
 	g.conv.Window(l, rr, s)
 	g.setPos(t, e)
-	if err := g.emit(ctx, l, rr); err != nil {
+	ours := [2]*mvc.Frame{l, rr}
+	shown := g.refOrOurs(ctx, t, ours)
+	if err := g.emit(ctx, shown[0], shown[1]); err != nil {
 		return err
 	}
 	for {
+		if g.ref != nil && g.ref.alignAsked() {
+			g.ref.align(ctx, f, t)
+			g.changed()
+		}
 		g.mu.Lock()
 		w := g.want
 		g.want.regrade = false
@@ -415,9 +445,10 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 			return nil
 		case w.regrade:
 			k := g.knobsAt(t)
-			l, rr, _ = g.conv.Grade(e, g.shape(k), k.Flat)
+			ours[0], ours[1], _ = g.conv.Grade(e, g.shape(k), k.Flat)
 			g.setPos(t, e)
-			if err := g.emit(ctx, l, rr); err != nil {
+			shown = g.refOrOurs(ctx, t, ours)
+			if err := g.emit(ctx, shown[0], shown[1]); err != nil {
 				return err
 			}
 			continue
@@ -427,11 +458,28 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 			return ctx.Err()
 		case <-g.wake:
 		case <-time.After(time.Until(g.next)):
-			if err := g.emit(ctx, l, rr); err != nil {
+			if err := g.emit(ctx, shown[0], shown[1]); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// refOrOurs is the pair to show at a time of the film: the reference's
+// when it is switched on and has one there, else ours.
+func (g *grader) refOrOurs(ctx context.Context, t time.Duration, ours [2]*mvc.Frame) [2]*mvc.Frame {
+	if g.ref == nil || !g.ref.on() {
+		if g.ref != nil {
+			g.ref.setShowing(false)
+		}
+		return ours
+	}
+	if l, r, ok := g.ref.at(ctx, t, g.frameOr()); ok && l.Width == ours[0].Width && l.Height == ours[0].Height {
+		g.ref.setShowing(true)
+		return [2]*mvc.Frame{l, r}
+	}
+	g.ref.setShowing(false)
+	return ours
 }
 
 // emit encodes a pair into the stream, at the stream's pace.
@@ -459,6 +507,7 @@ func (g *grader) emit(ctx context.Context, l, rr *mvc.Frame) error {
 		g.next = time.Now() // behind: no burst to catch up
 	}
 	g.next = g.next.Add(g.frame)
+	g.last = [2]*mvc.Frame{l, rr}
 	sf := &mvc.StereoFrame{Base: l, Dependent: rr}
 	return g.enc.Encode(func(dst *gpu.Picture) { drawFramed(dst, sf, false, LayoutFullSBS) })
 }
@@ -670,23 +719,34 @@ func (g *grader) changed() {
 
 // gradeState is what a page sees.
 type gradeState struct {
-	Ver      int         `json:"ver"`
-	T        float64     `json:"t"`
-	Length   float64     `json:"length"`
-	Frame    float64     `json:"frame"`
-	Playing  bool        `json:"playing"`
-	Knobs    gradeKnobs  `json:"knobs"`
-	Defaults gradeKnobs  `json:"defaults"`
-	Stretch  int         `json:"stretch"`
-	Shots    []gradeShot `json:"shots"`
-	Cuts     []float64   `json:"cuts"`
-	Near     float64     `json:"near"`
-	Far      float64     `json:"far"`
-	Clients  int         `json:"clients"`
-	Saved    bool        `json:"saved"`
-	File     string      `json:"file"`
-	Width    int         `json:"width"`
-	Title    string      `json:"title"`
+	Ver      int            `json:"ver"`
+	T        float64        `json:"t"`
+	Length   float64        `json:"length"`
+	Frame    float64        `json:"frame"`
+	Playing  bool           `json:"playing"`
+	Knobs    gradeKnobs     `json:"knobs"`
+	Defaults gradeKnobs     `json:"defaults"`
+	Stretch  int            `json:"stretch"`
+	Shots    []gradeShot    `json:"shots"`
+	Cuts     []float64      `json:"cuts"`
+	Near     float64        `json:"near"`
+	Far      float64        `json:"far"`
+	Clients  int            `json:"clients"`
+	Saved    bool           `json:"saved"`
+	File     string         `json:"file"`
+	Width    int            `json:"width"`
+	Title    string         `json:"title"`
+	Ref      *gradeRefState `json:"ref"`
+}
+
+// gradeRefState is the reference's state as a page sees it.
+type gradeRefState struct {
+	File     string  `json:"file"`
+	On       bool    `json:"on"`
+	Offset   float64 `json:"offset"` // seconds the reference runs ahead of the film
+	Aligned  bool    `json:"aligned"`
+	Aligning bool    `json:"aligning"`
+	Showing  bool    `json:"showing"` // its pair is the one on screen
 }
 
 type gradeShot struct {
@@ -714,13 +774,18 @@ func (g *grader) state() gradeState {
 			st.Clients++
 		}
 	}
+	if g.ref != nil {
+		st.Ref = g.ref.state()
+	}
 	return st
 }
 
 // gradeCommand is what the page asks: op play, pause, toggle, seek (t,
 // seconds), step (n pictures, negative back), jump (dir -1/1: the cut
 // before/after), knobs (knobs), reset (the stretch to the defaults),
-// delete (i: a stretch) or save.
+// delete (i: a stretch), save, ref (n 1 on, 0 off: the film's own 3D
+// shown instead), align (the reference aligned to the film by their
+// pictures) or refoffset (t: seconds the reference runs ahead).
 type gradeCommand struct {
 	Op    string      `json:"op"`
 	T     float64     `json:"t"`
@@ -789,6 +854,26 @@ func (g *grader) command(c gradeCommand) error {
 		err := g.saveLocked()
 		g.mu.Unlock()
 		return err
+	case "ref", "align", "refoffset":
+		g.mu.Unlock()
+		if g.ref == nil {
+			return errors.New("no --3d-reference to compare with")
+		}
+		switch c.Op {
+		case "ref":
+			g.ref.set(c.N > 0, nil)
+		case "align":
+			g.ref.set(true, nil)
+			g.ref.askAlign()
+		case "refoffset":
+			off := time.Duration(c.T * float64(time.Second))
+			g.ref.set(true, &off)
+		}
+		g.mu.Lock()
+		g.want.regrade = true
+		g.wakeUp()
+		g.mu.Unlock()
+		return nil
 	default:
 		g.mu.Unlock()
 		return fmt.Errorf("op %q: unknown", c.Op)
@@ -976,7 +1061,7 @@ func (r *Runner) matroskaLive(src *mkvSource, sel Selection) (liveSource, error)
 	if err != nil {
 		return liveSource{}, fmt.Errorf("--3d-grade: %w", err)
 	}
-	return liveSource{video: sel.Base, length: r.length, feed: feed, close: done,
+	return liveSource{video: sel.Base, length: src.duration, feed: feed, close: done,
 		clock: func(pts int64) time.Duration { return ticks90k(pts) - t0 }}, nil
 }
 

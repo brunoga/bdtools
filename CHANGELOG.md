@@ -19,6 +19,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fragmented MP4 (`/stream.mp4`, `mp4.Live`) into the browser's media
   source, held at its live edge, shown in VR as a stereo layer, the
   controllers turning the knobs.
+- `--3d-reference FILE`, with `--3d-grade`, puts the film's own 3D (a
+  side-by-side or over-under file) beside the conversion: the page's
+  `disc` button switches the stream to its pair at the same moment,
+  `align` finds the offset between the two files by their pictures.
 
 ## [0.19.0] - 2026-11-11
 

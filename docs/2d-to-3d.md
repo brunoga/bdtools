@@ -766,6 +766,15 @@ grip makes a shot flat, A and B step a picture, the left stick jumps
 between the cuts, X and Y ten seconds. The page's top line shows the
 time and the knobs; the page at `/` shows the rest.
 
+Where the film has a 3D release of its own (an MVC disc converted, say),
+`--3d-reference FILE` puts it beside the conversion: the page's `disc`
+button (the key `d`, a headset's left trigger) switches the stream to
+its pair at the same moment, and back. The two files' clocks differ
+when their discs do, so `align` finds the picture shown in the
+reference's eight seconds either side and keeps the offset; the page
+says when the reference has no picture at a place. The reference must
+be side by side or over-under at the conversion's size.
+
 The depth network runs as the film plays (it is faster than the film on
 a GPU), so nothing is precomputed and any film opens at once; the
 stream needs NVENC. The eyes are H.264 for the players' sake; the
