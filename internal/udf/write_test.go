@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"golift.io/udf"
 )
 
 func content(b []byte) func() (io.Reader, error) {
@@ -56,7 +54,9 @@ func bdmvTree(r *rand.Rand, pieces int) (root *File, order []Piece, want map[str
 }
 
 func TestWriteReadsBack(t *testing.T) {
-	for _, pieces := range []int{3, 300} {
+	// 3000 pieces: the entry's descriptors go on through a chain of
+	// allocation extent descriptors some 24 deep
+	for _, pieces := range []int{3, 300, 3000} {
 		root, order, want := bdmvTree(rand.New(rand.NewPCG(1, uint64(pieces))), pieces)
 		path := filepath.Join(t.TempDir(), "disc.iso")
 		if keep := os.Getenv("UDF_KEEP"); keep != "" {
@@ -76,13 +76,17 @@ func TestWriteReadsBack(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		u, err := udf.NewUdfFromReader(img)
+		st, err := img.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := Open(img, st.Size())
 		if err != nil {
 			t.Fatal(err)
 		}
 		got := map[string][]byte{}
-		var walk func(dir []udf.File, at string)
-		walk = func(dir []udf.File, at string) {
+		var walk func(dir []*Entry, at string)
+		walk = func(dir []*Entry, at string) {
 			for _, e := range dir {
 				p := filepath.Join(at, e.Name())
 				if e.IsDir() {
@@ -93,7 +97,7 @@ func TestWriteReadsBack(t *testing.T) {
 					walk(sub, p)
 					continue
 				}
-				sr, err := e.NewReader()
+				sr, err := e.Reader()
 				if err != nil {
 					t.Fatalf("%s: %v", p, err)
 				}
@@ -104,7 +108,7 @@ func TestWriteReadsBack(t *testing.T) {
 				got[p] = b
 			}
 		}
-		top, err := u.ReadDir(nil)
+		top, err := u.Root().ReadDir()
 		if err != nil {
 			t.Fatal(err)
 		}

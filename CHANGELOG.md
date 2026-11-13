@@ -7,6 +7,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Disc images are read by bdtools' own UDF reader (`internal/udf`,
+  beside its writer), not golift.io/udf: a file's chain of allocation
+  extent descriptors is followed however deep it runs (The Bad Guys'
+  feature, which the library refused as too deep), and the module has
+  one dependency fewer.
 - `--3d-grade`'s panel in VR has sliders for the depth and the screen,
   dragged with the trigger held; the picture is shown through mipmaps
   at a higher render scale, and the stream's quantiser is 18 (was 20).
