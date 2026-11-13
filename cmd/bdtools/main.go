@@ -107,6 +107,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network: small (the default), base or large (Video Depth Anything's, downloaded to the cache the first time; base and large are for non-commercial use only), or a checkpoint (.pth)")
 		depth3D  = fs.Float64("3d-depth", convert.DefaultDepth3D, "the depth's strength: with --to-3d, 1 the depth that scores best against the 3D discs' right eyes (the discs' own spans about twice it; more is stronger, and harder on the eyes); for a 3D source, its own depth scaled (1 as it is, less flatter, the eyes made again between its cameras' views), 1 by default")
 		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: builtin, none, or a file of tools/depthtrain's (default: the built-in weights when the depth network is not tuned, none when it is)")
+		fill3D   = fs.String("3d-fill", "", "with --to-3d: the hole filler's weights (tools/inpainttrain's), which fill what an eye saw nothing of behind a nearer thing's edge; none (the default): the renderer's carried edge")
 		tune3D   = fs.String("3d-tune", "", "with --to-3d: the depth network's last stages learnt from 3D discs: none for the network as it is, or a file of tools/depthtrain -tail's (default: the built-in ones, for the small network)")
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")
 		shots3D  = fs.String("3d-shots", "", "with --to-3d: a file of stretches of the film graded by hand, a line each: START [END] and depth=K (as --3d-depth), screen=P (as --3d-screen) or flat (on the screen), times as a player shows them, e.g. \"1:02:10 1:02:40 depth=0.8\" (see docs/2d-to-3d.md)")
@@ -325,7 +326,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if given["3d-depth"] {
 		o.Depth3D = *depth3D // else --to-3d's default, a 3D source's as it is
 	}
-	o.NoWindow3D, o.Refine3D, o.Tune3D = !*window3D, *refine3D, *tune3D
+	o.NoWindow3D, o.Refine3D, o.Tune3D, o.Fill3D = !*window3D, *refine3D, *tune3D, *fill3D
 	o.Decoder = convert.Decoder(*decoder)
 	if o.Decoder == "auto" {
 		o.Decoder = convert.DecoderAuto

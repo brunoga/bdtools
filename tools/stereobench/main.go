@@ -99,6 +99,7 @@ func main() {
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
+	fillPath := flag.String("fill", "", "fill the made eyes' holes by these weights (tools/inpainttrain's) in place of the renderer's carried edge")
 	flag.StringVar(&holesDir, "holes", "", "write crops of each measured picture's right eye rendered by the disc's own disparity, around its holes, with the disc's right eye there, to this directory (the hole filler's training data, holes.go)")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	flag.IntVar(&windowLen, "window", 0, "with -samples, also write each measured picture's window (it and the pictures before it, this many in all, as the depth network took them: NAME.bhw) for learning the network's head")
@@ -110,6 +111,14 @@ func main() {
 	flag.BoolVar(&keepCredits, "keep-credits", false, "give the credits (stereo.Credits) their depth, not flat")
 	creditsPath := flag.String("credit-features", "", "write each measured picture's credit features (stereo.Credits) to this CSV file")
 	flag.Parse()
+	if *fillPath != "" {
+		w, err := stereo.ReadInpaint(*fillPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "stereobench:", err)
+			os.Exit(1)
+		}
+		filler = stereo.NewFiller(w)
+	}
 	if *creditsPath != "" {
 		f, err := os.Create(*creditsPath)
 		if err != nil {
@@ -239,6 +248,18 @@ func main() {
 
 // creditsOut is -credit-features' file.
 var creditsOut io.Writer
+
+// filler is -fill: the hole filler run on each made eye.
+var filler *stereo.Filler
+
+// fillHoles runs the filler on an eye on be, the pass's memory released
+// after on a GPU.
+func fillHoles(be nn.Backend, eye *mvc.Frame, holes []bool, top, bottom int) error {
+	if g, ok := be.(*nn.GPU); ok {
+		defer g.Release()
+	}
+	return filler.Fill(be, eye, holes, top, bottom)
+}
 
 // keepCredits is -keep-credits.
 var keepCredits bool
@@ -632,9 +653,19 @@ func (c *clipBench) finish() (clipResult, error) {
 				}
 			} else {
 				eye, holes = stereo.Render(left, d, -1)
+				if filler != nil && name != "flat" {
+					if err := fillHoles(c.conv.Model.Backend(), eye, holes, r.top, r.bottom); err != nil {
+						return res, err
+					}
+				}
 				if name == "ours" && r.next != nil {
 					next0 = r.next.left
-					next1, _ = stereo.Render(r.next.left, r.next.disp, -1)
+					next1, h1 := stereo.Render(r.next.left, r.next.disp, -1)
+					if filler != nil {
+						if err := fillHoles(c.conv.Model.Backend(), next1, h1, r.top, r.bottom); err != nil {
+							return res, err
+						}
+					}
 				}
 			}
 			if name != "flat" {

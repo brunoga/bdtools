@@ -33,7 +33,11 @@ type Converter struct {
 	Refine *RefineWeights
 	// KeepDepth keeps each Estimate's depth even when a GPU makes the
 	// eyes, for Grade to shape it again as often as asked.
-	KeepDepth       bool
+	KeepDepth bool
+	// Fill, when not nil, fills the eyes' holes (what an eye saw nothing
+	// of) by the hole filler (inpaintnet.go) in place of the renderer's
+	// carried edge, on the depth model's backend.
+	Fill            *Filler
 	refineOn        *RefineWeights // Refine's weights on that backend
 	win             window
 	credits         creditState
@@ -64,7 +68,7 @@ func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	left, right = Pair(f, d)
+	left, right = c.pair(f, d, c.shapeTop, c.shapeBottom)
 	c.Window(left, right, SamplesOf(d, f.Width, f.Height, c.shapeTop, c.shapeBottom))
 	return left, right, nil
 }
@@ -299,14 +303,14 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 	if c.Refine != nil {
 		d = c.refineGPU(g, p, d, top, bottom)
 	}
-	var eyes, disp *nn.Tensor
+	var eyes, mask, disp *nn.Tensor
 	if makeEyes {
 		w := float64(f.Width)
 		a, b, lim := float32(e.shape.Scale*w), float32(e.shape.Offset*w), float32(0.04*w)
 		a, b = a*e.factor, b*e.factor
 		far := float32(e.shape.Far * w)
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim)
-		eyes = g.Eyes(p, disp, gapPixels)
+		eyes, mask = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}
 	return func() error {
@@ -324,6 +328,9 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 				e.left, e.right = eyeFrames(buf, f)
 				e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
 			}
+			if err == nil && mask != nil {
+				err = c.fillGPU(g, mask, e)
+			}
 			if err == nil && c.KeepDepth {
 				out, err = g.Download(d)
 			}
@@ -332,6 +339,52 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		e.d = out
 		return err
 	}
+}
+
+// fillGPU fills the holes of an Estimate's eyes (the GPU's) by the
+// filler: the mask downloaded, each eye filled on g.
+func (c *Converter) fillGPU(g *nn.GPU, mask *nn.Tensor, e *Estimate) error {
+	w, h := e.f.Width, e.f.Height
+	mb := make([]byte, 2*w*h)
+	if err := g.DownloadBytes(mb, mask); err != nil {
+		return err
+	}
+	for i, eye := range []*mvc.Frame{e.left, e.right} {
+		holes := make([]bool, w*h)
+		for j, v := range mb[i*w*h : (i+1)*w*h] {
+			holes[j] = v != 0
+		}
+		if err := c.Fill.Fill(g, eye, holes, e.top, e.bottom); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fillPair fills a pair's holes (Render's) by the filler on the model's
+// backend, when there is one.
+func (c *Converter) fillPair(left, right *mvc.Frame, hl, hr []bool, top, bottom int) {
+	if c.Fill == nil {
+		return
+	}
+	be := c.Model.Backend()
+	if g, ok := be.(*nn.GPU); ok {
+		defer g.Release()
+	}
+	_ = c.Fill.Fill(be, left, hl, top, bottom)
+	_ = c.Fill.Fill(be, right, hr, top, bottom)
+}
+
+// pair is Pair with the holes filled by the filler, when there is one.
+func (c *Converter) pair(f *mvc.Frame, d []float32, top, bottom int) (left, right *mvc.Frame) {
+	if c.Fill == nil {
+		return Pair(f, d)
+	}
+	var hl, hr []bool
+	left, hl = Render(f, d, 0.5)
+	right, hr = Render(f, d, -0.5)
+	c.fillPair(left, right, hl, hr, top, bottom)
+	return left, right
 }
 
 // gpuEyes reports whether Estimate makes the eyes on a GPU: when the
@@ -356,7 +409,7 @@ func eyeFrames(buf []byte, f *mvc.Frame) (left, right *mvc.Frame) {
 func (c *Converter) Eyes(e *Estimate) (left, right *mvc.Frame, s *Samples) {
 	if e.left == nil {
 		_, d := c.Shape(e)
-		left, right = Pair(e.f, d)
+		left, right = c.pair(e.f, d, e.top, e.bottom)
 		return left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
 	}
 	if e.fresh {
@@ -379,7 +432,7 @@ func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
 	c.Shaper, e.shape, e.fresh = Shaper{Shape: s}, s, true
 	_, d := c.Shape(e)
 	c.Shaper, e.shape, e.fresh = keep, shape, fresh
-	left, right = Pair(e.f, d)
+	left, right = c.pair(e.f, d, e.top, e.bottom)
 	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
 	return left, right
 }
@@ -396,7 +449,7 @@ func (c *Converter) Grade(e *Estimate, s Shape, flat bool) (left, right *mvc.Fra
 	}
 	_, d := c.Shape(e)
 	c.Shaper, e.shape, e.fresh, e.factor = keep, shape, fresh, factor
-	left, right = Pair(e.f, d)
+	left, right = c.pair(e.f, d, e.top, e.bottom)
 	samples = SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
 	c.Window(left, right, samples)
 	return left, right, samples

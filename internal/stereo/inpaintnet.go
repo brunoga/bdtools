@@ -196,3 +196,42 @@ func ApplyInpaint(eye *mvc.Frame, holes []bool, delta []float32, top, bottom int
 		}
 	})
 }
+
+// Filler is the hole filler ready to run on a backend: its weights
+// uploaded once.
+type Filler struct {
+	w  *InpaintWeights
+	on *InpaintWeights // the weights on the backend
+	be nn.Backend
+}
+
+// NewFiller is a filler with weights.
+func NewFiller(w *InpaintWeights) *Filler { return &Filler{w: w} }
+
+// Fill corrects the holes of an eye's rows [top, bottom) on be: the
+// filler run on the eye and its holes (Render's), its corrections taken
+// in the holes. On a GPU the caller releases the pass's memory
+// (nn.GPU.Release) after; the weights stay.
+func (f *Filler) Fill(be nn.Backend, eye *mvc.Frame, holes []bool, top, bottom int) error {
+	if f.on == nil || f.be != be {
+		f.on = &InpaintWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+		for _, l := range InpaintLayers {
+			for _, p := range []struct{ to, from map[string]*nn.Tensor }{{f.on.W, f.w.W}, {f.on.B, f.w.B}} {
+				t := be.Upload(p.from[l.Name])
+				be.Keep(t)
+				p.to[l.Name] = t
+			}
+		}
+		f.be = be
+	}
+	if bottom-top < 8 {
+		return nil
+	}
+	x := InpaintInput(eye, holes, top, bottom)
+	d, err := be.Download(f.on.Inpaint(be, be.Upload(x)))
+	if err != nil {
+		return err
+	}
+	ApplyInpaint(eye, holes, d.Data, top, bottom)
+	return nil
+}

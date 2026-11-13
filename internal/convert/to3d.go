@@ -136,6 +136,14 @@ func (o Options) depthModelKey() string {
 	return o.DepthModel
 }
 
+// fill3DKey is the hole filler's weights, for resuming.
+func (o Options) fill3DKey() string {
+	if !o.To3D {
+		return ""
+	}
+	return o.Fill3D
+}
+
 // refine3DKey is the refinement's weights, for resuming.
 func (o Options) refine3DKey() string {
 	if !o.To3D {
@@ -258,6 +266,14 @@ func (r *Runner) newConverter3D(m *depth.Model, report bool) (*stereo.Converter,
 		}
 		c.Refine = w
 		say("--to-3d: the depth refined by %s", f)
+	}
+	if f := r.Opts.Fill3D; f != "" && f != "none" {
+		w, err := stereo.ReadInpaint(f)
+		if err != nil {
+			return nil, fmt.Errorf("--3d-fill: %w", err)
+		}
+		c.Fill = stereo.NewFiller(w)
+		say("--to-3d: the eyes' holes filled by %s", f)
 	}
 	return c, nil
 }
