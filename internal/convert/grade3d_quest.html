@@ -144,8 +144,11 @@ function vrCheck() {
 vrCheck();
 $('vr').onclick = async () => {
   tele('enter VR: video ' + video.videoWidth + 'x' + video.videoHeight + ' ready ' + video.readyState + ' paused ' + video.paused);
+  // the layers feature only for the media layer path: a session with it
+  // refuses a plain WebGL layer
+  const forceGL = new URLSearchParams(location.search).get('webgl') === '1';
   try {
-    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
+    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: forceGL ? [] : ['layers'] });
   } catch (e) { say('no VR session: ' + e.message); tele('requestSession failed: ' + e.message); return; }
   tele('session: features ' + (session.enabledFeatures ? Array.from(session.enabledFeatures).join(',') : '?') + ' | rates ' + (session.supportedFrameRates ? Array.from(session.supportedFrameRates).join('/') : '?') + ' | frameRate ' + session.frameRate);
   const space = await session.requestReferenceSpace('local-floor');
@@ -161,7 +164,6 @@ $('vr').onclick = async () => {
   session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); tele('left VR: ' + how + ' ' + rate + ' ' + glNote); hud(); });
   // a 4 m wide, 16:9 screen, 3.5 m away, eye height
   const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
-  const forceGL = new URLSearchParams(location.search).get('webgl') === '1';
   if (window.XRMediaBinding && !forceGL) {
     // the browser shows the video itself, each half to its eye, at the
     // video's own pixels
