@@ -15,6 +15,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the last cut, written to `--output` as a `--3d-shots` file for the
   conversion proper. `bdmv.Live` writes a live transport stream;
   `gpu.Config.LowLatency` encodes a picture at a time on NVENC.
+- `--3d-grade` serves a headset page too (`/quest`): the stream as a
+  fragmented MP4 (`/stream.mp4`, `mp4.Live`) into the browser's media
+  source, held at its live edge, shown in VR as a stereo layer, the
+  controllers turning the knobs.
 
 ## [0.19.0] - 2026-11-11
 
