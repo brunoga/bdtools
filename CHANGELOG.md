@@ -10,6 +10,18 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An icon for bdtools (`internal/convert/icon.svg`: a disc seen by two
   eyes), the live grading's pages' favicon and header mark, served at
   `/icon.svg`.
+- `--3d-grade`'s page shows the stream itself above the knobs (the
+  left eye, both, or a red-cyan anaglyph), and the stream carries a
+  readout drawn into both eyes, time, knobs, stretch and view, for the
+  projector and the headset; a box on the page turns it off.
+- `--3d-grade` has one page: Enter VR on it, in a headset's browser
+  over HTTPS, puts the picture on a screen in VR with the controls on a
+  panel beside it, pointed at with the right controller (`/quest`
+  redirects there).
+- `--3d-grade`'s headset page decodes the stream itself in VR
+  (`/stream.raw`, WebCodecs) and draws it through WebGL at the film's
+  rate, asks the headset for a 72 Hz display, leaves VR on both grips,
+  and reports what it sees to the server's log (`POST /api/log`).
 - `--3d-grade` serves over HTTPS too, on the next port, with a
   certificate of its own making kept in the cache: a headset's browser
   allows WebXR on a secure page only, so `/quest` is opened there.

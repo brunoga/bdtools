@@ -9,9 +9,13 @@
 :root { color-scheme: dark; --bg:#14161a; --fg:#e8e8e8; --dim:#9a9a9a; --acc:#5fb0ff; --warn:#ffb050; --ok:#7bd88f; --band:#2b4a6a; }
 * { box-sizing: border-box; }
 body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; max-width:1100px; margin-inline:auto; }
-h1 { font-size:17px; font-weight:600; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:10px; }
-h1 img { width:28px; height:28px; flex:none; }
-h1 span { overflow:hidden; text-overflow:ellipsis; }
+#banner { display:flex; align-items:center; gap:14px; padding:4px 0 12px; margin-bottom:10px; border-bottom:1px solid #2c3139; }
+#banner img { width:56px; height:56px; flex:none; }
+.name { font-size:26px; font-weight:700; letter-spacing:.5px; }
+.version { font-size:14px; font-weight:400; color:var(--dim); margin-left:6px; }
+.tagline { color:var(--dim); font-size:14px; }
+.tagline em { color:var(--acc); font-style:normal; }
+h1 { font-size:17px; font-weight:600; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dim { color:var(--dim); }
 .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 .clock { font:600 34px/1 ui-monospace, monospace; letter-spacing:1px; }
@@ -34,16 +38,54 @@ tr.cur td { color:var(--acc); }
 .stat { font-variant-numeric: tabular-nums; }
 .ok { color:var(--ok); } .warn { color:var(--warn); }
 kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0 5px; font:12px ui-monospace, monospace; }
+#preview { position:relative; background:#000; border-radius:6px; overflow:hidden; margin:8px auto 0; aspect-ratio: 16/9; width:min(100%, calc(42vh * 16 / 9)); }
+#preview.both { aspect-ratio: 32/9; width:min(100%, calc(42vh * 32 / 9)); }
+#preview video, #preview canvas { position:absolute; top:0; left:0; height:100%; width:100%; object-fit:fill; }
+#preview.left video { width:200%; }
+#preview.off { display:none; }
+#vrprompt { position:fixed; inset:0; z-index:20; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; }
+#vrprompt[hidden] { display:none; }
+#vrbig { font-size:40px; padding:28px 64px; border-radius:16px; }
 @media (max-width:600px) { .clock { font-size:26px; } .knob { grid-template-columns: 70px 1fr 80px; } }
 </style>
 </head>
 <body>
-<h1><img src="/icon.svg" alt=""><span id="title">bdtools 3D grade</span></h1>
+<div id="vrprompt" hidden>
+  <img src="/icon.svg" alt="" style="width:120px;height:120px">
+  <div style="text-align:center">
+    <div class="name" style="font-size:40px">bdtools <span id="version2" class="version"></span></div>
+    <div class="tagline" style="font-size:18px">Blu-ray tools in pure Go &middot; <em>Depth, graded by eye.</em></div>
+  </div>
+  <button id="vrbig" class="primary">Enter VR</button>
+  <span id="vrnote" class="dim"></span>
+  <a href="#" id="vrstay" class="dim" style="font-size:14px">stay on the page</a>
+</div>
+<header id="banner">
+  <img src="/icon.svg" alt="">
+  <div>
+    <div class="name">bdtools <span id="version" class="version"></span></div>
+    <div class="tagline">Blu-ray tools in pure Go &middot; <em>Depth, graded by eye.</em></div>
+  </div>
+</header>
+<h1><span id="title">bdtools 3D grade</span></h1>
 <div class="row dim" style="font-size:13px">
+  <button id="vr" class="primary" hidden disabled title="in a headset's browser: the picture on a screen in VR, the controls on a panel beside it">Enter VR</button>
   <span>stream: <a id="stream" href="/stream.ts">/stream.ts</a> (full side by side, 1080p an eye)</span>
   <span id="clients">0 players</span>
   <span id="saved"></span>
+  <span id="msg" class="warn"></span>
 </div>
+
+<div class="row dim" style="font-size:13px; margin-top:10px">
+  <span>preview:</span>
+  <label><input type="radio" name="pv" value="left" checked> left eye</label>
+  <label><input type="radio" name="pv" value="both"> both</label>
+  <label><input type="radio" name="pv" value="anaglyph"> red-cyan</label>
+  <label><input type="radio" name="pv" value="off"> off</label>
+  <label style="margin-left:12px"><input type="checkbox" id="hud" checked> readout in the stream</label>
+  <span id="lag"></span>
+</div>
+<div id="preview"><video id="v" muted playsinline autoplay></video><canvas id="cv" hidden></canvas></div>
 
 <div id="bar"><div class="head" id="head"></div></div>
 
@@ -159,6 +201,8 @@ function render() {
   $('saved').textContent = st.saved ? 'saved' : 'unsaved';
   $('saved').className = st.saved ? 'ok' : 'warn';
   $('file').textContent = st.file;
+  $('version').textContent = st.version || ''; $('version2').textContent = st.version || '';
+  if (document.activeElement !== $('hud')) $('hud').checked = st.hud;
   const w = st.width > 0 ? st.width : 1920;
   $('extremes').textContent = st.knobs.flat ? 'flat' :
     'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
@@ -195,6 +239,81 @@ function render() {
     tb.appendChild(tr);
   });
 }
+
+// the live preview: the stream as a fragmented MP4 into a media source,
+// held at its live edge; the left eye alone (the video twice as wide,
+// its right half clipped), both eyes, or a red-cyan anaglyph drawn from
+// the two halves
+const video = $('v'), cv = $('cv');
+let previewMode = 'left', started = false;
+function lag() { const b = video.buffered; return b.length ? b.end(b.length - 1) - video.currentTime : 0; }
+async function startPreview() {
+  if (started) return;
+  started = true;
+  let info;
+  for (;;) {
+    try { info = await (await fetch('/stream.json')).json(); } catch (e) { info = { ready: false }; }
+    if (info.ready) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!('MediaSource' in window) || !MediaSource.isTypeSupported(info.mime)) { $('lag').textContent = 'no preview: this browser cannot play ' + info.mime; return; }
+  const ms = new MediaSource();
+  video.src = URL.createObjectURL(ms);
+  await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
+  const sb = ms.addSourceBuffer(info.mime);
+  const queue = [];
+  const pump = () => { if (!sb.updating && queue.length && ms.readyState === 'open') sb.appendBuffer(queue.shift()); };
+  sb.addEventListener('updateend', () => {
+    const b = sb.buffered;
+    if (b.length && video.currentTime - b.start(0) > 20 && !sb.updating) { try { sb.remove(b.start(0), video.currentTime - 10); } catch (e) {} }
+    pump();
+  });
+  const reader = (await fetch('/stream.mp4')).body.getReader();
+  (async () => { for (;;) { const { value, done } = await reader.read(); if (done) return; queue.push(value); pump(); } })();
+  setInterval(() => {
+    const l = lag();
+    if (l > 1.5) { const b = video.buffered; video.currentTime = b.end(b.length - 1) - 0.15; }
+    else video.playbackRate = l > 0.4 ? 1.1 : 1;
+    if (video.paused) video.play().catch(() => {});
+    $('lag').textContent = 'preview ' + l.toFixed(2) + ' s behind';
+  }, 250);
+}
+function setPreview(mode) {
+  previewMode = mode;
+  $('preview').className = mode;
+  cv.hidden = mode !== 'anaglyph';
+  video.style.visibility = mode === 'anaglyph' ? 'hidden' : '';
+  if (mode !== 'off') startPreview();
+}
+document.querySelectorAll('input[name=pv]').forEach(r => r.onchange = () => setPreview(r.value));
+$('hud').onchange = () => send({ op: 'hud', n: $('hud').checked ? 1 : 0 });
+// the anaglyph: the left half's red, the right half's green and blue, at a quarter size
+(function anaglyph() {
+  requestAnimationFrame(anaglyph);
+  if (previewMode !== 'anaglyph' || video.readyState < 2 || !video.videoWidth) return;
+  const w = video.videoWidth / 4, h = video.videoHeight / 2;
+  if (cv.width !== w) { cv.width = w; cv.height = h; }
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, video.videoWidth / 2, video.videoHeight, 0, 0, w, h);
+  const L = ctx.getImageData(0, 0, w, h);
+  ctx.drawImage(video, video.videoWidth / 2, 0, video.videoWidth / 2, video.videoHeight, 0, 0, w, h);
+  const R = ctx.getImageData(0, 0, w, h);
+  const a = L.data, b = R.data;
+  for (let i = 0; i < a.length; i += 4) { b[i] = a[i]; }
+  ctx.putImageData(R, 0, 0);
+})();
+setPreview('left');
+
+function say(m) { $('msg').textContent = m; }
+// telemetry: what the page sees, to the server's log
+function tele(m) {
+  const line = (performance.now() / 1000).toFixed(1) + 's ' + m;
+  try { fetch('/api/log', { method: 'POST', body: line, keepalive: true }); } catch (e) {}
+}
+window.addEventListener('error', e => tele('error: ' + e.message + ' at ' + e.filename + ':' + e.lineno));
+window.addEventListener('unhandledrejection', e => tele('rejection: ' + (e.reason && e.reason.message || e.reason)));
+tele('page: ' + navigator.userAgent + ' | secure ' + window.isSecureContext + ' | xr ' + !!navigator.xr + ' | XRMediaBinding ' + !!window.XRMediaBinding +
+  ' | XRWebGLBinding ' + !!window.XRWebGLBinding + ' | MediaSource ' + ('MediaSource' in window) + ' | VideoDecoder ' + ('VideoDecoder' in window) + ' | rVFC ' + !!HTMLVideoElement.prototype.requestVideoFrameCallback);
 
 function connect() {
   const es = new EventSource('/events');
@@ -248,6 +367,430 @@ document.addEventListener('keydown', e => {
   else return;
   e.preventDefault();
 });
+// VR: a secure page only (a headset's browser has no WebXR on plain
+// HTTP from a LAN address): the server's HTTPS side, from the state
+let xrOK = false, session = null;
+function vrCheck() {
+  if (!navigator.xr) return; // no headset: no button
+  // a headset's browser is here for VR: a prompt over the page, one press
+  const prompt = (note, onPress) => {
+    $('vrprompt').hidden = false; $('vrnote').textContent = note;
+    $('vrbig').onclick = onPress;
+    $('vrstay').onclick = e => { e.preventDefault(); $('vrprompt').hidden = true; };
+  };
+  if (!window.isSecureContext) {
+    // VR needs a secure page: the button goes to the server's HTTPS side
+    const go = () => { if (st && st.secure) location.href = 'https://' + st.secure + '/'; else say('open the https address the server printed'); };
+    $('vr').hidden = false; $('vr').disabled = false; $('vr').textContent = 'Enter VR (secure page)'; $('vr').onclick = go;
+    navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (ok) prompt('VR needs the secure page: this goes there first (accept the certificate once)', go); });
+    return;
+  }
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrOK = ok; $('vr').hidden = !ok; $('vr').disabled = !ok;
+    if (ok) prompt('the picture on a screen in VR, the controls on a panel beside it', () => { $('vrprompt').hidden = true; $('vr').onclick(); });
+  });
+}
+vrCheck();
+$('vr').onclick = async () => {
+  tele('enter VR: video ' + video.videoWidth + 'x' + video.videoHeight + ' ready ' + video.readyState + ' paused ' + video.paused);
+  // the picture's path in VR: the page's own decoder (WebCodecs) drawn
+  // through WebGL, by default; ?layer=1 the browser's media layer from
+  // the video element, ?webgl=1 WebGL from the video element (both
+  // starve in VR: a video element behind a VR session is composited at
+  // a few frames a second). The layers feature only for the media
+  // layer: a session with it refuses a plain WebGL layer.
+  const q = new URLSearchParams(location.search);
+  const mode = q.get('layer') === '1' ? 'layer' : q.get('webgl') === '1' ? 'webgl' : ('VideoDecoder' in window ? 'codecs' : 'layer');
+  try {
+    session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: mode === 'layer' ? ['layers'] : [] });
+  } catch (e) { say('no VR session: ' + e.message); tele('requestSession failed: ' + e.message); return; }
+  tele('session: features ' + (session.enabledFeatures ? Array.from(session.enabledFeatures).join(',') : '?') + ' | rates ' + (session.supportedFrameRates ? Array.from(session.supportedFrameRates).join('/') : '?') + ' | frameRate ' + session.frameRate);
+  const space = await session.requestReferenceSpace('local-floor');
+  panelSpace = space;
+  tele('reference space ok');
+  let rate = '', how = 'WebGL';
+  // the controllers first, so that a failure of the picture's path still
+  // leaves a way out (both grips)
+  session.requestAnimationFrame(function frame(t, xrFrame) {
+    if (!session) return;
+    session.requestAnimationFrame(frame);
+    try { controllers(session, xrFrame); } catch (e) { tele('controllers: ' + e.message); }
+  });
+  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); tele('left VR: ' + how + ' ' + rate + ' ' + glNote); render(); });
+  // a 4 m wide, 16:9 screen, 3.5 m away, eye height
+  const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
+  if (mode === 'layer' && window.XRMediaBinding) {
+    // the browser shows the video itself, each half to its eye, at the
+    // video's own pixels
+    try {
+      const binding = new XRMediaBinding(session);
+      const layer = binding.createQuadLayer(video, { space, layout: 'stereo-left-right', width: W, height: H,
+        transform: new XRRigidTransform({ x: 0, y: Y, z: Z }) });
+      session.updateRenderState({ layers: [layer] });
+      how = 'media layer';
+      tele('media layer: ' + layer.width + 'x' + layer.height + ' layout ' + layer.layout + ' mipLevels ' + layer.mipLevels);
+    } catch (e) { how = 'WebGL (no media layer: ' + e.message + ')'; tele('media layer failed: ' + e.message); }
+  }
+  if (how.startsWith('WebGL')) {
+    try {
+      if (mode === 'codecs') { how = 'WebCodecs'; glSource = codecsSource(session); } else { glSource = videoSource(); }
+      webglScreen(session, space, W, H, Y, Z);
+    } catch (e) { glNote = 'setup: ' + e.message; tele('webgl setup failed: ' + e.message + ' ' + (e.stack || '')); }
+  }
+  vrHow = how;
+  tele('path: ' + how + ' (mode ' + mode + ')');
+  // the display's rate a multiple of the film's 24: 72 (each picture
+  // three refreshes) or 120, not the 90 a Quest wakes at, where every
+  // fourth picture is held a refresh longer and the film judders; asked
+  // once the picture is up, and not waited for (a browser may never
+  // answer)
+  try {
+    const rates = session.supportedFrameRates ? Array.from(session.supportedFrameRates) : [];
+    const want = [72, 120, 96, 48].find(r => rates.includes(r));
+    rate = rates.length ? 'rates ' + rates.join('/') : 'rate unknown';
+    if (want && session.updateTargetFrameRate) {
+      rate = 'asked ' + want + ' Hz';
+      session.updateTargetFrameRate(want).then(() => { rate = want + ' Hz'; }, e => { rate = 'rate refused: ' + e.message; });
+    }
+  } catch (e) { rate = 'rate: ' + e.message; }
+  say('in VR through the ' + how + ' at ' + rate + '; hold both grips a second to leave');
+  // what the headset does, into the stream's readout every two seconds:
+  // the path, the video's frames shown and dropped a second, and whether
+  // the browser takes the page as hidden (it may then starve the video)
+  let lastQ = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null, lastAt = performance.now();
+  const report = setInterval(() => {
+    if (!session) { clearInterval(report); return; }
+    let text = how + ' ' + rate + (glNote ? ' ' + glNote : '');
+    if (video.getVideoPlaybackQuality) {
+      const q = video.getVideoPlaybackQuality(), dt = (performance.now() - lastAt) / 1000;
+      text += ' ' + ((q.totalVideoFrames - lastQ.totalVideoFrames) / dt).toFixed(1) + ' fps, dropped ' + (q.droppedVideoFrames - lastQ.droppedVideoFrames);
+      lastQ = q; lastAt = performance.now();
+    }
+    text += ', page ' + document.visibilityState + (video.paused ? ', video paused' : '') + ', lag ' + lag().toFixed(2) + ', t ' + video.currentTime.toFixed(2) + ', rate ' + rate;
+    send({ op: 'note', text });
+    tele('vr: ' + text);
+  }, 2000);
+};
+let vrHow = '';
+
+// The control panel in VR: a canvas drawn with the page's controls,
+// shown on a quad to the right of the screen, turned towards the
+// viewer; the right controller's ray meets it at a cursor, the trigger
+// presses what is under it.
+const panel = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800; canvas.height = 1000;
+  const ctx = canvas.getContext('2d');
+  const W = 1.2, H = 1.5; // metres
+  // placed to the right, 2.6 m away, turned 38 degrees towards the viewer
+  const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.55, cz = -2.4;
+  const c = Math.cos(ang), sn = Math.sin(ang);
+  const model = new Float32Array([c, 0, -sn, 0,  0, 1, 0, 0,  sn, 0, c, 0,  cx, cy, cz, 1]);
+  const normal = [sn, 0, c]; // the quad's +z, rotated
+  const right = [c, 0, -sn];
+  const items = []; // {x, y, w, h, label, cmd}
+  let cursor = null; // on the canvas, or null
+  const pl = { canvas, W, H, model, version: 0, cursor: null,
+    // hit: where a ray (origin o, direction d, world) meets the panel, as canvas coordinates, or null
+    hit(o, d) {
+      const dn = d[0] * normal[0] + d[1] * normal[1] + d[2] * normal[2];
+      if (Math.abs(dn) < 1e-4) return null;
+      const t = ((cx - o[0]) * normal[0] + (cy - o[1]) * normal[1] + (cz - o[2]) * normal[2]) / dn;
+      if (t < 0) return null;
+      const hx = o[0] + d[0] * t - cx, hy = o[1] + d[1] * t - cy, hz = o[2] + d[2] * t - cz;
+      const lx = hx * right[0] + hy * right[1] + hz * right[2], ly = hy;
+      if (Math.abs(lx) > W / 2 || Math.abs(ly) > H / 2) return null;
+      return [(lx / W + 0.5) * canvas.width, (0.5 - ly / H) * canvas.height];
+    },
+    press(at) { const it = items.find(i => at[0] >= i.x && at[0] < i.x + i.w && at[1] >= i.y && at[1] < i.y + i.h); if (it) it.cmd(); return !!it; },
+    setCursor(at) { if ((at && !cursor) || (!at && cursor) || (at && cursor && (Math.abs(at[0] - cursor[0]) > 2 || Math.abs(at[1] - cursor[1]) > 2))) { cursor = at; pl.draw(); } },
+    draw() {
+      items.length = 0;
+      const w = canvas.width;
+      ctx.fillStyle = '#14161a'; ctx.fillRect(0, 0, w, canvas.height);
+      ctx.font = '600 36px sans-serif'; ctx.fillStyle = '#e8e8e8'; ctx.textBaseline = 'middle';
+      let y = 50;
+      const text = (t, x, yy, font, color) => { ctx.font = font || '30px sans-serif'; ctx.fillStyle = color || '#e8e8e8'; ctx.fillText(t, x, yy); };
+      const button = (x, yy, bw, bh, label, cmd, on) => {
+        ctx.fillStyle = on ? '#2d4f78' : '#262a31'; ctx.strokeStyle = '#3a3f48';
+        ctx.beginPath(); ctx.roundRect(x, yy, bw, bh, 10); ctx.fill(); ctx.stroke();
+        ctx.font = '600 28px sans-serif'; ctx.fillStyle = '#eee'; ctx.textAlign = 'center';
+        ctx.fillText(label, x + bw / 2, yy + bh / 2); ctx.textAlign = 'left';
+        items.push({ x, y: yy, w: bw, h: bh, cmd });
+      };
+      if (!st) { text('waiting for the state', 30, y); cursorDot(); pl.version++; return; }
+      text(fmt(st.t) + (st.playing ? '  ▶' : '  ❚❚'), 30, y, '600 44px ui-monospace, monospace');
+      y += 60;
+      text('near ' + st.near.toFixed(2) + '%   far ' + st.far.toFixed(2) + '%', 30, y, '26px sans-serif', '#9a9a9a');
+      y += 50;
+      const row = (bs, bh, gap) => { let x = 30; const bw = (w - 60 - gap * (bs.length - 1)) / bs.length; for (const b of bs) { button(x, y, bw, bh, b[0], b[1], b[2]); x += bw + gap; } y += bh + 18; };
+      row([['−10 s', () => send({ op: 'step', n: -240 })], ['⇤ cut', () => send({ op: 'jump', dir: -1 })], ['−1', () => send({ op: 'step', n: -1 })],
+        [st.playing ? 'pause' : 'play', () => send({ op: 'toggle' }), true], ['+1', () => send({ op: 'step', n: 1 })], ['cut ⇥', () => send({ op: 'jump', dir: 1 })], ['+10 s', () => send({ op: 'step', n: 240 })]], 64, 8);
+      const k = st.knobs;
+      text('depth  ' + k.depth.toFixed(2), 30, y + 32, '600 34px sans-serif'); y += 70;
+      row([['−0.25', () => nudgeKnobs(-0.25, 0)], ['−0.05', () => nudgeKnobs(-0.05, 0)], ['+0.05', () => nudgeKnobs(0.05, 0)], ['+0.25', () => nudgeKnobs(0.25, 0)]], 64, 10);
+      text('screen  ' + (k.screen >= 0 ? '+' : '') + k.screen.toFixed(2) + '%', 30, y + 32, '600 34px sans-serif'); y += 70;
+      row([['−0.5', () => nudgeKnobs(0, -0.5)], ['−0.1', () => nudgeKnobs(0, -0.1)], ['+0.1', () => nudgeKnobs(0, 0.1)], ['+0.5', () => nudgeKnobs(0, 0.5)]], 64, 10);
+      row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat], ['reset', () => send({ op: 'reset' })],
+        ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud], ['save', () => send({ op: 'save' }), !st.saved]], 64, 10);
+      if (st.ref) {
+        const v = st.ref.view;
+        row([['ours', () => send({ op: 'ref', view: 'ours' }), v === 'ours'], ['disc', () => send({ op: 'ref', view: 'disc' }), v === 'disc'],
+          ['mix', () => send({ op: 'ref', view: 'mix' }), v === 'mix'], ['diff', () => send({ op: 'ref', view: 'diff' }), v === 'diff'],
+          ['align', () => send({ op: 'align' })]], 64, 10);
+      }
+      const stretch = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'no stretch here (the defaults)';
+      text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
+      if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch })); }
+      y += 76;
+      // the timeline: stretches as bands, cuts as ticks, the playhead; a press seeks
+      const L = st.length > 0 ? st.length : Math.max(st.t, 1), bx = 30, bw = w - 60, bh = 70;
+      ctx.fillStyle = '#1e2228'; ctx.fillRect(bx, y, bw, bh);
+      for (const [i, sh] of st.shots.entries()) {
+        ctx.fillStyle = i === st.stretch ? '#3b6b9c' : '#2b4a6a';
+        const x0 = bx + bw * sh.start / L, x1 = bx + bw * (sh.end > 0 ? sh.end : L) / L;
+        ctx.fillRect(x0, y, Math.max(x1 - x0, 2), bh);
+      }
+      ctx.fillStyle = '#7a8290';
+      for (const cut of st.cuts) ctx.fillRect(bx + bw * cut / L, y + bh - 20, 2, 20);
+      ctx.fillStyle = '#ffb050'; ctx.fillRect(bx + bw * st.t / L - 2, y, 4, bh);
+      items.push({ x: bx, y, w: bw, h: bh, cmd: () => { if (cursor) send({ op: 'seek', t: L * (cursor[0] - bx) / bw }); } });
+      y += bh + 30;
+      text('trigger presses; both grips leave VR', 30, y, '24px sans-serif', '#6f7680');
+      cursorDot();
+      pl.version++;
+    },
+  };
+  function cursorDot() { if (!cursor) return; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 9, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = '#5fb0ff'; ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 5, 0, 2 * Math.PI); ctx.fill(); }
+  pl.draw();
+  return pl;
+})();
+let panelStateVer = -1;
+
+// the controllers: an action on a button's press, the sticks repeating
+// while held past their middle
+const held = new Map(); // key -> last fire time
+function fire(key, every, fn) {
+  const now = performance.now(), last = held.get(key);
+  if (last !== undefined && now - last < every) return;
+  held.set(key, now); fn();
+}
+let gripsSince = 0; // both grips held: when it began
+let panelSpace = null; // the reference space the panel's ray is taken in
+function controllers(session, xrFrame) {
+  let grips = 0;
+  for (const src of session.inputSources) {
+    if (src.gamepad && src.gamepad.buttons[1] && src.gamepad.buttons[1].pressed) grips++;
+  }
+  if (grips === 2) {
+    if (!gripsSince) gripsSince = performance.now();
+    else if (performance.now() - gripsSince > 1000) { gripsSince = 0; session.end(); return; }
+  } else gripsSince = 0;
+  if (st && st.ver !== panelStateVer) { panelStateVer = st.ver; panel.draw(); }
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const b = i => gp.buttons[i] && gp.buttons[i].pressed;
+    const ax = gp.axes.length >= 4 ? [gp.axes[2], gp.axes[3]] : [gp.axes[0] || 0, gp.axes[1] || 0];
+    const edge = (name, pressed, fn) => { if (pressed) fire(name, 1e9, fn); else held.delete(name); };
+    if (src.handedness === 'right') {
+      // the ray on the panel
+      let at = null;
+      const rp = src.targetRaySpace && xrFrame.getPose(src.targetRaySpace, panelSpace);
+      if (rp) {
+        const q = rp.transform.orientation, o = rp.transform.position;
+        // the ray's direction: -z turned by the orientation
+        const x = q.x, y = q.y, z = q.z, w = q.w;
+        const d = [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))];
+        at = panel.hit([o.x, o.y, o.z], d);
+      }
+      panel.setCursor(at);
+      edge('rtrig', b(0), () => { if (!(at && panel.press(at))) send({ op: 'toggle' }); });
+      edge('rgrip', b(1), () => { if (st) send({ op: 'knobs', knobs: { ...st.knobs, flat: !st.knobs.flat } }); });
+      edge('A', b(4), () => send({ op: 'step', n: 1 }));
+      edge('B', b(5), () => send({ op: 'step', n: -1 }));
+      if (ax[1] < -0.6) fire('depth+', 150, () => nudgeKnobs(0.05, 0)); else held.delete('depth+');
+      if (ax[1] > 0.6) fire('depth-', 150, () => nudgeKnobs(-0.05, 0)); else held.delete('depth-');
+      if (ax[0] > 0.6) fire('screen+', 150, () => nudgeKnobs(0, 0.1)); else held.delete('screen+');
+      if (ax[0] < -0.6) fire('screen-', 150, () => nudgeKnobs(0, -0.1)); else held.delete('screen-');
+    } else if (src.handedness === 'left') {
+      edge('ltrig', b(0), () => { const v = st && st.ref ? st.ref.view : 'ours'; send({ op: 'ref', view: { ours: 'disc', disc: 'mix', mix: 'ours', diff: 'ours' }[v] || 'ours' }); });
+      edge('X', b(4), () => send({ op: 'step', n: -240 }));
+      edge('Y', b(5), () => send({ op: 'step', n: 240 }));
+      edge('lstick-', ax[0] < -0.6, () => send({ op: 'jump', dir: -1 }));
+      edge('lstick+', ax[0] > 0.6, () => send({ op: 'jump', dir: 1 }));
+    }
+  }
+}
+function nudgeKnobs(dd, ds) {
+  if (!st) return;
+  const k = { depth: +(st.knobs.depth + dd).toFixed(2), screen: +(st.knobs.screen + ds).toFixed(2), flat: st.knobs.flat };
+  st.knobs = k; render();
+  send({ op: 'knobs', knobs: k });
+}
+
+// without media layers: the video as a texture on a quad, each eye its half
+let glNote = ''; // what the WebGL path has to say, into the readout
+let glSource = null; // what the WebGL path draws: image() the picture when it changed, else null
+
+// videoSource draws the video element: a new picture when its time moved
+function videoSource() {
+  let lastT = -1;
+  return { image() { if (video.readyState < 2 || video.currentTime === lastT) return null; lastT = video.currentTime; return video; }, stats() { return ''; }, stop() {} };
+}
+
+// codecsSource decodes the raw frame feed in the page (WebCodecs) and
+// paces the frames by their times, a little behind the newest
+function codecsSource(session) {
+  let decoder = null, reader = null, stopped = false;
+  const queue = []; // decoded frames in order
+  let base = null; // performance.now() minus the first frame's time
+  let decoded = 0, shown = 0, dropped = 0, current = null;
+  const bufferMs = 120;
+  (async () => {
+    const info = await (await fetch('/stream.json')).json();
+    const desc = Uint8Array.from(atob(info.avcc), c => c.charCodeAt(0));
+    decoder = new VideoDecoder({
+      output: f => { decoded++; if (queue.length > 8) { queue.shift().close(); dropped++; } queue.push(f); },
+      error: e => { tele('decoder error: ' + e.message); glNote = 'decoder: ' + e.message; },
+    });
+    const config = { codec: info.codec, description: desc, codedWidth: info.width, codedHeight: info.height, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true };
+    try {
+      const sup = await VideoDecoder.isConfigSupported(config);
+      tele('decoder config ' + info.codec + ' supported ' + sup.supported);
+    } catch (e) { tele('isConfigSupported: ' + e.message); }
+    decoder.configure(config);
+    video.pause();
+    reader = (await fetch('/stream.raw')).body.getReader();
+    let buf = new Uint8Array(0);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done || stopped) break;
+      const b = new Uint8Array(buf.length + value.length); b.set(buf); b.set(value, buf.length); buf = b;
+      for (;;) {
+        if (buf.length < 13) break;
+        const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        const n = dv.getUint32(0), pts = Number(dv.getBigUint64(4)), key = buf[12] === 1;
+        if (buf.length < 13 + n) break;
+        const data = buf.slice(13, 13 + n);
+        buf = buf.subarray(13 + n);
+        if (decoder.state === 'configured') {
+          try { decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: Math.round(pts * 1e6 / 90000), data })); }
+          catch (e) { tele('decode: ' + e.message); }
+        }
+      }
+    }
+  })().catch(e => tele('codecs feed: ' + e.message));
+  return {
+    image() {
+      const now = performance.now();
+      if (queue.length && base === null) base = now + bufferMs - queue[0].timestamp / 1000;
+      let next = null;
+      while (queue.length && queue[0].timestamp / 1000 + base <= now) { if (next) next.close(); next = queue.shift(); }
+      if (!next) return null;
+      if (current) current.close();
+      current = next; shown++;
+      return current;
+    },
+    stats() { return 'decoded ' + decoded + ' shown ' + shown + ' dropped ' + dropped + ' queue ' + queue.length + (decoder ? ' decoder ' + decoder.state + ' q' + decoder.decodeQueueSize : ''); },
+    stop() { stopped = true; try { reader && reader.cancel(); } catch (e) {} try { decoder && decoder.close(); } catch (e) {} for (const f of queue) f.close(); queue.length = 0; if (current) { current.close(); current = null; } video.play().catch(() => {}); },
+  };
+}
+
+function webglScreen(session, space, W, H, Y, Z) {
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl2', { xrCompatible: true });
+  if (!gl) { glNote = 'no WebGL2'; tele('webgl: no WebGL2 context'); return; }
+  const base = new XRWebGLLayer(session, gl);
+  session.updateRenderState({ baseLayer: base });
+  tele('webgl: layer ' + base.framebufferWidth + 'x' + base.framebufferHeight + ' max texture ' + gl.getParameter(gl.MAX_TEXTURE_SIZE) + ' renderer ' + gl.getParameter(gl.RENDERER));
+  const vs = `#version 300 es
+    in vec2 p; in vec2 uv; uniform mat4 mvp; out vec2 v; void main(){ v = uv; gl_Position = mvp * vec4(p, 0.0, 1.0); }`;
+  const fs = `#version 300 es
+    precision mediump float; in vec2 v; uniform sampler2D tex; uniform float half_; uniform float uscale; out vec4 o;
+    void main(){ o = texture(tex, vec2(half_ + v.x * uscale, 1.0 - v.y)); }`;
+  const prog = gl.createProgram();
+  for (const [t, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) glNote = 'shader: ' + gl.getShaderInfoLog(s);
+    gl.attachShader(prog, s);
+  }
+  gl.linkProgram(prog); gl.useProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) glNote = 'link: ' + gl.getProgramInfoLog(prog);
+  tele('webgl: program ' + (glNote || 'ok'));
+  const quad = new Float32Array([-W/2, Y-H/2, 0, 0,  W/2, Y-H/2, 1, 0,  -W/2, Y+H/2, 0, 1,  W/2, Y+H/2, 1, 1]);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+  const p = gl.getAttribLocation(prog, 'p'), uv = gl.getAttribLocation(prog, 'uv');
+  gl.enableVertexAttribArray(p); gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(uv); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const uMVP = gl.getUniformLocation(prog, 'mvp'), uHalf = gl.getUniformLocation(prog, 'half_'), uScale = gl.getUniformLocation(prog, 'uscale');
+  // the control panel: its own quad and texture, to the right of the screen
+  const panelBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, panelBuf);
+  const PW = panel.W, PH = panel.H;
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-PW/2, -PH/2, 0, 0,  PW/2, -PH/2, 1, 0,  -PW/2, PH/2, 0, 1,  PW/2, PH/2, 1, 1]), gl.STATIC_DRAW);
+  const panelTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, panelTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  let panelVersion = -1;
+  const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
+  const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
+  // the texture taken from the source when it has a new picture, not at
+  // the headset's rate
+  let uploads = 0, draws = 0;
+  glNote = glNote || 'gl ok';
+  session.addEventListener('end', () => { if (glSource) glSource.stop(); });
+  session.requestAnimationFrame(function draw(t, frame) {
+    if (!session) return;
+    session.requestAnimationFrame(draw);
+    let pose, layer;
+    try {
+      pose = frame.getViewerPose(space);
+      if (!pose) return;
+      layer = session.renderState.baseLayer;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.clearColor(0.04, 0.04, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+      const img = glSource ? glSource.image() : null;
+      if (img) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); uploads++; }
+      draws++;
+      if (draws % 144 === 0) {
+        const err = gl.getError();
+        glNote = (err ? 'gl error ' + err + ', ' : 'gl ok, ') + uploads + ' uploads, ' + draws + ' draws' + (glSource ? ', ' + glSource.stats() : '');
+        if (draws % 720 === 0) {
+          const px = new Uint8Array(4);
+          gl.readPixels(Math.floor(base.framebufferWidth / 4), Math.floor(base.framebufferHeight / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          tele('webgl: ' + glNote + ', views ' + pose.views.length + ', pixel ' + Array.from(px).join(','));
+        }
+      }
+    } catch (e) { if (session) { glNote = 'draw: ' + e.message; tele('webgl draw error: ' + e.message); } return; }
+    try {
+      if (panel.version !== panelVersion) {
+        gl.bindTexture(gl.TEXTURE_2D, panelTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, panel.canvas);
+        panelVersion = panel.version;
+      }
+      for (const view of pose.views) {
+        const vp = layer.getViewport(view);
+        gl.viewport(vp.x, vp.y, vp.width, vp.height);
+        const pv = mul(view.projectionMatrix, view.transform.inverse.matrix);
+        // the screen
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+        gl.uniformMatrix4fv(uMVP, false, mul(pv, model));
+        gl.uniform1f(uHalf, view.eye === 'right' ? 0.5 : 0); gl.uniform1f(uScale, 0.5);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // the panel
+        gl.bindTexture(gl.TEXTURE_2D, panelTex);
+        gl.bindBuffer(gl.ARRAY_BUFFER, panelBuf);
+        gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+        gl.uniformMatrix4fv(uMVP, false, mul(pv, panel.model));
+        gl.uniform1f(uHalf, 0); gl.uniform1f(uScale, 1);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    } catch (e) { glNote = 'views: ' + e.message; }
+  });
+}
 </script>
 </body>
 </html>

@@ -13,6 +13,8 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,9 +37,6 @@ import (
 
 //go:embed grade3d.html
 var grade3DPage []byte
-
-//go:embed grade3d_quest.html
-var grade3DQuestPage []byte
 
 //go:embed icon.svg
 var bdtoolsIcon []byte
@@ -104,6 +104,9 @@ type grader struct {
 	near    float64       // its disparity's extremes, percent of the width
 	far     float64
 	saved   bool
+	noHUD   bool   // the readout left out of the stream
+	note    string // a player's note, shown in the readout for a while
+	noteAt  time.Time
 	clients map[*gradeClient]struct{}
 	events  map[chan struct{}]struct{}
 	ver     int
@@ -165,6 +168,33 @@ func (c *gradeClient) mp4Sink(params []byte, width, height int) {
 			started = true
 		}
 		return live.Frame(au, pts, key)
+	}
+}
+
+// rawSink is a player of the raw frames (a browser decoding them itself,
+// WebCodecs): from the first keyframe, each frame as its length (4 bytes,
+// big-endian), its time (8 bytes, 90 kHz), a keyframe flag (1 byte) and
+// the access unit as an MP4 sample (mp4.AVCSample's); the decoder's
+// configuration comes from /stream.json.
+func (c *gradeClient) rawSink(_ []byte, _, _ int) {
+	w := chanWriter{c.ch}
+	started := false
+	c.sink = func(au []byte, pts int64, key bool) error {
+		if !started {
+			if !key {
+				return nil
+			}
+			started = true
+		}
+		sample := mp4.AVCSample(au)
+		hdr := make([]byte, 13)
+		binary.BigEndian.PutUint32(hdr, uint32(len(sample))) //nolint:gosec // a frame's size
+		binary.BigEndian.PutUint64(hdr[4:], uint64(pts))     //nolint:gosec // a time
+		if key {
+			hdr[12] = 1
+		}
+		_, err := w.Write(append(hdr, sample...))
+		return err
 	}
 }
 
@@ -246,7 +276,7 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 			tlsSrv = &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second, TLSConfig: cfg}
 			go func() { _ = tlsSrv.Serve(tln) }()
 			g.tlsAddr = reachable(tln.Addr().String())
-			r.Report.Report("--3d-grade: for a headset, https://%s/quest (its certificate is this machine's own: accept it once)", g.tlsAddr)
+			r.Report.Report("--3d-grade: for a headset, https://%s/ (its certificate is this machine's own: accept it once), then Enter VR", g.tlsAddr)
 		}
 	}
 	err = g.play(ctx)
@@ -603,8 +633,43 @@ func (g *grader) emit(ctx context.Context, l, rr *mvc.Frame) error {
 	}
 	g.next = g.next.Add(g.frame)
 	g.last = [2]*mvc.Frame{l, rr}
+	if text := g.hudText(); text != "" {
+		l, rr = copyFrame(l), copyFrame(rr)
+		drawHUD([]*mvc.Frame{l, rr}, text)
+	}
 	sf := &mvc.StereoFrame{Base: l, Dependent: rr}
 	return g.enc.Encode(func(dst *gpu.Picture) { drawFramed(dst, sf, false, LayoutFullSBS) })
+}
+
+// hudText is the readout drawn into the stream: the time, the play
+// state, the knobs, the stretch and the view; "" when left out.
+func (g *grader) hudText() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.noHUD {
+		return ""
+	}
+	k := g.knobsAtLocked(g.pos)
+	state := "||"
+	if g.want.playing {
+		state = ">"
+	}
+	text := fmt.Sprintf("%s %s  depth %.2f  screen %+.2f", clock(g.pos)[:len(clock(g.pos))-1], state, k.Depth, k.Screen)
+	if k.Flat {
+		text += "  flat"
+	}
+	if i := shotAt(g.shots, g.pos); i >= 0 {
+		text += fmt.Sprintf("  stretch %d/%d", i+1, len(g.shots))
+	}
+	if g.ref != nil {
+		if v := g.ref.view(); v != viewOurs {
+			text += "  " + v
+		}
+	}
+	if g.note != "" && time.Since(g.noteAt) < 6*time.Second {
+		text += "  [" + g.note + "]"
+	}
+	return text
 }
 
 // gradeWriter takes the encoder's access units into the stream.
@@ -833,6 +898,8 @@ type gradeState struct {
 	Title    string         `json:"title"`
 	Ref      *gradeRefState `json:"ref"`
 	Secure   string         `json:"secure"` // the HTTPS side's address, for VR
+	Version  string         `json:"version"`
+	HUD      bool           `json:"hud"` // the readout drawn into the stream
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -860,7 +927,7 @@ func (g *grader) state() gradeState {
 	defer g.mu.Unlock()
 	st := gradeState{Ver: g.ver, T: g.pos.Seconds(), Length: g.src.length.Seconds(), Frame: g.frameOr().Seconds(),
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
-		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr,
+		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD, Version: g.r.Version,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
 		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
@@ -884,7 +951,9 @@ func (g *grader) state() gradeState {
 // before/after), knobs (knobs), reset (the stretch to the defaults),
 // delete (i: a stretch), save, ref (view: ours, disc, mix or diff; or n
 // 1 for disc, 0 for ours), align (the reference aligned to the film by
-// their pictures) or refoffset (t: seconds the reference runs ahead).
+// their pictures), refoffset (t: seconds the reference runs ahead) or
+// hud (n 1: the readout drawn into the stream, 0: not), or note (text: a
+// player's word, shown in the readout for a few seconds).
 type gradeCommand struct {
 	Op    string      `json:"op"`
 	T     float64     `json:"t"`
@@ -893,6 +962,7 @@ type gradeCommand struct {
 	I     int         `json:"i"`
 	Knobs *gradeKnobs `json:"knobs"`
 	View  string      `json:"view"`
+	Text  string      `json:"text"`
 }
 
 func (g *grader) command(c gradeCommand) error {
@@ -954,6 +1024,15 @@ func (g *grader) command(c gradeCommand) error {
 		err := g.saveLocked()
 		g.mu.Unlock()
 		return err
+	case "hud":
+		g.noHUD = c.N == 0
+		g.want.regrade = true
+	case "note":
+		if len(c.Text) > 80 {
+			c.Text = c.Text[:80]
+		}
+		g.note, g.noteAt = c.Text, time.Now()
+		g.want.regrade = true
 	case "ref", "align", "refoffset":
 		g.mu.Unlock()
 		if g.ref == nil {
@@ -1021,14 +1100,23 @@ func (g *grader) handler() http.Handler {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("POST /api/log", func(w http.ResponseWriter, r *http.Request) {
+		// a player's telemetry, into the report (and so the log)
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		g.r.Report.Report("--3d-grade: player %s: %s", r.RemoteAddr, strings.TrimSpace(string(b)))
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /events", g.serveEvents)
 	mux.HandleFunc("GET /stream.ts", g.serveStream)
 	mux.HandleFunc("GET /stream.mp4", g.serveMP4)
+	mux.HandleFunc("GET /stream.raw", func(w http.ResponseWriter, r *http.Request) {
+		g.serveClient(w, r, "application/octet-stream", (*gradeClient).rawSink)
+	})
 	mux.HandleFunc("GET /stream.json", func(w http.ResponseWriter, _ *http.Request) {
 		g.mu.Lock()
 		params, width, height := g.params, g.width, g.height
 		g.mu.Unlock()
-		sps, _, ok := avcParams(params)
+		sps, pps, ok := avcParams(params)
 		w.Header().Set("Content-Type", "application/json")
 		if !ok {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -1036,11 +1124,11 @@ func (g *grader) handler() http.Handler {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ready": true, "mime": `video/mp4; codecs="` + mp4.AVCCodec(sps) + `"`,
+			"codec": mp4.AVCCodec(sps), "avcc": base64.StdEncoding.EncodeToString(mp4.AVCC(sps, pps)),
 			"width": width, "height": height})
 	})
-	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(grade3DQuestPage)
+	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently) // one page for all: VR from its button
 	})
 	return mux
 }

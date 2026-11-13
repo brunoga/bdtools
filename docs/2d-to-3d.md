@@ -749,6 +749,14 @@ paused picture keeps its depth, so a turn of a knob shows at the next
 picture's time; the only wait is the player's own buffer (Kodi's a few
 seconds by default, under one with its cache turned down).
 
+The page shows the stream itself above the knobs (the left eye, both
+eyes, or a red-cyan anaglyph for a depth check on a laptop), a tenth of
+a second behind, and the stream carries a readout drawn into the bottom
+of both eyes at the screen's depth: the time, the play state, the knobs,
+the stretch and the view, so the projector and a headset show the state
+while a hand turns the knobs (a box on the page turns it off for clean
+viewing).
+
 A turn of a knob grades a stretch: from the last cut when one is within
 two seconds (a hand reacts to a shot a moment late), else from the
 picture shown, eased in over a second (`ramp=1`), to the next stretch
@@ -759,19 +767,28 @@ command starts from a file written before. The page shows where the
 picture's nearest and farthest come out, in percent of the width and in
 pixels, the cuts seen so far on the timeline, and the stretches.
 
-A headset grades without a phone in hand: `https://HOST:8421/quest` in
-the Quest's browser (the server's HTTPS side, on the next port, with a
-certificate of its own making that the browser is told to accept once:
-WebXR runs on a secure page only, and a plain HTTP page on a LAN
-address is not one) plays the stream through the page's own media
-source (`/stream.mp4`, the same pictures as a fragmented MP4), held at
-its live edge, under a tenth of a second behind; Enter VR puts it on a
-4 m screen as a stereo layer, each half to its eye. The controllers
-turn the knobs: the right stick up and down for the depth, left and
-right for the screen, the right trigger plays and pauses, the right
-grip makes a shot flat, A and B step a picture, the left stick jumps
-between the cuts, X and Y ten seconds. The page's top line shows the
-time and the knobs; the page at `/` shows the rest.
+A headset grades without a phone in hand: the same page at
+`https://HOST:8421/` in the Quest's browser (the server's HTTPS side,
+on the next port, with a certificate of its own making that the browser
+is told to accept once: WebXR runs on a secure page only, and a plain
+HTTP page on a LAN address is not one) shows an Enter VR button, which
+puts the picture on a 4 m screen, each half to its eye, with the
+page's controls on a panel to the right of it: the right controller's
+ray puts a cursor on the panel and the trigger presses what is under
+it, transport, depth and screen by steps, flat, the views, the stretch,
+save and the timeline. In VR the page decodes the stream
+itself (`/stream.raw`, the frames with their times; WebCodecs) and
+draws each through WebGL, paced by their times: a video element behind
+a VR session is composited at a few frames a second by the browser,
+which starved both its media layer and a copy of it. The page asks the
+headset for a 72 Hz display, where 24 pictures a second sit evenly.
+Both grips held a second leave VR. What the page sees goes to the
+server's log (`POST /api/log`): the browser, each step into VR, errors,
+and the frames decoded and shown. The controllers
+turn the knobs too: the right stick up and down for the depth, left and
+right for the screen, the right trigger plays and pauses (off the
+panel), the right grip makes a shot flat, A and B step a picture, the
+left stick jumps between the cuts, X and Y ten seconds.
 
 Where the film has a 3D release of its own (an MVC disc converted, say),
 `--3d-reference FILE` puts it beside the conversion: the page's `disc`
