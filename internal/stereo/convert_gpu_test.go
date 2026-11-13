@@ -344,3 +344,67 @@ func TestEyesMaskOnTheGPU(t *testing.T) {
 		t.Fatal("the scene has no holes")
 	}
 }
+
+// TestFillOnTheGPU: the holes filled on the GPU (InpaintInput, the
+// network, InpaintApply) are the CPU filler's, within a level.
+func TestFillOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU")
+	}
+	defer g.Close()
+	f, d := scene(640, 360)
+	w, h := f.Width, f.Height
+	top, bottom := 20, h-20
+	iw := &InpaintWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+	k := 0
+	for _, l := range InpaintLayers {
+		iw.W[l.Name], iw.B[l.Name] = nn.New(l.Shape()...), nn.New(l.Out)
+		for i := range iw.W[l.Name].Data {
+			k++
+			iw.W[l.Name].Data[i] = float32(k%13-6) / 40
+		}
+	}
+	// the CPU way
+	left, hl := Render(f, d, 0.5)
+	right, hr := Render(f, d, -0.5)
+	cpu := NewFiller(iw)
+	if err := cpu.Fill(nn.CPU, left, hl, top, bottom); err != nil {
+		t.Fatal(err)
+	}
+	if err := cpu.Fill(nn.CPU, right, hr, top, bottom); err != nil {
+		t.Fatal(err)
+	}
+	// the GPU way
+	p := g.UploadPicture(f.Y, f.Cb, f.Cr, w, h, f.StrideY, f.StrideC)
+	eyes, mask := g.EyesMask(p, g.Upload(&nn.Tensor{Shape: []int{h, w}, Data: d}), gapPixels, true)
+	NewFiller(iw).FillGPU(g, eyes, mask, w, h, top, bottom)
+	buf := make([]byte, nn.EyesSize(w, h))
+	if err := g.DownloadBytes(buf, eyes); err != nil {
+		t.Fatal(err)
+	}
+	g.Release()
+	gl, gr := eyeFrames(buf, f)
+	holes := 0
+	for _, hole := range append(hl, hr...) {
+		if hole {
+			holes++
+		}
+	}
+	if holes == 0 {
+		t.Fatal("no holes")
+	}
+	off := 0
+	for _, pair := range []struct{ a, b *mvc.Frame }{{left, gl}, {right, gr}} {
+		for _, pl := range []struct{ a, b []byte }{{pair.a.Y, pair.b.Y}, {pair.a.Cb, pair.b.Cb}, {pair.a.Cr, pair.b.Cr}} {
+			for i := range pl.a {
+				if dd := int(pl.a[i]) - int(pl.b[i]); dd > 1 || dd < -1 {
+					t.Fatalf("a sample differs by %d", dd)
+				} else if dd != 0 {
+					off++
+				}
+			}
+		}
+	}
+	t.Logf("%d holes, %d samples a level apart", holes, off)
+}

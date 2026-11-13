@@ -726,6 +726,66 @@ extern "C" __global__ void refine_input(int w, int h, int pw, int ph, const unsi
 	}
 }
 
+// inpaint_input is the hole filler's input, [4, ph, pw], for an eye's
+// rows [top, bottom) (h of them): its Y (rows sy apart), Cb and Cr (half
+// size, rows sc apart, doubled) and the holes' mask (rows w apart, 1 in
+// a hole); the sides padded by repeating the last row and column.
+extern "C" __global__ void inpaint_input(int w, int h, int pw, int ph, const unsigned char *Y, int sy,
+	const unsigned char *cb, const unsigned char *cr, int sc, const unsigned char *mask, float *x) {
+	long long plane = (long long)pw * ph;
+	EACH(plane) {
+		int c = i % pw, r = i / pw;
+		int sr = min(r, h - 1), sx = min(c, w - 1);
+		x[i] = ((float)Y[(long long)sr * sy + sx] - 16) / 219 - 0.5f;
+		x[plane + i] = ((float)cb[(long long)(sr / 2) * sc + sx / 2] - 128) / 112;
+		x[2 * plane + i] = ((float)cr[(long long)(sr / 2) * sc + sx / 2] - 128) / 112;
+		x[3 * plane + i] = mask[(long long)sr * w + sx] ? 1.0f : 0.0f;
+	}
+}
+
+// inpaint_apply_y takes the filler's corrections ([3, ph, pw], the first
+// plane) into an eye's luma rows [top, bottom) (h of them, sy apart)
+// where the mask says hole.
+extern "C" __global__ void inpaint_apply_y(int w, int h, int pw, int ph, unsigned char *Y, int sy,
+	const unsigned char *mask, const float *d) {
+	EACH((long long)w * h) {
+		int x = i % w, r = i / w;
+		if (!mask[(long long)r * w + x]) {
+			continue;
+		}
+		float v = (float)Y[(long long)r * sy + x] + 219 * d[(long long)r * pw + x];
+		Y[(long long)r * sy + x] = (unsigned char)fminf(fmaxf(v + 0.5f, 0), 255);
+	}
+}
+
+// inpaint_apply_c takes the corrections' Cb and Cr planes into an eye's
+// chroma (ch rows of cw, sc apart) where any of a sample's luma is a
+// hole: the mean of the four corrections.
+extern "C" __global__ void inpaint_apply_c(int w, int h, int pw, int ph, unsigned char *cb, unsigned char *cr, int sc,
+	const unsigned char *mask, const float *d) {
+	int cw = (w + 1) / 2, ch = (h + 1) / 2;
+	long long plane = (long long)pw * ph;
+	EACH((long long)cw * ch) {
+		int cx = i % cw, cy = i / cw;
+		int r0 = 2 * cy, r1 = min(2 * cy + 1, h - 1), c0 = 2 * cx, c1 = min(2 * cx + 1, w - 1);
+		bool hole = mask[(long long)r0 * w + c0] || mask[(long long)r0 * w + c1] || mask[(long long)r1 * w + c0] || mask[(long long)r1 * w + c1];
+		if (!hole) {
+			continue;
+		}
+		float dcb = 0, dcr = 0;
+		int rs[2] = {r0, r1}, cs[2] = {c0, c1};
+		for (int a = 0; a < 2; a++) {
+			for (int b = 0; b < 2; b++) {
+				dcb += d[plane + (long long)rs[a] * pw + cs[b]];
+				dcr += d[2 * plane + (long long)rs[a] * pw + cs[b]];
+			}
+		}
+		long long at = (long long)cy * sc + cx;
+		cb[at] = (unsigned char)fminf(fmaxf((float)cb[at] + 112 * dcb / 4 + 0.5f, 0), 255);
+		cr[at] = (unsigned char)fminf(fmaxf((float)cr[at] + 112 * dcr / 4 + 0.5f, 0), 255);
+	}
+}
+
 // renorm is the refinement's output (w x h of rows pw apart, its moments
 // got) put back to the depth's mean and deviation (from its moments
 // want): d, w x h.
