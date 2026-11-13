@@ -724,11 +724,13 @@ half a dB (19.71 to 19.21: behind a reflection the disc's truth is not
 to be had) while the fitted gain 1.5. Holes are about 1% of the
 picture, so the whole picture's PSNR and VMAF do not move. To the eye
 the renderer's comb-like streaks along edges become a soft fill near
-the disc's background. The cost: a conversion at 24.7 pictures a second
-against 111 without (the input made, the picture moved to and from the
-GPU and the fill applied on the CPU, twice a picture). So the filler is
-an option, not the default; the next steps are crops of both
-geometries (ours and the fitted), and the glue on the GPU.
+the disc's background. The cost, with the filler's input made and its
+corrections applied on the GPU beside the network (nothing crossing
+the bus): a conversion at about 50 pictures a second against 100
+without, the two eyes' passes at the picture's full size. So the
+filler is an option, not the default yet; the next steps are crops of
+both geometries (ours and the fitted) for its training, and the
+network's passes on the tensor cores.
 
 ## Grading by hand
 
