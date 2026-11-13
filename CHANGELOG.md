@@ -14,6 +14,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   left eye, both, or a red-cyan anaglyph), and the stream carries a
   readout drawn into both eyes, time, knobs, stretch and view, for the
   projector and the headset; a box on the page turns it off.
+- `--3d-grade` has one page: Enter VR on it, in a headset's browser
+  over HTTPS, puts the picture on a screen in VR with the controls on a
+  panel beside it, pointed at with the right controller (`/quest`
+  redirects there).
 - `--3d-grade`'s headset page decodes the stream itself in VR
   (`/stream.raw`, WebCodecs) and draws it through WebGL at the film's
   rate, asks the headset for a 72 Hz display, leaves VR on both grips,

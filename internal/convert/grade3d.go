@@ -38,8 +38,6 @@ import (
 //go:embed grade3d.html
 var grade3DPage []byte
 
-//go:embed grade3d_quest.html
-var grade3DQuestPage []byte
 
 //go:embed icon.svg
 var bdtoolsIcon []byte
@@ -279,7 +277,7 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 			tlsSrv = &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second, TLSConfig: cfg}
 			go func() { _ = tlsSrv.Serve(tln) }()
 			g.tlsAddr = reachable(tln.Addr().String())
-			r.Report.Report("--3d-grade: for a headset, https://%s/quest (its certificate is this machine's own: accept it once)", g.tlsAddr)
+			r.Report.Report("--3d-grade: for a headset, https://%s/ (its certificate is this machine's own: accept it once), then Enter VR", g.tlsAddr)
 		}
 	}
 	err = g.play(ctx)
@@ -1129,9 +1127,8 @@ func (g *grader) handler() http.Handler {
 			"codec": mp4.AVCCodec(sps), "avcc": base64.StdEncoding.EncodeToString(mp4.AVCC(sps, pps)),
 			"width": width, "height": height})
 	})
-	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(grade3DQuestPage)
+	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently) // one page for all: VR from its button
 	})
 	return mux
 }
