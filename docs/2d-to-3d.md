@@ -755,6 +755,17 @@ command starts from a file written before. The page shows where the
 picture's nearest and farthest come out, in percent of the width and in
 pixels, the cuts seen so far on the timeline, and the stretches.
 
+A headset grades without a phone in hand: `http://HOST:8420/quest` in
+the Quest's browser plays the stream through the page's own media
+source (`/stream.mp4`, the same pictures as a fragmented MP4), held at
+its live edge, under a tenth of a second behind; Enter VR puts it on a
+4 m screen as a stereo layer, each half to its eye. The controllers
+turn the knobs: the right stick up and down for the depth, left and
+right for the screen, the right trigger plays and pauses, the right
+grip makes a shot flat, A and B step a picture, the left stick jumps
+between the cuts, X and Y ten seconds. The page's top line shows the
+time and the knobs; the page at `/` shows the rest.
+
 The depth network runs as the film plays (it is faster than the film on
 a GPU), so nothing is precomputed and any film opens at once; the
 stream needs NVENC. The eyes are H.264 for the players' sake; the

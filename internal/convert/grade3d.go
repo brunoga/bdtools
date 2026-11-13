@@ -26,12 +26,16 @@ import (
 	"github.com/brunoga/bdtools/internal/bdmv"
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/gpu"
+	"github.com/brunoga/bdtools/internal/mp4"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
 
 //go:embed grade3d.html
 var grade3DPage []byte
+
+//go:embed grade3d_quest.html
+var grade3DQuestPage []byte
 
 const (
 	// gradeQP is the live stream's quantiser: a good picture at a rate a
@@ -101,17 +105,69 @@ type grader struct {
 	// the stream
 	enc    gpu.Encoder
 	params []byte // its parameter sets, for a player joining late
+	width  int    // the stream's picture
+	height int
 	outPTS int64
 	next   time.Time // when the next picture goes out
 	target time.Duration
 	seeks  int
 }
 
-// gradeClient is a player reading the stream.
+// gradeClient is a player reading the stream: its frames go through
+// sink into its connection's queue.
 type gradeClient struct {
 	ch   chan []byte
-	live bdmv.Live
+	sink func(au []byte, pts int64, key bool) error
 	dead bool
+}
+
+// tsSink is a player of the transport stream.
+func (c *gradeClient) tsSink(params []byte, _, _ int) {
+	live := &bdmv.Live{W: chanWriter{c.ch}, Coding: bdmv.CodingAVC, FromKey: true, Params: params}
+	c.sink = func(au []byte, pts int64, _ bool) error {
+		_, err := live.Frame(au, pts)
+		return err
+	}
+}
+
+// mp4Sink is a player of the fragmented MP4 (a browser's media source):
+// the header from the parameter sets, then the frames from the first
+// keyframe.
+func (c *gradeClient) mp4Sink(params []byte, width, height int) {
+	live := &mp4.Live{W: chanWriter{c.ch}}
+	started := false
+	c.sink = func(au []byte, pts int64, key bool) error {
+		if _, p := bdmv.AnnexBKey(bdmv.CodingAVC, au); p != nil {
+			params = p
+		}
+		if !started {
+			if !key {
+				return nil
+			}
+			sps, pps, ok := avcParams(params)
+			if !ok {
+				return nil // no parameter sets yet
+			}
+			if err := live.Init(sps, pps, width, height); err != nil {
+				return err
+			}
+			started = true
+		}
+		return live.Frame(au, pts, key)
+	}
+}
+
+// avcParams is the SPS and PPS among parameter sets (Annex B).
+func avcParams(params []byte) (sps, pps []byte, ok bool) {
+	for _, nal := range mp4.SplitAnnexB(params) {
+		switch nal[0] & 0x1f {
+		case 7:
+			sps = nal
+		case 8:
+			pps = nal
+		}
+	}
+	return sps, pps, sps != nil && pps != nil
 }
 
 // errSeek is show's: the film is wanted somewhere else.
@@ -389,6 +445,9 @@ func (g *grader) emit(ctx context.Context, l, rr *mvc.Frame) error {
 		}
 		g.enc = enc
 		g.next = time.Now()
+		g.mu.Lock()
+		g.width, g.height = cfg.Width, cfg.Height
+		g.mu.Unlock()
 	}
 	if d := time.Until(g.next); d > 0 {
 		select {
@@ -416,11 +475,12 @@ func (w gradeWriter) Write(au []byte) (int, error) {
 	if _, params := bdmv.AnnexBKey(bdmv.CodingAVC, au); params != nil {
 		g.params = params
 	}
+	key, _ := bdmv.AnnexBKey(bdmv.CodingAVC, au)
 	for c := range g.clients {
 		if c.dead {
 			continue
 		}
-		if _, err := c.live.Frame(au, pts); err != nil {
+		if err := c.sink(au, pts, key); err != nil {
 			c.dead = true
 			close(c.ch)
 		}
@@ -763,6 +823,25 @@ func (g *grader) handler() http.Handler {
 	})
 	mux.HandleFunc("GET /events", g.serveEvents)
 	mux.HandleFunc("GET /stream.ts", g.serveStream)
+	mux.HandleFunc("GET /stream.mp4", g.serveMP4)
+	mux.HandleFunc("GET /stream.json", func(w http.ResponseWriter, _ *http.Request) {
+		g.mu.Lock()
+		params, width, height := g.params, g.width, g.height
+		g.mu.Unlock()
+		sps, _, ok := avcParams(params)
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"ready":false}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ready": true, "mime": `video/mp4; codecs="` + mp4.AVCCodec(sps) + `"`,
+			"width": width, "height": height})
+	})
+	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(grade3DQuestPage)
+	})
 	return mux
 }
 
@@ -810,6 +889,16 @@ func (g *grader) serveEvents(w http.ResponseWriter, r *http.Request) {
 
 // serveStream sends the live transport stream, from the next keyframe.
 func (g *grader) serveStream(w http.ResponseWriter, r *http.Request) {
+	g.serveClient(w, r, "video/MP2T", (*gradeClient).tsSink)
+}
+
+// serveMP4 sends the live fragmented MP4, from the next keyframe.
+func (g *grader) serveMP4(w http.ResponseWriter, r *http.Request) {
+	g.serveClient(w, r, "video/mp4", (*gradeClient).mp4Sink)
+}
+
+// serveClient sends the stream in one of its forms.
+func (g *grader) serveClient(w http.ResponseWriter, r *http.Request, mime string, sink func(*gradeClient, []byte, int, int)) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "no streaming", http.StatusInternalServerError)
@@ -817,7 +906,7 @@ func (g *grader) serveStream(w http.ResponseWriter, r *http.Request) {
 	}
 	c := &gradeClient{ch: make(chan []byte, gradeJoinWait)}
 	g.mu.Lock()
-	c.live = bdmv.Live{W: chanWriter{c.ch}, Coding: bdmv.CodingAVC, FromKey: true, Params: g.params}
+	sink(c, g.params, g.width, g.height)
 	g.clients[c] = struct{}{}
 	g.wakeUp()
 	g.mu.Unlock()
@@ -827,7 +916,7 @@ func (g *grader) serveStream(w http.ResponseWriter, r *http.Request) {
 		g.wakeUp()
 		g.mu.Unlock()
 	}()
-	w.Header().Set("Content-Type", "video/MP2T")
+	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	fl.Flush()
