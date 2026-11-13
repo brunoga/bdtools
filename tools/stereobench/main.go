@@ -99,6 +99,7 @@ func main() {
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
+	flag.StringVar(&holesDir, "holes", "", "write crops of each measured picture's right eye rendered by the disc's own disparity, around its holes, with the disc's right eye there, to this directory (the hole filler's training data, holes.go)")
 	flag.StringVar(&samplesDir, "samples", "", "write each measured picture's depth refinement training sample (its picture, the network's depth, the disc's disparity) to this directory")
 	flag.IntVar(&windowLen, "window", 0, "with -samples, also write each measured picture's window (it and the pictures before it, this many in all, as the depth network took them: NAME.bhw) for learning the network's head")
 	parallaxFlag := flag.String("parallax", "", "the parallax probe: steps (pictures back, e.g. 2,4,8) to measure each picture's motion parallax against, and how much it adds to the network's depth")
@@ -531,7 +532,15 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 	if framesOut != nil {
 		writeFeatures(c.res.name, c.k-1, left, raw, dm, hr, a, b, corr, matched, top, bottom)
 	}
-	c.recs = append(c.recs, record{left: left, right: right, raw: raw, disp: disp, full: discDisparity(dm, w, left.Height),
+	full := discDisparity(dm, w, left.Height)
+	if holesDir != "" {
+		n, err := writeHoles(c.res.name, c.k-1, left, right, full, top, bottom)
+		if err != nil {
+			return err
+		}
+		holeCropsWritten += n
+	}
+	c.recs = append(c.recs, record{left: left, right: right, raw: raw, disp: disp, full: full,
 		dm: dm, hr: hr, a: a, b: b, med: med, top: top, bottom: bottom, k: c.k - 1})
 	for y := top / 2; y < bottom/2; y++ {
 		for x := range dm.W {
@@ -1004,6 +1013,9 @@ func report(r clipResult) {
 	if r.clipA != 0 {
 		fmt.Printf("network depth p5/median/p95 %.3f / %.3f / %.3f; the clip's fit: disparity = %.2f depth %+.2f px\n",
 			r.raw[0], r.raw[1], r.raw[2], r.clipA, r.clipB)
+	}
+	if holesDir != "" {
+		fmt.Printf("%d hole crops written to %s\n", holeCropsWritten, holesDir)
 	}
 	fmt.Printf("%-8s %7s %7s %6s %7s %7s %6s\n", "right", "PSNR", "holes", "area", "VMAF", "unsure", "area")
 	for _, m := range methods {
