@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--3d-curve`, a knob for the shots a depth network stacks away: the
+  depth bent within each shot's range, its nearness to that power, so
+  a curve below 1 brings what lies between the shot's farthest and
+  nearest forward (Toy Story 2's rows of robots seen from below, side
+  by side on the disc, stepped back by every network tried: at 0.5 the
+  rows come to where the disc has them, the pair's error 3.3 to 2.6 px).
+  Also `curve=` in `--3d-shots` and a third knob (a slider, `,` `.`, the
+  VR panel) in `--3d-grade`; 1, the default, leaves the depth as it was.
+
 ### Changed
 
 - Disc images are read by bdtools' own UDF reader (`internal/udf`,

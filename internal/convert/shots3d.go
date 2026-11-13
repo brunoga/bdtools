@@ -22,18 +22,19 @@ import (
 //
 // START and END are times as a player shows the film (--start's clock);
 // without END a stretch runs to the next one's start (or the end). The
-// settings are --3d-depth's (depth=), --3d-screen's (screen=) and flat
-// (on the screen, as the credits are); what a stretch does not set is the
-// command's. Where stretches overlap, the later line's wins. A stretch
-// that begins within a shot, not at a cut, takes ramp=SECONDS: its depth
-// and screen eased in from the stretch before's over that long (flat is
-// not eased).
+// settings are --3d-depth's (depth=), --3d-screen's (screen=),
+// --3d-curve's (curve=) and flat (on the screen, as the credits are);
+// what a stretch does not set is the command's. Where stretches overlap,
+// the later line's wins. A stretch that begins within a shot, not at a
+// cut, takes ramp=SECONDS: its depth, screen and curve eased in from the
+// stretch before's over that long (flat is not eased).
 
 // shot3D is a stretch of --3d-shots.
 type shot3D struct {
 	Start, End time.Duration // End 0: open, to the next stretch's start
 	Depth      float64       `json:",omitempty"` // 0: the command's
 	Screen     *float64      `json:",omitempty"` // nil: the command's
+	Curve      float64       `json:",omitempty"` // 0: the command's
 	Flat       bool          `json:",omitempty"`
 	Ramp       float64       `json:",omitempty"` // seconds the change eases in over
 }
@@ -79,7 +80,7 @@ func parseShots3D(text string) ([]shot3D, error) {
 			f = f[1:]
 		}
 		if len(f) == 0 {
-			return nil, bad("no settings (depth=, screen=, flat)")
+			return nil, bad("no settings (depth=, screen=, curve=, flat)")
 		}
 		for _, kv := range f {
 			k, v, _ := strings.Cut(kv, "=")
@@ -101,6 +102,12 @@ func parseShots3D(text string) ([]shot3D, error) {
 					return nil, bad("screen=%s: -5 to 5 percent of the width, as --3d-screen", v)
 				}
 				s.Screen = &d
+			case "curve":
+				d, err := strconv.ParseFloat(v, 64)
+				if err != nil || d < 0.2 || d > 3 {
+					return nil, bad("curve=%s: 0.2 to 3, as --3d-curve", v)
+				}
+				s.Curve = d
 			case "ramp":
 				d, err := strconv.ParseFloat(v, 64)
 				if err != nil || d < 0 || d > 10 {
@@ -108,7 +115,7 @@ func parseShots3D(text string) ([]shot3D, error) {
 				}
 				s.Ramp = d
 			default:
-				return nil, bad("%q: want depth=, screen=, flat or ramp=", kv)
+				return nil, bad("%q: want depth=, screen=, curve=, flat or ramp=", kv)
 			}
 		}
 		shots = append(shots, s)
@@ -172,6 +179,9 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 		if s.Screen != nil {
 			so.Screen3D = *s.Screen
 		}
+		if s.Curve > 0 {
+			so.Curve3D = s.Curve
+		}
 		shapes[i] = so.shape3D(size)
 	}
 	return func(t time.Duration) (stereo.Shape, bool) {
@@ -188,6 +198,14 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 			k := float64(t-s.Start) / float64(ramp)
 			sh.Scale = from.Scale + k*(sh.Scale-from.Scale)
 			sh.Offset = from.Offset + k*(sh.Offset-from.Offset)
+			c0, c1 := max(from.Curve, 0), max(sh.Curve, 0)
+			if c0 == 0 {
+				c0 = 1 // no curve is 1
+			}
+			if c1 == 0 {
+				c1 = 1
+			}
+			sh.Curve = c0 + k*(c1-c0)
 		}
 		return sh, s.Flat
 	}
@@ -197,7 +215,7 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 // temporary file beside it: a reader never sees half of one).
 func writeShots3D(file string, shots []shot3D) error {
 	var b strings.Builder
-	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P [flat] [ramp=S], as --3d-depth and --3d-screen; ramp eases a change made within a shot in over S seconds\n")
+	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P curve=C [flat] [ramp=S], as --3d-depth, --3d-screen and --3d-curve; ramp eases a change made within a shot in over S seconds\n")
 	for _, s := range shots {
 		b.WriteString(clock(s.Start))
 		if s.End > 0 {
@@ -209,13 +227,16 @@ func writeShots3D(file string, shots []shot3D) error {
 		if s.Screen != nil {
 			fmt.Fprintf(&b, " screen=%g", *s.Screen)
 		}
+		if s.Curve > 0 {
+			fmt.Fprintf(&b, " curve=%g", s.Curve)
+		}
 		if s.Flat {
 			b.WriteString(" flat")
 		}
 		if s.Ramp > 0 {
 			fmt.Fprintf(&b, " ramp=%g", s.Ramp)
 		}
-		if s.Depth <= 0 && s.Screen == nil && !s.Flat {
+		if s.Depth <= 0 && s.Screen == nil && s.Curve <= 0 && !s.Flat {
 			b.WriteString(" depth=1")
 		}
 		b.WriteString("\n")

@@ -2,6 +2,7 @@ package stereo
 
 import (
 	"math"
+	"sync"
 
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/nn"
@@ -39,6 +40,7 @@ type Converter struct {
 	// carried edge, on the depth model's backend.
 	Fill            *Filler
 	refineOn        *RefineWeights // Refine's weights on that backend
+	gpuRange        gpuRange       // the shot's depth range, for the GPU's curve
 	win             window
 	credits         creditState
 	cuts            cutDetector
@@ -304,12 +306,15 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		d = c.refineGPU(g, p, d, top, bottom)
 	}
 	var eyes, mask, disp *nn.Tensor
+	var clo, cspan, curve float32
+	var shot int
 	if makeEyes {
 		w := float64(f.Width)
 		a, b, lim := float32(e.shape.Scale*w), float32(e.shape.Offset*w), float32(0.04*w)
 		a, b = a*e.factor, b*e.factor
 		far := float32(e.shape.Far * w)
-		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim)
+		clo, cspan, curve, shot = c.gpuRange.args(g, e, d)
+		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim, clo, cspan, curve)
 		eyes, mask = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
 		if mask != nil {
 			c.Fill.FillGPU(g, eyes, mask, f.Width, f.Height, top, bottom)
@@ -331,13 +336,58 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 				e.left, e.right = eyeFrames(buf, f)
 				e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
 			}
-			if err == nil && c.KeepDepth {
+			if err == nil && (c.KeepDepth || curve != 0) {
 				out, err = g.Download(d)
+			}
+			if err == nil && curve != 0 {
+				c.gpuRange.steady(out.Data, shot)
 			}
 		}
 		g.Release()
-		e.d = out
+		if c.KeepDepth || eyes == nil {
+			e.d = out
+		}
 		return err
+	}
+}
+
+// gpuRange is the shot's depth range for the GPU's disparity kernel, when
+// the shape bends the depth (Shape.Curve): the first picture of a shot
+// has its own taken as it is, at a cost (its depth waited for), the rest
+// take the range as it stood a picture or two before (the pictures'
+// depths come back with their eyes, Steady's smoothing hiding the lag),
+// the Shaper's state kept apart from the CPU path's, which Shape owns.
+type gpuRange struct {
+	mu   sync.Mutex
+	s    Shaper
+	shot int // counts the shots: a range that comes back late for one is not another's
+}
+
+// args is the kernel's curve for a picture: Shaper.CurveArgs', and the
+// shot the picture is in.
+func (r *gpuRange) args(g *nn.GPU, e *Estimate, d *nn.Tensor) (lo, span, curve float32, shot int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.s.Shape = e.shape
+	if e.fresh {
+		r.s.Reset()
+		r.shot++
+	}
+	if _, _, ok := r.s.Range(); !ok && r.s.Shape.curves() {
+		if t, err := g.Download(d); err == nil {
+			r.s.steady(t.Data)
+		}
+	}
+	lo, span, curve = r.s.CurveArgs()
+	return lo, span, curve, r.shot
+}
+
+// steady takes a picture's depth into its shot's range, once it is back.
+func (r *gpuRange) steady(depth []float32, shot int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if shot == r.shot {
+		r.s.steady(depth)
 	}
 }
 

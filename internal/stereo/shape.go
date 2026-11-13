@@ -23,7 +23,32 @@ type Shape struct {
 	// go, a fraction of the width: what goes past FarKnee of it is eased
 	// towards it, never reaching it (FarLimit).
 	Far float64
+	// Curve, when not zero or one, bends the depth within the shot's
+	// range (its 5th to 95th percentile, steadied over the shot as
+	// Budget's is), with Scale: the nearness n of a point in it (0 the
+	// farthest, 1 the nearest) becomes n to the power Curve (Curved), the
+	// ends staying. Below 1 what is between comes forward, towards the
+	// nearest, as the rows of a crowd a network stacks away behind each
+	// other; above 1 it goes back.
+	Curve float64
 }
+
+// Curved is the nearness n (0 the farthest of a shot's range, 1 the
+// nearest) bent by the power curve: n to it within the range, the same
+// slope as at the range's ends beyond them (1 below, curve above), so it
+// stays monotone and continuous; 1 (or 0) leaves it.
+func Curved(n, curve float32) float32 {
+	switch {
+	case curve == 0 || curve == 1 || n <= 0:
+		return n
+	case n >= 1:
+		return 1 + curve*(n-1)
+	}
+	return float32(math.Pow(float64(n), float64(curve)))
+}
+
+// curves reports whether a shape bends the depth (Curve set, with Scale).
+func (s Shape) curves() bool { return s.Scale != 0 && s.Curve != 0 && s.Curve != 1 }
 
 // FarKnee is where, as a share of Shape.Far, the depth behind the screen
 // starts to be eased.
@@ -144,6 +169,43 @@ func (s *Shaper) Reset() { s.primed = false }
 // shot.
 const smoothing = 0.15
 
+// steady takes a depth map's range (its 5th to 95th percentile, of every
+// 61st value) into the shot's: as it is for the first map of a shot, a
+// part of the way for the rest.
+func (s *Shaper) steady(depth []float32) {
+	sample := make([]float32, 0, len(depth)/61+1)
+	for i := 0; i < len(depth); i += 61 { // a prime step: no column pattern
+		sample = append(sample, depth[i])
+	}
+	slices.Sort(sample)
+	s.Steady(float64(sample[len(sample)/20]), float64(sample[len(sample)-1-len(sample)/20]))
+}
+
+// Steady takes a map's range, lo to hi, into the shot's, as steady does.
+func (s *Shaper) Steady(lo, hi float64) {
+	if !s.primed {
+		s.lo, s.hi, s.primed = lo, hi, true
+	} else {
+		s.lo += smoothing * (lo - s.lo)
+		s.hi += smoothing * (hi - s.hi)
+	}
+}
+
+// Range is the shot's range so far, lo to hi (Steady's), and whether
+// there is one.
+func (s *Shaper) Range() (lo, hi float64, ok bool) { return s.lo, s.hi, s.primed }
+
+// CurveArgs is the shape's curve as the disparity kernels take it: the
+// shot's range (its farthest and its span, in the depth's units) and the
+// power; the power 0 when the shape does not bend the depth, or the
+// shot's range is not known yet.
+func (s *Shaper) CurveArgs() (lo, span, curve float32) {
+	if !s.Shape.curves() || !s.primed {
+		return 0, 1, 0
+	}
+	return float32(s.lo), float32(math.Max(s.hi-s.lo, 1e-6)), float32(s.Shape.Curve)
+}
+
 // Disparity is the disparity of a depth map (larger nearer, as the depth
 // network gives it), in pixels of a picture width wide.
 func (s *Shaper) Disparity(depth []float32, width int) []float32 {
@@ -153,27 +215,24 @@ func (s *Shaper) Disparity(depth []float32, width int) []float32 {
 		lim := float32(0.04 * float64(width))
 		far := float32(s.Shape.Far * float64(width))
 		knee := far * FarKnee
+		var lo, span, curve float32
+		if s.Shape.curves() {
+			s.steady(depth)
+			lo, span, curve = s.CurveArgs()
+		}
 		const chunk = 1 << 16
 		rows((len(depth)+chunk-1)/chunk, func(k int) {
 			for i := k * chunk; i < min((k+1)*chunk, len(depth)); i++ {
-				out[i] = min(max(FarLimit(a*depth[i]+b, far, knee), -lim), lim)
+				d := depth[i]
+				if curve != 0 {
+					d = lo + span*Curved((d-lo)/span, curve)
+				}
+				out[i] = min(max(FarLimit(a*d+b, far, knee), -lim), lim)
 			}
 		})
 		return out
 	}
-	sample := make([]float32, 0, len(depth)/61+1)
-	for i := 0; i < len(depth); i += 61 { // a prime step: no column pattern
-		sample = append(sample, depth[i])
-	}
-	slices.Sort(sample)
-	lo := float64(sample[len(sample)/20])
-	hi := float64(sample[len(sample)-1-len(sample)/20])
-	if !s.primed {
-		s.lo, s.hi, s.primed = lo, hi, true
-	} else {
-		s.lo += smoothing * (lo - s.lo)
-		s.hi += smoothing * (hi - s.hi)
-	}
+	s.steady(depth)
 	span := math.Max(s.hi-s.lo, 1e-6)
 	budget := s.Shape.Budget * float64(width)
 	out := make([]float32, len(depth))

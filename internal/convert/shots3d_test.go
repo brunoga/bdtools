@@ -12,7 +12,7 @@ func TestParseShots3D(t *testing.T) {
 	shots, err := parseShots3D(`# a film's fixes
 0:12:30 0:13:05 depth=0.8   # the close-up
 1:02:10.5 flat
-1:30:00 screen=-1 depth=2
+1:30:00 screen=-1 depth=2 curve=0.6
 
 1:40:00 1:41:00 flat
 `)
@@ -32,7 +32,7 @@ func TestParseShots3D(t *testing.T) {
 	if s := shots[1]; s.Start != at(1, 2, 10.5) || s.End != at(1, 30, 0) || !s.Flat {
 		t.Errorf("second: %+v", s)
 	}
-	if s := shots[2]; s.End != at(1, 40, 0) || s.Depth != 2 || s.Screen == nil || *s.Screen != -1 {
+	if s := shots[2]; s.End != at(1, 40, 0) || s.Depth != 2 || s.Screen == nil || *s.Screen != -1 || s.Curve != 0.6 {
 		t.Errorf("third: %+v", s)
 	}
 	for _, c := range []struct {
@@ -48,7 +48,7 @@ func TestParseShots3D(t *testing.T) {
 	}
 
 	for _, bad := range []string{
-		"0:10 depth=7", "0:10 screen=9", "0:10 0:09 flat", "0:10", "0:10 0:20", "x flat", "0:10 bright=2", "0:10 flat=1",
+		"0:10 depth=7", "0:10 screen=9", "0:10 curve=0.1", "0:10 curve=4", "0:10 0:09 flat", "0:10", "0:10 0:20", "x flat", "0:10 bright=2", "0:10 flat=1",
 	} {
 		if _, err := parseShots3D(bad); err == nil || !strings.Contains(err.Error(), "line 1") {
 			t.Errorf("%q: %v", bad, err)

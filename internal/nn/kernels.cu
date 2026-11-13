@@ -913,13 +913,24 @@ extern "C" __global__ void __launch_bounds__(128) attention_tc(int nq, int nk, i
 // disparity is the depth's disparity, a w x h picture's: rows [top,
 // bottom) a times the depth up (w a row, from top) plus b, what lies past
 // knee behind the screen eased short of far (far 0: not; as
-// stereo.FarLimit), kept within lim either way; the other rows 0.
-extern "C" __global__ void disparity(int w, int h, int top, int bottom, float a, float b, float far, float knee, float lim, const float *up, float *d) {
+// stereo.FarLimit), kept within lim either way; the other rows 0. With
+// curve above 0 the depth is first bent within the shot's range (clo its
+// farthest, cspan its span): its nearness in it to the power curve, the
+// slope kept beyond the ends (stereo.Curved).
+extern "C" __global__ void disparity(int w, int h, int top, int bottom, float a, float b, float far, float knee, float lim,
+		float clo, float cspan, float curve, const float *up, float *d) {
 	EACH((long long)w * h) {
 		int r = i / w;
 		float v = 0;
 		if (r >= top && r < bottom) {
-			v = __fadd_rn(__fmul_rn(a, up[i - (long long)top * w]), b);
+			float z = up[i - (long long)top * w];
+			if (curve > 0) {
+				float n = __fdiv_rn(__fsub_rn(z, clo), cspan);
+				if (n >= 1) n = __fadd_rn(1.0f, __fmul_rn(curve, __fsub_rn(n, 1.0f)));
+				else if (n > 0) n = powf(n, curve);
+				z = __fadd_rn(clo, __fmul_rn(cspan, n));
+			}
+			v = __fadd_rn(__fmul_rn(a, z), b);
 			if (far > 0 && -v > knee) {
 				float rest = __fsub_rn(far, knee);
 				float x = __fsub_rn(-v, knee);

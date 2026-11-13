@@ -188,24 +188,35 @@ func TestDisparityOnTheGPU(t *testing.T) {
 	for i := range up.Data {
 		up.Data[i] = r.Float32() * 80
 	}
-	s := Shaper{Shape: RefinedShape}
-	s.Shape.Offset, s.Shape.Far = -0.05, 0.03 // values behind the knee: the easing measured too
-	want := s.Disparity(up.Data, w)
-	ww := float64(w)
-	far := float32(s.Shape.Far * ww)
-	got, err := g.Download(g.Disparity(g.Upload(up), w, h, top, bottom, float32(s.Shape.Scale*ww), float32(s.Shape.Offset*ww), far, far*FarKnee, float32(0.04*ww)))
-	g.Release()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, v := range got.Data {
-		y := i / w
-		exp := float32(0)
-		if y >= top && y < bottom {
-			exp = want[i-top*w]
+	for _, curve := range []float64{1, 0.4} {
+		s := Shaper{Shape: RefinedShape}
+		s.Shape.Offset, s.Shape.Far = -0.05, 0.03 // values behind the knee: the easing measured too
+		s.Shape.Curve = curve
+		want := s.Disparity(up.Data, w)
+		ww := float64(w)
+		far := float32(s.Shape.Far * ww)
+		clo, cspan, cv := s.CurveArgs()
+		if (cv != 0) != (curve != 1) {
+			t.Fatalf("curve %g: the kernel's curve %g", curve, cv)
 		}
-		if v != exp {
-			t.Fatalf("value %d: the GPU's %v, the CPU's %v", i, v, exp)
+		got, err := g.Download(g.Disparity(g.Upload(up), w, h, top, bottom, float32(s.Shape.Scale*ww), float32(s.Shape.Offset*ww), far, far*FarKnee, float32(0.04*ww), clo, cspan, cv))
+		g.Release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		tol := float32(0)
+		if curve != 1 {
+			tol = 1e-4 // powf's rounding
+		}
+		for i, v := range got.Data {
+			y := i / w
+			exp := float32(0)
+			if y >= top && y < bottom {
+				exp = want[i-top*w]
+			}
+			if d := v - exp; d > tol || d < -tol {
+				t.Fatalf("curve %g, pixel %d: the GPU's %g, the CPU's %g", curve, i, v, exp)
+			}
 		}
 	}
 }
@@ -407,4 +418,59 @@ func TestFillOnTheGPU(t *testing.T) {
 		}
 	}
 	t.Logf("%d holes, %d samples a level apart", holes, off)
+}
+
+// The GPU's shot range: the first picture of a shot (fresh) has its own
+// range taken at once, the rest keep the shot's until a picture's depth
+// comes back and is taken a part of the way; a cut starts over, and a
+// depth that comes back late for the shot before is not taken.
+func TestGPURange(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU:", err)
+	}
+	defer g.Close()
+	depth := func(lo, hi float32) *nn.Tensor {
+		d := nn.New(1, 20, 100)
+		for i := range d.Data {
+			d.Data[i] = lo + (hi-lo)*float32(i)/float32(len(d.Data)-1)
+		}
+		return g.Upload(d)
+	}
+	var r gpuRange
+	plain := &Estimate{fresh: true, shape: Shape{Scale: 0.001}}
+	if lo, span, curve, _ := r.args(g, plain, depth(0, 10)); curve != 0 || lo != 0 || span != 1 {
+		t.Fatalf("no curve: %g %g %g", lo, span, curve)
+	}
+	if _, _, ok := r.s.Range(); ok {
+		t.Fatal("no curve: a range measured")
+	}
+	bent := &Estimate{fresh: true, shape: Shape{Scale: 0.001, Curve: 0.5}}
+	lo, span, curve, shot := r.args(g, bent, depth(0, 10))
+	if curve != 0.5 || lo < 0 || lo > 1 || span < 8.5 || span > 10 {
+		t.Fatalf("fresh: lo %g span %g curve %g", lo, span, curve)
+	}
+	// the next picture, not fresh: the range as it stood
+	next := &Estimate{shape: bent.shape}
+	if lo2, span2, _, shot2 := r.args(g, next, depth(5, 25)); lo2 != lo || span2 != span || shot2 != shot {
+		t.Fatalf("the next picture: lo %g span %g shot %d, want %g %g %d", lo2, span2, shot2, lo, span, shot)
+	}
+	// its depth back: taken a part of the way
+	d, _ := g.Download(depth(5, 25))
+	g.Release()
+	r.steady(d.Data, shot)
+	if lo3, _, _, _ := r.args(g, next, depth(0, 10)); lo3 <= lo || lo3 > lo+1.5 {
+		t.Fatalf("after a depth came back: lo %g, was %g", lo3, lo)
+	}
+	// a cut: the new shot's own range, and the old shot's late depth is not taken
+	cut := &Estimate{fresh: true, shape: bent.shape}
+	lo4, _, _, shot4 := r.args(g, cut, depth(20, 30))
+	if shot4 == shot || lo4 < 20 {
+		t.Fatalf("after a cut: lo %g shot %d (was %d)", lo4, shot4, shot)
+	}
+	r.steady(d.Data, shot)
+	if lo5, _, _, _ := r.args(g, next, depth(0, 10)); lo5 != lo4 {
+		t.Fatalf("a late depth of the shot before taken: lo %g, was %g", lo5, lo4)
+	}
+	g.Release()
 }

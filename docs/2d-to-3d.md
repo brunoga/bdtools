@@ -746,13 +746,14 @@ stretches of the film by hand, a line each:
 
 Times are the film's as a player shows them (`--start`'s clock, also
 with `--start`); a line without an end runs to the next line's start.
-`depth=` and `screen=` are `--3d-depth`'s and `--3d-screen`'s for the
-stretch, `flat` puts it on the screen as the credits are; what a line
+`depth=`, `screen=` and `curve=` are `--3d-depth`'s, `--3d-screen`'s
+and `--3d-curve`'s for the stretch, `flat` puts it on the screen as the
+credits are; what a line
 does not set stays the command's, and where lines overlap the later one
 wins. The change is at the picture the time names, so a stretch should
 begin and end at cuts; one that has to begin within a shot takes
-`ramp=1` (seconds) and its depth and screen ease in from the stretch
-before's over that long, which the eye does not notice where a jump
+`ramp=1` (seconds) and its depth, screen and curve ease in from the
+stretch before's over that long, which the eye does not notice where a jump
 would show. `--3d-preview` shows what each depth looks like
 before; the file is part of what an interrupted conversion must match to
 resume.
@@ -783,8 +784,13 @@ Kodi, VLC and most players read live: on a box at the projector, a
 `Film 3D FSBS.strm`, so the player picks the mode) plays it like any
 film. The page is at `http://HOST:8420/`: play, pause, a picture or ten
 seconds either way, the cut before or after, a click on the timeline to
-seek, and the two knobs, depth and screen (`--3d-depth`'s and
-`--3d-screen`'s), with `flat` for a shot that belongs on the screen. A
+seek, and the knobs: depth and screen (`--3d-depth`'s and
+`--3d-screen`'s), curve (`--3d-curve`'s: the depth bent within the
+shot's range, its nearness to that power, so a curve below 1 brings
+what lies between the shot's farthest and nearest forward; for the
+shots a network stacks away, as the rows of a crowd seen from below,
+which the disc has side by side), with `flat` for a shot that belongs
+on the screen. A
 paused picture keeps its depth, so a turn of a knob shows at the next
 picture's time; the only wait is the player's own buffer (Kodi's a few
 seconds by default, under one with its cache turned down).

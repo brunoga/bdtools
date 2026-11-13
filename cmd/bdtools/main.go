@@ -106,6 +106,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		to3D     = fs.Bool("to-3d", false, "make a 2D source 3D: its depth estimated by a video depth network (Video Depth Anything Small, downloaded once, or --depth-model's), the two eyes made from it, out in the --layout asked for")
 		depthMdl = fs.String("depth-model", "", "with --to-3d: the depth network: small (the default), base or large (Video Depth Anything's, downloaded to the cache the first time; base and large are for non-commercial use only), or a checkpoint (.pth)")
 		depth3D  = fs.Float64("3d-depth", convert.DefaultDepth3D, "the depth's strength: with --to-3d, 1 the depth that scores best against the 3D discs' right eyes (the discs' own spans about twice it; more is stronger, and harder on the eyes); for a 3D source, its own depth scaled (1 as it is, less flatter, the eyes made again between its cameras' views), 1 by default")
+		curve3D  = fs.Float64("3d-curve", 1, "with --to-3d: the depth bent within each shot's range, its nearness (0 the shot's farthest, 1 its nearest) to this power: 1 as the network gives it; below 1 what lies between comes forward, as the rows of a crowd the network stacks away behind each other; above 1 it goes back; 0.2 to 3")
 		refine3D = fs.String("3d-refine", "", "with --to-3d: the depth refinement's weights, which correct the depth's shape: builtin, none, or a file of tools/depthtrain's (default: the built-in weights when the depth network is not tuned, none when it is)")
 		fill3D   = fs.String("3d-fill", "", "with --to-3d: the hole filler's weights (tools/inpainttrain's), which fill what an eye saw nothing of behind a nearer thing's edge; none (the default): the renderer's carried edge")
 		tune3D   = fs.String("3d-tune", "", "with --to-3d: the depth network's last stages learnt from 3D discs: none for the network as it is, or a file of tools/depthtrain -tail's (default: the built-in ones, for the small network)")
@@ -321,6 +322,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.TwoD = *twoD
 	o.To3D, o.DepthModel, o.Screen3D, o.ScreenSize3D, o.Preview3D = *to3D, *depthMdl, *screen3D, *screenSz, *preview
 	o.Shots3D = *shots3D
+	o.Curve3D = *curve3D
 	o.Grade3D = *grade3D
 	o.Reference3D = *ref3D
 	if given["3d-depth"] {

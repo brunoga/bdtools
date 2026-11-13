@@ -383,6 +383,7 @@ scheduler such as pipeliner retry it.
 | `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
 | `--3d-depth` | `1` | With `--to-3d`: the depth's strength, 1 the 3D discs' |
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
+| `--3d-curve` | `1` | With `--to-3d`: bends the depth within each shot's range, its nearness to this power; below 1 what lies between the shot's farthest and nearest comes forward (a crowd's rows the network stacks away behind each other), above 1 it goes back |
 | `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
 | `--3d-grade` | — | With `--to-3d`: no conversion, but the film converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye (the same page over HTTPS on the next port enters VR in a headset's browser); the grade goes to `--output` as a `--3d-shots` file — see [2D to 3D](#2d-to-3d) |
 | `--3d-reference` | — | With `--3d-grade`: the film's own 3D, a side-by-side or over-under file, to switch to beside the conversion for comparison |

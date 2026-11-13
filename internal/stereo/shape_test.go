@@ -67,3 +67,64 @@ func TestScreenFar(t *testing.T) {
 		}
 	}
 }
+
+// A curve bends the nearness within a shot's range: 1 leaves it, the ends
+// stay, below 1 what is between comes forward, above 1 it goes back, and
+// it stays monotone past the ends.
+func TestCurved(t *testing.T) {
+	for _, n := range []float32{-0.2, 0, 0.3, 1, 1.2} {
+		if got := Curved(n, 1); got != n {
+			t.Errorf("Curved(%g, 1) = %g", n, got)
+		}
+		if got := Curved(n, 0); got != n {
+			t.Errorf("Curved(%g, 0) = %g", n, got)
+		}
+	}
+	for _, curve := range []float32{0.3, 0.5, 2} {
+		if Curved(0, curve) != 0 || Curved(1, curve) != 1 {
+			t.Errorf("curve %g: the ends moved: %g, %g", curve, Curved(0, curve), Curved(1, curve))
+		}
+		mid := Curved(0.5, curve)
+		if (curve < 1) != (mid > 0.5) {
+			t.Errorf("curve %g: the middle at %g", curve, mid)
+		}
+		last := float32(-1)
+		for n := float32(-0.3); n <= 1.3; n += 0.01 {
+			if got := Curved(n, curve); got <= last {
+				t.Fatalf("curve %g: not monotone at %g: %g after %g", curve, n, got, last)
+			} else {
+				last = got
+			}
+		}
+	}
+	// the shaper: a curve below 1 moves the middle of a shot's range nearer,
+	// the ends of it staying where the linear mapping put them
+	depth := make([]float32, 1000)
+	for i := range depth {
+		depth[i] = float32(i) / 100 // 0 to 10
+	}
+	plain := Shaper{Shape: Shape{Scale: 0.001, Offset: -0.005}}
+	bent := Shaper{Shape: Shape{Scale: 0.001, Offset: -0.005, Curve: 0.4}}
+	p, b := plain.Disparity(depth, 1000), bent.Disparity(depth, 1000)
+	lo, hi, ok := bent.Range()
+	if !ok || lo > 0.6 || hi < 9.4 {
+		t.Fatalf("the range %g to %g, %v", lo, hi, ok)
+	}
+	for i := range depth {
+		switch n := (float64(depth[i]) - lo) / (hi - lo); {
+		case n < 0 || n > 1:
+			continue
+		case n == 0 || n == 1:
+			if math.Abs(float64(p[i]-b[i])) > 1e-5 {
+				t.Errorf("depth %g, at the range's end: bent %g, plain %g", depth[i], b[i], p[i])
+			}
+		case n > 0.05 && n < 0.95:
+			if b[i] <= p[i] {
+				t.Errorf("depth %g: bent %g not nearer than plain %g", depth[i], b[i], p[i])
+			}
+		}
+	}
+	if _, _, ok := plain.Range(); ok {
+		t.Error("the plain shaper measured a range")
+	}
+}

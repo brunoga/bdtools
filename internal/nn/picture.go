@@ -83,11 +83,13 @@ func (g *GPU) Renorm(out *Tensor, w, h, pw int, want, got *Tensor) *Tensor {
 
 // Disparity is the disparity of a w x h picture from the depth up of its
 // rows [top, bottom) (w a row): a times the depth plus b, kept within lim
-// either way; the other rows 0. [h, w].
-func (g *GPU) Disparity(up *Tensor, w, h, top, bottom int, a, b, far, knee, lim float32) *Tensor {
+// either way; the other rows 0. [h, w]. With curve above 0 the depth is
+// first bent within the shot's range, clo its farthest and cspan its
+// span, as stereo.Curved does (stereo.Shaper.CurveArgs's).
+func (g *GPU) Disparity(up *Tensor, w, h, top, bottom int, a, b, far, knee, lim, clo, cspan, curve float32) *Tensor {
 	d := g.tensor(h, w)
 	gr, bl := each(w * h)
-	g.launch("disparity", gr, bl, 0, w, h, top, bottom, a, b, far, knee, lim, ptr(up), ptr(d))
+	g.launch("disparity", gr, bl, 0, w, h, top, bottom, a, b, far, knee, lim, clo, cspan, curve, ptr(up), ptr(d))
 	return d
 }
 
