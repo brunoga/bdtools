@@ -710,7 +710,10 @@ with `--start`); a line without an end runs to the next line's start.
 stretch, `flat` puts it on the screen as the credits are; what a line
 does not set stays the command's, and where lines overlap the later one
 wins. The change is at the picture the time names, so a stretch should
-begin and end at cuts. `--3d-preview` shows what each depth looks like
+begin and end at cuts; one that has to begin within a shot takes
+`ramp=1` (seconds) and its depth and screen ease in from the stretch
+before's over that long, which the eye does not notice where a jump
+would show. `--3d-preview` shows what each depth looks like
 before; the file is part of what an interrupted conversion must match to
 resume.
 
@@ -748,7 +751,8 @@ seconds by default, under one with its cache turned down).
 
 A turn of a knob grades a stretch: from the last cut when one is within
 two seconds (a hand reacts to a shot a moment late), else from the
-picture shown, to the next stretch or the end. The grade is written to
+picture shown, eased in over a second (`ramp=1`), to the next stretch
+or the end. The grade is written to
 `--output` as a `--3d-shots` file at every change, and the conversion
 proper applies it with `--3d-shots`; `--3d-shots` on the grading
 command starts from a file written before. The page shows where the

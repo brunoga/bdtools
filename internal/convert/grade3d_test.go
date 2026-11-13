@@ -68,6 +68,9 @@ func TestGraderKnobs(t *testing.T) {
 	if len(g.shots) != 2 || g.shots[0].End != sec(20) || g.shots[1].Start != sec(20) || !g.shots[1].Flat {
 		t.Fatalf("after the second turn: %+v", g.shots)
 	}
+	if g.shots[0].Ramp != 0 || g.shots[1].Ramp != gradeRamp {
+		t.Fatalf("ramps: at a cut %g, within a shot %g", g.shots[0].Ramp, g.shots[1].Ramp)
+	}
 	// another turn a moment later edits the same stretch
 	g.pos = sec(21)
 	g.setKnobs(gradeKnobs{Depth: 1.5, Screen: 0})
@@ -161,5 +164,47 @@ func TestThumbnailDistance(t *testing.T) {
 	}
 	if d := thumbnailDistance(a, thumbnail(pic(20, 0))); d < 10 {
 		t.Errorf("moved: %g", d)
+	}
+}
+
+// TestShotRamp: a stretch that begins within a shot eases in from the
+// stretch before over its ramp; one at a cut changes at once.
+func TestShotRamp(t *testing.T) {
+	o := DefaultOptions()
+	o.To3D = true
+	screen := 0.0
+	shots := []shot3D{
+		{Start: 10 * time.Second, End: 20 * time.Second, Depth: 1, Screen: &screen},
+		{Start: 20 * time.Second, Depth: 3, Screen: &screen, Ramp: 1},
+	}
+	at := o.shotShaper(shots, "small")
+	one, _ := at(15 * time.Second)
+	three, _ := at(25 * time.Second)
+	if three.Scale <= one.Scale {
+		t.Fatalf("depth 3 (%g) not above depth 1 (%g)", three.Scale, one.Scale)
+	}
+	if s, _ := at(20 * time.Second); s.Scale != one.Scale {
+		t.Errorf("at the start of the ramp: %g, want %g", s.Scale, one.Scale)
+	}
+	if s, _ := at(20*time.Second + 500*time.Millisecond); s.Scale < (one.Scale+three.Scale)/2-1e-9 || s.Scale > (one.Scale+three.Scale)/2+1e-9 {
+		t.Errorf("midway: %g, want %g", s.Scale, (one.Scale+three.Scale)/2)
+	}
+	if s, _ := at(21 * time.Second); s.Scale != three.Scale {
+		t.Errorf("after the ramp: %g, want %g", s.Scale, three.Scale)
+	}
+	// no ramp: at once
+	shots[1].Ramp = 0
+	if s, _ := o.shotShaper(shots, "small")(20 * time.Second); s.Scale != three.Scale {
+		t.Errorf("without a ramp: %g, want %g", s.Scale, three.Scale)
+	}
+	// the file carries it
+	file := filepath.Join(t.TempDir(), "r.3d")
+	shots[1].Ramp = 1.5
+	if err := writeShots3D(file, shots); err != nil {
+		t.Fatal(err)
+	}
+	back, err := readShots3D(file)
+	if err != nil || len(back) != 2 || back[1].Ramp != 1.5 {
+		t.Fatalf("back: %v, %+v", err, back)
 	}
 }

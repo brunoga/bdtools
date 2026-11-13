@@ -92,13 +92,13 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
     <strong>stretches</strong>
     <span><button data-op="save">save</button> <span class="dim" id="file"></span></span>
   </div>
-  <table id="shots"><thead><tr><th>start</th><th>end</th><th>depth</th><th>screen</th><th>flat</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="shots"><thead><tr><th>start</th><th>end</th><th>depth</th><th>screen</th><th>flat</th><th>ramp</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
 <p class="dim" style="font-size:13px">
 <kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> a picture · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> 10 s · <kbd>[</kbd> <kbd>]</kbd> cuts ·
 <kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D · <kbd>s</kbd> save.
-A turn of a knob grades the shot from its cut (or from this picture, when no cut is near) to the next stretch.
+A turn of a knob grades the shot from its cut (or from this picture, when no cut is near, eased in over a second) to the next stretch.
 </p>
 
 <script>
@@ -185,7 +185,7 @@ function render() {
     const go = document.createElement('button'); go.textContent = 'go'; go.onclick = () => send({ op: 'seek', t: s.start });
     const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove'; del.onclick = () => send({ op: 'delete', i });
     tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
-      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.flat ? 'flat' : ''));
+      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
     tb.appendChild(tr);
   });
