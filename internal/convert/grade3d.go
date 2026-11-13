@@ -47,6 +47,9 @@ const (
 	// gradeSnap is how long after a cut (or a stretch's start) a turn of
 	// a knob still counts from it: a hand reacts to a shot a moment late.
 	gradeSnap = 2 * time.Second
+	// gradeRamp is how long, in seconds, a change made within a shot (no
+	// cut near) eases in over in the conversion (shot3D.Ramp).
+	gradeRamp = 1.0
 	// gradeJoinWait is how long a player's packets may wait on a slow
 	// network before it is dropped.
 	gradeJoinWait = 256
@@ -637,11 +640,11 @@ func (g *grader) setKnobs(k gradeKnobs) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	t := g.pos
-	start := t
+	start, ramp := t, gradeRamp
 	if i := shotAt(g.shots, t); i >= 0 && t-g.shots[i].Start <= gradeSnap {
-		start = g.shots[i].Start
+		start, ramp = g.shots[i].Start, g.shots[i].Ramp
 	} else if j := sort.Search(len(g.cuts), func(i int) bool { return g.cuts[i] > t }); j > 0 && t-g.cuts[j-1] <= gradeSnap {
-		start = g.cuts[j-1]
+		start, ramp = g.cuts[j-1], 0
 	}
 	// the stretch that runs over start ends there
 	for i := range g.shots {
@@ -651,7 +654,7 @@ func (g *grader) setKnobs(k gradeKnobs) {
 	}
 	i := sort.Search(len(g.shots), func(i int) bool { return g.shots[i].Start >= start })
 	if i == len(g.shots) || g.shots[i].Start != start {
-		s := shot3D{Start: start}
+		s := shot3D{Start: start, Ramp: ramp}
 		if i < len(g.shots) {
 			s.End = g.shots[i].Start
 		}
@@ -755,6 +758,7 @@ type gradeShot struct {
 	Depth  float64  `json:"depth"`
 	Screen *float64 `json:"screen"`
 	Flat   bool     `json:"flat"`
+	Ramp   float64  `json:"ramp"`
 }
 
 func (g *grader) state() gradeState {
@@ -764,7 +768,7 @@ func (g *grader) state() gradeState {
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
 		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
-		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat})
+		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
 	}
 	for _, c := range g.cuts {
 		st.Cuts = append(st.Cuts, c.Seconds())

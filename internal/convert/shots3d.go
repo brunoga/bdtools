@@ -18,13 +18,16 @@ import (
 //	# START [END] SETTINGS...
 //	0:12:30 0:13:05 depth=0.8
 //	1:02:10.5 1:02:40 flat
-//	1:30:00 screen=-1
+//	1:30:00 screen=-1 ramp=1
 //
 // START and END are times as a player shows the film (--start's clock);
 // without END a stretch runs to the next one's start (or the end). The
 // settings are --3d-depth's (depth=), --3d-screen's (screen=) and flat
 // (on the screen, as the credits are); what a stretch does not set is the
-// command's. Where stretches overlap, the later line's wins.
+// command's. Where stretches overlap, the later line's wins. A stretch
+// that begins within a shot, not at a cut, takes ramp=SECONDS: its depth
+// and screen eased in from the stretch before's over that long (flat is
+// not eased).
 
 // shot3D is a stretch of --3d-shots.
 type shot3D struct {
@@ -32,6 +35,7 @@ type shot3D struct {
 	Depth      float64       `json:",omitempty"` // 0: the command's
 	Screen     *float64      `json:",omitempty"` // nil: the command's
 	Flat       bool          `json:",omitempty"`
+	Ramp       float64       `json:",omitempty"` // seconds the change eases in over
 }
 
 // readShots3D reads a --3d-shots file, its stretches in its lines' order,
@@ -97,8 +101,14 @@ func parseShots3D(text string) ([]shot3D, error) {
 					return nil, bad("screen=%s: -5 to 5 percent of the width, as --3d-screen", v)
 				}
 				s.Screen = &d
+			case "ramp":
+				d, err := strconv.ParseFloat(v, 64)
+				if err != nil || d < 0 || d > 10 {
+					return nil, bad("ramp=%s: seconds, 0 to 10", v)
+				}
+				s.Ramp = d
 			default:
-				return nil, bad("%q: want depth=, screen= or flat", kv)
+				return nil, bad("%q: want depth=, screen=, flat or ramp=", kv)
 			}
 		}
 		shots = append(shots, s)
@@ -144,6 +154,14 @@ func shotAt(shots []shot3D, t time.Duration) int {
 // shotShapes is the converter's Shot for the stretches, the network's
 // size (depth.Model.Size) and the film's clock (pts to a time of it).
 func (o Options) shotShapes(shots []shot3D, size string, at func(pts int64) time.Duration) func(int64) (stereo.Shape, bool) {
+	shaper := o.shotShaper(shots, size)
+	return func(pts int64) (stereo.Shape, bool) { return shaper(at(pts)) }
+}
+
+// shotShaper is the shape (and flatness) at a time of the film under the
+// stretches: a stretch's own, eased in over its ramp from what was before
+// it (the stretch before, or the command's).
+func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (stereo.Shape, bool) {
 	base := o.shape3D(size)
 	shapes := make([]stereo.Shape, len(shots))
 	for i, s := range shots {
@@ -156,12 +174,22 @@ func (o Options) shotShapes(shots []shot3D, size string, at func(pts int64) time
 		}
 		shapes[i] = so.shape3D(size)
 	}
-	return func(pts int64) (stereo.Shape, bool) {
-		i := shotAt(shots, at(pts))
+	return func(t time.Duration) (stereo.Shape, bool) {
+		i := shotAt(shots, t)
 		if i < 0 {
 			return base, false
 		}
-		return shapes[i], shots[i].Flat
+		s, sh := shots[i], shapes[i]
+		if ramp := time.Duration(s.Ramp * float64(time.Second)); ramp > 0 && t-s.Start < ramp {
+			from := base
+			if j := shotAt(shots, s.Start-time.Millisecond); j >= 0 && j != i {
+				from = shapes[j]
+			}
+			k := float64(t-s.Start) / float64(ramp)
+			sh.Scale = from.Scale + k*(sh.Scale-from.Scale)
+			sh.Offset = from.Offset + k*(sh.Offset-from.Offset)
+		}
+		return sh, s.Flat
 	}
 }
 
@@ -169,7 +197,7 @@ func (o Options) shotShapes(shots []shot3D, size string, at func(pts int64) time
 // temporary file beside it: a reader never sees half of one).
 func writeShots3D(file string, shots []shot3D) error {
 	var b strings.Builder
-	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P [flat], as --3d-depth and --3d-screen\n")
+	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P [flat] [ramp=S], as --3d-depth and --3d-screen; ramp eases a change made within a shot in over S seconds\n")
 	for _, s := range shots {
 		b.WriteString(clock(s.Start))
 		if s.End > 0 {
@@ -183,6 +211,9 @@ func writeShots3D(file string, shots []shot3D) error {
 		}
 		if s.Flat {
 			b.WriteString(" flat")
+		}
+		if s.Ramp > 0 {
+			fmt.Fprintf(&b, " ramp=%g", s.Ramp)
 		}
 		if s.Depth <= 0 && s.Screen == nil && !s.Flat {
 			b.WriteString(" depth=1")
