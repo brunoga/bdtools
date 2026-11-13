@@ -39,6 +39,7 @@ video { display:block; width:100%; max-height:calc(100vh - 60px); background:#00
 //   X: ten seconds back, Y: ten seconds on
 //   left trigger: the view, ours, the film's own 3D, the mix (--3d-reference)
 //   both grips held a second: out of VR
+// ?webgl=1 draws the picture through WebGL even when media layers exist.
 const $ = id => document.getElementById(id);
 const video = $('v');
 let st = null, mime = null;
@@ -137,10 +138,21 @@ $('vr').onclick = async () => {
     session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
   } catch (e) { say('no VR session: ' + e.message); return; }
   const space = await session.requestReferenceSpace('local-floor');
+  // the display's rate a multiple of the film's 24: 72 (each picture
+  // three refreshes) or 120, not the 90 a Quest wakes at, where every
+  // fourth picture is held a refresh longer and the film judders
+  let rate = '';
+  try {
+    const rates = session.supportedFrameRates ? Array.from(session.supportedFrameRates) : [];
+    const want = [72, 120, 96, 48].find(r => rates.includes(r));
+    if (want && session.updateTargetFrameRate) { await session.updateTargetFrameRate(want); rate = want + ' Hz'; }
+    else rate = rates.length ? 'rates ' + rates.join('/') : 'rate unknown';
+  } catch (e) { rate = 'rate: ' + e.message; }
   // a 4 m wide, 16:9 screen, 3.5 m away, eye height
   const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
   let how = 'WebGL';
-  if (window.XRMediaBinding) {
+  const forceGL = new URLSearchParams(location.search).get('webgl') === '1';
+  if (window.XRMediaBinding && !forceGL) {
     // the browser shows the video itself, each half to its eye, at the
     // video's own pixels
     try {
@@ -153,14 +165,14 @@ $('vr').onclick = async () => {
   }
   if (how.startsWith('WebGL')) webglScreen(session, space, W, H, Y, Z);
   vrHow = how;
-  say('in VR through the ' + how + '; hold both grips a second to leave');
+  say('in VR through the ' + how + ' at ' + rate + '; hold both grips a second to leave');
   // what the headset does, into the stream's readout every two seconds:
   // the path, the video's frames shown and dropped a second, and whether
   // the browser takes the page as hidden (it may then starve the video)
   let lastQ = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null, lastAt = performance.now();
   const report = setInterval(() => {
     if (!session) { clearInterval(report); return; }
-    let text = how;
+    let text = how + ' ' + rate;
     if (video.getVideoPlaybackQuality) {
       const q = video.getVideoPlaybackQuality(), dt = (performance.now() - lastAt) / 1000;
       text += ' ' + ((q.totalVideoFrames - lastQ.totalVideoFrames) / dt).toFixed(1) + ' fps, dropped ' + (q.droppedVideoFrames - lastQ.droppedVideoFrames);
