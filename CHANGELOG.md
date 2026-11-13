@@ -5,6 +5,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-13
+
 ### Added
 
 - `--3d-grade ADDR` grades a 2D-to-3D conversion by eye: the film is
@@ -1573,7 +1575,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/brunoga/bdtools/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/brunoga/bdtools/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/brunoga/bdtools/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/brunoga/bdtools/compare/v0.17.0...v0.18.0
