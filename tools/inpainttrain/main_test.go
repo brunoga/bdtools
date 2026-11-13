@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/brunoga/bdtools/internal/nn"
+	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -129,6 +130,50 @@ func TestDumpCrop(t *testing.T) {
 				v = 255
 			}
 			img.SetGray(s.w+x, y, color.Gray{v})
+			img.SetGray(2*s.w+x, y, color.Gray{s.disc.Y[y*s.w+x]})
+		}
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDumpFilled writes a crop (INPAINT_CROP) filled by weights
+// (INPAINT_WEIGHTS) as a PNG (INPAINT_PNG): rendered, filled, the disc.
+func TestDumpFilled(t *testing.T) {
+	path, out, wpath := os.Getenv("INPAINT_CROP"), os.Getenv("INPAINT_PNG"), os.Getenv("INPAINT_WEIGHTS")
+	if path == "" || out == "" || wpath == "" {
+		t.Skip("set INPAINT_CROP, INPAINT_PNG and INPAINT_WEIGHTS")
+	}
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU")
+	}
+	defer g.Close()
+	s, err := read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := stereo.ReadInpaint(wpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filled := &mvc.Frame{Width: s.w, Height: s.h, StrideY: s.w, StrideC: s.w / 2,
+		Y: append([]byte(nil), s.eye.Y...), Cb: append([]byte(nil), s.eye.Cb...), Cr: append([]byte(nil), s.eye.Cr...)}
+	if err := stereo.NewFiller(w).Fill(g, filled, s.holes, 0, s.h); err != nil {
+		t.Fatal(err)
+	}
+	g.Release()
+	img := image.NewGray(image.Rect(0, 0, 3*s.w, s.h))
+	for y := range s.h {
+		for x := range s.w {
+			img.SetGray(x, y, color.Gray{s.eye.Y[y*s.w+x]})
+			img.SetGray(s.w+x, y, color.Gray{filled.Y[y*s.w+x]})
 			img.SetGray(2*s.w+x, y, color.Gray{s.disc.Y[y*s.w+x]})
 		}
 	}

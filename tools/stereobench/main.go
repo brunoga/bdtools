@@ -564,8 +564,13 @@ func (c *clipBench) frame(sbs *mvc.Frame) error {
 				fitted[i] = float32(a*float64(v) + b)
 			}
 		}
-		n, err := writeHoles(c.res.name, c.k-1, left, right, fitted, top, bottom)
+		n, err := writeHoles(c.res.name, c.k-1, "f", left, right, fitted, top, bottom)
 		if err != nil {
+			return err
+		}
+		holeCropsWritten += n
+		// and by our own depth as shaped: the holes a conversion makes
+		if n, err = writeHoles(c.res.name, c.k-1, "o", left, right, disp, top, bottom); err != nil {
 			return err
 		}
 		holeCropsWritten += n

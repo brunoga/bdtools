@@ -14,10 +14,11 @@ import (
 )
 
 // The hole filler's training data (-holes DIR): for each measured
-// picture, the right eye rendered from the left by the network's depth
-// fitted to the disc (holes of the shape a conversion makes, placed as
-// the disc's geometry has them), cut into crops around where the holes
-// are, each with the disc's right eye there (the truth):
+// picture, the right eye rendered from the left twice, by the network's
+// depth fitted to the disc (holes placed as the disc's geometry has
+// them; NAME-fN) and by our own depth as shaped (the holes a conversion
+// makes; NAME-oN), cut into crops around where the holes are, each with
+// the disc's right eye there (the truth):
 //
 //	"BHL1", W, H (uint32 little-endian: the crop's size, a multiple of 16)
 //	rendered Y   W*H bytes
@@ -49,7 +50,7 @@ const (
 // which opens holes a pixel wide everywhere); holes a pixel wide are
 // dropped, and those within holeMargin of the picture's sides (the eye
 // looking past the frame) left out.
-func writeHoles(clip string, k int, left, right *mvc.Frame, disp []float32, top, bottom int) (int, error) {
+func writeHoles(clip string, k int, kind string, left, right *mvc.Frame, disp []float32, top, bottom int) (int, error) {
 	w, h := left.Width, left.Height
 	if w < holeCrop || bottom-top < holeCrop {
 		return 0, nil
@@ -116,7 +117,7 @@ func writeHoles(clip string, k int, left, right *mvc.Frame, disp []float32, top,
 		if float64(inCrop) < holeLeast*holeCrop*holeCrop {
 			continue
 		}
-		if err := writeHoleCrop(clip, k, n, eye, holes, right, x0, y0); err != nil {
+		if err := writeHoleCrop(clip, k, kind, n, eye, holes, right, x0, y0); err != nil {
 			return n, err
 		}
 		n++
@@ -124,8 +125,8 @@ func writeHoles(clip string, k int, left, right *mvc.Frame, disp []float32, top,
 	return n, nil
 }
 
-func writeHoleCrop(clip string, k, i int, eye *mvc.Frame, holes []bool, right *mvc.Frame, x0, y0 int) error {
-	name := strings.ReplaceAll(fmt.Sprintf("%s-%06d-%d.bhl", clip, k, i), "/", "_")
+func writeHoleCrop(clip string, k int, kind string, i int, eye *mvc.Frame, holes []bool, right *mvc.Frame, x0, y0 int) error {
+	name := strings.ReplaceAll(fmt.Sprintf("%s-%06d-%s%d.bhl", clip, k, kind, i), "/", "_")
 	f, err := os.Create(filepath.Join(holesDir, name)) //nolint:gosec // the operator's directory
 	if err != nil {
 		return err

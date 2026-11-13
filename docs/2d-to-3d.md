@@ -716,6 +716,20 @@ prints the holes' PSNR as rendered and as filled; `stereobench -fill
 FILE` scores it on the benchmark's clips, and `--3d-fill FILE` uses it
 in a conversion (the GPU's eyes kernels give the holes' mask).
 
+**First weights (2026-11-13, 7917 crops of 37 films, 8 passes):** the
+validation crops' holes 20.7 to 23.2 dB. On the benchmark clips (held
+out, `-every 8`) the holes of our own render go 20.91 to 21.75 dB, of
+the fitted-depth render 22.36 to 23.94; on the glass clips ours lose
+half a dB (19.71 to 19.21: behind a reflection the disc's truth is not
+to be had) while the fitted gain 1.5. Holes are about 1% of the
+picture, so the whole picture's PSNR and VMAF do not move. To the eye
+the renderer's comb-like streaks along edges become a soft fill near
+the disc's background. The cost: a conversion at 24.7 pictures a second
+against 111 without (the input made, the picture moved to and from the
+GPU and the fill applied on the CPU, twice a picture). So the filler is
+an option, not the default; the next steps are crops of both
+geometries (ours and the fitted), and the glue on the GPU.
+
 ## Grading by hand
 
 No automatic depth gets every shot right. `--3d-shots FILE` grades
