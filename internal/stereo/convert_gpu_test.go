@@ -313,3 +313,34 @@ func BenchmarkMatchGPU(b *testing.B) {
 		}
 	}
 }
+
+// TestEyesMaskOnTheGPU: the GPU's hole mask is the CPU renderer's holes.
+func TestEyesMaskOnTheGPU(t *testing.T) {
+	g, err := nn.NewGPU()
+	if err != nil {
+		t.Skip("no GPU")
+	}
+	defer g.Close()
+	f, d := scene(640, 360)
+	_, hl := Render(f, d, 0.5)
+	_, hr := Render(f, d, -0.5)
+	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
+	_, mask := g.EyesMask(p, g.Upload(&nn.Tensor{Shape: []int{f.Height, f.Width}, Data: d}), gapPixels, true)
+	mb := make([]byte, 2*f.Width*f.Height)
+	if err := g.DownloadBytes(mb, mask); err != nil {
+		t.Fatal(err)
+	}
+	g.Release()
+	n := 0
+	for i, want := range append(hl, hr...) {
+		if (mb[i] != 0) != want {
+			t.Fatalf("pixel %d of the two eyes: GPU %d, CPU %v", i, mb[i], want)
+		}
+		if want {
+			n++
+		}
+	}
+	if n == 0 {
+		t.Fatal("the scene has no holes")
+	}
+}

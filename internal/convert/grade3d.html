@@ -479,9 +479,9 @@ let vrHow = '';
 // presses what is under it.
 const panel = (() => {
   const canvas = document.createElement('canvas');
-  canvas.width = 800; canvas.height = 1000;
+  canvas.width = 800; canvas.height = 1220;
   const ctx = canvas.getContext('2d');
-  const W = 1.2, H = 1.5; // metres
+  const W = 1.2, H = 1.83; // metres
   // placed to the right, 2.6 m away, turned 38 degrees towards the viewer
   const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.55, cz = -2.4;
   const c = Math.cos(ang), sn = Math.sin(ang);
@@ -502,7 +502,8 @@ const panel = (() => {
       if (Math.abs(lx) > W / 2 || Math.abs(ly) > H / 2) return null;
       return [(lx / W + 0.5) * canvas.width, (0.5 - ly / H) * canvas.height];
     },
-    press(at) { const it = items.find(i => at[0] >= i.x && at[0] < i.x + i.w && at[1] >= i.y && at[1] < i.y + i.h); if (it) it.cmd(); return !!it; },
+    itemAt(at) { return items.find(i => at[0] >= i.x && at[0] < i.x + i.w && at[1] >= i.y && at[1] < i.y + i.h); },
+    press(at) { const it = pl.itemAt(at); if (it) it.cmd(); return !!it; },
     setCursor(at) { if ((at && !cursor) || (!at && cursor) || (at && cursor && (Math.abs(at[0] - cursor[0]) > 2 || Math.abs(at[1] - cursor[1]) > 2))) { cursor = at; pl.draw(); } },
     draw() {
       items.length = 0;
@@ -527,10 +528,23 @@ const panel = (() => {
       row([['−10 s', () => send({ op: 'step', n: -240 })], ['⇤ cut', () => send({ op: 'jump', dir: -1 })], ['−1', () => send({ op: 'step', n: -1 })],
         [st.playing ? 'pause' : 'play', () => send({ op: 'toggle' }), true], ['+1', () => send({ op: 'step', n: 1 })], ['cut ⇥', () => send({ op: 'jump', dir: 1 })], ['+10 s', () => send({ op: 'step', n: 240 })]], 64, 8);
       const k = st.knobs;
+      // a slider: a bar whose press or drag sets the value from the cursor's place
+      const slider = (lo, hi, val, set) => {
+        const bx = 30, bw = w - 60, bh = 44, ky = y + bh / 2;
+        ctx.fillStyle = '#2a2f37'; ctx.beginPath(); ctx.roundRect(bx, ky - 6, bw, 12, 6); ctx.fill();
+        const kx = bx + bw * (val - lo) / (hi - lo);
+        ctx.fillStyle = '#5fb0ff'; ctx.beginPath(); ctx.roundRect(bx, ky - 6, Math.max(kx - bx, 0), 12, 6); ctx.fill();
+        ctx.beginPath(); ctx.arc(kx, ky, 18, 0, 2 * Math.PI); ctx.fill();
+        const at = x => set(Math.round((lo + (hi - lo) * Math.min(Math.max((x - bx) / bw, 0), 1)) / 0.01) * 0.01);
+        items.push({ x: bx, y, w: bw, h: bh, cmd: () => { if (cursor) at(cursor[0]); }, drag: at });
+        y += bh + 14;
+      };
       text('depth  ' + k.depth.toFixed(2), 30, y + 32, '600 34px sans-serif'); y += 70;
-      row([['−0.25', () => nudgeKnobs(-0.25, 0)], ['−0.05', () => nudgeKnobs(-0.05, 0)], ['+0.05', () => nudgeKnobs(0.05, 0)], ['+0.25', () => nudgeKnobs(0.25, 0)]], 64, 10);
+      slider(0.2, 4, k.depth, v => setKnobs(v, k.screen));
+      row([['−0.25', () => nudgeKnobs(-0.25, 0)], ['−0.05', () => nudgeKnobs(-0.05, 0)], ['+0.05', () => nudgeKnobs(0.05, 0)], ['+0.25', () => nudgeKnobs(0.25, 0)]], 56, 10);
       text('screen  ' + (k.screen >= 0 ? '+' : '') + k.screen.toFixed(2) + '%', 30, y + 32, '600 34px sans-serif'); y += 70;
-      row([['−0.5', () => nudgeKnobs(0, -0.5)], ['−0.1', () => nudgeKnobs(0, -0.1)], ['+0.1', () => nudgeKnobs(0, 0.1)], ['+0.5', () => nudgeKnobs(0, 0.5)]], 64, 10);
+      slider(-3, 3, k.screen, v => setKnobs(k.depth, v));
+      row([['−0.5', () => nudgeKnobs(0, -0.5)], ['−0.1', () => nudgeKnobs(0, -0.1)], ['+0.1', () => nudgeKnobs(0, 0.1)], ['+0.5', () => nudgeKnobs(0, 0.5)]], 56, 10);
       row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat], ['reset', () => send({ op: 'reset' })],
         ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud], ['save', () => send({ op: 'save' }), !st.saved]], 64, 10);
       if (st.ref) {
@@ -539,6 +553,8 @@ const panel = (() => {
           ['mix', () => send({ op: 'ref', view: 'mix' }), v === 'mix'], ['diff', () => send({ op: 'ref', view: 'diff' }), v === 'diff'],
           ['align', () => send({ op: 'align' })]], 64, 10);
       }
+      text('screen size ' + (4 * screenScale).toFixed(1) + ' m (' + Math.round(2 * Math.atan(2 * screenScale / 3.5) * 180 / Math.PI) + '° of view)', 30, y + 20, '26px sans-serif', '#9a9a9a'); y += 46;
+      row([['smaller', () => { screenScale = Math.max(0.5, screenScale - 0.1); pl.draw(); }], ['bigger', () => { screenScale = Math.min(2.2, screenScale + 0.1); pl.draw(); }]], 56, 10);
       const stretch = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'no stretch here (the defaults)';
       text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
       if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch })); }
@@ -605,7 +621,9 @@ function controllers(session, xrFrame) {
         at = panel.hit([o.x, o.y, o.z], d);
       }
       panel.setCursor(at);
-      edge('rtrig', b(0), () => { if (!(at && panel.press(at))) send({ op: 'toggle' }); });
+      const over = at && panel.itemAt(at);
+      if (b(0) && over && over.drag) fire('drag', 80, () => over.drag(at[0])); else held.delete('drag');
+      edge('rtrig', b(0), () => { if (over && over.drag) return; if (!(at && panel.press(at))) send({ op: 'toggle' }); });
       edge('rgrip', b(1), () => { if (st) send({ op: 'knobs', knobs: { ...st.knobs, flat: !st.knobs.flat } }); });
       edge('A', b(4), () => send({ op: 'step', n: 1 }));
       edge('B', b(5), () => send({ op: 'step', n: -1 }));
@@ -622,6 +640,13 @@ function controllers(session, xrFrame) {
     }
   }
 }
+function setKnobs(depth, screen) {
+  if (!st) return;
+  const k = { depth: +Math.min(Math.max(depth, 0.05), 5).toFixed(2), screen: +Math.min(Math.max(screen, -5), 5).toFixed(2), flat: st.knobs.flat };
+  if (k.depth === st.knobs.depth && k.screen === st.knobs.screen) return;
+  st.knobs = k; render(); panel.draw();
+  send({ op: 'knobs', knobs: k });
+}
 function nudgeKnobs(dd, ds) {
   if (!st) return;
   const k = { depth: +(st.knobs.depth + dd).toFixed(2), screen: +(st.knobs.screen + ds).toFixed(2), flat: st.knobs.flat };
@@ -631,6 +656,7 @@ function nudgeKnobs(dd, ds) {
 
 // without media layers: the video as a texture on a quad, each eye its half
 let glNote = ''; // what the WebGL path has to say, into the readout
+let screenScale = 1; // the screen's size in VR, 1 the 4 m screen
 let glSource = null; // what the WebGL path draws: image() the picture when it changed, else null
 
 // videoSource draws the video element: a new picture when its time moved
@@ -701,7 +727,7 @@ function webglScreen(session, space, W, H, Y, Z) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2', { xrCompatible: true });
   if (!gl) { glNote = 'no WebGL2'; tele('webgl: no WebGL2 context'); return; }
-  const base = new XRWebGLLayer(session, gl);
+  const base = new XRWebGLLayer(session, gl, { framebufferScaleFactor: 1.2 });
   session.updateRenderState({ baseLayer: base });
   tele('webgl: layer ' + base.framebufferWidth + 'x' + base.framebufferHeight + ' max texture ' + gl.getParameter(gl.MAX_TEXTURE_SIZE) + ' renderer ' + gl.getParameter(gl.RENDERER));
   const vs = `#version 300 es
@@ -723,8 +749,9 @@ function webglScreen(session, space, W, H, Y, Z) {
   const p = gl.getAttribLocation(prog, 'p'), uv = gl.getAttribLocation(prog, 'uv');
   gl.enableVertexAttribArray(p); gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0);
   gl.enableVertexAttribArray(uv); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+  // the picture, shrunk onto the screen through mipmaps (no shimmer)
   const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const uMVP = gl.getUniformLocation(prog, 'mvp'), uHalf = gl.getUniformLocation(prog, 'half_'), uScale = gl.getUniformLocation(prog, 'uscale');
   // the control panel: its own quad and texture, to the right of the screen
   const panelBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, panelBuf);
@@ -734,7 +761,8 @@ function webglScreen(session, space, W, H, Y, Z) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   let panelVersion = -1;
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
-  const model = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,Z,1]);
+  // the screen's size: scaled about its centre, at eye height, by screenScale
+  const model = () => { const k = screenScale; return new Float32Array([k,0,0,0, 0,k,0,0, 0,0,1,0, 0,Y - Y * k,Z,1]); };
   // the texture taken from the source when it has a new picture, not at
   // the headset's rate
   let uploads = 0, draws = 0;
@@ -751,7 +779,7 @@ function webglScreen(session, space, W, H, Y, Z) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       gl.clearColor(0.04, 0.04, 0.1, 1); gl.clear(gl.COLOR_BUFFER_BIT);
       const img = glSource ? glSource.image() : null;
-      if (img) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); uploads++; }
+      if (img) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img); gl.generateMipmap(gl.TEXTURE_2D); uploads++; }
       draws++;
       if (draws % 144 === 0) {
         const err = gl.getError();
@@ -777,7 +805,7 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
-        gl.uniformMatrix4fv(uMVP, false, mul(pv, model));
+        gl.uniformMatrix4fv(uMVP, false, mul(pv, model()));
         gl.uniform1f(uHalf, view.eye === 'right' ? 0.5 : 0); gl.uniform1f(uScale, 0.5);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         // the panel

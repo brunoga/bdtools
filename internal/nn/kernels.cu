@@ -880,7 +880,8 @@ extern "C" __global__ void disparity(int w, int h, int top, int bottom, float a,
 // both eyes' planes packed (rows w and cw apart); z and v scratch, a
 // row's values nrows apart.
 extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, const unsigned char *cb,
-	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, float *zs, float *vs) {
+	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, float *zs, float *vs,
+	unsigned char *mask) {
 	int cw = (w + 1) / 2, ch = (h + 1) / 2;
 	int per = h + 2 * ch, nrows = 2 * per;
 	int row = blockIdx.x * blockDim.x + threadIdx.x;
@@ -950,6 +951,13 @@ extern "C" __global__ void eyes(int w, int h, const unsigned char *Y, int sy, co
 		}
 	}
 	put((int)round((double)p1), b, d1);
+	if (luma && mask) {
+		// the holes, for a filler: 1 where nothing landed
+		unsigned char *m = mask + (long long)eye * w * h + (long long)r * w;
+		for (int X = 0; X < n; X++) {
+			m[X] = Z(X) == -INFINITY;
+		}
+	}
 	// the holes (z still -inf: nothing landed), from their farther side
 	for (int x = 0; x < n;) {
 		if (Z(x) != -INFINITY) {
@@ -1003,7 +1011,7 @@ static __device__ __forceinline__ float unorderedF(unsigned u) {
 }
 
 extern "C" __global__ void eyes_warp(int w, int h, const unsigned char *Y, int sy, const unsigned char *cb,
-	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, int rows) {
+	const unsigned char *cr, int sc, const float *d, float gap, unsigned char *out, int rows, unsigned char *mask) {
 	extern __shared__ unsigned long long keys[];
 	int cw = (w + 1) / 2, ch = (h + 1) / 2;
 	int per = h + 2 * ch, nrows = 2 * per;
@@ -1102,6 +1110,13 @@ extern "C" __global__ void eyes_warp(int w, int h, const unsigned char *Y, int s
 	__syncwarp();
 #define Z(x) zv[2 * (x)]
 #define V(x) zv[2 * (x) + 1]
+	if (luma && mask) {
+		// the holes, for a filler: 1 where nothing landed
+		unsigned char *m = mask + (long long)eye * w * h + (long long)r * w;
+		for (int X = lane; X < n; X += 32) {
+			m[X] = Z(X) == -INFINITY;
+		}
+	}
 	if (lane == 0) {
 		for (int x = 0; x < n;) {
 			if (Z(x) != -INFINITY) {

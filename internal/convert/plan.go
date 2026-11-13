@@ -185,6 +185,10 @@ type Options struct {
 	// built-in ones ("", the default when the network is not tuned), none
 	// ("none", the default when it is), or a file of tools/depthtrain's.
 	Refine3D string
+	// Fill3D is --3d-fill: the hole filler's weights, which fill what an
+	// eye saw nothing of: "" or "none" for the renderer's carried edge,
+	// else a file of tools/inpainttrain's.
+	Fill3D string
 	// Tune3D is the depth network's tail, learnt from the 3D discs
 	// (graded then as stereo.TunedShape grades it): the built-in one ("",
 	// the default, for Video Depth Anything Small), none ("none"), or a
