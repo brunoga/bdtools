@@ -173,6 +173,9 @@ type Options struct {
 	// (grade3d.go): the film converted as it plays, its depth turned by
 	// hand; Output is the --3d-shots file written.
 	Grade3D string
+	// Reference3D, with Grade3D, is the film's own 3D (a side-by-side or
+	// over-under file) to switch to beside the conversion, for comparison.
+	Reference3D string
 	// NoWindow3D leaves out the floating window: the black strips down a
 	// side of one eye that put the picture's edge in front of what comes
 	// out of the screen there.
@@ -454,6 +457,9 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--3d-grade grades --to-3d's depth by hand: give --to-3d")
 		}
 		return nil // --output is the --3d-shots file written
+	}
+	if o.Reference3D != "" {
+		return fmt.Errorf("--3d-reference is --3d-grade's: the film's own 3D to compare with")
 	}
 	for _, f := range o.SubsFiles {
 		switch strings.ToLower(filepath.Ext(f.Path)) {
