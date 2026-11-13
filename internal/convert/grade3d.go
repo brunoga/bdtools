@@ -104,7 +104,9 @@ type grader struct {
 	near    float64       // its disparity's extremes, percent of the width
 	far     float64
 	saved   bool
-	noHUD   bool // the readout left out of the stream
+	noHUD   bool   // the readout left out of the stream
+	note    string // a player's note, shown in the readout for a while
+	noteAt  time.Time
 	clients map[*gradeClient]struct{}
 	events  map[chan struct{}]struct{}
 	ver     int
@@ -637,6 +639,9 @@ func (g *grader) hudText() string {
 			text += "  " + v
 		}
 	}
+	if g.note != "" && time.Since(g.noteAt) < 6*time.Second {
+		text += "  [" + g.note + "]"
+	}
 	return text
 }
 
@@ -919,7 +924,8 @@ func (g *grader) state() gradeState {
 // delete (i: a stretch), save, ref (view: ours, disc, mix or diff; or n
 // 1 for disc, 0 for ours), align (the reference aligned to the film by
 // their pictures), refoffset (t: seconds the reference runs ahead) or
-// hud (n 1: the readout drawn into the stream, 0: not).
+// hud (n 1: the readout drawn into the stream, 0: not), or note (text: a
+// player's word, shown in the readout for a few seconds).
 type gradeCommand struct {
 	Op    string      `json:"op"`
 	T     float64     `json:"t"`
@@ -928,6 +934,7 @@ type gradeCommand struct {
 	I     int         `json:"i"`
 	Knobs *gradeKnobs `json:"knobs"`
 	View  string      `json:"view"`
+	Text  string      `json:"text"`
 }
 
 func (g *grader) command(c gradeCommand) error {
@@ -991,6 +998,12 @@ func (g *grader) command(c gradeCommand) error {
 		return err
 	case "hud":
 		g.noHUD = c.N == 0
+		g.want.regrade = true
+	case "note":
+		if len(c.Text) > 80 {
+			c.Text = c.Text[:80]
+		}
+		g.note, g.noteAt = c.Text, time.Now()
 		g.want.regrade = true
 	case "ref", "align", "refoffset":
 		g.mu.Unlock()

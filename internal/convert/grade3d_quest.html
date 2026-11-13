@@ -154,12 +154,27 @@ $('vr').onclick = async () => {
   if (how.startsWith('WebGL')) webglScreen(session, space, W, H, Y, Z);
   vrHow = how;
   say('in VR through the ' + how + '; hold both grips a second to leave');
+  // what the headset does, into the stream's readout every two seconds:
+  // the path, the video's frames shown and dropped a second, and whether
+  // the browser takes the page as hidden (it may then starve the video)
+  let lastQ = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null, lastAt = performance.now();
+  const report = setInterval(() => {
+    if (!session) { clearInterval(report); return; }
+    let text = how;
+    if (video.getVideoPlaybackQuality) {
+      const q = video.getVideoPlaybackQuality(), dt = (performance.now() - lastAt) / 1000;
+      text += ' ' + ((q.totalVideoFrames - lastQ.totalVideoFrames) / dt).toFixed(1) + ' fps, dropped ' + (q.droppedVideoFrames - lastQ.droppedVideoFrames);
+      lastQ = q; lastAt = performance.now();
+    }
+    text += ', page ' + document.visibilityState + (video.paused ? ', video paused' : '') + ', lag ' + lag().toFixed(2);
+    send({ op: 'note', text });
+  }, 2000);
   session.requestAnimationFrame(function frame(t, xrFrame) {
     if (!session) return;
     session.requestAnimationFrame(frame);
     controllers(session, xrFrame);
   });
-  session.addEventListener('end', () => { session = null; vrHow = ''; say(''); hud(); });
+  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR (' + how + ')'); hud(); });
 };
 let vrHow = '';
 
