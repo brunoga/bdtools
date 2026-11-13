@@ -153,7 +153,7 @@ function render() {
   $('saved').textContent = st.saved ? 'saved' : 'unsaved';
   $('saved').className = st.saved ? 'ok' : 'warn';
   $('file').textContent = st.file;
-  const w = 1920;
+  const w = st.width > 0 ? st.width : 1920;
   $('extremes').textContent = st.knobs.flat ? 'flat' :
     'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
   setKnobUI(st.knobs);

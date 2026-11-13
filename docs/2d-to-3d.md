@@ -779,6 +779,15 @@ reference's eight seconds either side and keeps the offset; the page
 says when the reference has no picture at a place. The reference must
 be side by side or over-under at the conversion's size.
 
+The sharpest test needs no second file: give a 3D file itself (a
+side-by-side or over-under conversion of an MVC disc) as the input of
+`--3d-grade`. Its left eye is the picture converted and its own pair is
+the reference, on one clock, so `disc` flips between the stereographer's
+right eye and ours made from the same left eye. (A 3D disc image is not
+taken directly: give its conversion, or its base view from `--remux
+--2d`.) The disc's right eye is a second camera and sees behind edges
+where ours cannot, so judge the depth of the scene, not the edges.
+
 The depth network runs as the film plays (it is faster than the film on
 a GPU), so nothing is precomputed and any film opens at once; the
 stream needs NVENC. The eyes are H.264 for the players' sake; the

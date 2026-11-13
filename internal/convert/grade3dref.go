@@ -17,13 +17,17 @@ import (
 	"github.com/brunoga/bdtools/mvc"
 )
 
-// gradeRef is the reference and its reader.
+// gradeRef is the reference and its reader; or, when self, the input
+// file's own pair (a 3D file whose left eye is converted), which comes
+// with each picture and needs no reader.
 type gradeRef struct {
 	g      *grader
 	r      *Runner // the grader's, quiet: the reader says nothing
 	src    liveSource
 	layout Layout
 	swap   bool
+	self   bool
+	pair   refFrame // self: the pair of the picture shown
 
 	mu       sync.Mutex
 	isOn     bool
@@ -84,7 +88,7 @@ func (f *gradeRef) on() bool {
 func (f *gradeRef) set(on bool, offset *time.Duration) {
 	f.mu.Lock()
 	f.isOn = on
-	if offset != nil {
+	if offset != nil && !f.self {
 		f.offset, f.aligned = *offset, false
 		f.stopLocked()
 	}
@@ -106,7 +110,18 @@ func (f *gradeRef) alignAsked() bool {
 func (f *gradeRef) state() *gradeRefState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return &gradeRefState{File: f.r.Opts.Reference3D, On: f.isOn, Offset: f.offset.Seconds(), Aligned: f.aligned, Aligning: f.aligning, Showing: f.showing}
+	file := f.r.Opts.Reference3D
+	if f.self {
+		file = f.r.Opts.Input + " (its own pair)"
+	}
+	return &gradeRefState{File: file, On: f.isOn, Offset: f.offset.Seconds(), Aligned: f.aligned, Aligning: f.aligning, Showing: f.showing}
+}
+
+// setSelf keeps the input's own pair of the picture shown.
+func (f *gradeRef) setSelf(l, r *mvc.Frame, t time.Duration) {
+	f.mu.Lock()
+	f.pair = refFrame{l, r, t}
+	f.mu.Unlock()
 }
 
 // setShowing records whether the reference's pair is the one on screen.
@@ -177,6 +192,12 @@ func (f *gradeRef) start(ctx context.Context, from, frame time.Duration) {
 func (f *gradeRef) at(ctx context.Context, t, frame time.Duration) (l, r *mvc.Frame, ok bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.self {
+		if p := f.pair; p.l != nil && p.t-t <= frame/2 && t-p.t <= frame/2 {
+			return p.l, p.r, true
+		}
+		return nil, nil, false
+	}
 	if f.frames == nil || t < f.from-frame/2 || (f.next != nil && t-f.next.t > 2*time.Second) {
 		f.start(ctx, t, frame)
 	}
@@ -210,6 +231,11 @@ func (f *gradeRef) at(ctx context.Context, t, frame time.Duration) (l, r *mvc.Fr
 // side of where the offset puts it, the nearest wins.
 func (f *gradeRef) align(ctx context.Context, pic *mvc.Frame, t time.Duration) {
 	f.mu.Lock()
+	if f.self {
+		f.alignReq = false // one clock: nothing to find
+		f.mu.Unlock()
+		return
+	}
 	f.alignReq, f.aligning = false, true
 	f.stopLocked()
 	offset := f.offset

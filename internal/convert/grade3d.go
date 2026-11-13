@@ -197,7 +197,16 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	g := &grader{r: r, src: src, model: m, conv: c, wake: make(chan struct{}, 1),
 		clients: map[*gradeClient]struct{}{}, events: map[chan struct{}]struct{}{}, saved: true}
 	c.Shot = g.shotShape
-	if r.Opts.Reference3D != "" {
+	switch {
+	case r.framedIn != "":
+		// a 3D file: its left eye is the picture converted, its pair the
+		// reference, on one clock
+		if r.Opts.Reference3D != "" {
+			return errors.New("--3d-reference: the input is 3D itself, and its own reference")
+		}
+		g.ref = &gradeRef{g: g, r: r, self: true, layout: r.framedIn, swap: r.framedSwap, aligned: true}
+		r.Report.Report("--3d-grade: a 3D file (%s): its left eye converted, its own pair the reference", r.framedIn)
+	case r.Opts.Reference3D != "":
 		if g.ref, err = r.openReference(ctx, g); err != nil {
 			return err
 		}
@@ -400,6 +409,15 @@ func (g *grader) picture(ctx context.Context, p picture, src pictureSource) erro
 	}
 	if t+g.frame/2 < g.target {
 		return nil
+	}
+	if g.ref != nil && g.ref.self {
+		l, rr := splitFramed(p, g.ref.layout)
+		if g.ref.swap {
+			l, rr = rr, l
+		}
+		l.PTS, rr.PTS = p.pts, p.pts
+		g.ref.setSelf(l, rr, t)
+		return g.show(ctx, l, t)
 	}
 	return g.show(ctx, pictureFrame8(p), t)
 }
@@ -766,7 +784,8 @@ func (g *grader) state() gradeState {
 	defer g.mu.Unlock()
 	st := gradeState{Ver: g.ver, T: g.pos.Seconds(), Length: g.src.length.Seconds(), Frame: g.frameOr().Seconds(),
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
-		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Shots: []gradeShot{}, Cuts: []float64{}}
+		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2,
+		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
 		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
 	}

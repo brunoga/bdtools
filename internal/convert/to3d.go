@@ -84,7 +84,13 @@ func (r *Runner) useTo3D(threeD bool) error {
 	if !r.Opts.To3D {
 		return nil
 	}
-	if threeD || r.framedIn != "" {
+	switch {
+	case r.framedIn != "" && r.Opts.Grade3D != "":
+		// a live grading of a 3D file: its left eye the picture, its
+		// pair the reference (grade3d.go)
+	case threeD && r.Opts.Grade3D != "":
+		return errors.New("--3d-grade of a 3D disc: give its side-by-side conversion instead (its left eye is converted, its pair the reference), or its base view alone (--remux --2d)")
+	case threeD || r.framedIn != "":
 		return errors.New("--to-3d makes a 2D source 3D: this one is 3D already")
 	}
 	r.flat, r.Opts.TwoD, r.to3D = false, false, true
