@@ -5,6 +5,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Disc images are read by bdtools' own UDF reader (`internal/udf`,
+  beside its writer), not golift.io/udf: a file's chain of allocation
+  extent descriptors is followed however deep it runs (The Bad Guys'
+  feature, which the library refused as too deep), and the module has
+  one dependency fewer.
+
 ### Added
 
 - An icon for bdtools (`internal/convert/icon.svg`: a disc seen by two
