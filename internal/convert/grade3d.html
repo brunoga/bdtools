@@ -39,10 +39,19 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 #preview video, #preview canvas { position:absolute; top:0; left:0; height:100%; width:100%; object-fit:fill; }
 #preview.left video { width:200%; }
 #preview.off { display:none; }
+#vrprompt { position:fixed; inset:0; z-index:20; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; }
+#vrprompt[hidden] { display:none; }
+#vrbig { font-size:40px; padding:28px 64px; border-radius:16px; }
 @media (max-width:600px) { .clock { font-size:26px; } .knob { grid-template-columns: 70px 1fr 80px; } }
 </style>
 </head>
 <body>
+<div id="vrprompt" hidden>
+  <img src="/icon.svg" alt="" style="width:96px;height:96px">
+  <button id="vrbig" class="primary">Enter VR</button>
+  <span id="vrnote" class="dim"></span>
+  <a href="#" id="vrstay" class="dim" style="font-size:14px">stay on the page</a>
+</div>
 <h1><img src="/icon.svg" alt=""><span id="title">bdtools 3D grade</span></h1>
 <div class="row dim" style="font-size:13px">
   <button id="vr" class="primary" hidden disabled title="in a headset's browser: the picture on a screen in VR, the controls on a panel beside it">Enter VR</button>
@@ -347,13 +356,23 @@ document.addEventListener('keydown', e => {
 let xrOK = false, session = null;
 function vrCheck() {
   if (!navigator.xr) return; // no headset: no button
+  // a headset's browser is here for VR: a prompt over the page, one press
+  const prompt = (note, onPress) => {
+    $('vrprompt').hidden = false; $('vrnote').textContent = note;
+    $('vrbig').onclick = onPress;
+    $('vrstay').onclick = e => { e.preventDefault(); $('vrprompt').hidden = true; };
+  };
   if (!window.isSecureContext) {
     // VR needs a secure page: the button goes to the server's HTTPS side
-    $('vr').hidden = false; $('vr').disabled = false; $('vr').textContent = 'Enter VR (secure page)';
-    $('vr').onclick = () => { if (st && st.secure) location.href = 'https://' + st.secure + '/'; else say('open the https address the server printed'); };
+    const go = () => { if (st && st.secure) location.href = 'https://' + st.secure + '/'; else say('open the https address the server printed'); };
+    $('vr').hidden = false; $('vr').disabled = false; $('vr').textContent = 'Enter VR (secure page)'; $('vr').onclick = go;
+    navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (ok) prompt('VR needs the secure page: this goes there first (accept the certificate once)', go); });
     return;
   }
-  navigator.xr.isSessionSupported('immersive-vr').then(ok => { xrOK = ok; $('vr').hidden = !ok; $('vr').disabled = !ok; });
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    xrOK = ok; $('vr').hidden = !ok; $('vr').disabled = !ok;
+    if (ok) prompt('the picture on a screen in VR, the controls on a panel beside it', () => { $('vrprompt').hidden = true; $('vr').onclick(); });
+  });
 }
 vrCheck();
 $('vr').onclick = async () => {
