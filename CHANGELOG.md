@@ -26,6 +26,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--3d-grade` takes a 3D file (side by side or over-under) as its
   input: its left eye is converted and its own pair is the reference,
   on one clock, for the sharpest comparison with the disc.
+- `--3d-grade`'s reference has two more views: `mix`, the right eye a
+  blend of the disc's and ours (what agrees fuses, what does not doubles
+  by the difference), and `diff`, both eyes the difference of the two
+  right eyes, grey where they agree.
 - `--3d-shots` takes `ramp=SECONDS` on a stretch that begins within a
   shot: its depth and screen ease in from the stretch before's over that
   long. A live grading writes it for a turn made with no cut near.

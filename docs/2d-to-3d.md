@@ -788,6 +788,15 @@ taken directly: give its conversion, or its base view from `--remux
 --2d`.) The disc's right eye is a second camera and sees behind edges
 where ours cannot, so judge the depth of the scene, not the edges.
 
+Two more views make the comparison exact. `mix` (the key `m`) keeps the
+left eye and blends the disc's right eye with ours half and half: where
+the two depths agree the picture fuses, where they differ it doubles by
+exactly the difference, and the knobs are turned until the doubles
+merge. `diff` (`x`) shows both eyes the difference of the two right
+eyes, mid grey where they agree and an embossed edge where they do not:
+the sharper tool for a small mismatch, and it shows at a glance which
+of the near and the far is off. `o` is back to ours.
+
 The depth network runs as the film plays (it is faster than the film on
 a GPU), so nothing is precomputed and any film opens at once; the
 stream needs NVENC. The eyes are H.264 for the players' sake; the
