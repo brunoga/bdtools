@@ -5,6 +5,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- An icon for bdtools (`internal/convert/icon.svg`: a disc seen by two
+  eyes), the live grading's pages' favicon and header mark, served at
+  `/icon.svg`.
+
 ## [0.20.0] - 2026-11-13
 
 ### Added

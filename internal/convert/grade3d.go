@@ -37,6 +37,9 @@ var grade3DPage []byte
 //go:embed grade3d_quest.html
 var grade3DQuestPage []byte
 
+//go:embed icon.svg
+var bdtoolsIcon []byte
+
 const (
 	// gradeQP is the live stream's quantiser: a good picture at a rate a
 	// home network carries.
@@ -976,6 +979,11 @@ func (g *grader) handler() http.Handler {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(grade3DPage)
+	})
+	mux.HandleFunc("GET /icon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "max-age=86400")
+		_, _ = w.Write(bdtoolsIcon)
 	})
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
