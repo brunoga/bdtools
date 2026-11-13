@@ -64,7 +64,7 @@ function lag() {
 // state events, for the HUD
 (function events() {
   const es = new EventSource('/events');
-  es.onmessage = e => { st = JSON.parse(e.data); hud(); };
+  es.onmessage = e => { const first = !st; st = JSON.parse(e.data); hud(); if (first && !window.isSecureContext) vrCheck(); };
   es.onerror = () => { es.close(); setTimeout(events, 1000); };
 })();
 
@@ -116,9 +116,20 @@ async function start() {
 }
 $('go').onclick = start;
 
-// VR
+// VR: a secure page only (a headset's browser has no WebXR on plain
+// HTTP from a LAN address): the server's HTTPS side, from the state
 let xrOK = false, session = null;
-if (navigator.xr) navigator.xr.isSessionSupported('immersive-vr').then(ok => { xrOK = ok; if (ok && video.readyState >= 1) $('vr').disabled = false; });
+function vrCheck() {
+  if (!window.isSecureContext) {
+    const sec = st && st.secure ? 'https://' + st.secure + '/quest' : 'the https address the server printed';
+    say('VR needs a secure page: open ' + sec + ' (accept the certificate once)');
+    $('vr').disabled = true;
+    return;
+  }
+  if (!navigator.xr) { say('this browser has no WebXR'); return; }
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => { xrOK = ok; if (ok && video.readyState >= 1) $('vr').disabled = false; if (!ok) say('this browser has no immersive VR'); });
+}
+vrCheck();
 $('vr').onclick = async () => {
   try {
     session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
