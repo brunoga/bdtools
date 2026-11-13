@@ -5,6 +5,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--3d-grade ADDR` grades a 2D-to-3D conversion by eye: the film is
+  converted live as it plays and served as a 3D stream (full side by
+  side, H.264 in a transport stream) for the player at the 3D screen,
+  with a web page to play, pause, step and seek it, jump between the
+  cuts and turn the depth and screen; each turn grades a stretch from
+  the last cut, written to `--output` as a `--3d-shots` file for the
+  conversion proper. `bdmv.Live` writes a live transport stream;
+  `gpu.Config.LowLatency` encodes a picture at a time on NVENC.
+
 ## [0.19.0] - 2026-11-11
 
 ### Added

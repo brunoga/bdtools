@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -162,4 +163,35 @@ func (o Options) shotShapes(shots []shot3D, size string, at func(pts int64) time
 		}
 		return shapes[i], shots[i].Flat
 	}
+}
+
+// writeShots3D writes stretches as a --3d-shots file (through a
+// temporary file beside it: a reader never sees half of one).
+func writeShots3D(file string, shots []shot3D) error {
+	var b strings.Builder
+	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P [flat], as --3d-depth and --3d-screen\n")
+	for _, s := range shots {
+		b.WriteString(clock(s.Start))
+		if s.End > 0 {
+			b.WriteString(" " + clock(s.End))
+		}
+		if s.Depth > 0 {
+			fmt.Fprintf(&b, " depth=%g", s.Depth)
+		}
+		if s.Screen != nil {
+			fmt.Fprintf(&b, " screen=%g", *s.Screen)
+		}
+		if s.Flat {
+			b.WriteString(" flat")
+		}
+		if s.Depth <= 0 && s.Screen == nil && !s.Flat {
+			b.WriteString(" depth=1")
+		}
+		b.WriteString("\n")
+	}
+	tmp := filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".tmp")
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, file)
 }

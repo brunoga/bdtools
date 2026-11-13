@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bdtools 3D grade</title>
+<style>
+:root { color-scheme: dark; --bg:#14161a; --fg:#e8e8e8; --dim:#9a9a9a; --acc:#5fb0ff; --warn:#ffb050; --ok:#7bd88f; --band:#2b4a6a; }
+* { box-sizing: border-box; }
+body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; max-width:1100px; margin-inline:auto; }
+h1 { font-size:17px; font-weight:600; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dim { color:var(--dim); }
+.row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.clock { font:600 34px/1 ui-monospace, monospace; letter-spacing:1px; }
+button { background:#262a31; color:var(--fg); border:1px solid #3a3f48; border-radius:6px; padding:8px 12px; font:inherit; cursor:pointer; min-width:44px; }
+button:hover { background:#30353e; }
+button.primary { background:#2d4f78; border-color:#3c6aa0; }
+button:disabled { opacity:.4; cursor:default; }
+#bar { position:relative; height:46px; background:#1e2228; border:1px solid #3a3f48; border-radius:6px; margin:12px 0; cursor:pointer; overflow:hidden; user-select:none; }
+#bar .band { position:absolute; top:0; bottom:0; background:var(--band); opacity:.75; }
+#bar .band.cur { background:#3b6b9c; }
+#bar .cut { position:absolute; top:30px; bottom:0; width:1px; background:#7a8290; }
+#bar .head { position:absolute; top:0; bottom:0; width:2px; background:var(--warn); }
+.knob { display:grid; grid-template-columns: 90px 1fr 90px; gap:10px; align-items:center; margin:8px 0; }
+.knob input[type=range] { width:100%; }
+.knob input[type=number] { width:90px; background:#1e2228; color:var(--fg); border:1px solid #3a3f48; border-radius:6px; padding:6px; font:inherit; }
+.panel { background:#1a1d22; border:1px solid #2c3139; border-radius:8px; padding:12px; margin:12px 0; }
+table { width:100%; border-collapse:collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align:left; padding:4px 6px; border-bottom:1px solid #2c3139; }
+tr.cur td { color:var(--acc); }
+.stat { font-variant-numeric: tabular-nums; }
+.ok { color:var(--ok); } .warn { color:var(--warn); }
+kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0 5px; font:12px ui-monospace, monospace; }
+@media (max-width:600px) { .clock { font-size:26px; } .knob { grid-template-columns: 70px 1fr 80px; } }
+</style>
+</head>
+<body>
+<h1 id="title">bdtools 3D grade</h1>
+<div class="row dim" style="font-size:13px">
+  <span>stream: <a id="stream" href="/stream.ts">/stream.ts</a> (full side by side, 1080p an eye)</span>
+  <span id="clients">0 players</span>
+  <span id="saved"></span>
+</div>
+
+<div id="bar"><div class="head" id="head"></div></div>
+
+<div class="row">
+  <span class="clock" id="clock">0:00:00.00</span>
+  <span class="dim" id="length"></span>
+  <span class="stat dim" id="extremes"></span>
+</div>
+
+<div class="row" style="margin:12px 0">
+  <button data-op="step" data-n="-240" title="10 s back (Shift+Left)">−10 s</button>
+  <button data-op="jump" data-dir="-1" title="the cut before ([)">⇤ cut</button>
+  <button data-op="step" data-n="-1" title="a picture back (Left)">−1</button>
+  <button data-op="toggle" id="play" class="primary" title="play / pause (Space)">Play</button>
+  <button data-op="step" data-n="1" title="a picture on (Right)">+1</button>
+  <button data-op="jump" data-dir="1" title="the next cut (])">cut ⇥</button>
+  <button data-op="step" data-n="240" title="10 s on (Shift+Right)">+10 s</button>
+</div>
+
+<div class="panel">
+  <div class="knob">
+    <label for="depth">depth</label>
+    <input type="range" id="depth" min="0.2" max="4" step="0.02">
+    <input type="number" id="depthN" min="0.05" max="5" step="0.05">
+  </div>
+  <div class="knob">
+    <label for="screen">screen %</label>
+    <input type="range" id="screen" min="-3" max="3" step="0.02">
+    <input type="number" id="screenN" min="-5" max="5" step="0.05">
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="flat"> flat (on the screen)</label>
+    <button data-op="reset" title="the stretch back to the command's defaults">reset</button>
+    <span class="dim" id="stretch"></span>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="row" style="justify-content:space-between">
+    <strong>stretches</strong>
+    <span><button data-op="save">save</button> <span class="dim" id="file"></span></span>
+  </div>
+  <table id="shots"><thead><tr><th>start</th><th>end</th><th>depth</th><th>screen</th><th>flat</th><th></th></tr></thead><tbody></tbody></table>
+</div>
+
+<p class="dim" style="font-size:13px">
+<kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> a picture · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> 10 s · <kbd>[</kbd> <kbd>]</kbd> cuts ·
+<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>f</kbd> flat · <kbd>s</kbd> save.
+A turn of a knob grades the shot from its cut (or from this picture, when no cut is near) to the next stretch.
+</p>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let st = null, dragging = null, lastSend = 0, pendingKnobs = null, timer = null;
+
+function fmt(s) {
+  const neg = s < 0; s = Math.abs(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return (neg ? '-' : '') + h + ':' + String(m).padStart(2, '0') + ':' + sec.toFixed(2).padStart(5, '0');
+}
+
+async function send(cmd) {
+  const r = await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+  if (!r.ok) console.warn('command refused:', await r.text());
+}
+
+function knobs() {
+  return { depth: +$('depthN').value, screen: +$('screenN').value, flat: $('flat').checked };
+}
+
+// knob changes go out at most every 60 ms; the player keeps only the last
+function sendKnobs() {
+  pendingKnobs = knobs();
+  const now = Date.now();
+  if (now - lastSend >= 60) { flushKnobs(); } else if (!timer) { timer = setTimeout(flushKnobs, 60 - (now - lastSend)); }
+}
+function flushKnobs() {
+  timer = null;
+  if (!pendingKnobs) return;
+  lastSend = Date.now();
+  send({ op: 'knobs', knobs: pendingKnobs });
+  pendingKnobs = null;
+}
+
+function setKnobUI(k) {
+  if (dragging) return;
+  $('depth').value = k.depth; $('depthN').value = k.depth.toFixed(2);
+  $('screen').value = k.screen; $('screenN').value = k.screen.toFixed(2);
+  $('flat').checked = k.flat;
+}
+
+function render() {
+  if (!st) return;
+  document.title = 'bdtools 3D grade';
+  $('title').textContent = st.title.split(/[\\/]/).pop();
+  $('clock').textContent = fmt(st.t);
+  $('length').textContent = st.length > 0 ? 'of ' + fmt(st.length) : '';
+  $('play').textContent = st.playing ? 'Pause' : 'Play';
+  $('clients').textContent = st.clients + (st.clients === 1 ? ' player' : ' players');
+  $('saved').textContent = st.saved ? 'saved' : 'unsaved';
+  $('saved').className = st.saved ? 'ok' : 'warn';
+  $('file').textContent = st.file;
+  const w = 1920;
+  $('extremes').textContent = st.knobs.flat ? 'flat' :
+    'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
+  setKnobUI(st.knobs);
+  $('stretch').textContent = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'the command\'s defaults (depth ' + st.defaults.depth + ', screen ' + st.defaults.screen + ')';
+  // the bar
+  const bar = $('bar'); bar.querySelectorAll('.band,.cut').forEach(e => e.remove());
+  const L = st.length > 0 ? st.length : Math.max(st.t, 1);
+  const x = t => (100 * Math.min(Math.max(t / L, 0), 1)) + '%';
+  st.shots.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'band' + (i === st.stretch ? ' cur' : '');
+    d.style.left = x(s.start); d.style.width = (100 * ((s.end > 0 ? s.end : L) - s.start) / L) + '%';
+    d.title = fmt(s.start) + ' – ' + (s.end > 0 ? fmt(s.end) : 'end'); bar.appendChild(d);
+  });
+  for (const c of st.cuts) { const d = document.createElement('div'); d.className = 'cut'; d.style.left = x(c); bar.appendChild(d); }
+  $('head').style.left = x(st.t);
+  // the table
+  const tb = $('shots').querySelector('tbody'); tb.innerHTML = '';
+  st.shots.forEach((s, i) => {
+    const tr = document.createElement('tr'); if (i === st.stretch) tr.className = 'cur';
+    const td = v => { const e = document.createElement('td'); e.textContent = v; return e; };
+    const go = document.createElement('button'); go.textContent = 'go'; go.onclick = () => send({ op: 'seek', t: s.start });
+    const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove'; del.onclick = () => send({ op: 'delete', i });
+    tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
+      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.flat ? 'flat' : ''));
+    const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
+    tb.appendChild(tr);
+  });
+}
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onmessage = e => { st = JSON.parse(e.data); render(); };
+  es.onerror = () => { es.close(); setTimeout(connect, 1000); };
+}
+connect();
+
+document.querySelectorAll('button[data-op]').forEach(b => b.onclick = () => {
+  const c = { op: b.dataset.op };
+  if (b.dataset.n) c.n = +b.dataset.n;
+  if (b.dataset.dir) c.dir = +b.dataset.dir;
+  send(c);
+});
+$('bar').onclick = e => {
+  if (!st || !(st.length > 0)) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  send({ op: 'seek', t: st.length * (e.clientX - r.left) / r.width });
+};
+for (const [range, num] of [['depth', 'depthN'], ['screen', 'screenN']]) {
+  $(range).oninput = () => { dragging = range; $(num).value = (+$(range).value).toFixed(2); sendKnobs(); };
+  $(range).onchange = () => { dragging = null; sendKnobs(); };
+  $(num).onchange = () => { $(range).value = $(num).value; sendKnobs(); };
+}
+$('flat').onchange = sendKnobs;
+
+function nudge(id, by) {
+  const n = $(id + 'N'); n.value = (+n.value + by).toFixed(2); $(id).value = n.value; sendKnobs();
+}
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' && e.target.type === 'number') return;
+  const k = e.key;
+  if (k === ' ') send({ op: 'toggle' });
+  else if (k === 'ArrowLeft') send({ op: 'step', n: e.shiftKey ? -240 : -1 });
+  else if (k === 'ArrowRight') send({ op: 'step', n: e.shiftKey ? 240 : 1 });
+  else if (k === '[') send({ op: 'jump', dir: -1 });
+  else if (k === ']') send({ op: 'jump', dir: 1 });
+  else if (k === 'ArrowUp') nudge('depth', 0.05);
+  else if (k === 'ArrowDown') nudge('depth', -0.05);
+  else if (k === 'PageUp') nudge('screen', 0.1);
+  else if (k === 'PageDown') nudge('screen', -0.1);
+  else if (k === 'f') { $('flat').checked = !$('flat').checked; sendKnobs(); }
+  else if (k === 's') send({ op: 'save' });
+  else return;
+  e.preventDefault();
+});
+</script>
+</body>
+</html>

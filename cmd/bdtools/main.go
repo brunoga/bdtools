@@ -111,6 +111,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		window3D = fs.Bool("3d-window", true, "with --to-3d: a floating window (black strips down a side of one eye) where something in front of the screen meets the picture's edge")
 		shots3D  = fs.String("3d-shots", "", "with --to-3d: a file of stretches of the film graded by hand, a line each: START [END] and depth=K (as --3d-depth), screen=P (as --3d-screen) or flat (on the screen), times as a player shows them, e.g. \"1:02:10 1:02:40 depth=0.8\" (see docs/2d-to-3d.md)")
 		preview  = fs.Bool("3d-preview", false, "with --to-3d: no conversion, but stills of its pairs at 8 places through the film, each at a few depths (--3d-depth 1, 1.5, 2, 2.5 and the one given), into --output, a directory: full side-by-side and red-cyan anaglyph JPEGs, in seconds, to choose the depth by")
+		grade3D  = fs.String("3d-grade", "", "with --to-3d: no conversion, but the film converted live as it plays and served as a 3D stream (full side by side, H.264 in a transport stream, http://ADDR/stream.ts) at this address, e.g. :8420, with a web page there to play, pause, step and seek it and to turn the depth and screen by eye, shot by shot; what is set is written to --output as a --3d-shots file for the conversion proper (see docs/2d-to-3d.md)")
 		screenSz = fs.Float64("3d-screen-size", 0, "with --to-3d: the screen's diagonal in inches (of a 16:9 picture); what is behind the screen is kept short of the eyes' separation there (63 mm), past which the eyes would have to turn outwards: a large screen's depth eased at the back (0, the default: no limit beyond 4% of the width)")
 		screen3D = fs.Float64("3d-screen", 0, "moves the whole depth nearer (positive: more out of the screen) or farther, in percent of the picture's width: --to-3d's, or a 3D source's (its subtitles moved with it)")
 		twoD     = fs.Bool("2d", false, "convert as a 2D film: the picture of a 2D source (which is converted so anyway), or a 3D source's base view on its own")
@@ -318,6 +319,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 	o.TwoD = *twoD
 	o.To3D, o.DepthModel, o.Screen3D, o.ScreenSize3D, o.Preview3D = *to3D, *depthMdl, *screen3D, *screenSz, *preview
 	o.Shots3D = *shots3D
+	o.Grade3D = *grade3D
 	if given["3d-depth"] {
 		o.Depth3D = *depth3D // else --to-3d's default, a 3D source's as it is
 	}
@@ -462,7 +464,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		return 1
 	}
 
-	if o.Preview3D {
+	if o.Preview3D || o.Grade3D != "" {
 		return 0
 	}
 	final := o.Output

@@ -57,6 +57,11 @@ type Config struct {
 	// base layer, the right as layer 1 predicted from it, each picture
 	// given through StereoEncoder.EncodeStereo. 0 or 1 is one view.
 	Views int
+	// LowLatency encodes each picture as it comes, for a stream a player
+	// reads live: no B-frames (so no reordering), no lookahead, and each
+	// picture's bitstream written before the next is taken (NVENC; the
+	// other encoders keep their own pace).
+	LowLatency bool
 }
 
 // Picture is the frame an encoder wants filled: a full-resolution luma

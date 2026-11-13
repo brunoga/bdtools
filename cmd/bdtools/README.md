@@ -384,6 +384,7 @@ scheduler such as pipeliner retry it.
 | `--3d-depth` | `1` | With `--to-3d`: the depth's strength, 1 the 3D discs' |
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
 | `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
+| `--3d-grade` | — | With `--to-3d`: no conversion, but the film converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye; the grade goes to `--output` as a `--3d-shots` file — see [2D to 3D](#2d-to-3d) |
 | `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |
 | `--depth-model` | `small` | With `--to-3d`: the depth network, `small`, `base` or `large` (Video Depth Anything's, downloaded once; `base` and `large` are licensed CC-BY-NC-4.0, for non-commercial use only), or a checkpoint (`.pth`) |
 | `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |

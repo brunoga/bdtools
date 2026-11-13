@@ -896,6 +896,13 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if r.Opts.Preview3D {
 		return r.preview3D(sel.Base, func() (sampleFeed, func(), error) { return r.matroskaFeed(src, sel) })
 	}
+	if r.Opts.Grade3D != "" {
+		live, err := r.matroskaLive(src, sel)
+		if err != nil {
+			return err
+		}
+		return r.grade3D(ctx, live)
+	}
 	g := newMkvDemux(src, sel, tmp, r.Report)
 	g.trim = r.Opts.Trim
 	r.timeline = func(pts int64) time.Duration { return ticks90k(pts) - g.t0 }

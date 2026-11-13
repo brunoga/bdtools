@@ -30,7 +30,10 @@ type Converter struct {
 	Shot func(pts int64) (s Shape, flat bool)
 	// Refine, when not nil, corrects the depth's shape (refinenet.go), on
 	// the depth model's backend.
-	Refine          *RefineWeights
+	Refine *RefineWeights
+	// KeepDepth keeps each Estimate's depth even when a GPU makes the
+	// eyes, for Grade to shape it again as often as asked.
+	KeepDepth       bool
 	refineOn        *RefineWeights // Refine's weights on that backend
 	win             window
 	credits         creditState
@@ -49,6 +52,11 @@ func NewConverter(m *depth.Model, shape Shape) *Converter {
 
 // Cuts is how many cuts the converter has seen.
 func (c *Converter) Cuts() int { return c.cutsHit }
+
+// Restart has the next picture start the network's and the shaping's
+// state afresh, as the first did, and not count as a cut: the film read
+// from somewhere else.
+func (c *Converter) Restart() { c.frames = 0 }
 
 // Convert gives the pair for the next picture (8-bit 4:2:0).
 func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
@@ -316,6 +324,9 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 				e.left, e.right = eyeFrames(buf, f)
 				e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
 			}
+			if err == nil && c.KeepDepth {
+				out, err = g.Download(d)
+			}
 		}
 		g.Release()
 		e.d = out
@@ -372,6 +383,37 @@ func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
 	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
 	return left, right
 }
+
+// Grade is Still with the picture flat when asked (on the screen, as the
+// credits are) and never flat otherwise, whatever the credits detector
+// made of it: a hand's grading. It gives the disparity's samples too.
+// The Estimate's depth must be there (KeepDepth, or Depth's).
+func (c *Converter) Grade(e *Estimate, s Shape, flat bool) (left, right *mvc.Frame, samples *Samples) {
+	keep, shape, fresh, factor := c.Shaper, e.shape, e.fresh, e.factor
+	c.Shaper, e.shape, e.fresh, e.factor = Shaper{Shape: s}, s, true, 1
+	if flat {
+		e.factor = 0
+	}
+	_, d := c.Shape(e)
+	c.Shaper, e.shape, e.fresh, e.factor = keep, shape, fresh, factor
+	left, right = Pair(e.f, d)
+	samples = SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
+	c.Window(left, right, samples)
+	return left, right, samples
+}
+
+// Depth is the Estimate's depth as the network gave it (larger nearer),
+// at the network's size, nil when there is none (a picture too short, or
+// a GPU's eyes without KeepDepth).
+func (e *Estimate) Depth() []float32 {
+	if e.d == nil {
+		return nil
+	}
+	return e.d.Data
+}
+
+// Frame is the picture the Estimate is of.
+func (e *Estimate) Frame() *mvc.Frame { return e.f }
 
 // refineGPU is refine on a GPU, the picture p and the depth dm there.
 func (c *Converter) refineGPU(g *nn.GPU, p *nn.Picture, dm *nn.Tensor, top, bottom int) *nn.Tensor {
