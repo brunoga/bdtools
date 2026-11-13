@@ -97,6 +97,7 @@ func main() {
 	flag.Float64Var(&shape.Screen, "screen", 0.57, "with -scale 0: the screen's place in that range (0 far, 1 near)")
 	flag.Float64Var(&shape.Scale, "scale", stereo.DefaultShape.Scale, "the depth as it is: disparity = scale depth + offset (fractions of the width; by default the network's, stereo.ShapeFor); 0: normalised a picture at a time")
 	flag.Float64Var(&shape.Offset, "offset", stereo.DefaultShape.Offset, "with -scale: the offset")
+	flag.Float64Var(&shape.Curve, "curve", 1, "with -scale: the depth bent within each shot's range, its nearness to this power (stereo.Shape.Curve; below 1 what is between comes forward)")
 	flag.StringVar(&dumpDir, "dump", "", "write each measured picture's maps to this directory, as PNG")
 	flag.StringVar(&refinePath, "refine", "", "refine the depth by these weights (tools/depthtrain's, or builtin), mapped by the refined depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	fillPath := flag.String("fill", "", "fill the made eyes' holes by these weights (tools/inpainttrain's) in place of the renderer's carried edge")

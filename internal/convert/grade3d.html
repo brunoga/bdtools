@@ -116,6 +116,11 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
     <input type="range" id="screen" min="-3" max="3" step="0.02">
     <input type="number" id="screenN" min="-5" max="5" step="0.05">
   </div>
+  <div class="knob">
+    <label for="curve" title="the depth bent within the shot's range: its nearness to this power; below 1 what lies between the shot's farthest and nearest comes forward (the rows of a crowd the network stacks away), above 1 it goes back">curve</label>
+    <input type="range" id="curve" min="0.2" max="3" step="0.02">
+    <input type="number" id="curveN" min="0.2" max="3" step="0.05">
+  </div>
   <div class="row">
     <label><input type="checkbox" id="flat"> flat (on the screen)</label>
     <button data-op="reset" title="the stretch back to the command's defaults">reset</button>
@@ -140,12 +145,12 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
     <strong>stretches</strong>
     <span><button data-op="save">save</button> <span class="dim" id="file"></span></span>
   </div>
-  <table id="shots"><thead><tr><th>start</th><th>end</th><th>depth</th><th>screen</th><th>flat</th><th>ramp</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="shots"><thead><tr><th>start</th><th>end</th><th>depth</th><th>screen</th><th>curve</th><th>flat</th><th>ramp</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
 <p class="dim" style="font-size:13px">
 <kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> a picture · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> 10 s · <kbd>[</kbd> <kbd>]</kbd> cuts ·
-<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D, <kbd>m</kbd> mixed into the right eye, <kbd>x</kbd> the difference, <kbd>o</kbd> ours · <kbd>s</kbd> save.
+<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>,</kbd> <kbd>.</kbd> curve ±0.05 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D, <kbd>m</kbd> mixed into the right eye, <kbd>x</kbd> the difference, <kbd>o</kbd> ours · <kbd>s</kbd> save.
 A turn of a knob grades the shot from its cut (or from this picture, when no cut is near, eased in over a second) to the next stretch.
 </p>
 
@@ -166,7 +171,7 @@ async function send(cmd) {
 }
 
 function knobs() {
-  return { depth: +$('depthN').value, screen: +$('screenN').value, flat: $('flat').checked };
+  return { depth: +$('depthN').value, screen: +$('screenN').value, curve: +$('curveN').value, flat: $('flat').checked };
 }
 
 // knob changes go out at most every 60 ms; the player keeps only the last
@@ -187,6 +192,7 @@ function setKnobUI(k) {
   if (dragging) return;
   $('depth').value = k.depth; $('depthN').value = k.depth.toFixed(2);
   $('screen').value = k.screen; $('screenN').value = k.screen.toFixed(2);
+  $('curve').value = k.curve; $('curveN').value = k.curve.toFixed(2);
   $('flat').checked = k.flat;
 }
 
@@ -207,7 +213,7 @@ function render() {
   $('extremes').textContent = st.knobs.flat ? 'flat' :
     'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
   setKnobUI(st.knobs);
-  $('stretch').textContent = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'the command\'s defaults (depth ' + st.defaults.depth + ', screen ' + st.defaults.screen + ')';
+  $('stretch').textContent = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'the command\'s defaults (depth ' + st.defaults.depth + ', screen ' + st.defaults.screen + (st.defaults.curve !== 1 ? ', curve ' + st.defaults.curve : '') + ')';
   // the bar
   const bar = $('bar'); bar.querySelectorAll('.band,.cut').forEach(e => e.remove());
   const L = st.length > 0 ? st.length : Math.max(st.t, 1);
@@ -234,7 +240,7 @@ function render() {
     const go = document.createElement('button'); go.textContent = 'go'; go.onclick = () => send({ op: 'seek', t: s.start });
     const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove'; del.onclick = () => send({ op: 'delete', i });
     tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
-      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
+      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.curve > 0 ? s.curve.toFixed(2) : '–'), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
     tb.appendChild(tr);
   });
@@ -333,7 +339,7 @@ $('bar').onclick = e => {
   const r = e.currentTarget.getBoundingClientRect();
   send({ op: 'seek', t: st.length * (e.clientX - r.left) / r.width });
 };
-for (const [range, num] of [['depth', 'depthN'], ['screen', 'screenN']]) {
+for (const [range, num] of [['depth', 'depthN'], ['screen', 'screenN'], ['curve', 'curveN']]) {
   $(range).oninput = () => { dragging = range; $(num).value = (+$(range).value).toFixed(2); sendKnobs(); };
   $(range).onchange = () => { dragging = null; sendKnobs(); };
   $(num).onchange = () => { $(range).value = $(num).value; sendKnobs(); };
@@ -358,6 +364,8 @@ document.addEventListener('keydown', e => {
   else if (k === 'ArrowDown') nudge('depth', -0.05);
   else if (k === 'PageUp') nudge('screen', 0.1);
   else if (k === 'PageDown') nudge('screen', -0.1);
+  else if (k === ',') nudge('curve', -0.05);
+  else if (k === '.') nudge('curve', 0.05);
   else if (k === 'f') { $('flat').checked = !$('flat').checked; sendKnobs(); }
   else if (k === 's') send({ op: 'save' });
   else if (k === 'd') toggleView('disc');
@@ -479,9 +487,9 @@ let vrHow = '';
 // presses what is under it.
 const panel = (() => {
   const canvas = document.createElement('canvas');
-  canvas.width = 800; canvas.height = 1220;
+  canvas.width = 800; canvas.height = 1380;
   const ctx = canvas.getContext('2d');
-  const W = 1.2, H = 1.83; // metres
+  const W = 1.2, H = 2.07; // metres
   // placed to the right, 2.6 m away, turned 38 degrees towards the viewer
   const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.55, cz = -2.4;
   const c = Math.cos(ang), sn = Math.sin(ang);
@@ -545,6 +553,9 @@ const panel = (() => {
       text('screen  ' + (k.screen >= 0 ? '+' : '') + k.screen.toFixed(2) + '%', 30, y + 32, '600 34px sans-serif'); y += 70;
       slider(-3, 3, k.screen, v => setKnobs(k.depth, v));
       row([['−0.5', () => nudgeKnobs(0, -0.5)], ['−0.1', () => nudgeKnobs(0, -0.1)], ['+0.1', () => nudgeKnobs(0, 0.1)], ['+0.5', () => nudgeKnobs(0, 0.5)]], 56, 10);
+      text('curve  ' + k.curve.toFixed(2), 30, y + 32, '600 34px sans-serif'); y += 70;
+      slider(0.2, 3, k.curve, v => setKnobs(k.depth, k.screen, v));
+      row([['−0.1', () => nudgeKnobs(0, 0, -0.1)], ['−0.05', () => nudgeKnobs(0, 0, -0.05)], ['+0.05', () => nudgeKnobs(0, 0, 0.05)], ['+0.1', () => nudgeKnobs(0, 0, 0.1)]], 56, 10);
       row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat], ['reset', () => send({ op: 'reset' })],
         ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud], ['save', () => send({ op: 'save' }), !st.saved]], 64, 10);
       if (st.ref) {
@@ -640,16 +651,19 @@ function controllers(session, xrFrame) {
     }
   }
 }
-function setKnobs(depth, screen) {
+function setKnobs(depth, screen, curve) {
   if (!st) return;
-  const k = { depth: +Math.min(Math.max(depth, 0.05), 5).toFixed(2), screen: +Math.min(Math.max(screen, -5), 5).toFixed(2), flat: st.knobs.flat };
-  if (k.depth === st.knobs.depth && k.screen === st.knobs.screen) return;
+  if (curve === undefined) curve = st.knobs.curve;
+  const k = { depth: +Math.min(Math.max(depth, 0.05), 5).toFixed(2), screen: +Math.min(Math.max(screen, -5), 5).toFixed(2),
+    curve: +Math.min(Math.max(curve, 0.2), 3).toFixed(2), flat: st.knobs.flat };
+  if (k.depth === st.knobs.depth && k.screen === st.knobs.screen && k.curve === st.knobs.curve) return;
   st.knobs = k; render(); panel.draw();
   send({ op: 'knobs', knobs: k });
 }
-function nudgeKnobs(dd, ds) {
+function nudgeKnobs(dd, ds, dc = 0) {
   if (!st) return;
-  const k = { depth: +(st.knobs.depth + dd).toFixed(2), screen: +(st.knobs.screen + ds).toFixed(2), flat: st.knobs.flat };
+  const k = { depth: +(st.knobs.depth + dd).toFixed(2), screen: +(st.knobs.screen + ds).toFixed(2),
+    curve: +Math.min(Math.max(st.knobs.curve + dc, 0.2), 3).toFixed(2), flat: st.knobs.flat };
   st.knobs = k; render();
   send({ op: 'knobs', knobs: k });
 }

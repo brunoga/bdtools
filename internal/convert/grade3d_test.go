@@ -14,7 +14,7 @@ func TestWriteShots3D(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "film.3d")
 	screen := -0.5
 	shots := []shot3D{
-		{Start: 90 * time.Second, End: 120 * time.Second, Depth: 1.25, Screen: &screen},
+		{Start: 90 * time.Second, End: 120 * time.Second, Depth: 1.25, Screen: &screen, Curve: 0.5},
 		{Start: 120 * time.Second, Flat: true},
 		{Start: 3*time.Hour + 2*time.Second + 500*time.Millisecond, End: 3*time.Hour + 10*time.Second, Depth: 2},
 	}
@@ -31,7 +31,7 @@ func TestWriteShots3D(t *testing.T) {
 	shots[1].End = shots[2].Start // an open stretch runs to the next line's start
 	for i, s := range shots {
 		b := back[i]
-		if b.Start != s.Start || b.End != s.End || b.Depth != s.Depth || b.Flat != s.Flat ||
+		if b.Start != s.Start || b.End != s.End || b.Depth != s.Depth || b.Curve != s.Curve || b.Flat != s.Flat ||
 			(s.Screen == nil) != (b.Screen == nil) || s.Screen != nil && *s.Screen != *b.Screen {
 			t.Errorf("stretch %d: %+v back, want %+v", i, b, s)
 		}

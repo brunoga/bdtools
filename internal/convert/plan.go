@@ -159,6 +159,11 @@ type Options struct {
 	To3D              bool
 	DepthModel        string
 	Depth3D, Screen3D float64
+	// Curve3D, when not 0 or 1, bends the depth within each shot's range:
+	// its nearness (0 the shot's farthest, 1 its nearest) to this power
+	// (stereo.Shape.Curve); below 1 what lies between comes forward, as
+	// the rows of a crowd a depth network stacks away behind each other.
+	Curve3D float64
 	// ScreenSize3D, when not zero, is the screen's diagonal in inches:
 	// --to-3d keeps what is behind its screen short of the eyes'
 	// separation there (stereo.ScreenFar).
@@ -396,6 +401,8 @@ func (o Options) Validate(goos string) error {
 			return fmt.Errorf("--3d-depth scales the depth, 0 to 5, 1 the depth that scores best against the 3D discs' (got %g)", o.Depth3D)
 		case o.Screen3D < -5 || o.Screen3D > 5:
 			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
+		case o.Curve3D != 0 && (o.Curve3D < 0.2 || o.Curve3D > 3):
+			return fmt.Errorf("--3d-curve bends the depth within each shot's range, 0.2 to 3, 1 as the network gives it (got %g)", o.Curve3D)
 		case o.ScreenSize3D != 0 && (o.ScreenSize3D < 10 || o.ScreenSize3D > 1000):
 			return fmt.Errorf("--3d-screen-size is the screen's diagonal, 10 to 1000 inches (got %g)", o.ScreenSize3D)
 		}

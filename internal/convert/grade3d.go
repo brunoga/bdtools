@@ -63,6 +63,7 @@ const (
 type gradeKnobs struct {
 	Depth  float64 `json:"depth"`
 	Screen float64 `json:"screen"`
+	Curve  float64 `json:"curve"` // 0: the command's
 	Flat   bool    `json:"flat"`
 }
 
@@ -655,6 +656,9 @@ func (g *grader) hudText() string {
 		state = ">"
 	}
 	text := fmt.Sprintf("%s %s  depth %.2f  screen %+.2f", clock(g.pos)[:len(clock(g.pos))-1], state, k.Depth, k.Screen)
+	if k.Curve != 0 && k.Curve != 1 {
+		text += fmt.Sprintf("  curve %.2f", k.Curve)
+	}
 	if k.Flat {
 		text += "  flat"
 	}
@@ -719,13 +723,13 @@ func (g *grader) shotShape(pts int64) (stereo.Shape, bool) {
 // shape is the knobs as the conversion's shape.
 func (g *grader) shape(k gradeKnobs) stereo.Shape {
 	o := g.r.Opts
-	o.Depth3D, o.Screen3D = k.Depth, k.Screen
+	o.Depth3D, o.Screen3D, o.Curve3D = k.Depth, k.Screen, k.Curve
 	return o.shape3D(g.model.Size())
 }
 
 // defaults are the command's knobs, where no stretch says otherwise.
 func (g *grader) defaults() gradeKnobs {
-	return gradeKnobs{Depth: g.r.Opts.depth3D(), Screen: g.r.Opts.Screen3D}
+	return gradeKnobs{Depth: g.r.Opts.depth3D(), Screen: g.r.Opts.Screen3D, Curve: g.r.Opts.curve3D()}
 }
 
 // knobsAt is the grade at a time of the film.
@@ -744,6 +748,9 @@ func (g *grader) knobsAtLocked(t time.Duration) gradeKnobs {
 		}
 		if s.Screen != nil {
 			k.Screen = *s.Screen
+		}
+		if s.Curve > 0 {
+			k.Curve = s.Curve
 		}
 		k.Flat = s.Flat
 	}
@@ -818,7 +825,7 @@ func (g *grader) setKnobs(k gradeKnobs) {
 		g.shots = slices.Insert(g.shots, i, s)
 	}
 	screen := k.Screen
-	g.shots[i].Depth, g.shots[i].Screen, g.shots[i].Flat = k.Depth, &screen, k.Flat
+	g.shots[i].Depth, g.shots[i].Screen, g.shots[i].Curve, g.shots[i].Flat = k.Depth, &screen, k.Curve, k.Flat
 	g.want.regrade = true
 	g.saved = false
 	g.wakeUp()
@@ -918,6 +925,7 @@ type gradeShot struct {
 	End    float64  `json:"end"`
 	Depth  float64  `json:"depth"`
 	Screen *float64 `json:"screen"`
+	Curve  float64  `json:"curve"`
 	Flat   bool     `json:"flat"`
 	Ramp   float64  `json:"ramp"`
 }
@@ -930,7 +938,7 @@ func (g *grader) state() gradeState {
 		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD, Version: g.r.Version,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
-		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})
+		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Curve: s.Curve, Flat: s.Flat, Ramp: s.Ramp})
 	}
 	for _, c := range g.cuts {
 		st.Cuts = append(st.Cuts, c.Seconds())
@@ -1005,9 +1013,9 @@ func (g *grader) command(c gradeCommand) error {
 			return errors.New("knobs: none given")
 		}
 		k := *c.Knobs
-		if k.Depth <= 0 || k.Depth > 5 || k.Screen < -5 || k.Screen > 5 {
+		if k.Depth <= 0 || k.Depth > 5 || k.Screen < -5 || k.Screen > 5 || k.Curve != 0 && (k.Curve < 0.2 || k.Curve > 3) {
 			g.mu.Unlock()
-			return errors.New("knobs: depth above 0 to 5, screen -5 to 5")
+			return errors.New("knobs: depth above 0 to 5, screen -5 to 5, curve 0.2 to 3")
 		}
 		g.mu.Unlock()
 		g.setKnobs(k)

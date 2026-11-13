@@ -117,6 +117,24 @@ func (o Options) to3DKey() [4]float64 {
 // flatter than the discs.
 const DefaultDepth3D = 1.5
 
+// curve3D is the depth's curve asked for (Curve3D), 1 when not: as the
+// network gives it.
+func (o Options) curve3D() float64 {
+	if o.Curve3D > 0 {
+		return o.Curve3D
+	}
+	return 1
+}
+
+// curve3DKey is the curve as the resume key takes it: 0 when the depth
+// is as the network gives it, so the key is as it was.
+func (o Options) curve3DKey() float64 {
+	if c := o.curve3D(); c != 1 {
+		return c
+	}
+	return 0
+}
+
 // depth3D is the depth's strength asked for, DefaultDepth3D when not.
 func (o Options) depth3D() float64 {
 	if o.Depth3D > 0 {
@@ -191,6 +209,9 @@ func (o Options) shape3D(size string) stereo.Shape {
 	s.Scale *= o.depth3D()
 	s.Offset *= o.depth3D()
 	s.Offset += o.Screen3D / 100
+	if c := o.curve3D(); c != 1 {
+		s.Curve = c // 0: as the network gives it, the shape as it was
+	}
 	if o.ScreenSize3D > 0 {
 		s.Far = stereo.ScreenFar(o.ScreenSize3D)
 	}
