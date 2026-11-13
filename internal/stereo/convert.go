@@ -311,6 +311,9 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		far := float32(e.shape.Far * w)
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim)
 		eyes, mask = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
+		if mask != nil {
+			c.Fill.FillGPU(g, eyes, mask, f.Width, f.Height, top, bottom)
+		}
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}
 	return func() error {
@@ -328,9 +331,6 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 				e.left, e.right = eyeFrames(buf, f)
 				e.samples = samplesSplit(dt.Data, f.Width, top, bottom)
 			}
-			if err == nil && mask != nil {
-				err = c.fillGPU(g, mask, e)
-			}
 			if err == nil && c.KeepDepth {
 				out, err = g.Download(d)
 			}
@@ -339,26 +339,6 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		e.d = out
 		return err
 	}
-}
-
-// fillGPU fills the holes of an Estimate's eyes (the GPU's) by the
-// filler: the mask downloaded, each eye filled on g.
-func (c *Converter) fillGPU(g *nn.GPU, mask *nn.Tensor, e *Estimate) error {
-	w, h := e.f.Width, e.f.Height
-	mb := make([]byte, 2*w*h)
-	if err := g.DownloadBytes(mb, mask); err != nil {
-		return err
-	}
-	for i, eye := range []*mvc.Frame{e.left, e.right} {
-		holes := make([]bool, w*h)
-		for j, v := range mb[i*w*h : (i+1)*w*h] {
-			holes[j] = v != 0
-		}
-		if err := c.Fill.Fill(g, eye, holes, e.top, e.bottom); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // fillPair fills a pair's holes (Render's) by the filler on the model's

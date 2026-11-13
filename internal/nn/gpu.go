@@ -66,7 +66,7 @@ func NewGPU() (*GPU, error) {
 	for _, name := range []string{"gemm_nn", "gemm_nt", "conv2d", "layernorm", "groupnorm", "softmax", "gelu", "relu",
 		"add", "addscaled", "geglu", "split3", "transpose", "tokens", "bilinear", "convt", "temporal",
 		"gemm_nn_tc", "gemm_nt_tc", "conv2d_tc", "gemm_nn_tc_64", "gemm_nt_tc_64", "conv2d_tc_64",
-		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp",
+		"net_input", "moments_part", "moments_sum", "refine_input", "renorm", "inpaint_input", "inpaint_apply_y", "inpaint_apply_c", "attention_tc", "disparity", "eyes", "eyes_warp", "disp_samples", "temporal_warp",
 		"im2col", "col2im", "rowsum", "relu_back", "convt_bx", "convt_bw", "sumparts", "fill", "bilinear_back",
 		"layernorm_back", "groupnorm_back", "geglu_back", "temporal_back", "temporal_pe_back",
 		"gelu_back", "softmax_back", "mul", "mulcols", "join3",

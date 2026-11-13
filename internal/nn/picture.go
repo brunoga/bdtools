@@ -126,6 +126,37 @@ func (g *GPU) EyesMask(p *Picture, d *Tensor, gap float32, withMask bool) (eyes,
 	return out, mask
 }
 
+// InpaintInput is the hole filler's input for an eye (0 the left, 1 the
+// right) of Eyes' output of a w x h picture and EyesMask's mask, its
+// rows [top, bottom): [4, ph, pw] (pw, ph the sides padded to a multiple
+// of 8), as stereo.InpaintInput makes it.
+func (g *GPU) InpaintInput(eyes, mask *Tensor, eye, w, h, top, bottom int) *Tensor {
+	ah := bottom - top
+	pw, ph := (w+7)/8*8, (ah+7)/8*8
+	x := g.tensor(4, ph, pw)
+	cw, ch := (w+1)/2, (h+1)/2
+	base := ptr(eyes) + uintptr(eye*(w*h+2*cw*ch))
+	m := ptr(mask) + uintptr(eye*w*h+top*w)
+	gr, bl := each(pw * ph)
+	g.launch("inpaint_input", gr, bl, 0, w, ah, pw, ph, base+uintptr(top*w), w,
+		base+uintptr(w*h+top/2*cw), base+uintptr(w*h+cw*ch+top/2*cw), cw, m, ptr(x))
+	return x
+}
+
+// InpaintApply takes the filler's corrections d ([3, ph, pw], InpaintInput's
+// padding) into an eye of Eyes' output, in place, where the mask says hole.
+func (g *GPU) InpaintApply(eyes, mask *Tensor, eye, w, h, top, bottom int, d *Tensor) {
+	ah := bottom - top
+	pw, ph := (w+7)/8*8, (ah+7)/8*8
+	cw, ch := (w+1)/2, (h+1)/2
+	base := ptr(eyes) + uintptr(eye*(w*h+2*cw*ch))
+	m := ptr(mask) + uintptr(eye*w*h+top*w)
+	gr, bl := each(w * ah)
+	g.launch("inpaint_apply_y", gr, bl, 0, w, ah, pw, ph, base+uintptr(top*w), w, m, ptr(d))
+	gr, bl = each(cw * (ah + 1) / 2)
+	g.launch("inpaint_apply_c", gr, bl, 0, w, ah, pw, ph, base+uintptr(w*h+top/2*cw), base+uintptr(w*h+cw*ch+top/2*cw), cw, m, ptr(d))
+}
+
 // EyesSize is the bytes of a w x h picture's two eyes (Eyes').
 func EyesSize(w, h int) int {
 	cw, ch := (w+1)/2, (h+1)/2

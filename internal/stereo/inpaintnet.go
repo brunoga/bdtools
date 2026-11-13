@@ -155,6 +155,36 @@ func (iw *InpaintWeights) Inpaint(be nn.Backend, x *nn.Tensor) *nn.Tensor {
 	return h
 }
 
+// upload puts the weights on a backend, once.
+func (f *Filler) upload(be nn.Backend) {
+	if f.on != nil && f.be == be {
+		return
+	}
+	f.on = &InpaintWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
+	for _, l := range InpaintLayers {
+		for _, p := range []struct{ to, from map[string]*nn.Tensor }{{f.on.W, f.w.W}, {f.on.B, f.w.B}} {
+			t := be.Upload(p.from[l.Name])
+			be.Keep(t)
+			p.to[l.Name] = t
+		}
+	}
+	f.be = be
+}
+
+// FillGPU fills the holes of both eyes of nn.GPU.Eyes' output (with
+// EyesMask's mask) of a w x h picture, rows [top, bottom), in place on
+// the GPU: queued, nothing crosses to the CPU.
+func (f *Filler) FillGPU(g *nn.GPU, eyes, mask *nn.Tensor, w, h, top, bottom int) {
+	f.upload(g)
+	if bottom-top < 8 {
+		return
+	}
+	for eye := range 2 {
+		x := g.InpaintInput(eyes, mask, eye, w, h, top, bottom)
+		g.InpaintApply(eyes, mask, eye, w, h, top, bottom, f.on.Inpaint(g, x))
+	}
+}
+
 // ApplyInpaint takes the filler's corrections (Inpaint's, downloaded:
 // [3, H, W] for the rows [top, bottom) of eye, padded) into eye's holes:
 // a luma pixel that is a hole, a chroma sample any of whose luma pixels
@@ -213,17 +243,7 @@ func NewFiller(w *InpaintWeights) *Filler { return &Filler{w: w} }
 // in the holes. On a GPU the caller releases the pass's memory
 // (nn.GPU.Release) after; the weights stay.
 func (f *Filler) Fill(be nn.Backend, eye *mvc.Frame, holes []bool, top, bottom int) error {
-	if f.on == nil || f.be != be {
-		f.on = &InpaintWeights{W: map[string]*nn.Tensor{}, B: map[string]*nn.Tensor{}}
-		for _, l := range InpaintLayers {
-			for _, p := range []struct{ to, from map[string]*nn.Tensor }{{f.on.W, f.w.W}, {f.on.B, f.w.B}} {
-				t := be.Upload(p.from[l.Name])
-				be.Keep(t)
-				p.to[l.Name] = t
-			}
-		}
-		f.be = be
-	}
+	f.upload(be)
 	if bottom-top < 8 {
 		return nil
 	}
