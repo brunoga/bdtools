@@ -723,6 +723,43 @@ against the defaults is `--3d-depth 1.3 --3d-screen 0.17`; a film's
 own 3D release, where one exists, is the way to find its grade, as
 `tools/stereobench` does.
 
+## Grading live
+
+Numbers in a file are a poor way to grade by eye. `--3d-grade ADDR`
+converts the film as it plays and serves it as a 3D stream, for the
+player at the 3D screen, with a web page to drive it:
+
+```sh
+bdtools --input "Film (2020).mkv" --output "Film (2020).3d" --to-3d --3d-grade :8420
+```
+
+The stream is at `http://HOST:8420/stream.ts`, full side by side at
+the source's size (1080p an eye), H.264 in a transport stream that
+Kodi, VLC and most players read live: on a box at the projector, a
+`.strm` file holding that address (named with the library's 3D tag,
+`Film 3D FSBS.strm`, so the player picks the mode) plays it like any
+film. The page is at `http://HOST:8420/`: play, pause, a picture or ten
+seconds either way, the cut before or after, a click on the timeline to
+seek, and the two knobs, depth and screen (`--3d-depth`'s and
+`--3d-screen`'s), with `flat` for a shot that belongs on the screen. A
+paused picture keeps its depth, so a turn of a knob shows at the next
+picture's time; the only wait is the player's own buffer (Kodi's a few
+seconds by default, under one with its cache turned down).
+
+A turn of a knob grades a stretch: from the last cut when one is within
+two seconds (a hand reacts to a shot a moment late), else from the
+picture shown, to the next stretch or the end. The grade is written to
+`--output` as a `--3d-shots` file at every change, and the conversion
+proper applies it with `--3d-shots`; `--3d-shots` on the grading
+command starts from a file written before. The page shows where the
+picture's nearest and farthest come out, in percent of the width and in
+pixels, the cuts seen so far on the timeline, and the stretches.
+
+The depth network runs as the film plays (it is faster than the film on
+a GPU), so nothing is precomputed and any film opens at once; the
+stream needs NVENC. The eyes are H.264 for the players' sake; the
+conversion proper encodes as asked.
+
 ## Milestones
 
 1. **Depth in Go** (done): `internal/nn` on the CPU; Video Depth Anything

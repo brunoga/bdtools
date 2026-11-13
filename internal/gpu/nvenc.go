@@ -172,6 +172,13 @@ func (e *nvenc) open() error {
 	cfg.u32(nvCfgFrameIntervalP, 4)            // three B-frames
 	rc := nvCfgRCParams
 	cfg.u32(rc, nvRCParamsVer)
+	if e.cfg.LowLatency {
+		// P-frames only, nothing held back for a decision: a frame in, a
+		// frame out.
+		cfg.u32(nvCfgFrameIntervalP, 1)
+		cfg.u32(rc+nvRCFlags, cfg.getU32(rc+nvRCFlags)&^(1<<nvRCLookaheadBit))
+		cfg.u32(rc+nvRCMultiPass, 0)
+	}
 	if e.cfg.CQ > 0 && e.cfg.Codec != AV1 {
 		// No average bitrate, no VBV: only the quality, up to a ceiling.
 		// Left at 0 the driver sets one of its own, which on a grainy 4K
@@ -441,6 +448,9 @@ func (e *nvenc) submit(view int, fill func(*Picture)) error {
 		// meanwhile the decoder can be drawing the next pictures.
 		e.ready = append(e.ready, e.pending...)
 		e.pending = e.pending[:0]
+		if e.cfg.LowLatency {
+			return e.drain(e.buffers())
+		}
 		return e.drain(e.spare())
 	}
 	e.err = e.status("encoding", st)

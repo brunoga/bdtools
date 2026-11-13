@@ -181,6 +181,7 @@ type keyStart struct {
 	video   uint64
 	started bool
 	aus     int
+	limit   int // access units before it ends (0: no end)
 }
 
 func (k *keyStart) Next() (mkv.Packet, error) {
@@ -193,7 +194,7 @@ func (k *keyStart) Next() (mkv.Packet, error) {
 			continue
 		}
 		k.started = true
-		if k.aus++; k.aus > cropAUs {
+		if k.aus++; k.limit > 0 && k.aus > k.limit {
 			return mkv.Packet{}, io.EOF
 		}
 		return p, nil
@@ -202,6 +203,12 @@ func (k *keyStart) Next() (mkv.Packet, error) {
 
 // matroskaFeed samples a Matroska or MP4 source's video.
 func (r *Runner) matroskaFeed(src *mkvSource, sel Selection) (sampleFeed, func(), error) {
+	return r.matroskaFeedN(src, sel, cropAUs)
+}
+
+// matroskaFeedN is matroskaFeed, each place giving up to limit access
+// units (0: to the file's end).
+func (r *Runner) matroskaFeedN(src *mkvSource, sel Selection, limit int) (sampleFeed, func(), error) {
 	g := newMkvDemux(src, Selection{Base: sel.Base}, "", r.Report)
 	if err := g.start(); err != nil {
 		return nil, nil, err
@@ -220,7 +227,7 @@ func (r *Runner) matroskaFeed(src *mkvSource, sel Selection) (sampleFeed, func()
 			return nil, nil, err
 		}
 		c := *inner
-		c.frameReader = &keyStart{frameReader: inner.frameReader, video: g.video}
+		c.frameReader = &keyStart{frameReader: inner.frameReader, video: g.video, limit: limit}
 		g.r = &c
 		g.params = params
 		clear(g.deps)
@@ -232,6 +239,13 @@ func (r *Runner) matroskaFeed(src *mkvSource, sel Selection) (sampleFeed, func()
 // discFeed samples a disc title's video, its clips one after another by
 // their sizes.
 func (r *Runner) discFeed(src *goSource, sel Selection) (sampleFeed, func(), error) {
+	return r.discFeedN(src, sel, cropAUs, false)
+}
+
+// discFeedN is discFeed, each place giving up to limit access units (0:
+// to the title's end, clip after clip), their timestamps tagged with
+// their clip's index (goDemux.tag's form) when tag.
+func (r *Runner) discFeedN(src *goSource, sel Selection, limit int, tag bool) (sampleFeed, func(), error) {
 	sizes := make([]int64, len(src.clips))
 	var total int64
 	for i, c := range src.clips {
@@ -276,6 +290,17 @@ func (r *Runner) discFeed(src *goSource, sel Selection) (sampleFeed, func(), err
 			for {
 				p, err := rd.Next()
 				if err != nil {
+					if limit == 0 && i+1 < len(src.clips) {
+						// the next clip
+						_ = f.Close()
+						i++
+						if f, _, err = src.clips[i].open(); err != nil {
+							return nil, nil, 0, err
+						}
+						rd = m2ts.NewReader(f)
+						rd.Select(pid)
+						continue
+					}
 					return nil, nil, 0, io.EOF
 				}
 				if p.PID != pid {
@@ -285,10 +310,14 @@ func (r *Runner) discFeed(src *goSource, sel Selection) (sampleFeed, func(), err
 					continue
 				}
 				started = true
-				if aus++; aus > cropAUs {
+				if aus++; limit > 0 && aus > limit {
 					return nil, nil, 0, io.EOF
 				}
-				return append([]byte(nil), p.Payload...), nil, p.PTS, nil
+				pts := p.PTS
+				if tag {
+					pts |= int64(i) << ptsTagShift
+				}
+				return append([]byte(nil), p.Payload...), nil, pts, nil
 			}
 		}
 		return next, func() { _ = f.Close() }, nil

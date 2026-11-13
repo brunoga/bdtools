@@ -271,6 +271,13 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 	if r.Opts.Preview3D {
 		return r.preview3D(sel.Base, func() (sampleFeed, func(), error) { return r.discFeed(src, sel) })
 	}
+	if r.Opts.Grade3D != "" {
+		live, err := r.discLive(src, sel)
+		if err != nil {
+			return err
+		}
+		return r.grade3D(ctx, live)
+	}
 	g := newGoDemux(src, sel, tmp, r.Report)
 	g.setTrim(r.Opts.Trim)
 	r.timeline = g.timeline

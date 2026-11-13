@@ -169,6 +169,10 @@ type Options struct {
 	// Preview3D makes stills of --to-3d's pairs at a few places and
 	// depths, into Output, a directory, instead of converting.
 	Preview3D bool
+	// Grade3D, when set, is the address a live grading serves at
+	// (grade3d.go): the film converted as it plays, its depth turned by
+	// hand; Output is the --3d-shots file written.
+	Grade3D string
 	// NoWindow3D leaves out the floating window: the black strips down a
 	// side of one eye that put the picture's edge in front of what comes
 	// out of the screen there.
@@ -440,7 +444,16 @@ func (o Options) Validate(goos string) error {
 		if !o.To3D {
 			return fmt.Errorf("--3d-preview makes stills of --to-3d's pairs: give --to-3d")
 		}
+		if o.Grade3D != "" {
+			return fmt.Errorf("--3d-preview and --3d-grade: one at a time")
+		}
 		return nil // --output is the stills' directory
+	}
+	if o.Grade3D != "" {
+		if !o.To3D {
+			return fmt.Errorf("--3d-grade grades --to-3d's depth by hand: give --to-3d")
+		}
+		return nil // --output is the --3d-shots file written
 	}
 	for _, f := range o.SubsFiles {
 		switch strings.ToLower(filepath.Ext(f.Path)) {
