@@ -45,6 +45,15 @@ const video = $('v');
 let st = null, mime = null;
 
 function say(m) { $('msg').textContent = m; }
+// telemetry: what the page sees, to the server's log
+function tele(m) {
+  const line = (performance.now() / 1000).toFixed(1) + 's ' + m;
+  try { fetch('/api/log', { method: 'POST', body: line, keepalive: true }); } catch (e) {}
+}
+window.addEventListener('error', e => tele('error: ' + e.message + ' at ' + e.filename + ':' + e.lineno));
+window.addEventListener('unhandledrejection', e => tele('rejection: ' + (e.reason && e.reason.message || e.reason)));
+tele('page: ' + navigator.userAgent + ' | secure ' + window.isSecureContext + ' | xr ' + !!navigator.xr + ' | XRMediaBinding ' + !!window.XRMediaBinding +
+  ' | XRWebGLBinding ' + !!window.XRWebGLBinding + ' | MediaSource ' + ('MediaSource' in window) + ' | VideoDecoder ' + ('VideoDecoder' in window) + ' | rVFC ' + !!HTMLVideoElement.prototype.requestVideoFrameCallback);
 async function send(cmd) {
   try { await fetch('/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) }); } catch (e) {}
 }
@@ -134,14 +143,24 @@ function vrCheck() {
 }
 vrCheck();
 $('vr').onclick = async () => {
+  tele('enter VR: video ' + video.videoWidth + 'x' + video.videoHeight + ' ready ' + video.readyState + ' paused ' + video.paused);
   try {
     session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
-  } catch (e) { say('no VR session: ' + e.message); return; }
+  } catch (e) { say('no VR session: ' + e.message); tele('requestSession failed: ' + e.message); return; }
+  tele('session: features ' + (session.enabledFeatures ? Array.from(session.enabledFeatures).join(',') : '?') + ' | rates ' + (session.supportedFrameRates ? Array.from(session.supportedFrameRates).join('/') : '?') + ' | frameRate ' + session.frameRate);
   const space = await session.requestReferenceSpace('local-floor');
-  let rate = '';
+  tele('reference space ok');
+  let rate = '', how = 'WebGL';
+  // the controllers first, so that a failure of the picture's path still
+  // leaves a way out (both grips)
+  session.requestAnimationFrame(function frame(t, xrFrame) {
+    if (!session) return;
+    session.requestAnimationFrame(frame);
+    try { controllers(session, xrFrame); } catch (e) { tele('controllers: ' + e.message); }
+  });
+  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); tele('left VR: ' + how + ' ' + rate + ' ' + glNote); hud(); });
   // a 4 m wide, 16:9 screen, 3.5 m away, eye height
   const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
-  let how = 'WebGL';
   const forceGL = new URLSearchParams(location.search).get('webgl') === '1';
   if (window.XRMediaBinding && !forceGL) {
     // the browser shows the video itself, each half to its eye, at the
@@ -152,10 +171,14 @@ $('vr').onclick = async () => {
         transform: new XRRigidTransform({ x: 0, y: Y, z: Z }) });
       session.updateRenderState({ layers: [layer] });
       how = 'media layer';
-    } catch (e) { how = 'WebGL (no media layer: ' + e.message + ')'; }
+      tele('media layer: ' + layer.width + 'x' + layer.height + ' layout ' + layer.layout + ' mipLevels ' + layer.mipLevels);
+    } catch (e) { how = 'WebGL (no media layer: ' + e.message + ')'; tele('media layer failed: ' + e.message); }
   }
-  if (how.startsWith('WebGL')) webglScreen(session, space, W, H, Y, Z);
+  if (how.startsWith('WebGL')) {
+    try { webglScreen(session, space, W, H, Y, Z); } catch (e) { glNote = 'setup: ' + e.message; tele('webgl setup failed: ' + e.message + ' ' + (e.stack || '')); }
+  }
   vrHow = how;
+  tele('path: ' + how + (forceGL ? ' (forced)' : ''));
   // the display's rate a multiple of the film's 24: 72 (each picture
   // three refreshes) or 120, not the 90 a Quest wakes at, where every
   // fourth picture is held a refresh longer and the film judders; asked
@@ -183,15 +206,10 @@ $('vr').onclick = async () => {
       text += ' ' + ((q.totalVideoFrames - lastQ.totalVideoFrames) / dt).toFixed(1) + ' fps, dropped ' + (q.droppedVideoFrames - lastQ.droppedVideoFrames);
       lastQ = q; lastAt = performance.now();
     }
-    text += ', page ' + document.visibilityState + (video.paused ? ', video paused' : '') + ', lag ' + lag().toFixed(2);
+    text += ', page ' + document.visibilityState + (video.paused ? ', video paused' : '') + ', lag ' + lag().toFixed(2) + ', t ' + video.currentTime.toFixed(2) + ', rate ' + rate;
     send({ op: 'note', text });
+    tele('vr: ' + text);
   }, 2000);
-  session.requestAnimationFrame(function frame(t, xrFrame) {
-    if (!session) return;
-    session.requestAnimationFrame(frame);
-    controllers(session, xrFrame);
-  });
-  session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); hud(); });
 };
 let vrHow = '';
 
@@ -249,8 +267,10 @@ let glNote = ''; // what the WebGL path has to say, into the readout
 function webglScreen(session, space, W, H, Y, Z) {
   const canvas = document.createElement('canvas');
   const gl = canvas.getContext('webgl2', { xrCompatible: true });
-  if (!gl) { glNote = 'no WebGL2'; return; }
-  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  if (!gl) { glNote = 'no WebGL2'; tele('webgl: no WebGL2 context'); return; }
+  const base = new XRWebGLLayer(session, gl);
+  session.updateRenderState({ baseLayer: base });
+  tele('webgl: layer ' + base.framebufferWidth + 'x' + base.framebufferHeight + ' max texture ' + gl.getParameter(gl.MAX_TEXTURE_SIZE) + ' renderer ' + gl.getParameter(gl.RENDERER));
   const vs = `#version 300 es
     in vec2 p; in vec2 uv; uniform mat4 mvp; out vec2 v; void main(){ v = uv; gl_Position = mvp * vec4(p, 0.0, 1.0); }`;
   const fs = `#version 300 es
@@ -264,6 +284,7 @@ function webglScreen(session, space, W, H, Y, Z) {
   }
   gl.linkProgram(prog); gl.useProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) glNote = 'link: ' + gl.getProgramInfoLog(prog);
+  tele('webgl: program ' + (glNote || 'ok'));
   const quad = new Float32Array([-W/2, Y-H/2, 0, 0,  W/2, Y-H/2, 1, 0,  -W/2, Y+H/2, 0, 1,  W/2, Y+H/2, 1, 1]);
   const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
   const p = gl.getAttribLocation(prog, 'p'), uv = gl.getAttribLocation(prog, 'uv');
@@ -295,8 +316,14 @@ function webglScreen(session, space, W, H, Y, Z) {
       if (draws % 144 === 0) {
         const err = gl.getError();
         glNote = (err ? 'gl error ' + err + ', ' : 'gl ok, ') + uploads + ' uploads, ' + draws + ' draws, ' + video.videoWidth + 'x' + video.videoHeight + ', ready ' + video.readyState;
+        if (draws % 720 === 0) {
+          // a pixel of the frame, to see whether anything is drawn
+          const px = new Uint8Array(4);
+          gl.readPixels(Math.floor(base.framebufferWidth / 4), Math.floor(base.framebufferHeight / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          tele('webgl: ' + glNote + ', views ' + pose.views.length + ', pixel ' + Array.from(px).join(','));
+        }
       }
-    } catch (e) { glNote = 'draw: ' + e.message; return; }
+    } catch (e) { glNote = 'draw: ' + e.message; tele('webgl draw error: ' + e.message); return; }
     try {
       const pose = frame.getViewerPose(space), layer = session.renderState.baseLayer;
       for (const view of pose.views) {

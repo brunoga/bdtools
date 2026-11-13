@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -1070,6 +1071,12 @@ func (g *grader) handler() http.Handler {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /api/log", func(w http.ResponseWriter, r *http.Request) {
+		// a player's telemetry, into the report (and so the log)
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		g.r.Report.Report("--3d-grade: player %s: %s", r.RemoteAddr, strings.TrimSpace(string(b)))
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /events", g.serveEvents)
