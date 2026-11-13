@@ -23,6 +23,9 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   side-by-side or over-under file) beside the conversion: the page's
   `disc` button switches the stream to its pair at the same moment,
   `align` finds the offset between the two files by their pictures.
+- `--3d-grade` takes a 3D file (side by side or over-under) as its
+  input: its left eye is converted and its own pair is the reference,
+  on one clock, for the sharpest comparison with the disc.
 - `--3d-shots` takes `ramp=SECONDS` on a stretch that begins within a
   shot: its depth and screen ease in from the stretch before's over that
   long. A live grading writes it for a turn made with no cut near.
