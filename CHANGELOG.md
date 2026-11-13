@@ -14,6 +14,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   left eye, both, or a red-cyan anaglyph), and the stream carries a
   readout drawn into both eyes, time, knobs, stretch and view, for the
   projector and the headset; a box on the page turns it off.
+- `--3d-grade`'s headset page decodes the stream itself in VR
+  (`/stream.raw`, WebCodecs) and draws it through WebGL at the film's
+  rate, asks the headset for a 72 Hz display, leaves VR on both grips,
+  and reports what it sees to the server's log (`POST /api/log`).
 - `--3d-grade` serves over HTTPS too, on the next port, with a
   certificate of its own making kept in the cache: a headset's browser
   allows WebXR on a secure page only, so `/quest` is opened there.

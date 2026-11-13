@@ -400,7 +400,7 @@ function webglScreen(session, space, W, H, Y, Z) {
           tele('webgl: ' + glNote + ', views ' + pose.views.length + ', pixel ' + Array.from(px).join(','));
         }
       }
-    } catch (e) { glNote = 'draw: ' + e.message; tele('webgl draw error: ' + e.message); return; }
+    } catch (e) { if (session) { glNote = 'draw: ' + e.message; tele('webgl draw error: ' + e.message); } return; }
     try {
       for (const view of pose.views) {
         const vp = layer.getViewport(view);

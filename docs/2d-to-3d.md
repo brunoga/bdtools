@@ -774,7 +774,15 @@ WebXR runs on a secure page only, and a plain HTTP page on a LAN
 address is not one) plays the stream through the page's own media
 source (`/stream.mp4`, the same pictures as a fragmented MP4), held at
 its live edge, under a tenth of a second behind; Enter VR puts it on a
-4 m screen as a stereo layer, each half to its eye. The controllers
+4 m screen, each half to its eye. In VR the page decodes the stream
+itself (`/stream.raw`, the frames with their times; WebCodecs) and
+draws each through WebGL, paced by their times: a video element behind
+a VR session is composited at a few frames a second by the browser,
+which starved both its media layer and a copy of it. The page asks the
+headset for a 72 Hz display, where 24 pictures a second sit evenly.
+Both grips held a second leave VR. What the page sees goes to the
+server's log (`POST /api/log`): the browser, each step into VR, errors,
+and the frames decoded and shown. The controllers
 turn the knobs: the right stick up and down for the depth, left and
 right for the screen, the right trigger plays and pauses, the right
 grip makes a shot flat, A and B step a picture, the left stick jumps
