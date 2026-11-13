@@ -38,7 +38,6 @@ import (
 //go:embed grade3d.html
 var grade3DPage []byte
 
-
 //go:embed icon.svg
 var bdtoolsIcon []byte
 
@@ -899,7 +898,8 @@ type gradeState struct {
 	Title    string         `json:"title"`
 	Ref      *gradeRefState `json:"ref"`
 	Secure   string         `json:"secure"` // the HTTPS side's address, for VR
-	HUD      bool           `json:"hud"`    // the readout drawn into the stream
+	Version  string         `json:"version"`
+	HUD      bool           `json:"hud"` // the readout drawn into the stream
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -927,7 +927,7 @@ func (g *grader) state() gradeState {
 	defer g.mu.Unlock()
 	st := gradeState{Ver: g.ver, T: g.pos.Seconds(), Length: g.src.length.Seconds(), Frame: g.frameOr().Seconds(),
 		Playing: g.want.playing, Knobs: g.knobsAtLocked(g.pos), Defaults: g.defaults(), Stretch: shotAt(g.shots, g.pos),
-		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD,
+		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD, Version: g.r.Version,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
 		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Flat: s.Flat, Ramp: s.Ramp})

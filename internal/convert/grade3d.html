@@ -9,9 +9,13 @@
 :root { color-scheme: dark; --bg:#14161a; --fg:#e8e8e8; --dim:#9a9a9a; --acc:#5fb0ff; --warn:#ffb050; --ok:#7bd88f; --band:#2b4a6a; }
 * { box-sizing: border-box; }
 body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif; max-width:1100px; margin-inline:auto; }
-h1 { font-size:17px; font-weight:600; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:10px; }
-h1 img { width:28px; height:28px; flex:none; }
-h1 span { overflow:hidden; text-overflow:ellipsis; }
+#banner { display:flex; align-items:center; gap:14px; padding:4px 0 12px; margin-bottom:10px; border-bottom:1px solid #2c3139; }
+#banner img { width:56px; height:56px; flex:none; }
+.name { font-size:26px; font-weight:700; letter-spacing:.5px; }
+.version { font-size:14px; font-weight:400; color:var(--dim); margin-left:6px; }
+.tagline { color:var(--dim); font-size:14px; }
+.tagline em { color:var(--acc); font-style:normal; }
+h1 { font-size:17px; font-weight:600; margin:0 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dim { color:var(--dim); }
 .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
 .clock { font:600 34px/1 ui-monospace, monospace; letter-spacing:1px; }
@@ -47,12 +51,23 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 </head>
 <body>
 <div id="vrprompt" hidden>
-  <img src="/icon.svg" alt="" style="width:96px;height:96px">
+  <img src="/icon.svg" alt="" style="width:120px;height:120px">
+  <div style="text-align:center">
+    <div class="name" style="font-size:40px">bdtools <span id="version2" class="version"></span></div>
+    <div class="tagline" style="font-size:18px">Blu-ray tools in pure Go &middot; <em>Depth, graded by eye.</em></div>
+  </div>
   <button id="vrbig" class="primary">Enter VR</button>
   <span id="vrnote" class="dim"></span>
   <a href="#" id="vrstay" class="dim" style="font-size:14px">stay on the page</a>
 </div>
-<h1><img src="/icon.svg" alt=""><span id="title">bdtools 3D grade</span></h1>
+<header id="banner">
+  <img src="/icon.svg" alt="">
+  <div>
+    <div class="name">bdtools <span id="version" class="version"></span></div>
+    <div class="tagline">Blu-ray tools in pure Go &middot; <em>Depth, graded by eye.</em></div>
+  </div>
+</header>
+<h1><span id="title">bdtools 3D grade</span></h1>
 <div class="row dim" style="font-size:13px">
   <button id="vr" class="primary" hidden disabled title="in a headset's browser: the picture on a screen in VR, the controls on a panel beside it">Enter VR</button>
   <span>stream: <a id="stream" href="/stream.ts">/stream.ts</a> (full side by side, 1080p an eye)</span>
@@ -186,6 +201,7 @@ function render() {
   $('saved').textContent = st.saved ? 'saved' : 'unsaved';
   $('saved').className = st.saved ? 'ok' : 'warn';
   $('file').textContent = st.file;
+  $('version').textContent = st.version || ''; $('version2').textContent = st.version || '';
   if (document.activeElement !== $('hud')) $('hud').checked = st.hud;
   const w = st.width > 0 ? st.width : 1920;
   $('extremes').textContent = st.knobs.flat ? 'flat' :
