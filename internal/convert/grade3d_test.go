@@ -208,3 +208,29 @@ func TestShotRamp(t *testing.T) {
 		t.Fatalf("back: %v, %+v", err, back)
 	}
 }
+
+// TestBlendDiff: a blend is the mean, a difference mid grey where the
+// pictures agree.
+func TestBlendDiff(t *testing.T) {
+	w, h := 64, 32
+	mk := func(v byte) *mvc.Frame {
+		f := &mvc.Frame{Width: w, Height: h, StrideY: w, StrideC: w / 2, Y: make([]byte, w*h), Cb: make([]byte, w*h/4), Cr: make([]byte, w*h/4)}
+		for i := range f.Y {
+			f.Y[i] = v
+		}
+		return f
+	}
+	a, b := mk(100), mk(120)
+	if m := blendFrames(a, b); m.Y[0] != 110 || m.Y[len(m.Y)-1] != 110 || m.Width != w {
+		t.Errorf("blend: %d", m.Y[0])
+	}
+	if d := diffFrames(a, a); d.Y[0] != 128 || d.Cb[0] != 128 {
+		t.Errorf("same: %d", d.Y[0])
+	}
+	if d := diffFrames(b, a); d.Y[0] != 208 {
+		t.Errorf("20 apart: %d, want 208", d.Y[0])
+	}
+	if d := diffFrames(a, b); d.Y[0] != 48 {
+		t.Errorf("-20 apart: %d, want 48", d.Y[0])
+	}
+}

@@ -486,21 +486,73 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	}
 }
 
-// refOrOurs is the pair to show at a time of the film: the reference's
-// when it is switched on and has one there, else ours.
+// refOrOurs is the pair to show at a time of the film by the view asked:
+// ours; the reference's when it has one there; mix, the right eye a
+// blend of the two right eyes (where the depths agree it fuses, where
+// not it doubles by the difference); diff, both eyes the difference of
+// the two right eyes, grey where they agree.
 func (g *grader) refOrOurs(ctx context.Context, t time.Duration, ours [2]*mvc.Frame) [2]*mvc.Frame {
-	if g.ref == nil || !g.ref.on() {
-		if g.ref != nil {
-			g.ref.setShowing(false)
-		}
+	if g.ref == nil {
 		return ours
 	}
-	if l, r, ok := g.ref.at(ctx, t, g.frameOr()); ok && l.Width == ours[0].Width && l.Height == ours[0].Height {
-		g.ref.setShowing(true)
-		return [2]*mvc.Frame{l, r}
+	view := g.ref.view()
+	if view == viewOurs {
+		g.ref.setShowing(false)
+		return ours
 	}
-	g.ref.setShowing(false)
-	return ours
+	l, r, ok := g.ref.at(ctx, t, g.frameOr())
+	if !ok || l.Width != ours[0].Width || l.Height != ours[0].Height {
+		g.ref.setShowing(false)
+		return ours
+	}
+	g.ref.setShowing(true)
+	switch view {
+	case viewMix:
+		return [2]*mvc.Frame{ours[0], blendFrames(r, ours[1])}
+	case viewDiff:
+		d := diffFrames(r, ours[1])
+		return [2]*mvc.Frame{d, d}
+	}
+	return [2]*mvc.Frame{l, r}
+}
+
+// blendFrames is two pictures of a size half each.
+func blendFrames(a, b *mvc.Frame) *mvc.Frame {
+	w, h := a.Width, a.Height
+	cw, ch := (w+1)/2, (h+1)/2
+	out := &mvc.Frame{Width: w, Height: h, StrideY: w, StrideC: cw, PTS: a.PTS,
+		Y: make([]byte, w*h), Cb: make([]byte, cw*ch), Cr: make([]byte, cw*ch)}
+	mix := func(dst []byte, pa, pb []byte, sa, sb, pw, ph, stride int) {
+		for y := range ph {
+			ra, rb, ro := pa[y*sa:y*sa+pw], pb[y*sb:y*sb+pw], dst[y*stride:(y+1)*stride]
+			for x := range pw {
+				ro[x] = byte((int(ra[x]) + int(rb[x]) + 1) >> 1)
+			}
+		}
+	}
+	mix(out.Y, a.Y, b.Y, a.StrideY, b.StrideY, w, h, w)
+	mix(out.Cb, a.Cb, b.Cb, a.StrideC, b.StrideC, cw, ch, cw)
+	mix(out.Cr, a.Cr, b.Cr, a.StrideC, b.StrideC, cw, ch, cw)
+	return out
+}
+
+// diffFrames is the difference of two pictures' luma, four times and
+// about mid grey, the chroma neutral.
+func diffFrames(a, b *mvc.Frame) *mvc.Frame {
+	w, h := a.Width, a.Height
+	cw, ch := (w+1)/2, (h+1)/2
+	out := &mvc.Frame{Width: w, Height: h, StrideY: w, StrideC: cw, PTS: a.PTS,
+		Y: make([]byte, w*h), Cb: make([]byte, cw*ch), Cr: make([]byte, cw*ch)}
+	for y := range h {
+		ra, rb, ro := a.Y[y*a.StrideY:y*a.StrideY+w], b.Y[y*b.StrideY:y*b.StrideY+w], out.Y[y*w:(y+1)*w]
+		for x := range w {
+			ro[x] = byte(min(max(128+4*(int(ra[x])-int(rb[x])), 16), 235))
+		}
+	}
+	for i := range out.Cb {
+		out.Cb[i], out.Cr[i] = 128, 128
+	}
+	return out
 }
 
 // emit encodes a pair into the stream, at the stream's pace.
@@ -763,7 +815,8 @@ type gradeState struct {
 // gradeRefState is the reference's state as a page sees it.
 type gradeRefState struct {
 	File     string  `json:"file"`
-	On       bool    `json:"on"`
+	On       bool    `json:"on"` // the view is not ours
+	View     string  `json:"view"`
 	Offset   float64 `json:"offset"` // seconds the reference runs ahead of the film
 	Aligned  bool    `json:"aligned"`
 	Aligning bool    `json:"aligning"`
@@ -806,9 +859,9 @@ func (g *grader) state() gradeState {
 // gradeCommand is what the page asks: op play, pause, toggle, seek (t,
 // seconds), step (n pictures, negative back), jump (dir -1/1: the cut
 // before/after), knobs (knobs), reset (the stretch to the defaults),
-// delete (i: a stretch), save, ref (n 1 on, 0 off: the film's own 3D
-// shown instead), align (the reference aligned to the film by their
-// pictures) or refoffset (t: seconds the reference runs ahead).
+// delete (i: a stretch), save, ref (view: ours, disc, mix or diff; or n
+// 1 for disc, 0 for ours), align (the reference aligned to the film by
+// their pictures) or refoffset (t: seconds the reference runs ahead).
 type gradeCommand struct {
 	Op    string      `json:"op"`
 	T     float64     `json:"t"`
@@ -816,6 +869,7 @@ type gradeCommand struct {
 	Dir   int         `json:"dir"`
 	I     int         `json:"i"`
 	Knobs *gradeKnobs `json:"knobs"`
+	View  string      `json:"view"`
 }
 
 func (g *grader) command(c gradeCommand) error {
@@ -884,13 +938,23 @@ func (g *grader) command(c gradeCommand) error {
 		}
 		switch c.Op {
 		case "ref":
-			g.ref.set(c.N > 0, nil)
+			v := viewOurs
+			if c.N > 0 {
+				v = viewDisc
+			}
+			if c.View != "" {
+				v = c.View
+			}
+			if v != viewOurs && v != viewDisc && v != viewMix && v != viewDiff {
+				return fmt.Errorf("view %q: want ours, disc, mix or diff", v)
+			}
+			g.ref.set(v, nil)
 		case "align":
-			g.ref.set(true, nil)
+			g.ref.set(viewDisc, nil)
 			g.ref.askAlign()
 		case "refoffset":
 			off := time.Duration(c.T * float64(time.Second))
-			g.ref.set(true, &off)
+			g.ref.set(viewDisc, &off)
 		}
 		g.mu.Lock()
 		g.want.regrade = true

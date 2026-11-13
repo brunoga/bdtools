@@ -81,7 +81,10 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 <div class="panel" id="refpanel" hidden>
   <div class="row">
     <strong>the film's own 3D</strong>
-    <button id="ref" title="show the film's own 3D instead of the conversion (d)">disc</button>
+    <button id="v-ours" data-view="ours" title="the conversion (o)">ours</button>
+    <button id="v-disc" data-view="disc" title="the film's own 3D instead (d)">disc</button>
+    <button id="v-mix" data-view="mix" title="the right eye a blend of the disc's and ours: what agrees fuses, what does not doubles by the difference (m)">mix</button>
+    <button id="v-diff" data-view="diff" title="both eyes the difference of the two right eyes, grey where they agree (x)">diff</button>
     <button id="align" title="find where this picture is in the film's own 3D">align</button>
     <span class="dim" id="refinfo"></span>
   </div>
@@ -97,7 +100,7 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 
 <p class="dim" style="font-size:13px">
 <kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> a picture · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> 10 s · <kbd>[</kbd> <kbd>]</kbd> cuts ·
-<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D · <kbd>s</kbd> save.
+<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D, <kbd>m</kbd> mixed into the right eye, <kbd>x</kbd> the difference, <kbd>o</kbd> ours · <kbd>s</kbd> save.
 A turn of a knob grades the shot from its cut (or from this picture, when no cut is near, eased in over a second) to the next stretch.
 </p>
 
@@ -172,9 +175,8 @@ function render() {
   // the reference
   $('refpanel').hidden = !st.ref;
   if (st.ref) {
-    $('ref').className = st.ref.on ? 'primary' : '';
-    $('ref').textContent = st.ref.on ? (st.ref.showing ? 'disc (shown)' : 'disc (no picture here)') : 'disc';
-    $('refinfo').textContent = st.ref.file.split(/[\\/]/).pop() + (st.ref.aligning ? ' — aligning…' :
+    for (const v of ['ours', 'disc', 'mix', 'diff']) $('v-' + v).className = st.ref.view === v ? 'primary' : '';
+    $('refinfo').textContent = (st.ref.on && !st.ref.showing ? 'no picture of the disc here — ' : '') + st.ref.file.split(/[\\/]/).pop() + (st.ref.aligning ? ' — aligning…' :
       ' — runs ' + st.ref.offset.toFixed(3) + ' s ahead' + (st.ref.aligned ? ' (aligned here)' : ' (not aligned: press align)'));
   }
   // the table
@@ -215,8 +217,9 @@ for (const [range, num] of [['depth', 'depthN'], ['screen', 'screenN']]) {
   $(num).onchange = () => { $(range).value = $(num).value; sendKnobs(); };
 }
 $('flat').onchange = sendKnobs;
-$('ref').onclick = () => send({ op: 'ref', n: st && st.ref && st.ref.on ? 0 : 1 });
+document.querySelectorAll('button[data-view]').forEach(b => b.onclick = () => send({ op: 'ref', view: b.dataset.view }));
 $('align').onclick = () => send({ op: 'align' });
+function toggleView(v) { send({ op: 'ref', view: st && st.ref && st.ref.view === v ? 'ours' : v }); }
 
 function nudge(id, by) {
   const n = $(id + 'N'); n.value = (+n.value + by).toFixed(2); $(id).value = n.value; sendKnobs();
@@ -235,7 +238,10 @@ document.addEventListener('keydown', e => {
   else if (k === 'PageDown') nudge('screen', -0.1);
   else if (k === 'f') { $('flat').checked = !$('flat').checked; sendKnobs(); }
   else if (k === 's') send({ op: 'save' });
-  else if (k === 'd') send({ op: 'ref', n: st && st.ref && st.ref.on ? 0 : 1 });
+  else if (k === 'd') toggleView('disc');
+  else if (k === 'm') toggleView('mix');
+  else if (k === 'x') toggleView('diff');
+  else if (k === 'o') send({ op: 'ref', view: 'ours' });
   else return;
   e.preventDefault();
 });

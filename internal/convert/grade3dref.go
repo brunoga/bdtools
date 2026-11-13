@@ -30,7 +30,7 @@ type gradeRef struct {
 	pair   refFrame // self: the pair of the picture shown
 
 	mu       sync.Mutex
-	isOn     bool
+	v        string        // the view: viewOurs, viewDisc, viewMix or viewDiff
 	offset   time.Duration // the reference's time less the film's
 	aligned  bool
 	aligning bool
@@ -78,16 +78,27 @@ func (r *Runner) openReference(ctx context.Context, g *grader) (*gradeRef, error
 	return &gradeRef{g: g, r: &quiet, src: live, layout: quiet.framedIn, swap: quiet.framedSwap}, nil
 }
 
-func (f *gradeRef) on() bool {
+// The views of a grading with a reference.
+const (
+	viewOurs = "ours"
+	viewDisc = "disc"
+	viewMix  = "mix"
+	viewDiff = "diff"
+)
+
+func (f *gradeRef) view() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.isOn
+	if f.v == "" {
+		return viewOurs
+	}
+	return f.v
 }
 
-// set switches the reference on or off, and moves its offset when given.
-func (f *gradeRef) set(on bool, offset *time.Duration) {
+// set chooses the view, and moves the offset when given.
+func (f *gradeRef) set(view string, offset *time.Duration) {
 	f.mu.Lock()
-	f.isOn = on
+	f.v = view
 	if offset != nil && !f.self {
 		f.offset, f.aligned = *offset, false
 		f.stopLocked()
@@ -114,7 +125,11 @@ func (f *gradeRef) state() *gradeRefState {
 	if f.self {
 		file = f.r.Opts.Input + " (its own pair)"
 	}
-	return &gradeRefState{File: file, On: f.isOn, Offset: f.offset.Seconds(), Aligned: f.aligned, Aligning: f.aligning, Showing: f.showing}
+	v := f.v
+	if v == "" {
+		v = viewOurs
+	}
+	return &gradeRefState{File: file, On: v != viewOurs, View: v, Offset: f.offset.Seconds(), Aligned: f.aligned, Aligning: f.aligning, Showing: f.showing}
 }
 
 // setSelf keeps the input's own pair of the picture shown.
