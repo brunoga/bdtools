@@ -692,6 +692,30 @@ glasses). The window is each still's own, as a cut's first picture's.
 A 4K Dolby Vision film takes about 25 seconds on an RTX 5090, a 1080p
 one about 15.
 
+## The holes
+
+Where the right eye looks past a nearer thing's edge it sees what the
+left eye never did: a hole, about 6% of the picture at a disc's depth,
+a few pixels wide at every edge. The renderer fills it by carrying the
+farther side's last pixel across (measured better than mirroring the
+texture: 29.8 to 31.6 dB in the holes of a disc-depth render), which
+reads as a smear. A learnt filler does better: `internal/stereo`'s
+`InpaintWeights`, a U-Net of the refinement's shape at the picture's
+full size, from the rendered eye and the mask of its holes to a
+correction taken in the holes only.
+
+Its training data are the discs' own right eyes: `stereobench -holes
+DIR` renders the right eye from the left by the network's depth fitted
+to the disc (holes of the shape a conversion makes, where the disc's
+geometry puts them; the disc's own disparity opens holes a pixel wide
+everywhere, the matcher's noise, and taught nothing), drops holes a
+pixel wide and those at the frame's sides, and writes 384-pixel crops
+around the densest holes with the disc's eye there. `tools/inpainttrain`
+learns the filler from them (a squared error in the holes, Adam) and
+prints the holes' PSNR as rendered and as filled; `stereobench -fill
+FILE` scores it on the benchmark's clips, and `--3d-fill FILE` uses it
+in a conversion (the GPU's eyes kernels give the holes' mask).
+
 ## Grading by hand
 
 No automatic depth gets every shot right. `--3d-shots FILE` grades
