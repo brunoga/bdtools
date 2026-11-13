@@ -138,16 +138,7 @@ $('vr').onclick = async () => {
     session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['layers'] });
   } catch (e) { say('no VR session: ' + e.message); return; }
   const space = await session.requestReferenceSpace('local-floor');
-  // the display's rate a multiple of the film's 24: 72 (each picture
-  // three refreshes) or 120, not the 90 a Quest wakes at, where every
-  // fourth picture is held a refresh longer and the film judders
   let rate = '';
-  try {
-    const rates = session.supportedFrameRates ? Array.from(session.supportedFrameRates) : [];
-    const want = [72, 120, 96, 48].find(r => rates.includes(r));
-    if (want && session.updateTargetFrameRate) { await session.updateTargetFrameRate(want); rate = want + ' Hz'; }
-    else rate = rates.length ? 'rates ' + rates.join('/') : 'rate unknown';
-  } catch (e) { rate = 'rate: ' + e.message; }
   // a 4 m wide, 16:9 screen, 3.5 m away, eye height
   const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
   let how = 'WebGL';
@@ -165,6 +156,20 @@ $('vr').onclick = async () => {
   }
   if (how.startsWith('WebGL')) webglScreen(session, space, W, H, Y, Z);
   vrHow = how;
+  // the display's rate a multiple of the film's 24: 72 (each picture
+  // three refreshes) or 120, not the 90 a Quest wakes at, where every
+  // fourth picture is held a refresh longer and the film judders; asked
+  // once the picture is up, and not waited for (a browser may never
+  // answer)
+  try {
+    const rates = session.supportedFrameRates ? Array.from(session.supportedFrameRates) : [];
+    const want = [72, 120, 96, 48].find(r => rates.includes(r));
+    rate = rates.length ? 'rates ' + rates.join('/') : 'rate unknown';
+    if (want && session.updateTargetFrameRate) {
+      rate = 'asked ' + want + ' Hz';
+      session.updateTargetFrameRate(want).then(() => { rate = want + ' Hz'; }, e => { rate = 'rate refused: ' + e.message; });
+    }
+  } catch (e) { rate = 'rate: ' + e.message; }
   say('in VR through the ' + how + ' at ' + rate + '; hold both grips a second to leave');
   // what the headset does, into the stream's readout every two seconds:
   // the path, the video's frames shown and dropped a second, and whether
