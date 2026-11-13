@@ -96,21 +96,34 @@ func (g *GPU) Disparity(up *Tensor, w, h, top, bottom int, a, b, far, knee, lim 
 // eye's Y, Cb and Cr planes then the right's, their rows w and (w+1)/2
 // apart.
 func (g *GPU) Eyes(p *Picture, d *Tensor, gap float32) *Tensor {
+	out, _ := g.EyesMask(p, d, gap, false)
+	return out
+}
+
+// EyesMask is Eyes and, when asked, the eyes' holes (what the eye saw
+// nothing of, filled from the side): 2*w*h bytes, the left eye's luma
+// rows then the right's, 1 in a hole.
+func (g *GPU) EyesMask(p *Picture, d *Tensor, gap float32, withMask bool) (eyes, mask *Tensor) {
 	n := EyesSize(p.w, p.h)
 	out := g.tensor((n + 3) / 4)
+	var mp uintptr
+	if withMask {
+		mask = g.tensor((2*p.w*p.h + 3) / 4)
+		mp = ptr(mask)
+	}
 	rows := 2 * (p.h + 2*((p.h+1)/2))
 	base := ptr(p.buf)
 	const shared = 48 << 10 // a block's shared memory, without asking for more
 	if per := min(4, shared/(8*p.w)); per > 0 {
 		// a warp a row, the row's targets in shared memory
 		g.launch("eyes_warp", cuda.Dim{X: (rows + per - 1) / per}, cuda.Dim{X: 32 * per}, 8*p.w*per, p.w, p.h, base, p.strideY,
-			base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), per)
-		return out
+			base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), per, mp)
+		return out, mask
 	}
 	z, v := g.tensor(rows, p.w), g.tensor(rows, p.w)
 	g.launch("eyes", cuda.Dim{X: (rows + 63) / 64}, cuda.Dim{X: 64}, 0, p.w, p.h, base, p.strideY,
-		base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), ptr(z), ptr(v))
-	return out
+		base+uintptr(p.cb), base+uintptr(p.cr), p.strideC, ptr(d), gap, ptr(out), ptr(z), ptr(v), mp)
+	return out, mask
 }
 
 // EyesSize is the bytes of a w x h picture's two eyes (Eyes').

@@ -55,6 +55,14 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--3d-grade` takes a 3D file (side by side or over-under) as its
   input: its left eye is converted and its own pair is the reference,
   on one clock, for the sharpest comparison with the disc.
+- A learnt hole filler for 2D-to-3D: `--3d-fill FILE` paints what an
+  eye saw nothing of behind a nearer thing's edge by a small network
+  (`stereo.InpaintWeights`), in place of the renderer's carried edge;
+  `stereobench -holes DIR` records its training crops from 3D discs,
+  `tools/inpainttrain` learns it, `stereobench -fill FILE` scores it.
+  An option for now: the first weights gain under a decibel in the
+  holes of our render and cost a conversion three quarters of its
+  speed (docs/2d-to-3d.md).
 - `--3d-grade`'s reference has two more views: `mix`, the right eye a
   blend of the disc's and ours (what agrees fuses, what does not doubles
   by the difference), and `diff`, both eyes the difference of the two

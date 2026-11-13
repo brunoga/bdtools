@@ -692,6 +692,44 @@ glasses). The window is each still's own, as a cut's first picture's.
 A 4K Dolby Vision film takes about 25 seconds on an RTX 5090, a 1080p
 one about 15.
 
+## The holes
+
+Where the right eye looks past a nearer thing's edge it sees what the
+left eye never did: a hole, about 6% of the picture at a disc's depth,
+a few pixels wide at every edge. The renderer fills it by carrying the
+farther side's last pixel across (measured better than mirroring the
+texture: 29.8 to 31.6 dB in the holes of a disc-depth render), which
+reads as a smear. A learnt filler does better: `internal/stereo`'s
+`InpaintWeights`, a U-Net of the refinement's shape at the picture's
+full size, from the rendered eye and the mask of its holes to a
+correction taken in the holes only.
+
+Its training data are the discs' own right eyes: `stereobench -holes
+DIR` renders the right eye from the left by the network's depth fitted
+to the disc (holes of the shape a conversion makes, where the disc's
+geometry puts them; the disc's own disparity opens holes a pixel wide
+everywhere, the matcher's noise, and taught nothing), drops holes a
+pixel wide and those at the frame's sides, and writes 384-pixel crops
+around the densest holes with the disc's eye there. `tools/inpainttrain`
+learns the filler from them (a squared error in the holes, Adam) and
+prints the holes' PSNR as rendered and as filled; `stereobench -fill
+FILE` scores it on the benchmark's clips, and `--3d-fill FILE` uses it
+in a conversion (the GPU's eyes kernels give the holes' mask).
+
+**First weights (2026-11-13, 7917 crops of 37 films, 8 passes):** the
+validation crops' holes 20.7 to 23.2 dB. On the benchmark clips (held
+out, `-every 8`) the holes of our own render go 20.91 to 21.75 dB, of
+the fitted-depth render 22.36 to 23.94; on the glass clips ours lose
+half a dB (19.71 to 19.21: behind a reflection the disc's truth is not
+to be had) while the fitted gain 1.5. Holes are about 1% of the
+picture, so the whole picture's PSNR and VMAF do not move. To the eye
+the renderer's comb-like streaks along edges become a soft fill near
+the disc's background. The cost: a conversion at 24.7 pictures a second
+against 111 without (the input made, the picture moved to and from the
+GPU and the fill applied on the CPU, twice a picture). So the filler is
+an option, not the default; the next steps are crops of both
+geometries (ours and the fitted), and the glue on the GPU.
+
 ## Grading by hand
 
 No automatic depth gets every shot right. `--3d-shots FILE` grades
