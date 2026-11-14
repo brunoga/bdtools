@@ -274,14 +274,14 @@ func (g *gpuFallback) fall(err error) error {
 		return err
 	}
 	if g.shown {
-		g.report.Report("warning: the GPU decoder failed (%v): decoding here from the last IDR instead", err)
+		g.report.Report("warning: the GPU decoder failed (%v), so the decoding goes on here from the last IDR", err)
 	} else {
-		g.report.Report("warning: the GPU decoder failed before its first picture (%v): decoding here instead", err)
+		g.report.Report("warning: the GPU decoder failed before its first picture (%v), so the decoding is done here instead", err)
 	}
 	_ = g.dec.Close()
 	dec, oerr := g.open()
 	if oerr != nil {
-		return fmt.Errorf("%w (and decoding here: %w)", err, oerr)
+		return fmt.Errorf("%w. Decoding here failed too: %w", err, oerr)
 	}
 	g.dec, g.replace = dec, true
 	for i, au := range g.fed {

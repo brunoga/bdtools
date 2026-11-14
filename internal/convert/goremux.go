@@ -126,7 +126,7 @@ func readProgram(ctx context.Context, c clipRef) (*m2ts.Program, map[uint16]bool
 	rd := m2ts.NewReader(io.LimitReader(f, 32<<20))
 	prog, err := rd.ReadProgram()
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: no program table: %w", c.path, err)
+		return nil, nil, fmt.Errorf("%s has no program table: %w", c.path, err)
 	}
 	// Read on so an SSIF's second PMT is seen.
 	for rd.Packets*192 < 16<<20 {

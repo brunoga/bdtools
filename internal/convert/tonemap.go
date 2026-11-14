@@ -308,7 +308,7 @@ func (t *toneMapper) pixel(y, cb, cr float32) (float32, float32, float32) {
 func (r *Runner) setupToneMap(t *picTransform, p picture, src pictureSource) error {
 	if p.rpu != nil {
 		if u, err := dovi.ParseNAL(p.rpu); err == nil && u.Profile() == 5 {
-			return fmt.Errorf("--tonemap: Dolby Vision profile 5's picture (IPT, not HDR10) is not tone mapped here")
+			return fmt.Errorf("--tonemap does not tone map Dolby Vision profile 5's picture here, because it is IPT and not HDR10")
 		}
 	}
 	var transfer int
@@ -318,7 +318,7 @@ func (r *Runner) setupToneMap(t *picTransform, p picture, src pictureSource) err
 		_, transfer, _, _ = p.stereo.ColorInfo()
 	}
 	if transfer != 16 && transfer != 18 {
-		r.Report.Report("--tonemap: the source is not HDR: not tone mapped")
+		r.Report.Report("--tonemap: the source is not HDR, so it is not tone mapped")
 		return nil
 	}
 	t.tm = newToneMapper(transfer, src.hdrStatic())

@@ -220,7 +220,7 @@ func Compare(ctx context.Context, goos string, o Options, ref, dis string, skip,
 				res.Model = "vmaf_4k_v0.6.1"
 			}
 			if d.Width != r.Width || d.Height != r.Height {
-				report.Report("--compare: the output is %dx%d, the source %dx%d: the output scaled up to it", d.Width, d.Height, r.Width, r.Height)
+				report.Report("--compare: the output is %dx%d and the source %dx%d, so the output is scaled up to the source", d.Width, d.Height, r.Width, r.Height)
 			}
 		}
 		if d.Width != r.Width || d.Height != r.Height {

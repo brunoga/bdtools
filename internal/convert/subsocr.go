@@ -29,7 +29,7 @@ var ocrLangs = map[string]bool{
 // ocrTrack reads a PGS track's .sup into a text track in dir.
 func (r *Runner) ocrTrack(e extra, id int, dir string) (extra, bool, error) {
 	if !ocrLangs[strings.ToLower(strings.TrimSpace(e.track.Lang))] {
-		r.Report.Report("subtitles: track %d (%s) is not read: its language's letters are not known here", e.track.ID, e.track.Lang)
+		r.Report.Report("subtitles: track %d (%s) is not read, because its language's letters are not known here", e.track.ID, e.track.Lang)
 		return extra{}, false, nil
 	}
 	m, err := ocr.Default()
@@ -94,7 +94,7 @@ func (r *Runner) ocrTrack(e extra, id int, dir string) (extra, bool, error) {
 	if err := out.Close(); err != nil {
 		return extra{}, false, err
 	}
-	r.Report.Report("subtitles: read track %d (%s): %d pictures, %d cues, in %.1f s", e.track.ID, e.track.Lang,
+	r.Report.Report("subtitles: read track %d (%s), %d pictures and %d cues in %.1f s", e.track.ID, e.track.Lang,
 		len(bms), cues, time.Since(start).Seconds())
 	if cues == 0 {
 		return extra{}, false, nil

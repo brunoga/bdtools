@@ -39,13 +39,13 @@ func ParseCrop(s string) (Crop, error) {
 	}
 	parts := strings.Split(s, ":")
 	if len(parts) != 4 {
-		return Crop{}, fmt.Errorf("--crop %q: want none, auto or TOP:BOTTOM:LEFT:RIGHT", s)
+		return Crop{}, fmt.Errorf("--crop %q is not a crop this understands. It must be none, auto or TOP:BOTTOM:LEFT:RIGHT", s)
 	}
 	var v [4]int
 	for i, p := range parts {
 		n, err := strconv.Atoi(p)
 		if err != nil || n < 0 || n%2 != 0 {
-			return Crop{}, fmt.Errorf("--crop %q: each edge is an even number of samples", s)
+			return Crop{}, fmt.Errorf("--crop %q has an edge that is not a whole even number. Each edge must be an even number of samples", s)
 		}
 		v[i] = n
 	}
@@ -81,7 +81,7 @@ func ParseScale(s string) (Scale, error) {
 	wi, err1 := strconv.Atoi(w)
 	hi, err2 := strconv.Atoi(h)
 	if !ok || err1 != nil || err2 != nil || wi < 16 || hi < 16 {
-		return Scale{}, fmt.Errorf("--scale %q: want none, 2160p, 1440p, 1080p, 720p, 576p, 480p or WIDTHxHEIGHT", s)
+		return Scale{}, fmt.Errorf("--scale %q is not a size this understands. It must be none, 2160p, 1440p, 1080p, 720p, 576p, 480p or WIDTHxHEIGHT", s)
 	}
 	return Scale{wi, hi}, nil
 }
@@ -145,7 +145,7 @@ func (t *picTransform) describe() string {
 func (t *picTransform) apply(p picture) (picture, error) {
 	w, h, _ := p.size()
 	if w != t.inW || h != t.inH {
-		return p, fmt.Errorf("the picture size changed from %dx%d to %dx%d: --crop and --scale need one size", t.inW, t.inH, w, h)
+		return p, fmt.Errorf("the picture size changed from %dx%d to %dx%d, and --crop and --scale need one size", t.inW, t.inH, w, h)
 	}
 	src := p.gpu
 	if src == nil {

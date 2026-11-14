@@ -108,7 +108,7 @@ func (m *remuxer) runClips(ctx context.Context, clips []clipRef) error {
 			return err
 		}
 		if !m.win.started {
-			m.report.Report("warning: %s has no picture in its window; it adds nothing", c.path)
+			m.report.Report("warning: %s has no picture in its window, so it adds nothing", c.path)
 		}
 		// A clip moved later than its nominal place (see begin) moves the
 		// clips after it by as much.
@@ -434,7 +434,7 @@ func sameStreams(first, later *m2ts.Program, keep map[uint16]bool, firstPath, la
 		a, _ := first.Stream(pid)
 		b, ok := later.Stream(pid)
 		if !ok || b.Type != a.Type {
-			return fmt.Errorf("%s does not carry track %d as %s does: the clips of this title do not "+
+			return fmt.Errorf("%s does not carry track %d as %s does. The clips of this title do not "+
 				"share their streams, so they cannot be joined into one", laterPath, pid, firstPath)
 		}
 	}

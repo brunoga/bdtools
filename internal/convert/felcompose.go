@@ -251,9 +251,9 @@ func (f *felComposer) close() {
 		f.report.Report("composed the full enhancement layer into %d pictures", f.composed)
 	}
 	if f.missing > 0 {
-		f.report.Report("warning: %d pictures had no enhancement layer or RPU to compose with: their base layer is kept", f.missing)
+		f.report.Report("warning: %d pictures had no enhancement layer or RPU to compose with, so their base layer is kept", f.missing)
 	}
 	if f.unusable > 0 {
-		f.report.Report("warning: %d pictures could not be composed (%v): their base layer is kept", f.unusable, f.err)
+		f.report.Report("warning: %d pictures could not be composed (%v), so their base layer is kept", f.unusable, f.err)
 	}
 }

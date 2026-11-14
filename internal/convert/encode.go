@@ -60,7 +60,7 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 		if r.Opts.Encoder == EncoderBuiltin {
 			on = "the built-in encoder"
 		}
-		r.Report.Report("decoding and encoding (MV-HEVC: both eyes on " + on + ", the right predicted from the left)")
+		r.Report.Report("decoding and encoding as MV-HEVC, both eyes on " + on + ", with the right predicted from the left")
 	case !r.flat && r.Opts.Layout == LayoutMVC:
 		s := &mvcSink{r: r, ctx: ctx}
 		switch r.Opts.Encoder {
@@ -83,28 +83,28 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 		sink = s
 		verb = "encoded"
 		if s.copy {
-			r.Report.Report("decoding and encoding (MVC: the left eye copied from the source, the right eye here)")
+			r.Report.Report("decoding and encoding as MVC, with the left eye copied from the source and the right eye coded here")
 		} else {
-			r.Report.Report("decoding and encoding (MVC: the left eye with %s, the right eye here)", r.Opts.Encoder)
+			r.Report.Report("decoding and encoding as MVC, with the left eye coded by %s and the right eye here", r.Opts.Encoder)
 		}
 	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecH264:
 		sink = &gpuSink{r: r, open: openBuiltinAVC}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (h264, the encoder here, in process)")
+		r.Report.Report("decoding and encoding as h264 with the encoder here, in process")
 	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecH265:
 		sink = &gpuSink{r: r, open: openBuiltinHEVC}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (h265, the encoder here, in process)")
+		r.Report.Report("decoding and encoding as h265 with the encoder here, in process")
 	case r.Opts.Encoder == EncoderBuiltin && r.Opts.Codec == CodecAV1:
 		speed, tune := av1Speed(r.Opts.Preset), r.Opts.Tune
 		sink = &gpuSink{r: r, open: func(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) { return openBuiltinAV1(cfg, w, speed, tune) }}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (av1, the encoder here, in process)")
+		r.Report.Report("decoding and encoding as av1 with the encoder here, in process")
 	case r.Opts.NativeGPU:
 		k, _ := hwKind(r.Opts.Encoder)
 		sink = &gpuSink{r: r, kind: k}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (%s, %s on the GPU, in process)", r.Opts.Codec, r.Opts.Encoder)
+		r.Report.Report("decoding and encoding as %s with %s on the GPU, in process", r.Opts.Codec, r.Opts.Encoder)
 	case r.Opts.DVFEL.layered() && r.Opts.Encoder == EncoderSoftware && r.Opts.Codec == CodecH265:
 		// Dolby Vision's layers kept apart without NVENC: x265 in process,
 		// set up alike for both layers.
@@ -117,14 +117,14 @@ func (r *Runner) newSink(ctx context.Context, keep func(int64) bool) (encoderSin
 			return openX265(bin, cfg, preset, r.felLayered, w)
 		}}
 		verb = "encoded"
-		r.Report.Report("decoding and encoding (h265, x265, in process)")
+		r.Report.Report("decoding and encoding as h265 with x265, in process")
 	default:
 		bin, err := r.resolve(encoderTool(r.Opts.Encoder, r.Opts.Codec, r.Opts.EncodesViaFFmpeg()))
 		if err != nil {
 			return nil, "", err
 		}
 		sink = &programSink{r: r, ctx: ctx, bin: bin}
-		r.Report.Report("decoding and encoding (%s, %s)", r.Opts.Codec, r.Opts.Encoder)
+		r.Report.Report("decoding and encoding as %s with %s", r.Opts.Codec, r.Opts.Encoder)
 	}
 	return sink, verb, nil
 }
@@ -145,7 +145,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		return nil, err
 	}
 	if skip > 0 {
-		r.Report.Report("resuming: %d frames were encoded by an earlier run; decoding up to them first", skip)
+		r.Report.Report("resuming: %d frames were encoded by an earlier run, so the decoding runs up to them first", skip)
 	}
 	ext := r.Opts.Codec.streamExt()
 
@@ -179,7 +179,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 				// Dolby Vision's layers kept apart: profile 7 out.
 				if _, ok := sink.(*gpuSink); !ok {
 					return &encodeError{errors.New("--dv-fel " + string(r.Opts.DVFEL) +
-						" needs NVENC in process (an NVIDIA GPU, --gpu-api builtin), x265 (--encoder software) or the encoder here (--encoder builtin)")}
+						" needs an encoder that keeps the layers apart. That is NVENC in process on an NVIDIA GPU with --gpu-api builtin, x265 with --encoder software, or the encoder here with --encoder builtin")}
 				}
 				r.felLayered = true
 			}
@@ -196,9 +196,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 				switch {
 				case c.Transfer != 16 && c.Transfer != 18, r.Opts.BitDepth != 8:
 				case r.Opts.Codec == CodecH264:
-					r.Report.Report("warning: an HDR source into 8-bit H.264 bands visibly; --codec h265 or av1 keeps 10 bits")
+					r.Report.Report("warning: an HDR source into 8-bit H.264 bands visibly. --codec h265 or av1 keeps 10 bits")
 				default:
-					r.Report.Report("warning: an HDR source at 8 bits bands visibly; --bit-depth 10 (the default for it) keeps its precision")
+					r.Report.Report("warning: an HDR source at 8 bits bands visibly. --bit-depth 10, the default for it, keeps its precision")
 				}
 			} else if sf.stereo != nil {
 				r.noteDiscColour(sf)
@@ -207,11 +207,11 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			var overruled bool
 			num, den, overruled = pictureRate(sn, sd, r.rateNum, r.rateDen)
 			if overruled {
-				r.Report.Report("warning: the video stream states %d/%d frames a second but its timestamps run at %d/%d; following the timestamps", sn, sd, num, den)
+				r.Report.Report("warning: the video stream states %d/%d frames a second but its timestamps run at %d/%d, so the timestamps are followed", sn, sd, num, den)
 			}
 			if num <= 0 {
 				num, den = 24000, 1001
-				r.Report.Report("warning: the stream carries no frame rate; assuming 24000/1001")
+				r.Report.Report("warning: the stream carries no frame rate, so 24000/1001 is assumed")
 			} else {
 				r.Report.Report("frame rate %d/%d", num, den)
 			}
@@ -289,9 +289,9 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 					lost = fmt.Sprintf("%d pictures", k)
 				}
 				if r.Opts.Encoder == EncoderCopy {
-					r.Report.Report("warning: the source lost %s at %s; the picture runs out of step with the sound from there", lost, at)
+					r.Report.Report("warning: the source lost %s at %s. The picture runs out of step with the sound from there", lost, at)
 				} else {
-					r.Report.Report("the source lost %s at %s (damaged?): the picture after stands in, to stay in step with the sound", lost, at)
+					r.Report.Report("the source lost %s at %s, perhaps to damage. The picture after it stands in, to stay in step with the sound", lost, at)
 					// each at the timestamp it would have had
 					tick := int64(r.burnFrameDur * 90000 / time.Second)
 					for i := k; i > 0; i-- {
@@ -333,7 +333,7 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 			return nil
 		}
 		if r.Opts.Crop.Auto {
-			r.Report.Report("--crop auto: this source cannot be looked at in places: not cropped")
+			r.Report.Report("--crop auto: this source cannot be looked at in places, so it is not cropped")
 			r.Opts.Crop = Crop{}
 		}
 		var err error
@@ -396,17 +396,17 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 	case n == 0:
 		return nil, fmt.Errorf("the video decoded to no frames")
 	case !r.flat && !r.to3D && src.dependentFrames() == 0:
-		return nil, fmt.Errorf("the dependent view decoded to nothing: the source does not look like 3D")
+		return nil, fmt.Errorf("the dependent view decoded to nothing, so the source does not look like 3D")
 	case n < skip:
-		return nil, fmt.Errorf("the source has %d frames, fewer than the %d an earlier run encoded: "+
-			"delete %s and start over", n, skip, r.work.dir)
+		return nil, fmt.Errorf("the source has %d frames, fewer than the %d an earlier run encoded. "+
+			"Delete %s and start over", n, skip, r.work.dir)
 	}
 	if skipped > 0 {
 		r.Report.Report("left out %d pictures outside the playlist's IN/OUT times", skipped)
 	}
 	switch {
 	case decodeErrs > 0:
-		r.Report.Report("decoded %d frames, %d access units had errors and were concealed", n, decodeErrs)
+		r.Report.Report("decoded %d frames, and %d access units had errors and were concealed", n, decodeErrs)
 	case n > skip:
 		r.Report.Report("%s %d frames (%.1f fps)", verb, n-skip, prog.rate(n-skip))
 	}
@@ -540,7 +540,7 @@ type programSink struct {
 
 func (s *programSink) start(path string, first picture, num, den int) error {
 	if s.r.burn != nil {
-		s.r.Report.Report("warning: --burn-subs draws with the encoders in process (builtin, GPU), not %s: no subtitles burned", filepath.Base(s.bin))
+		s.r.Report.Report("warning: --burn-subs draws with the encoders in process (builtin, GPU), not with %s, so no subtitles are burned", filepath.Base(s.bin))
 	}
 	o := s.r.Opts
 	o.frameW, o.frameH = s.r.frameSize(first)
@@ -635,7 +635,7 @@ func (r *Runner) noteDiscColour(sf picture) {
 	case p != 2 || t != 2 || m != 2: // something stated
 	case r.Opts.Layout == LayoutMVHEVC && sf.stereo.Base.Width <= 1920 && sf.stereo.Base.Height <= 1080:
 		c = gpu.ColorInfo{Primaries: 1, Transfer: 1, Matrix: 1}
-		r.Report.Report("the disc's video states no colour; the file states BT.709, a Blu-ray's HD colour")
+		r.Report.Report("the disc's video states no colour, so the file states BT.709, a Blu-ray's HD colour")
 	default:
 		return
 	}
@@ -649,7 +649,7 @@ func (r *Runner) noteDiscColour(sf picture) {
 func (r *Runner) transform(sf picture, src pictureSource) (picture, error) {
 	if r.to3D && r.xform == nil && !r.Opts.ToneMap && hdrPicture(sf) {
 		// the stereo pictures are 8-bit: an HDR source is made SDR first
-		r.Report.Report("--to-3d: the 3D is 8-bit SDR: tone mapping the HDR source (--tonemap)")
+		r.Report.Report("--to-3d: the 3D is 8-bit SDR, so the HDR source is tone mapped, as with --tonemap")
 		r.Opts.ToneMap = true
 	}
 	if r.xform == nil && (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) {
@@ -678,7 +678,7 @@ func (r *Runner) transform(sf picture, src pictureSource) (picture, error) {
 	}
 	p, err := r.xform.apply(sf)
 	if e := r.xform.gpuErr; e != nil {
-		r.Report.Report("the picture's scaling and tone mapping on the CPU from here: the GPU failed (%v)", e)
+		r.Report.Report("the GPU failed (%v), so the picture's scaling and tone mapping run on the CPU from here", e)
 		r.xform.gpuErr = nil
 	}
 	return p, err

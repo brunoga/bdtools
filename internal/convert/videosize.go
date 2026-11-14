@@ -48,7 +48,7 @@ func ParseSize(s string) (int64, error) {
 	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil || v <= 0 || math.IsInf(v, 0) {
-		return 0, fmt.Errorf("%q: want a size (4.5G, 700M, 3GiB)", s)
+		return 0, fmt.Errorf("%q is not a size. It must be a size such as 4.5G, 700M or 3GiB", s)
 	}
 	return int64(v * mult), nil
 }
@@ -198,7 +198,7 @@ func (r *Runner) estimateCRF(ctx context.Context, video Track, feed sampleFeed, 
 	for _, p := range pts {
 		seen = append(seen, fmt.Sprintf("%s at CRF %d", size(p.size), p.crf))
 	}
-	r.Report.Report("--video-size %s: CRF %d (the places put the film at %s)", size(target), got, strings.Join(seen, ", "))
+	r.Report.Report("--video-size %s chose CRF %d, because the places encoded put the film at %s", size(target), got, strings.Join(seen, ", "))
 	return got, nil
 }
 

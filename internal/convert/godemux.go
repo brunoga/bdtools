@@ -101,7 +101,7 @@ func resolveGo(in, playlist string, twoD bool, report Reporter) (*goSource, erro
 			return nil, err
 		}
 		if ext == ".iso" {
-			report.Report("reading the disc image in place (no mount, no extraction)")
+			report.Report("reading the disc image in place, with no mount and no extraction")
 		}
 		var src *goSource
 		if playlist != "" {
@@ -219,7 +219,7 @@ func chooseGo(d bdmv.Disc, twoD bool, report Reporter) (*goSource, error) {
 	case twoD:
 		cands, kind = flat, "2D"
 	case len(cands) == 0:
-		report.Report("none of the %d playlists is 3D: converting the 2D feature", len(names))
+		report.Report("none of the %d playlists is 3D, so the 2D feature is converted", len(names))
 		cands, kind = flat, "2D"
 	}
 	if len(cands) == 0 {
@@ -365,7 +365,7 @@ func probeGo(ctx context.Context, src *goSource) ([]Track, error) {
 	r := m2ts.NewReader(io.LimitReader(f, probeBudget))
 	prog, err := r.ReadProgram()
 	if err != nil {
-		return nil, fmt.Errorf("%s: no program table found: %w", c.path, err)
+		return nil, fmt.Errorf("%s has no program table: %w", c.path, err)
 	}
 	// Collect the first frames of each stream. An SSIF starts with the
 	// dependent view's extent, whose PMT lists only that view, so reading
@@ -1126,7 +1126,7 @@ func (g *goDemux) finish() ([]extra, error) {
 		for _, b := range g.dropped {
 			most = max(most, b)
 		}
-		g.report.Report("trimmed the audio and subtitles outside the played section (up to %d KiB per track): a player never plays them", most>>10)
+		g.report.Report("trimmed the audio and subtitles outside the played section, up to %d KiB per track, because a player never plays them", most>>10)
 	}
 	if g.noDep > 0 {
 		what := "dependent view"

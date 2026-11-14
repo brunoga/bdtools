@@ -394,17 +394,17 @@ func (o Options) Validate(goos string) error {
 	if o.To3D {
 		switch {
 		case o.Remux:
-			return fmt.Errorf("--to-3d makes new pictures: it cannot be a --remux")
+			return fmt.Errorf("--to-3d makes new pictures, so it cannot be a --remux")
 		case o.TwoD:
 			return fmt.Errorf("--to-3d and --2d ask for opposite things")
 		case o.Depth3D < 0 || o.Depth3D > 5:
-			return fmt.Errorf("--3d-depth scales the depth, 0 to 5, 1 the depth that scores best against the 3D discs' (got %g)", o.Depth3D)
+			return fmt.Errorf("--3d-depth scales the depth and must be between 0 and 5, where 1 is the depth that scores best against the 3D discs. It was %g", o.Depth3D)
 		case o.Screen3D < -5 || o.Screen3D > 5:
-			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
+			return fmt.Errorf("--3d-screen moves the depth nearer or farther and must be between -5 and 5 percent of the width. It was %g", o.Screen3D)
 		case o.Curve3D != 0 && (o.Curve3D < 0.2 || o.Curve3D > 3):
-			return fmt.Errorf("--3d-curve bends the depth within each shot's range, 0.2 to 3, 1 as the network gives it (got %g)", o.Curve3D)
+			return fmt.Errorf("--3d-curve bends the depth within each shot's range and must be between 0.2 and 3, where 1 is the depth as the network gives it. It was %g", o.Curve3D)
 		case o.ScreenSize3D != 0 && (o.ScreenSize3D < 10 || o.ScreenSize3D > 1000):
-			return fmt.Errorf("--3d-screen-size is the screen's diagonal, 10 to 1000 inches (got %g)", o.ScreenSize3D)
+			return fmt.Errorf("--3d-screen-size is the screen's diagonal and must be between 10 and 1000 inches. It was %g", o.ScreenSize3D)
 		}
 		if o.Shots3D != "" {
 			if _, err := readShots3D(o.Shots3D); err != nil {
@@ -412,36 +412,36 @@ func (o Options) Validate(goos string) error {
 			}
 		}
 	} else if o.ScreenSize3D != 0 {
-		return fmt.Errorf("--3d-screen-size is --to-3d's")
+		return fmt.Errorf("--3d-screen-size applies to --to-3d only")
 	} else if o.Shots3D != "" {
-		return fmt.Errorf("--3d-shots is --to-3d's")
+		return fmt.Errorf("--3d-shots applies to --to-3d only")
 	} else if o.redepthAsked() {
 		switch {
 		case o.Remux:
-			return fmt.Errorf("--3d-depth and --3d-screen make new pictures: they cannot be a --remux")
+			return fmt.Errorf("--3d-depth and --3d-screen make new pictures, so they cannot be a --remux")
 		case o.TwoD:
-			return fmt.Errorf("--3d-depth and --3d-screen change a 3D film's depth: --2d leaves it out")
+			return fmt.Errorf("--3d-depth and --3d-screen change a 3D film's depth, and --2d leaves the depth out")
 		case o.Depth3D > 3:
-			return fmt.Errorf("--3d-depth scales a 3D source's depth, above 0 to 3, 1 as it is (got %g)", o.Depth3D)
+			return fmt.Errorf("--3d-depth scales a 3D source's depth and must be above 0 and up to 3, where 1 keeps it as it is. It was %g", o.Depth3D)
 		case o.Screen3D < -5 || o.Screen3D > 5:
-			return fmt.Errorf("--3d-screen moves the depth nearer or farther, -5 to 5 percent of the width (got %g)", o.Screen3D)
+			return fmt.Errorf("--3d-screen moves the depth nearer or farther and must be between -5 and 5 percent of the width. It was %g", o.Screen3D)
 		}
 	}
 	if strings.EqualFold(o.Input, o.Output) {
 		return fmt.Errorf("input and output are the same file")
 	}
 	if unsupportedContainer(o.Input) {
-		return fmt.Errorf("cannot read %s: the source must be a Blu-ray (a disc image, a BDMV folder, "+
-			"a playlist or an m2ts), a Matroska file or an MP4 or QuickTime file", filepath.Base(o.Input))
+		return fmt.Errorf("cannot read %s. The source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file. "+
+			"A Blu-ray is a disc image, a BDMV folder, a playlist or an m2ts", filepath.Base(o.Input))
 	}
 	if o.VideoSize > 0 {
 		switch {
 		case o.Remux || o.Encoder == EncoderCopy:
-			return fmt.Errorf("--video-size encodes the video to a size: a remux or a copy keeps it as it is")
+			return fmt.Errorf("--video-size encodes the video to a size, and a remux or a copy keeps it as it is")
 		case o.Codec == CodecAV1:
-			return fmt.Errorf("--video-size with --codec av1: not yet")
+			return fmt.Errorf("--video-size with --codec av1 is not supported yet")
 		case o.DVFEL.layered():
-			return fmt.Errorf("--video-size with --dv-fel %s: not yet (the enhancement layer is a stream of its own)", o.DVFEL)
+			return fmt.Errorf("--video-size with --dv-fel %s is not supported yet, because the enhancement layer is a stream of its own", o.DVFEL)
 		}
 	}
 	if !o.Trim.IsZero() {
@@ -449,62 +449,62 @@ func (o Options) Validate(goos string) error {
 		case o.Trim.End > 0 && o.Trim.End <= o.Trim.Start:
 			return fmt.Errorf("--end %s is not after --start %s", clock(o.Trim.End), clock(o.Trim.Start))
 		case o.Remux:
-			return fmt.Errorf("--start and --end with --remux: not yet (a copy can only be cut at keyframes); convert instead")
+			return fmt.Errorf("--start and --end with --remux are not supported yet, because a copy can only be cut at keyframes. Convert instead")
 		case o.Encoder == EncoderCopy:
-			return fmt.Errorf("--start and --end with --encoder copy: not yet; encode both eyes instead")
+			return fmt.Errorf("--start and --end with --encoder copy are not supported yet. Encode both eyes instead")
 		}
 	}
 	if o.Preview3D {
 		if !o.To3D {
-			return fmt.Errorf("--3d-preview makes stills of --to-3d's pairs: give --to-3d")
+			return fmt.Errorf("--3d-preview makes stills of --to-3d's pairs, so give --to-3d too")
 		}
 		if o.Grade3D != "" {
-			return fmt.Errorf("--3d-preview and --3d-grade: one at a time")
+			return fmt.Errorf("--3d-preview and --3d-grade cannot be used together. Give one at a time")
 		}
 		return nil // --output is the stills' directory
 	}
 	if o.Grade3D != "" {
 		if !o.To3D {
-			return fmt.Errorf("--3d-grade grades --to-3d's depth by hand: give --to-3d")
+			return fmt.Errorf("--3d-grade grades --to-3d's depth by hand, so give --to-3d too")
 		}
 		return nil // --output is the --3d-shots file written
 	}
 	if o.Reference3D != "" {
-		return fmt.Errorf("--3d-reference is --3d-grade's: the film's own 3D to compare with")
+		return fmt.Errorf("--3d-reference applies to --3d-grade only. It names the film's own 3D to compare with")
 	}
 	for _, f := range o.SubsFiles {
 		switch strings.ToLower(filepath.Ext(f.Path)) {
 		case ".srt", ".ass", ".ssa", ".vtt":
 		default:
-			return fmt.Errorf("--subs-file %s: want a .srt, .ass, .ssa or .vtt file", f.Path)
+			return fmt.Errorf("--subs-file %s is not a subtitle file this reads. It must be a .srt, .ass, .ssa or .vtt file", f.Path)
 		}
 		if _, err := os.Stat(f.Path); err != nil {
 			return fmt.Errorf("--subs-file: %w", err)
 		}
 		if o.Remux {
-			return fmt.Errorf("--subs-file with --remux: not yet; convert instead")
+			return fmt.Errorf("--subs-file with --remux is not supported yet. Convert instead")
 		}
 	}
 	if o.ToneMap {
 		switch {
 		case o.Remux:
-			return fmt.Errorf("--tonemap changes the picture: a remux keeps it as it is")
+			return fmt.Errorf("--tonemap changes the picture, and a remux keeps it as it is")
 		case o.Encoder == EncoderCopy:
-			return fmt.Errorf("--tonemap changes the picture: --encoder copy keeps it as it is")
+			return fmt.Errorf("--tonemap changes the picture, and --encoder copy keeps it as it is")
 		case o.DVFEL.layered():
-			return fmt.Errorf("--tonemap with --dv-fel %s: an SDR picture has no Dolby Vision layers; compose the enhancement layer (the default) or drop it", o.DVFEL)
+			return fmt.Errorf("--tonemap with --dv-fel %s does not work, because an SDR picture has no Dolby Vision layers. Compose the enhancement layer, which is the default, or drop it", o.DVFEL)
 		}
 	}
 	if !o.Crop.IsZero() || !o.Scale.IsZero() {
 		switch {
 		case o.Remux:
-			return fmt.Errorf("--crop and --scale change the picture: a remux keeps it as it is")
+			return fmt.Errorf("--crop and --scale change the picture, and a remux keeps it as it is")
 		case o.Encoder == EncoderCopy:
-			return fmt.Errorf("--crop and --scale change the picture: --encoder copy keeps it as it is")
+			return fmt.Errorf("--crop and --scale change the picture, and --encoder copy keeps it as it is")
 		case o.DVFEL.layered():
-			return fmt.Errorf("--crop and --scale with --dv-fel %s: the enhancement layer is half the base layer's size, and would have to change with it; compose it (the default) or drop it", o.DVFEL)
+			return fmt.Errorf("--crop and --scale with --dv-fel %s do not work, because the enhancement layer is half the base layer's size and would have to change with it. Compose it, which is the default, or drop it", o.DVFEL)
 		case o.BurnSubs != 0:
-			return fmt.Errorf("--crop and --scale with --burn-subs: not yet; carry the subtitle track instead")
+			return fmt.Errorf("--crop and --scale with --burn-subs are not supported yet. Carry the subtitle track instead")
 		}
 	}
 	if o.Remux {
@@ -512,39 +512,39 @@ func (o Options) Validate(goos string) error {
 		// stays in the transport stream the disc already uses; a 2D one can
 		// be either (whether the source is 3D is known once it is read).
 		if ext := strings.ToLower(filepath.Ext(o.Output)); ext != ".m2ts" && ext != ".ts" && ext != ".mkv" {
-			return fmt.Errorf("a remux output must be a .mkv (2D), or a .m2ts or .ts (got %q)", ext)
+			return fmt.Errorf("a remux output must be a .mkv for 2D, or a .m2ts or .ts. It was %q", ext)
 		}
 		// Everything below describes the decode-and-encode path, which a
 		// remux does not take. Saying so beats silently ignoring settings.
 		if o.Layout.halved() || o.Layout.overUnder() {
-			return fmt.Errorf("--remux cannot change the layout: it copies the disc's " +
+			return fmt.Errorf("--remux cannot change the layout, because it copies the disc's " +
 				"MVC video without re-encoding")
 		}
 		if o.SwapLR {
-			return fmt.Errorf("--remux cannot swap the eyes: it copies the disc's " +
-				"MVC video without re-encoding, and the eyes are swapped while stacking them")
+			return fmt.Errorf("--remux cannot swap the eyes, because it copies the disc's " +
+				"MVC video without re-encoding. The eyes are swapped while stacking them")
 		}
 		if o.BitDepth == 10 {
-			return fmt.Errorf("--remux cannot change the bit depth: it copies the disc's MVC video without re-encoding")
+			return fmt.Errorf("--remux cannot change the bit depth, because it copies the disc's MVC video without re-encoding")
 		}
 		if o.Subs3D.threeD() {
-			return fmt.Errorf("--remux keeps the disc's subtitles, whose 3D player places them: --subs-3d does not apply")
+			return fmt.Errorf("--subs-3d does not apply to --remux, because it keeps the disc's subtitles and the 3D player places them")
 		}
 		return nil
 	}
 	switch ext := strings.ToLower(filepath.Ext(o.Output)); {
 	case o.Layout == LayoutMVHEVC && !o.TwoD:
 		if ext != ".mp4" && ext != ".mov" {
-			return fmt.Errorf("--layout mvhevc writes an MP4 or QuickTime file: the output must be a .mp4 or .mov (got %q)", ext)
+			return fmt.Errorf("--layout mvhevc writes an MP4 or QuickTime file, so the output must be a .mp4 or .mov. It was %q", ext)
 		}
 	case o.Layout == LayoutMVC && !o.TwoD:
 		if ext != ".mkv" && ext != ".iso" {
-			return fmt.Errorf("--layout mvc writes Matroska or a Blu-ray 3D disc image: the output must be a .mkv or .iso (got %q)", ext)
+			return fmt.Errorf("--layout mvc writes Matroska or a Blu-ray 3D disc image, so the output must be a .mkv or .iso. It was %q", ext)
 		}
 	case ext == ".iso":
-		return fmt.Errorf("a .iso output is a Blu-ray 3D disc: its video MVC (--layout mvc, the default for it), from a 3D source or --to-3d")
+		return fmt.Errorf("a .iso output is a Blu-ray 3D disc, so its video is MVC from a 3D source or from --to-3d. --layout mvc is the default for it")
 	case ext != ".mkv" && ext != ".mp4" && ext != ".mov":
-		return fmt.Errorf("output must be a .mkv, .mp4 or .mov (got %q)", ext)
+		return fmt.Errorf("the output must be a .mkv, .mp4 or .mov. It was %q", ext)
 	}
 	switch o.Layout {
 	case LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU:
@@ -553,48 +553,48 @@ func (o Options) Validate(goos string) error {
 			break
 		}
 		if o.Codec != CodecH265 {
-			return fmt.Errorf("--layout mvhevc is HEVC (MV-HEVC is its multiview extension): use --codec h265")
+			return fmt.Errorf("--layout mvhevc is HEVC, because MV-HEVC is its multiview extension. Use --codec h265")
 		}
 		if o.Encoder != EncoderBuiltin && (o.Encoder != EncoderNVENC || o.GPUAPI == GPUFFmpeg) {
-			return fmt.Errorf("--layout mvhevc is coded by NVENC in process (--encoder nvenc) or the encoder here (--encoder builtin): no other encoder codes MV-HEVC")
+			return fmt.Errorf("--layout mvhevc is coded by NVENC in process with --encoder nvenc, or by the encoder here with --encoder builtin. No other encoder codes MV-HEVC")
 		}
 		if o.Subs3D.threeD() {
-			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: an MV-HEVC file carries none (--burn-subs draws one track into both eyes)")
+			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame, and an MV-HEVC file carries none. --burn-subs draws one track into both eyes")
 		}
 		if o.SpatialFOV <= 0 || o.SpatialFOV > 360 {
-			return fmt.Errorf("--spatial-fov %g: a horizontal field of view in degrees, up to 360", o.SpatialFOV)
+			return fmt.Errorf("--spatial-fov %g is out of range. It is a horizontal field of view in degrees, above 0 and up to 360", o.SpatialFOV)
 		}
 		if o.SpatialBaseline < 0 || o.SpatialDisparity < -1 || o.SpatialDisparity > 1 {
-			return errors.New("--spatial-baseline is millimetres, --spatial-disparity -1 to 1")
+			return errors.New("--spatial-baseline or --spatial-disparity is out of range. The baseline is in millimetres and cannot be negative, and the disparity must be between -1 and 1")
 		}
 	case LayoutMVC:
 		if o.TwoD {
 			break
 		}
 		if o.Codec != CodecH264 {
-			return fmt.Errorf("--layout mvc is H.264 (MVC is its 3D extension): use --codec h264")
+			return fmt.Errorf("--layout mvc is H.264, because MVC is its 3D extension. Use --codec h264")
 		}
 		if o.BitDepth == 10 {
-			return fmt.Errorf("--layout mvc is 8-bit: MVC players decode Stereo High, which has no 10-bit form")
+			return fmt.Errorf("--layout mvc is 8-bit, because MVC players decode Stereo High, which has no 10-bit form")
 		}
 		if o.Encoder != EncoderSoftware && o.Encoder != EncoderBuiltin && o.Encoder != EncoderCopy {
 			// Players' MVC decoders (Blu-ray era firmware) stall or reset
 			// on a left eye from NVENC, however it is configured, while
 			// x264's plays: the trigger is in NVENC's slice data, not in
 			// the stream's structure, and NVENC gives no control over it.
-			return fmt.Errorf("--layout mvc encodes the left eye with the encoder here (--encoder builtin, the default) or x264 (--encoder software), or keeps the source's (--encoder copy): players' MVC decoders do not play a GPU-encoded left eye")
+			return fmt.Errorf("--layout mvc encodes the left eye with the encoder here, which is --encoder builtin and the default, or with x264, which is --encoder software, or keeps the source's with --encoder copy. Players' MVC decoders do not play a GPU-encoded left eye")
 		}
 		if o.Subs3D.threeD() {
-			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame: with --layout mvc the player places them in 3D itself")
+			return fmt.Errorf("--subs-3d draws subtitles into a side-by-side frame, and with --layout mvc the player places them in 3D itself")
 		}
 	default:
-		return fmt.Errorf("unknown layout %q (want %q, %q, %q, %q, %q or %q)", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU, LayoutMVC, LayoutMVHEVC)
+		return fmt.Errorf("unknown layout %q. It must be %q, %q, %q, %q, %q or %q", o.Layout, LayoutFullSBS, LayoutHalfSBS, LayoutFullOU, LayoutHalfOU, LayoutMVC, LayoutMVHEVC)
 	}
 	if a := o.AudioTranscode; a != "" && a != "ac3" && a != "aac" {
-		return fmt.Errorf("--audio-transcode %q: want ac3 or aac", a)
+		return fmt.Errorf("--audio-transcode %q is unknown. It must be ac3 or aac", a)
 	}
 	if o.BurnSubs != 0 && (o.Layout != LayoutMVHEVC || o.TwoD) && !isMP4Output(o.Output) {
-		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture (--layout mvhevc): the other outputs carry subtitle tracks")
+		return fmt.Errorf("--burn-subs draws a subtitle track into an MV-HEVC picture, with --layout mvhevc. The other outputs carry subtitle tracks")
 	}
 	if o.Encoder == EncoderCopy && (o.Layout != LayoutMVC || o.TwoD) {
 		return fmt.Errorf("--encoder copy codes MVC (--layout mvc) only")
@@ -602,58 +602,58 @@ func (o Options) Validate(goos string) error {
 	if o.Encoder == EncoderBuiltin && (o.Layout != LayoutMVC || o.TwoD) {
 		switch {
 		case o.Codec == CodecH264 && o.BitDepth == 10:
-			return fmt.Errorf("--encoder builtin codes H.264 in 8 bits: use --bit-depth 8, or --codec h265 for 10")
+			return fmt.Errorf("--encoder builtin codes H.264 in 8 bits. Use --bit-depth 8, or --codec h265 for 10")
 		}
 	}
 	if !o.Codec.Valid() {
-		return fmt.Errorf("unknown codec %q (want %s)", o.Codec, codecList(Codecs()))
+		return fmt.Errorf("unknown codec %q. It must be %s", o.Codec, codecList(Codecs()))
 	}
 	if !SupportsEncoder(goos, o.Encoder) {
-		return fmt.Errorf("encoder %q is not available on %s (have: %s)",
+		return fmt.Errorf("encoder %q is not available on %s. This has %s",
 			o.Encoder, goos, encoderList(Encoders(goos)))
 	}
 	if o.Codec == CodecAV1 && o.Encoder == EncoderVideoToolbox {
-		return fmt.Errorf("VideoToolbox cannot encode AV1: use --encoder software (SVT-AV1) or another codec")
+		return fmt.Errorf("VideoToolbox cannot encode AV1. Use --encoder software, which is SVT-AV1, or another codec")
 	}
 	if o.Codec == CodecAV1 && o.Encoder == EncoderMediaFoundation {
-		return fmt.Errorf("the Media Foundation encoder does H.264 and HEVC, not AV1: use --encoder nvenc or software (SVT-AV1)")
+		return fmt.Errorf("the Media Foundation encoder does H.264 and HEVC, not AV1. Use --encoder nvenc or software, which is SVT-AV1")
 	}
 	if o.CRF != CRFAuto && (o.CRF < 0 || o.CRF > 51) {
-		return fmt.Errorf("crf %d out of range 0-51", o.CRF)
+		return fmt.Errorf("--crf %d is out of range. It must be between 0 and 51", o.CRF)
 	}
 	switch o.Decoder {
 	case DecoderAuto, "auto", DecoderGPU, DecoderCPU:
 	default:
-		return fmt.Errorf("--decoder %q: want auto, gpu or cpu", o.Decoder)
+		return fmt.Errorf("--decoder %q is unknown. It must be auto, gpu or cpu", o.Decoder)
 	}
 	if o.DVELCRF < 0 || o.DVELCRF > 51 {
-		return fmt.Errorf("--dv-el-crf %d out of range 0-51", o.DVELCRF)
+		return fmt.Errorf("--dv-el-crf %d is out of range. It must be between 0 and 51", o.DVELCRF)
 	}
 	switch o.DVFEL {
 	case FELCompose, "compose", FELDrop:
 	case FELKeep, FELReencode:
 		if !o.Remux && (o.Codec != CodecH265 || (o.Encoder != EncoderNVENC && o.Encoder != EncoderSoftware && o.Encoder != EncoderBuiltin)) {
-			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart (profile 7): it needs --codec h265 and --encoder nvenc, software (x265) or builtin", o.DVFEL)
+			return fmt.Errorf("--dv-fel %s keeps Dolby Vision's layers apart, as profile 7. It needs --codec h265, and --encoder nvenc, software (x265) or builtin", o.DVFEL)
 		}
 	default:
-		return fmt.Errorf("--dv-fel %q: want compose, keep, reencode or drop", o.DVFEL)
+		return fmt.Errorf("--dv-fel %q is unknown. It must be compose, keep, reencode or drop", o.DVFEL)
 	}
 	switch o.Subs3D {
 	case "", Subs3DOff, Subs3DOn, Subs3DBoth:
 	default:
-		return fmt.Errorf("--subs-3d %q: want off, on or both", o.Subs3D)
+		return fmt.Errorf("--subs-3d %q is unknown. It must be off, on or both", o.Subs3D)
 	}
 	switch o.BitDepth {
 	case 0, 8:
 	case 10:
 		if o.Codec == CodecH264 {
-			return fmt.Errorf("10-bit output needs --codec h265 or av1: 10-bit H.264 (High 10) plays on almost nothing")
+			return fmt.Errorf("10-bit output needs --codec h265 or av1, because 10-bit H.264 (High 10) plays on almost nothing")
 		}
 		if o.Encoder == EncoderMediaFoundation {
-			return fmt.Errorf("10-bit output is not supported with Media Foundation: use --encoder nvenc or software")
+			return fmt.Errorf("10-bit output is not supported with Media Foundation. Use --encoder nvenc or software")
 		}
 	default:
-		return fmt.Errorf("bit depth %d: want 8 or 10", o.BitDepth)
+		return fmt.Errorf("--bit-depth %d is not a bit depth this codes. It must be 8 or 10", o.BitDepth)
 	}
 	return nil
 }

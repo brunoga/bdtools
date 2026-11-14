@@ -38,7 +38,7 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 	codec, ok := remuxCodecs[video.StreamID]
 	if !ok {
 		_, _ = finish()
-		return fmt.Errorf("a Matroska remux of %s video is not supported yet; convert it, or remux to .m2ts", video.Type)
+		return fmt.Errorf("a Matroska remux of %s video is not supported yet. Convert it, or remux to .m2ts", video.Type)
 	}
 	path := filepath.Join(r.work.dir, "video"+codec.streamExt())
 	f, err := os.Create(path) //nolint:gosec // our work directory
@@ -142,14 +142,14 @@ func (r *Runner) remuxToMKV(ctx context.Context, video Track, next func() (base,
 	r.fpsNum, r.fpsDen = r.rateNum, r.rateDen
 	if r.fpsNum == 0 {
 		r.fpsNum, r.fpsDen = 24000, 1001
-		r.Report.Report("warning: the source states no frame rate; assuming 24000/1001")
+		r.Report.Report("warning: the source states no frame rate, so 24000/1001 is assumed")
 	}
 	r.Opts.Codec = codec // the muxer's video codec
 	r.Report.Report("copied %d pictures", n)
 	if merged > 0 {
 		cfg := dovi.UHDBluRay(0, 0, 0, 0) // the level comes from the picture, at the mux
 		r.dovi = &cfg
-		r.Report.Report("kept Dolby Vision profile 7: the enhancement layer on %d pictures, the RPU on %d", merged, rpus)
+		r.Report.Report("kept Dolby Vision profile 7, with the enhancement layer on %d pictures and the RPU on %d", merged, rpus)
 	}
 	return r.mux(ctx, []string{path}, extras, chapters)
 }

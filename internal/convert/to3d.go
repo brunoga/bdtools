@@ -89,9 +89,9 @@ func (r *Runner) useTo3D(threeD bool) error {
 		// a live grading of a 3D file: its left eye the picture, its
 		// pair the reference (grade3d.go)
 	case threeD && r.Opts.Grade3D != "":
-		return errors.New("--3d-grade of a 3D disc: give its side-by-side conversion instead (its left eye is converted, its pair the reference), or its base view alone (--remux --2d)")
+		return errors.New("--3d-grade does not take a 3D disc. Give its side-by-side conversion instead, whose left eye is converted with its pair as the reference, or its base view alone from --remux --2d")
 	case threeD || r.framedIn != "":
-		return errors.New("--to-3d makes a 2D source 3D: this one is 3D already")
+		return errors.New("--to-3d makes a 2D source 3D, and this one is 3D already")
 	}
 	r.flat, r.Opts.TwoD, r.to3D = false, false, true
 	return nil
@@ -253,7 +253,7 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 		}
 		r.conv = &to3DState{conv: c}
 		s := r.Opts.shape3D(m.Size())
-		r.Report.Report("--to-3d: disparity %.3f%% of the width a unit of depth, %+.2f%% at depth 0 (the farthest)",
+		r.Report.Report("--to-3d: the disparity is %.3f%% of the width per unit of depth, and %+.2f%% at depth 0, the farthest",
 			100*s.Scale, 100*s.Offset)
 	}
 	f := pictureFrame8(p)
@@ -309,7 +309,7 @@ func (r *Runner) wait3D() (func() (picture, error), error) {
 	p, f := r.conv.pendPic, r.conv.pendFrame
 	r.conv.pend, r.conv.pendPic, r.conv.pendFrame = nil, picture{}, nil
 	if err != nil {
-		return nil, fmt.Errorf("--to-3d: the depth: %w", err)
+		return nil, fmt.Errorf("--to-3d could not compute the depth: %w", err)
 	}
 	return func() (picture, error) { return r.pair3D(p, f, e), nil }, nil
 }
@@ -377,20 +377,20 @@ func (r *Runner) depthModel() (*depth.Model, error) {
 			if err != nil {
 				return nil, fmt.Errorf("--3d-tune: %w", err)
 			}
-			r.Report.Report("--to-3d: the depth network tuned by %s", f)
+			r.Report.Report("--to-3d: the depth network is tuned by %s", f)
 		} else {
 			if err := m.SetTail(depth.BuiltinTail()); err != nil {
 				return nil, err
 			}
-			r.Report.Report("--to-3d: the depth network tuned to the 3D discs (the built-in weights)")
+			r.Report.Report("--to-3d: the depth network is tuned to the 3D discs, with the built-in weights")
 		}
 	}
 	if g, err := nn.NewGPU(); err == nil {
 		g.Half = m.HalfSafe() // the tensor cores: a third faster
 		m.Use(g)
-		r.Report.Report("--to-3d: the depth on the GPU (%s)", g.Name())
+		r.Report.Report("--to-3d: the depth is computed on the GPU (%s)", g.Name())
 	} else {
-		r.Report.Report("--to-3d: the depth on the CPU (slow: no CUDA GPU, %v)", err)
+		r.Report.Report("--to-3d: the depth is computed on the CPU, which is slow, because there is no CUDA GPU (%v)", err)
 	}
 	return m, nil
 }
@@ -406,16 +406,16 @@ func (r *Runner) loadDepthModel() (*depth.Model, error) {
 	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
-		return nil, fmt.Errorf("--to-3d: no cache directory for the depth model (%w): name a file with --depth-model", err)
+		return nil, fmt.Errorf("--to-3d has no cache directory for the depth model (%w). Name a file with --depth-model", err)
 	}
 	file := filepath.Join(dir, "bdtools", n.file)
 	if n.licence != "" {
-		r.Report.Report("--to-3d: %s is licensed %s: for non-commercial use only", n.name, n.licence)
+		r.Report.Report("--to-3d: %s is licensed %s, for non-commercial use only", n.name, n.licence)
 	}
 	if _, err := os.Stat(file); err != nil {
 		r.Report.Report("--to-3d: downloading the depth model (%s, %s) to %s", n.name, n.size, file)
 		if err := download(n.url, file, n.sha256); err != nil {
-			return nil, fmt.Errorf("--to-3d: the depth model: %w (or name a copy with --depth-model)", err)
+			return nil, fmt.Errorf("--to-3d could not download the depth model: %w. A copy can be named with --depth-model instead", err)
 		}
 	}
 	return depth.Load(file)
@@ -446,7 +446,7 @@ func download(url, file, want string) error {
 		err = cerr
 	}
 	if err == nil && hex.EncodeToString(h.Sum(nil)) != want {
-		err = errors.New("the download is not the file it should be (its SHA-256 differs)")
+		err = errors.New("the download is not the file it should be, because its SHA-256 differs")
 	}
 	if err != nil {
 		_ = os.Remove(part)

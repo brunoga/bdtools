@@ -239,17 +239,17 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 		// a 3D file: its left eye is the picture converted, its pair the
 		// reference, on one clock
 		if r.Opts.Reference3D != "" {
-			return errors.New("--3d-reference: the input is 3D itself, and its own reference")
+			return errors.New("--3d-reference does not apply, because the input is 3D itself and is its own reference")
 		}
 		g.ref = &gradeRef{g: g, r: r, self: true, layout: r.framedIn, swap: r.framedSwap, aligned: true}
-		r.Report.Report("--3d-grade: a 3D file (%s): its left eye converted, its own pair the reference", r.framedIn)
+		r.Report.Report("--3d-grade: the input is a 3D file (%s), so its left eye is converted and its own pair is the reference", r.framedIn)
 	case r.Opts.Reference3D != "":
 		if g.ref, err = r.openReference(ctx, g); err != nil {
 			return err
 		}
 		defer g.ref.stop()
 		defer g.ref.src.close()
-		r.Report.Report("--3d-grade: the film's own 3D to compare with: %s (%s)", r.Opts.Reference3D, g.ref.layout)
+		r.Report.Report("--3d-grade: the film's own 3D to compare with is %s (%s)", r.Opts.Reference3D, g.ref.layout)
 	}
 	if r.Opts.Shots3D != "" {
 		if g.shots, err = readShots3D(r.Opts.Shots3D); err != nil {
@@ -264,21 +264,21 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	g.addr = reachable(ln.Addr().String())
 	srv := &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
-	r.Report.Report("--3d-grade: the controls at http://%s/, the 3D stream at http://%s/stream.ts (full side by side); the grade goes to %s",
+	r.Report.Report("--3d-grade: the controls are at http://%s/ and the 3D stream at http://%s/stream.ts, as full side by side. The grade goes to %s",
 		g.addr, g.addr, r.Opts.Output)
 	// the secure side, for a headset's VR (a page on a LAN address allows
 	// WebXR over HTTPS only)
 	var tlsSrv *http.Server
 	if tlsAddr, err := nextPort(ln.Addr().String()); err == nil {
 		if cfg, err := gradeTLS(); err != nil {
-			r.Report.Report("--3d-grade: no HTTPS (%v): a headset's VR needs it", err)
+			r.Report.Report("--3d-grade: there is no HTTPS (%v), and a headset's VR needs it", err)
 		} else if tln, err := tls.Listen("tcp", tlsAddr, cfg); err != nil {
-			r.Report.Report("--3d-grade: no HTTPS on %s (%v): a headset's VR needs it", tlsAddr, err)
+			r.Report.Report("--3d-grade: there is no HTTPS on %s (%v), and a headset's VR needs it", tlsAddr, err)
 		} else {
 			tlsSrv = &http.Server{Handler: g.handler(), ReadHeaderTimeout: 10 * time.Second, TLSConfig: cfg}
 			go func() { _ = tlsSrv.Serve(tln) }()
 			g.tlsAddr = reachable(tln.Addr().String())
-			r.Report.Report("--3d-grade: for a headset, https://%s/ (its certificate is this machine's own: accept it once), then Enter VR", g.tlsAddr)
+			r.Report.Report("--3d-grade: for a headset, open https://%s/ and then Enter VR. Its certificate is this machine's own, so accept it once", g.tlsAddr)
 		}
 	}
 	err = g.play(ctx)
@@ -484,7 +484,7 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	cuts := g.conv.Cuts()
 	e, err := g.conv.Start(f).Wait()
 	if err != nil {
-		return fmt.Errorf("--3d-grade: the depth: %w", err)
+		return fmt.Errorf("--3d-grade could not compute the depth: %w", err)
 	}
 	if g.conv.Cuts() > cuts {
 		g.noteCut(t)
@@ -616,7 +616,7 @@ func (g *grader) emit(ctx context.Context, l, rr *mvc.Frame) error {
 			QP: gradeQP, GOP: gradeGOP, LowLatency: true}
 		enc, err := gpu.Open(gpu.NVENC, cfg, gradeWriter{g})
 		if err != nil {
-			return fmt.Errorf("--3d-grade: the stream's encoder (NVENC): %w", err)
+			return fmt.Errorf("--3d-grade could not open the stream's encoder, NVENC: %w", err)
 		}
 		g.enc = enc
 		g.next = time.Now()
@@ -857,7 +857,7 @@ func (g *grader) saveLocked() error {
 		return nil
 	}
 	if err := writeShots3D(g.r.Opts.Output, g.shots); err != nil {
-		g.r.Report.Report("--3d-grade: writing %s: %v", g.r.Opts.Output, err)
+		g.r.Report.Report("--3d-grade could not write %s: %v", g.r.Opts.Output, err)
 		return err
 	}
 	g.saved = true
@@ -1011,12 +1011,12 @@ func (g *grader) command(c gradeCommand) error {
 	case "knobs":
 		if c.Knobs == nil {
 			g.mu.Unlock()
-			return errors.New("knobs: none given")
+			return errors.New("no knobs given")
 		}
 		k := *c.Knobs
 		if k.Depth <= 0 || k.Depth > 5 || k.Screen < -5 || k.Screen > 5 || k.Curve != 0 && (k.Curve < 0.2 || k.Curve > 3) {
 			g.mu.Unlock()
-			return errors.New("knobs: depth above 0 to 5, screen -5 to 5, curve 0.2 to 3")
+			return errors.New("a knob is out of range. The depth must be above 0 and up to 5, the screen between -5 and 5, and the curve between 0.2 and 3")
 		}
 		g.mu.Unlock()
 		g.setKnobs(k)
@@ -1057,7 +1057,7 @@ func (g *grader) command(c gradeCommand) error {
 				v = c.View
 			}
 			if v != viewOurs && v != viewDisc && v != viewMix && v != viewDiff {
-				return fmt.Errorf("view %q: want ours, disc, mix or diff", v)
+				return fmt.Errorf("view %q is unknown. It must be ours, disc, mix or diff", v)
 			}
 			g.ref.set(v, nil)
 		case "align":
@@ -1074,7 +1074,7 @@ func (g *grader) command(c gradeCommand) error {
 		return nil
 	default:
 		g.mu.Unlock()
-		return fmt.Errorf("op %q: unknown", c.Op)
+		return fmt.Errorf("op %q is unknown", c.Op)
 	}
 	g.wakeUp()
 	g.mu.Unlock()

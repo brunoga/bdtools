@@ -92,9 +92,9 @@ func (r *Runner) transcodeAudio(ctx context.Context, e extra, format mkv.AudioFo
 	}
 	name := map[string]string{"ac3": "AC-3", "aac": "AAC"}[codec]
 	if err == nil {
-		r.Report.Report("coding the %s track %d as %s here (the file format and the players take it)", e.track.Type, e.track.ID, name)
+		r.Report.Report("coding the %s track %d as %s here, which the file format and the players take", e.track.Type, e.track.ID, name)
 	} else {
-		r.Report.Report("the %s track %d: %v; trying ffmpeg (to AC-3)", e.track.Type, e.track.ID, err)
+		r.Report.Report("could not code the %s track %d here (%v). Trying ffmpeg, which codes it to AC-3", e.track.Type, e.track.ID, err)
 		bits, delay, ferr := r.ffmpegAC3(ctx, e, channels, out)
 		if ferr != nil {
 			return "", nil, 0, ferr
@@ -152,6 +152,6 @@ func (r *Runner) ffmpegAC3(ctx context.Context, e extra, channels int, out strin
 	if msg, err := cmd.CombinedOutput(); err != nil {
 		return 0, 0, fmt.Errorf("ffmpeg: %v %s", err, strings.TrimSpace(string(msg)))
 	}
-	r.Report.Report("coding the %s track %d as AC-3 with ffmpeg (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
+	r.Report.Report("coding the %s track %d as AC-3 with ffmpeg, because the file format and the players take AC-3 and E-AC-3", e.track.Type, e.track.ID)
 	return kbps, ac3Delay, nil
 }

@@ -130,7 +130,7 @@ func (w *work) tidy() {
 // are already encoded.
 func (w *work) begin(key string, report Reporter) (int, error) {
 	if w.m.Key != key && len(w.m.Segments) > 0 {
-		report.Report("an earlier run left %d encoded frames, with other settings or another source: starting over", w.m.done())
+		report.Report("an earlier run left %d encoded frames with other settings or another source, so this run is starting over", w.m.done())
 		// Only the segments go: by now the demuxer is writing this run's
 		// audio and subtitles here too.
 		for _, s := range w.m.Segments {
@@ -190,12 +190,12 @@ func (w *work) elSegmentPaths() ([]string, error) {
 	for _, s := range w.m.Segments {
 		if s.EL == "" {
 			if out != nil {
-				return nil, errors.New("some segments have an enhancement layer and some do not: start over with --restart")
+				return nil, errors.New("some segments have an enhancement layer and some do not. Start over with --restart")
 			}
 			continue
 		}
 		if len(out) == 0 && s != w.m.Segments[0] {
-			return nil, errors.New("some segments have an enhancement layer and some do not: start over with --restart")
+			return nil, errors.New("some segments have an enhancement layer and some do not. Start over with --restart")
 		}
 		out = append(out, filepath.Join(w.dir, s.EL))
 	}

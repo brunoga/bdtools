@@ -941,7 +941,7 @@ func TestRunnerKeepsFELLayersFromACut(t *testing.T) {
 				}
 				t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
 			}
-			if !slices.Contains(lines, "carrying Dolby Vision profile 7: the full enhancement layer and the RPU on 24 frames") {
+			if !slices.Contains(lines, "carrying Dolby Vision profile 7, the full enhancement layer and the RPU on 24 frames") {
 				t.Fatalf("not profile 7 throughout:\n%s", strings.Join(lines, "\n"))
 			}
 			in, err := os.Open(out) //nolint:gosec // test

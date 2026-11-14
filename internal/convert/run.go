@@ -178,8 +178,8 @@ func (r *Runner) closeWork(ok bool) {
 		return
 	case !ok && r.work.m.done() > 0:
 		r.work.tidy()
-		r.Report.Report("kept the %d frames encoded so far in %s: the same command continues from there "+
-			"(--restart starts over)", r.work.m.done(), dir)
+		r.Report.Report("kept the %d frames encoded so far in %s. The same command continues from there, "+
+			"and --restart starts over", r.work.m.done(), dir)
 		return
 	}
 	if err := os.RemoveAll(dir); err != nil {
@@ -239,15 +239,15 @@ func (r *Runner) runBuiltin(ctx context.Context, tmp string) error {
 		return r.remuxBuiltin(ctx, src, sel)
 	}
 	if r.Opts.Remux && !r.flat {
-		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: " +
-			"remux to .m2ts, or add --2d for its base view alone")
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on. " +
+			"Remux to .m2ts, or add --2d for its base view alone")
 	}
 	if (!r.Opts.Crop.IsZero() || !r.Opts.Scale.IsZero() || r.Opts.ToneMap) && !r.flat && !r.to3D {
-		return fmt.Errorf("--crop, --scale and --tonemap convert a 2D picture for now: add --2d for a 3D source's base view")
+		return fmt.Errorf("--crop, --scale and --tonemap convert a 2D picture for now. Add --2d for a 3D source's base view")
 	}
 	switch {
 	case r.to3D:
-		r.Report.Report("source: 2D, made 3D (its depth estimated), video track %d (%s), %d audio, %d subtitle",
+		r.Report.Report("source: 2D made 3D with its depth estimated, video track %d (%s), %d audio, %d subtitle",
 			sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	case r.framedIn != "" && !r.flat:
 		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle",
@@ -398,7 +398,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 		}
 	}
 	if r.Opts.Decoder == DecoderGPU {
-		return nil, fmt.Errorf("--decoder gpu: no GPU decoder for %s here", video.Type)
+		return nil, fmt.Errorf("--decoder gpu asks for a GPU decoder, and there is none for %s here", video.Type)
 	}
 	switch codec {
 	case gpu.DecodeH264:
@@ -412,7 +412,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 					if err != nil {
 						return nil, err
 					}
-					r.Report.Report("decoding %s with ffmpeg (a feature not decoded here)", video.Type)
+					r.Report.Report("decoding %s with ffmpeg, because it uses a feature not decoded here", video.Type)
 					return openFFDecoder(bin, cfg, picture)
 				}), nil
 			}), nil
@@ -434,7 +434,7 @@ func (r *Runner) pictures(video Track, next func() (base, dep []byte, pts int64,
 			if err != nil {
 				return nil, err
 			}
-			r.Report.Report("decoding %s with ffmpeg (a profile not decoded here)", video.Type)
+			r.Report.Report("decoding %s with ffmpeg, because its profile is not decoded here", video.Type)
 			return openFFDecoder(bin, cfg, picture)
 		}), nil
 	}), nil
@@ -482,7 +482,7 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 		return nil
 	}
 	if r.flat && !isMP4Output(r.Opts.Output) {
-		r.Report.Report("2D: --burn-subs does not apply; the subtitles are kept as they are")
+		r.Report.Report("2D: --burn-subs does not apply, so the subtitles are kept as they are")
 		return nil
 	}
 	var t *Track
@@ -492,11 +492,11 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 		}
 	}
 	if t == nil {
-		return fmt.Errorf("--burn-subs %d: not a subtitle track of the title kept (see --list, and --subs-lang)", r.Opts.BurnSubs)
+		return fmt.Errorf("--burn-subs %d is not a subtitle track of the title kept. --list names the tracks, and --subs-lang says which are kept", r.Opts.BurnSubs)
 	}
 	b := newPGSBurner()
 	if !tap(t.ID, b.feed) {
-		return fmt.Errorf("--burn-subs %d: not a PGS subtitle track", t.ID)
+		return fmt.Errorf("--burn-subs %d is not a PGS subtitle track", t.ID)
 	}
 	r.burn, r.burnSeq = b, -1
 	if r.offsetSequence != nil {
@@ -506,9 +506,9 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 	case r.to3D:
 		r.Report.Report("burning subtitle track %d into the picture, just in front of the made 3D picture beneath it", t.ID)
 	case r.burnSeq == frontMost:
-		r.Report.Report("burning subtitle track %d into the picture, at the offset nearest the viewer at each moment (the source does not say which it follows)", t.ID)
+		r.Report.Report("burning subtitle track %d into the picture at the offset nearest the viewer at each moment, because the source does not say which offset it follows", t.ID)
 	case r.burnSeq < 0:
-		r.Report.Report("burning subtitle track %d into the picture, at the screen (it follows no offset sequence)", t.ID)
+		r.Report.Report("burning subtitle track %d into the picture at the screen, because it follows no offset sequence", t.ID)
 	default:
 		r.Report.Report("burning subtitle track %d into the picture, at the depth of offset sequence %d", t.ID, r.burnSeq)
 	}
@@ -519,7 +519,7 @@ func (r *Runner) setupBurn(tap func(id int, fn func(int64, []byte)) bool) error 
 func (r *Runner) check2D() {
 	if r.Opts.Subs3D.threeD() {
 		if r.Explicit["subs-3d"] {
-			r.Report.Report("2D: --subs-3d does not apply; the subtitles are kept as they are")
+			r.Report.Report("2D: --subs-3d does not apply, so the subtitles are kept as they are")
 		}
 		r.Opts.Subs3D = Subs3DOff
 	}
@@ -540,7 +540,7 @@ func (r *Runner) ListTracks(ctx context.Context) ([]Track, error) {
 // file's, a disc title's playlist's (0 when the source does not say).
 func (r *Runner) ListSource(ctx context.Context) ([]Track, time.Duration, error) {
 	if unsupportedContainer(r.Opts.Input) {
-		return nil, 0, fmt.Errorf("cannot read %s: the source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file", filepath.Base(r.Opts.Input))
+		return nil, 0, fmt.Errorf("cannot read %s. The source must be a Blu-ray, a Matroska file or an MP4 or QuickTime file", filepath.Base(r.Opts.Input))
 	}
 	if isMatroska(r.Opts.Input) {
 		src, tracks, err := probeMatroska(ctx, r.Opts.Input)
@@ -633,7 +633,7 @@ func (r *Runner) mux(ctx context.Context, video []string, extras []extra, chapte
 			}
 			t, ok, err := r.ocrTrack(e, 20000+i, dir)
 			if err != nil {
-				return fmt.Errorf("--subs-ocr: track %d: %w", e.track.ID, err)
+				return fmt.Errorf("--subs-ocr could not read track %d: %w", e.track.ID, err)
 			}
 			if ok {
 				out = append(out, t)
@@ -679,7 +679,7 @@ func (r *Runner) resolve(t Tool) (string, error) {
 	if hint != "" {
 		hint = "\n  try: " + hint
 	}
-	return "", fmt.Errorf("%s is not installed — needed to %s%s", t.Name, t.Purpose, hint)
+	return "", fmt.Errorf("%s is not installed, and it is needed to %s%s", t.Name, t.Purpose, hint)
 }
 
 // noteFirstPicture records where the first kept picture plays, so the mux

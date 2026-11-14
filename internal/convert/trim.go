@@ -60,13 +60,13 @@ func ParseClock(s string) (time.Duration, error) {
 	}
 	parts := strings.Split(s, ":")
 	if len(parts) > 3 {
-		return 0, fmt.Errorf("%q: want [[H:]M:]S, or a duration (90s, 1h30m)", s)
+		return 0, fmt.Errorf("%q is not a time. It must be [[H:]M:]S, or a duration such as 90s or 1h30m", s)
 	}
 	var d time.Duration
 	for i, p := range parts {
 		v, err := strconv.ParseFloat(p, 64)
 		if err != nil || v < 0 || math.IsInf(v, 0) || (i > 0 && v >= 60) {
-			return 0, fmt.Errorf("%q: want [[H:]M:]S, or a duration (90s, 1h30m)", s)
+			return 0, fmt.Errorf("%q is not a time. It must be [[H:]M:]S, or a duration such as 90s or 1h30m", s)
 		}
 		unit := time.Second
 		switch len(parts) - 1 - i {

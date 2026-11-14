@@ -49,7 +49,7 @@ func DeviceNames() string {
 func DeviceFor(name string) (Device, error) {
 	d, ok := Devices[strings.ToLower(name)]
 	if !ok {
-		return Device{}, fmt.Errorf("--for %q: want one of %s", name, DeviceNames())
+		return Device{}, fmt.Errorf("--for %q is not a device this knows. It must be one of %s", name, DeviceNames())
 	}
 	return d, nil
 }

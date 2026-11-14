@@ -830,7 +830,7 @@ func (w *rawWAV) header(dataLen uint32) error {
 // runMatroska is runBuiltin for a Matroska source.
 func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	if r.Opts.Remux && !isMKVOutput(r.Opts.Output) {
-		return fmt.Errorf("--remux of %s: a Matroska source remuxes into a .mkv (2D), not a transport stream", filepath.Base(r.Opts.Input))
+		return fmt.Errorf("--remux of %s must write a .mkv, because a Matroska source remuxes into a 2D .mkv and not into a transport stream", filepath.Base(r.Opts.Input))
 	}
 	r.Report.Report("probing %s", r.Opts.Input)
 	src, tracks, err := probeMatroska(ctx, r.Opts.Input)
@@ -841,7 +841,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 	r.flat = r.Opts.TwoD || !threeD(tracks)
 	r.Opts.TwoD = r.flat
 	if r.Opts.Remux && !r.flat {
-		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on: add --2d to remux its base view alone")
+		return fmt.Errorf("a 3D source's MVC video has no home in Matroska that players agree on. Add --2d to remux its base view alone")
 	}
 	selectTracks := SelectTracks
 	if r.flat {
@@ -872,7 +872,7 @@ func (r *Runner) runMatroska(ctx context.Context, tmp string) error {
 		return err
 	}
 	if r.to3D {
-		r.Report.Report("source: 2D, made 3D (its depth estimated), video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
+		r.Report.Report("source: 2D made 3D with its depth estimated, video track %d (%s), %d audio, %d subtitle", sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	} else if r.framedIn != "" && !r.flat {
 		r.Report.Report("source: 3D in one frame (%s), video track %d (%s), %d audio, %d subtitle", r.framedIn, sel.Base.ID, sel.Base.Type, len(sel.Audio), len(sel.Subtitles))
 	} else if r.flat {

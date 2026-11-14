@@ -71,7 +71,7 @@ On amd64 the hot paths are hand-written Go assembly. The files are
 assembly covers the CABAC residual, motion vector difference and coded block
 pattern decoders, motion compensation (6-tap luma, bilinear chroma,
 averaging and weighted prediction), the inverse transforms, the deblocking
-filters and the per-macroblock bookkeeping. It is used when the CPU has
+filters and the reset of each macroblock's grids. It is used when the CPU has
 AVX2, BMI2 and LZCNT, which is checked with CPUID at startup. Other CPUs and
 other architectures use the equivalent Go code. You can force the Go code on
 any CPU with `-tags purego`. Every assembly routine has a randomized test
@@ -187,8 +187,8 @@ is demuxed to disk except the audio and subtitles. Decoding and muxing
 happen in process. A GPU decodes and encodes in process as well, through its
 own system library, so with a GPU the conversion needs no external tools at
 all. Without one, the only external tool is x264, x265 or SvtAv1EncApp.
-ffmpeg takes over for software half-SBS, and for the rare interlaced H.264
-disc when there is no GPU decoder. A remux needs no tools. A container with
+ffmpeg takes over for software half-SBS, and for an interlaced H.264
+feature that the decoder here does not handle, which is rare. A remux needs no tools. A container with
 the whole toolchain is published as `ghcr.io/brunoga/bdtools` for amd64 and
 arm64. See [cmd/bdtools](cmd/bdtools/README.md), which starts with
 [examples of common tasks](cmd/bdtools/README.md#common-tasks).
@@ -241,8 +241,8 @@ For comparison, edge264, which is C with SSE/AVX2 intrinsics, decodes the
 same clips at 126 stereo pairs/s, 127 frames/s and ~880 frames/s on one
 core. Here the CABAC residual decoding, motion compensation, intra
 prediction and deblocking are all assembly, with pure-Go fallbacks under
-`-tags purego`. The remaining difference is the per-macroblock bookkeeping,
-which is still Go.
+`-tags purego`. The remaining difference is the Go code between those
+routines, the glue that walks the macroblocks and calls them.
 
 These numbers decode from memory, one access unit at a time, with
 `go test -bench File`. `mvcdec` with file I/O is somewhat slower. Real time
@@ -267,11 +267,13 @@ The decoder supports the following:
   dependent view's NAL units may arrive before their base view, and the
   dependent view may start late in the stream.
 
-Some things are not supported, because 3D Blu-ray does not use them:
-interlaced coding (field pictures, PAFF and MBAFF), 4:2:2 and 4:4:4 chroma,
-bit depths above 8, FMO and ASO, SP and SI slices, and more than two views.
-Interlaced 2D H.264, which 1080i discs use, is handed by bdtools to NVDEC,
-VideoToolbox or ffmpeg instead.
+Interlaced coding is decoded too, both field pictures (PAFF) and MBAFF
+frames, which is what 1080i 2D discs use. The decoder passes 79 of the 80
+interlaced JVT conformance streams. The one left is CAMACI3, constrained
+intra prediction in MBAFF, and a feature the decoder does not handle goes
+to NVDEC, VideoToolbox or ffmpeg instead. Some things are not supported,
+because Blu-ray does not use them: 4:2:2 and 4:4:4 chroma, bit depths
+above 8, FMO and ASO, SP and SI slices, and more than two views.
 
 The decoder can also work with an accelerator, set with `Decoder.SetAccel`.
 It then parses a 2D progressive stream, keeps track of its reference
