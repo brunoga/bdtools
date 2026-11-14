@@ -23,6 +23,11 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from start to finish (the page, the headset, the shots file, the
   conversion), and `docs/cookbook.md`, the command line's common
   operations with a complete command each.
+- The manuals as web pages, with pictures of the grading page and the
+  VR panel: `docs/manual/` (generated from the markdown, kept current by
+  a test), carried in the binary and in the release archives;
+  `--manual :8080` serves them, `--manual DIR` writes them out, and the
+  grading page links them.
 
 ### Changed
 

@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brunoga/bdtools/docs/manual"
 	"github.com/brunoga/bdtools/internal/bdmv"
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/gpu"
@@ -1135,6 +1136,7 @@ func (g *grader) handler() http.Handler {
 			"codec": mp4.AVCCodec(sps), "avcc": base64.StdEncoding.EncodeToString(mp4.AVCC(sps, pps)),
 			"width": width, "height": height})
 	})
+	mux.Handle("GET /manual/", http.StripPrefix("/manual/", manual.Handler()))
 	mux.HandleFunc("GET /quest", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusMovedPermanently) // one page for all: VR from its button
 	})

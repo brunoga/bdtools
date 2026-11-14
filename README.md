@@ -30,7 +30,9 @@ bdtools --input "Furiosa (2024).mkv" --output "Furiosa (2024) 3D.iso" --to-3d   
 More in [the cookbook](docs/cookbook.md), common operations with a complete
 command each, and [bdtools' common tasks](cmd/bdtools/README.md#common-tasks);
 [grading](docs/grading.md) is the manual for grading a 2D-to-3D conversion
-by eye, on the web page or in a headset.
+by eye, on the web page or in a headset. Both are web pages as well, with
+the pictures, in [docs/manual](docs/manual/index.html), carried in the
+binary and in every release: `bdtools --manual :8080` serves them.
 
 The decoders, each checked against its standard's conformance streams:
 
