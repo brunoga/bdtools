@@ -19,6 +19,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it when hovered, the knobs, views, transport, preview modes, the
   stretches table and the bar; in VR the panel's foot says it for what
   the cursor is over.
+- Two manuals: `docs/grading.md`, grading a 2D-to-3D conversion by eye
+  from start to finish (the page, the headset, the shots file, the
+  conversion), and `docs/cookbook.md`, the command line's common
+  operations with a complete command each.
 
 ### Changed
 

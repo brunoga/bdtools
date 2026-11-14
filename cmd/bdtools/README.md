@@ -52,7 +52,9 @@ arm64; Linux arm/v7 too):
 ## Common tasks
 
 Each example is a complete command; only the paths are yours. `bdtools
---help` lists every flag, and [Usage](#usage) explains each one.
+--help` lists every flag, and [Usage](#usage) explains each one;
+[docs/cookbook.md](../../docs/cookbook.md) has more operations, grouped by
+what you are doing.
 
 **Check what is installed** (the answer depends on the options, so pass the
 ones you will use):
@@ -385,7 +387,7 @@ scheduler such as pipeliner retry it.
 | `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
 | `--3d-curve` | `1` | With `--to-3d`: bends the depth within each shot's range, its nearness to this power; below 1 what lies between the shot's farthest and nearest comes forward (a crowd's rows the network stacks away behind each other), above 1 it goes back |
 | `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
-| `--3d-grade` | — | With `--to-3d`: no conversion, but the film converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye (the same page over HTTPS on the next port enters VR in a headset's browser); the grade goes to `--output` as a `--3d-shots` file — see [2D to 3D](#2d-to-3d) |
+| `--3d-grade` | — | With `--to-3d`: no conversion, but the film converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye (the same page over HTTPS on the next port enters VR in a headset's browser); the grade goes to `--output` as a `--3d-shots` file — see [docs/grading.md](../../docs/grading.md) |
 | `--3d-reference` | — | With `--3d-grade`: the film's own 3D, a side-by-side or over-under file, to switch to beside the conversion for comparison |
 | `--3d-fill` | none | With `--to-3d`: the hole filler's weights (`tools/inpainttrain`'s), a small network that paints what an eye saw nothing of behind a nearer thing's edge, in place of the renderer's carried edge |
 | `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |

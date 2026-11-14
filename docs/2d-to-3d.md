@@ -771,7 +771,8 @@ own 3D release, where one exists, is the way to find its grade, as
 
 Numbers in a file are a poor way to grade by eye. `--3d-grade ADDR`
 converts the film as it plays and serves it as a 3D stream, for the
-player at the 3D screen, with a web page to drive it:
+player at the 3D screen, with a web page to drive it ([grading.md](grading.md)
+is the manual: the process, the page, the headset, control by control):
 
 ```sh
 bdtools --input "Film (2020).mkv" --output "Film (2020).3d" --to-3d --3d-grade :8420
