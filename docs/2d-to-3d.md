@@ -822,7 +822,9 @@ puts the picture on a 4 m screen, each half to its eye, with the
 page's controls on a panel to the right of it: the right controller's
 ray puts a cursor on the panel and the trigger presses what is under
 it, transport, depth and screen by steps, flat, the views, the stretch,
-save and the timeline. In VR the page decodes the stream
+save and the timeline; the panel's foot says what the cursor is over
+and when to use it, as the page's controls do when hovered. In VR the
+page decodes the stream
 itself (`/stream.raw`, the frames with their times; WebCodecs) and
 draws each through WebGL, paced by their times: a video element behind
 a VR session is composited at a few frames a second by the browser,

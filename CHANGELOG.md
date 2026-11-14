@@ -15,6 +15,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rows come to where the disc has them, the pair's error 3.3 to 2.6 px).
   Also `curve=` in `--3d-shots` and a third knob (a slider, `,` `.`, the
   VR panel) in `--3d-grade`; 1, the default, leaves the depth as it was.
+- Every control of `--3d-grade`'s page says what it does and when to use
+  it when hovered, the knobs, views, transport, preview modes, the
+  stretches table and the bar; in VR the panel's foot says it for what
+  the cursor is over.
 
 ### Changed
 
