@@ -1,124 +1,130 @@
 # bdtools
 
-Turns Blu-rays into files any player handles:
+bdtools turns Blu-rays into files that any player handles. It does three
+kinds of work.
 
-- **3D Blu-ray → side-by-side MKV.** The disc's MVC video (the second eye
-  coded as a *dependent view* of the first) is decoded here and both eyes
-  stacked into one frame, full or half width, that an ordinary decoder plays —
-  subtitles kept flat or drawn in 3D at the disc's depth.
-- **2D and Ultra HD Blu-ray → MKV**, re-encoded in H.264, HEVC or AV1, 8 or
-  10 bits, keeping HDR10, HDR10+ and Dolby Vision (profile 8.1, the full
-  enhancement layer composed into the picture, or profile 7 with the layers
-  kept apart).
-- **Remuxes**, with no re-encoding: a 3D disc's MVC into one `.m2ts`, a 2D or
-  Ultra HD disc (Dolby Vision included) or an existing MKV into an MKV with
-  just the tracks you want.
+- **3D Blu-ray → side-by-side MKV.** A 3D disc codes its second eye as a
+  *dependent view* of the first, in MVC. bdtools decodes that video itself
+  and stacks both eyes into one frame, at full or half width, that an
+  ordinary decoder plays. The subtitles are kept flat, or drawn in 3D at
+  the depth the disc gives them.
+- **2D and Ultra HD Blu-ray → MKV.** The video is re-encoded in H.264, HEVC
+  or AV1, at 8 or 10 bits. HDR10, HDR10+ and Dolby Vision are kept. Dolby
+  Vision comes out as profile 8.1, with the full enhancement layer composed
+  into the picture, or as profile 7 with the layers kept apart.
+- **Remuxes**, with no re-encoding. A 3D disc's MVC goes into one `.m2ts`.
+  A 2D or Ultra HD disc, Dolby Vision included, or an existing MKV goes
+  into an MKV with just the tracks you want.
 
-It reads `.iso` images and BDMV folders in place (no mounting, no
-extraction), playlists, `.m2ts`/`.ssif` streams, AVCHD 3D recordings,
-Matroska remuxes (MakeMKV's, mkvmerge's) and MP4 and QuickTime files
-(MV-HEVC spatial video and side-by-side or over-under 3D included), and
-picks the feature itself. It writes Matroska, or MP4 and QuickTime
-(`.mp4`, `.mov`) for every layout but MVC. The
-demuxer, the decoders (H.264/MVC, HEVC, MPEG-2 and VC-1, all in Go), the
-Dolby Vision processing and the Matroska muxer are built in; a GPU decodes
-and encodes in process through its own system library (NVIDIA, Intel, AMD,
-Apple), so with one a conversion runs no other program at all. Without one,
-x264, x265 or SVT-AV1 encode. An interrupted conversion resumes where it
-stopped.
+bdtools reads `.iso` images and BDMV folders in place, with no mounting and
+no extraction. It also reads playlists, `.m2ts` and `.ssif` streams, AVCHD
+3D recordings, Matroska remuxes made by MakeMKV or mkvmerge, and MP4 and
+QuickTime files, including MV-HEVC spatial video and side-by-side or
+over-under 3D. It picks the feature itself. It writes Matroska, or MP4 and
+QuickTime (`.mp4`, `.mov`) for every layout but MVC. The demuxer, the
+decoders for H.264/MVC, HEVC, MPEG-2 and VC-1, the Dolby Vision processing
+and the Matroska muxer are all built in, in Go. A GPU decodes and encodes
+in process through its own system library, whether NVIDIA, Intel, AMD or
+Apple, so with a GPU a conversion runs no other program at all. Without
+one, x264, x265 or SVT-AV1 does the encoding. An interrupted conversion
+resumes where it stopped.
 
-MVC is the reason this exists: very few players decode it — **Plex does
-not**, and neither does libavcodec, which drops the dependent view outright —
-so a 3D Blu-ray sits in a library unwatchable despite carrying a full 1080p
-image per eye. Side by side puts both eyes in one frame every H.264/HEVC
-decoder handles, at the cost of a re-encode.
+MVC is the reason this exists. Very few players decode it. **Plex does
+not**, and neither does libavcodec, which drops the dependent view
+outright. So a 3D Blu-ray sits in a library unwatchable, even though it
+carries a full 1080p image per eye. Side by side puts both eyes in one
+frame that every H.264 and HEVC decoder handles. The cost is a re-encode.
 
 ## Status
 
-Complete for what a Blu-ray holds, on Linux, macOS and Windows (amd64,
-arm64; Linux arm/v7 too):
+bdtools is complete for what a Blu-ray holds, on Linux, macOS and Windows
+(amd64 and arm64, and Linux arm/v7 too):
 
-- 3D conversion and remux: tested end to end on synthetic discs in CI and on
-  real 3D Blu-rays (whole films; the MVC decoder is byte-identical to the
-  edge264 reference on every picture of one).
-- 2D conversion of H.264, HEVC (Main, Main 10), MPEG-2 and VC-1 video, on the
-  GPU or in Go: every decoder here is checked against its standard's
-  conformance streams (byte-identical to ffmpeg where the standard is
-  bit-exact) — see [What works where](#what-works-where).
-- HDR10, HDR10+ and Dolby Vision carried through conversions and remuxes.
-- Not yet: a Matroska remux of VC-1 or MPEG-2 video (convert it, or remux it
-  to `.m2ts`); VAAPI decoding of VC-1 (decoded in Go, or on NVDEC, instead).
+- 3D conversion and remux are tested end to end, on synthetic discs in CI
+  and on real 3D Blu-rays, whole films. The MVC decoder is byte-identical
+  to the edge264 reference on every picture of one of them.
+- 2D conversion handles H.264, HEVC (Main, Main 10), MPEG-2 and VC-1
+  video, on the GPU or in Go. Every decoder here is checked against its
+  standard's conformance streams, and is byte-identical to ffmpeg where
+  the standard is bit-exact. See [What works where](#what-works-where).
+- HDR10, HDR10+ and Dolby Vision are carried through conversions and
+  remuxes.
+- Not yet done: a Matroska remux of VC-1 or MPEG-2 video. Convert it, or
+  remux it to `.m2ts`. VAAPI decoding of VC-1 is not done either. VC-1 is
+  decoded in Go or on NVDEC instead.
 
 ## Common tasks
 
-Each example is a complete command; only the paths are yours. `bdtools
---help` lists every flag, and [Usage](#usage) explains each one;
-[docs/cookbook.md](../../docs/cookbook.md) has more operations, grouped by
-what you are doing. The manual is in the binary as web pages too:
-`bdtools --manual :8080` serves it, `bdtools --manual DIR` writes it out.
+Each example here is a complete command. Only the paths are yours to
+change. `bdtools --help` lists every flag, and [Usage](#usage) explains
+each one. [docs/cookbook.md](../../docs/cookbook.md) has more operations,
+grouped by what you are doing. The manual is also in the binary as web
+pages: `bdtools --manual :8080` serves it, and `bdtools --manual DIR`
+writes it out.
 
-**Check what is installed** (the answer depends on the options, so pass the
-ones you will use):
+**Check what is installed.** The answer depends on the options, so pass
+the ones you will use:
 
 ```sh
 bdtools --check
 bdtools --check --encoder software --codec h265
 ```
 
-**See what a disc holds** before choosing tracks — instant, even over a
-network share:
+**See what a disc holds** before you choose tracks. This is instant, even
+over a network share:
 
 ```sh
 bdtools --list --input "Avatar (2009) 3D.iso"
 ```
 
-**A 3D Blu-ray to a full side-by-side MKV** (1080p per eye; HEVC at 10 bits
-and the quality chosen for 3D, on the GPU when there is one — see
-[Defaults by source](#defaults-by-source)):
+**A 3D Blu-ray to a full side-by-side MKV.** This gives 1080p per eye, in
+HEVC at 10 bits, at the quality chosen for 3D, and on the GPU when there
+is one. See [Defaults by source](#defaults-by-source):
 
 ```sh
 bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv"
 ```
 
-**With only the best English audio and English subtitles drawn in 3D** —
-what a TV or headset in side-by-side mode needs:
+**With only the best English audio and English subtitles drawn in 3D.**
+This is what a TV or headset in side-by-side mode needs:
 
 ```sh
 bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D FSBS.mkv" \
         --audio-lang eng --audio-best --subs-lang eng --subs-3d on
 ```
 
-**Half side by side** for players that only take that (Plex, most phones),
-naming the file after what it holds:
+**Half side by side**, for players that only take that, such as Plex and
+most phones. The file is named after what it holds:
 
 ```sh
 bdtools --input disc.iso --output "Frozen (2013).mkv" --layout half --name-details
 # -> Frozen (2013) 3D HSBS 1080p HEVC 10bit CQ26 NVENC TrueHD 7.1.mkv
 ```
 
-**A 3D disc as a 2D film** (its base view, one eye):
+**A 3D disc as a 2D film.** This takes its base view, one eye:
 
 ```sh
 bdtools --input "Avatar (2009) 3D.iso" --output "Avatar (2009).mkv" --2d
 ```
 
-**A specific title** when the disc's choice is not the one you want (`--list`
-reports which playlist it chose and how many there are):
+**A specific title**, when the disc's own choice is not the one you want.
+`--list` reports which playlist it chose and how many there are:
 
 ```sh
 bdtools --input disc.iso --playlist 00801 --output "Film (Extended).mkv"
 ```
 
-**An Ultra HD Blu-ray, HDR10 or HDR10+, to HEVC** — 10 bits and the HDR
-metadata are kept without asking:
+**An Ultra HD Blu-ray, HDR10 or HDR10+, to HEVC.** The 10 bits and the
+HDR metadata are kept without asking:
 
 ```sh
 bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"
 ```
 
-**Dolby Vision.** A conversion makes profile 8.1, the full enhancement layer
-composed into the picture; or keep profile 7's layers for a player that
-composes them (NVENC, x265 or the encoder here); or leave Dolby Vision out:
+**Dolby Vision.** A conversion makes profile 8.1, with the full
+enhancement layer composed into the picture. You can also keep profile 7's
+layers for a player that composes them, with NVENC, x265 or the encoder
+here. Or you can leave Dolby Vision out:
 
 ```sh
 bdtools --input uhd.iso --output film.mkv                          # profile 8.1
@@ -126,42 +132,44 @@ bdtools --input uhd.iso --output film.mkv --dv-fel keep --encoder nvenc
 bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only
 ```
 
-**Cropping, scaling and tone mapping.** A UHD film made 1080p with its
-black bars found and cut off, or made SDR for a screen that shows HDR
-wrongly — see [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping):
+**Cropping, scaling and tone mapping.** The first command makes a UHD film
+1080p with its black bars found and cut off. The second also makes it SDR,
+for a screen that shows HDR wrongly. See
+[Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping):
 
 ```sh
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p --tonemap
 ```
 
-**Part of a film**, a scene to try settings on or to keep:
+**Part of a film**, as a scene to try settings on or to keep:
 
 ```sh
 bdtools --input disc.iso --output scene.mkv --start 1:02:30 --duration 2m
 ```
 
 The picture is decoded from the keyframe before the start and kept from
-it, the sound and subtitles are cut at the start and the end (within half
-an audio frame), and the chapters move with them. Not with `--remux` yet.
+the start. The sound and subtitles are cut at the start and the end,
+within half an audio frame. The chapters move with them. This does not
+work with `--remux` yet.
 
-**AV1**, smaller again (RTX 40, Intel Arc/Core Ultra, AMD RX 7000 encode it;
-SVT-AV1 otherwise):
+**AV1**, which is smaller again. RTX 40, Intel Arc and Core Ultra, and AMD
+RX 7000 encode it. SVT-AV1 does otherwise:
 
 ```sh
 bdtools --input disc.iso --output film.mkv --codec av1 --crf 22
 ```
 
-**No GPU at all**, or not this one: software encoding at a faster preset,
-decoding in Go:
+**No GPU at all**, or not this one. This encodes in software at a faster
+preset and decodes in Go:
 
 ```sh
 bdtools --input disc.iso --output film.mkv --encoder software --preset medium --decoder cpu
 ```
 
-**A remux, no re-encoding.** A 3D disc's MVC to one `.m2ts` (for a player
-that decodes MVC); a 2D or Ultra HD disc to an MKV, Dolby Vision profile 7
-kept whole:
+**A remux, with no re-encoding.** The first command puts a 3D disc's MVC
+into one `.m2ts`, for a player that decodes MVC. The second puts a 2D or
+Ultra HD disc into an MKV, with Dolby Vision profile 7 kept whole:
 
 ```sh
 bdtools --remux --input "Avatar (2009) 3D.iso" --output "Avatar (2009) 3D.m2ts" --audio-lang eng --audio-best
@@ -174,23 +182,23 @@ bdtools --remux --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --audio
 bdtools --remux --input "Film (2012).mkv" --output "Film (2012) eng.mkv" --audio-lang eng --audio-best --subs-lang eng
 ```
 
-**Keep the lossy core** of a lossless track as a track of its own (the AC-3
-inside TrueHD, the DTS inside DTS-HD), for a player that cannot decode the
-lossless one:
+**Keep the lossy core** of a lossless track as a track of its own. That is
+the AC-3 inside TrueHD, or the DTS inside DTS-HD, for a player that cannot
+decode the lossless one:
 
 ```sh
 bdtools --input disc.iso --output film.mkv --audio-lang eng --audio-best --keep-fallback
 ```
 
-**Scratch space elsewhere** (a fast local disk when the output is on a
-network share), and keeping it for a look afterwards:
+**Scratch space elsewhere**, such as a fast local disk when the output is
+on a network share. `--keep-temp` keeps it for a look afterwards:
 
 ```sh
 bdtools --input /nas/disc.iso --output /nas/film.mkv --temp /scratch --keep-temp
 ```
 
-**Resume after an interruption:** run the same command again; it continues
-from the last finished segment. `--restart` starts over:
+**Resume after an interruption.** Run the same command again, and it
+continues from the last finished segment. `--restart` starts over:
 
 ```sh
 bdtools --input disc.iso --output film.mkv            # stopped at 40%...
@@ -204,8 +212,8 @@ bdtools --input disc.iso --output film.mkv --restart  # from the beginning
 bdtools --dry-run --input disc.iso --output film.mkv --encoder software
 ```
 
-**A whole folder of discs**, one after another (a non-zero exit means that
-one did not convert; it resumes when run again):
+**A whole folder of discs**, one after another. A non-zero exit means that
+one did not convert. It resumes when run again:
 
 ```sh
 for iso in /media/3d-staging/*.iso; do
@@ -215,8 +223,8 @@ for iso in /media/3d-staging/*.iso; do
 done
 ```
 
-**In Docker**, with the whole toolchain (NVIDIA through the container
-toolkit; Intel and AMD through the render node):
+**In Docker**, with the whole toolchain. An NVIDIA GPU is reached through
+the container toolkit, an Intel or AMD one through the render node:
 
 ```sh
 docker run --rm --gpus all -v /media:/media ghcr.io/brunoga/bdtools:latest \
@@ -239,39 +247,43 @@ muxer      write the MKV: video, audio, subtitles (flat, or drawn in 3D),
            chapters — built in
 ```
 
-With a GPU nothing outside the process runs at all. ffmpeg is used only for
-software half-SBS (its scaler), for software AV1 when SvtAv1EncApp is not
-installed (its libsvtav1), as a fallback for a GPU whose library is
-missing — see [Hardware encoding](#hardware-encoding) — and to decode the
-two kinds of 2D video the decoders here do not take when no GPU decoder
-does: interlaced H.264 and HEVC's format range extensions (neither of which a
-Blu-ray uses for HEVC; 1080i H.264 discs exist).
+With a GPU, nothing outside the process runs at all. ffmpeg is used in
+four cases only. Software half-SBS uses its scaler. Software AV1 uses its
+libsvtav1 when SvtAv1EncApp is not installed. A GPU whose library is
+missing is reached through it, as [Hardware encoding](#hardware-encoding)
+explains. And it decodes the two kinds of 2D video that the decoders here
+do not take, when no GPU decoder does either: interlaced H.264 and HEVC's
+format range extensions. No Blu-ray uses the range extensions for HEVC,
+but 1080i H.264 discs exist.
 
-The disc is read **once and in place**: a `.iso` straight out of the image, a
-folder straight from its files. Nothing is extracted and neither view is
-demuxed to disk — the access units go from the disc to this repository's MVC
-decoder, and the stacked frames straight into the encoder. The only files
-written are the audio and subtitle tracks the mux needs, and the encoded
-video. For a feature film that is the difference between a scratch directory
-the size of the disc (twice over: the extracted stream, then the demuxed
-views) and one the size of its soundtrack.
+The disc is read **once and in place**. A `.iso` is read straight out of
+the image, and a folder straight from its files. Nothing is extracted, and
+neither view is demuxed to disk. The access units go from the disc to this
+repository's MVC decoder, and the stacked frames go straight into the
+encoder. The only files written are the audio and subtitle tracks the mux
+needs, and the encoded video. For a feature film, that is the difference
+between a scratch directory the size of the disc, twice over for the
+extracted stream and then the demuxed views, and one the size of its
+soundtrack.
 
-A Matroska remux of a 3D disc (MakeMKV's, or mkvmerge's from a disc) is
-read the same way: its video track carries each MVC access unit whole, both
-views, and goes to the decoder as it is read; the audio and subtitle tracks
-keep their names and forced flags. MP4 and VOB sources are not read: MVC
-does not travel in them (a VOB is a DVD's, which is never 3D).
+A Matroska remux of a 3D disc, made by MakeMKV or by mkvmerge from a
+disc, is read the same way. Its video track carries each MVC access unit
+whole, with both views, and it goes to the decoder as it is read. The
+audio and subtitle tracks keep their names and forced flags. MP4 and VOB
+sources are not read, because MVC does not travel in them. A VOB is a
+DVD's, and a DVD is never 3D.
 
-tsMuxeR and mkvmerge were used for the demux and the mux before these were
-built in, and are not used any more. The muxer writes what mkvmerge writes
-from the same streams: on a whole film (The Wild Robot, re-muxed from an
-mkvmerge-made MKV) every one of the 146,237 video packets is identical —
-timestamp, size, keyframe flag and content — and so are the subtitles; the
-TrueHD packets are identical but for sub-millisecond timestamp rounding. It
-reads the encoder's raw output (an H.264 or HEVC stream has no timestamps, so
-each frame's display time comes from its picture order count, B-frames and
-open GOPs included) and the audio and subtitle files frame by frame, and a
-whole film takes about a minute and a half.
+tsMuxeR and mkvmerge were used for the demux and the mux before these
+were built in. They are not used any more. The muxer writes what mkvmerge
+writes from the same streams. On a whole film (The Wild Robot, re-muxed
+from an mkvmerge-made MKV) every one of the 146,237 video packets is
+identical in timestamp, size, keyframe flag and content, and so are the
+subtitles. The TrueHD packets are identical but for sub-millisecond
+timestamp rounding. The muxer reads the encoder's raw output and the
+audio and subtitle files frame by frame. An H.264 or HEVC stream has no
+timestamps, so each frame's display time comes from its picture order
+count, B-frames and open GOPs included. A whole film takes about a minute
+and a half.
 
 ## Usage
 
@@ -292,20 +304,22 @@ bdtools --input 00800.m2ts --output "Life of Pi (2012).mkv"
 | Loose streams | the feature's `.m2ts`, or its `STREAM/SSIF/*.ssif` | you |
 | An MKV remux (MakeMKV, mkvmerge) | the `.mkv` | you |
 
-**A disc image needs no mounting and no extraction.** Mounting one requires
-root, which rules it out for an unattended conversion, so the image is read
-directly — a Blu-ray is a UDF 2.50 filesystem and a pure-Go reader handles it on
-every platform — and the feature's stream is decoded straight out of it.
+**A disc image needs no mounting and no extraction.** Mounting one
+requires root, which rules it out for an unattended conversion. So the
+image is read directly. A Blu-ray is a UDF 2.50 filesystem, and a pure-Go
+reader handles it on every platform. The feature's stream is decoded
+straight out of it.
 
 ### Choosing the title
 
-Given an image or a folder, the playlists themselves are read — instantly, and
-without touching a stream — and the 3D one holding **the most distinct content**
-wins. A disc holds a playlist per title: the feature, its trailers, the menus,
-and often several near-duplicates of the feature. Some also carry playlists
-that loop one short clip a hundred times (menus, demo loops, decoys meant to
-confuse rippers) and so run *longer* than the film; counting each stretch of a
-clip once sees through those. Between copies of the feature the one with
+Given an image or a folder, bdtools reads the playlists themselves. That
+is instant, and it touches no stream. The 3D playlist holding **the most
+distinct content** wins. A disc holds a playlist per title: the feature,
+its trailers, the menus, and often several near-duplicates of the
+feature. Some discs also carry playlists that loop one short clip a
+hundred times. Those are menus, demo loops or decoys meant to confuse
+rippers, and they run *longer* than the film. Counting each stretch of a
+clip once sees through them. Between copies of the feature, the one with
 chapters wins, then the one in fewer pieces.
 
 ```
@@ -313,17 +327,17 @@ bdtools: reading the disc image in place (no mount, no extraction)
 bdtools: chose 00800.mpls (1h28m3s) from 46 playlists for a 3D conversion
 ```
 
-A disc with no 3D title has its 2D feature converted; with `--2d` the title is
-chosen among every playlist, and a 2D copy of the feature wins over its 3D
-twin, which would read both views to use one.
+A disc with no 3D title has its 2D feature converted. With `--2d` the
+title is chosen among every playlist, and a 2D copy of the feature wins
+over its 3D twin, which would read both views to use one.
 
-**The eye order comes from the disc too.** The playlist says whether the base
-view is the left or the right eye, and the decoder stacks the views the other
-way round when it is the right — most discs are left, some are not, and the
-difference is the difference between 3D and a headache. `--swap-lr` overrides
-it when given explicitly.
+**The eye order comes from the disc too.** The playlist says whether the
+base view is the left or the right eye. When it is the right, the decoder
+stacks the views the other way round. Most discs are left, some are not,
+and the difference is the difference between 3D and a headache.
+`--swap-lr` overrides it when given explicitly.
 
-It reports as it goes, because a feature film takes hours:
+bdtools reports as it goes, because a feature film takes hours:
 
 ```
 bdtools: probing STREAM/SSIF/00272.ssif
@@ -340,7 +354,7 @@ bdtools: timeline: picture 0.898-4865.800 s, A_TRUEHD 0.000-4865.841 s
 bdtools: done: /media/3dmovies/Toy Story (1995).mkv
 ```
 
-A non-zero exit means the conversion did not happen, which is what lets a
+A non-zero exit means the conversion did not happen. That is what lets a
 scheduler such as pipeliner retry it.
 
 | Flag | Default | Description |
@@ -348,154 +362,163 @@ scheduler such as pipeliner retry it.
 | `--check` | — | Report which external tools are present and which are missing, then exit |
 | `--dry-run` | — | Print the commands that would run, without running them |
 | `--version` | — | Print the version and exit |
-| `--manual` | — | The manual (the web pages of `docs/manual`, carried in the binary): serve it at this address (`:8080`, until Ctrl-C) or write its pages into this directory, then exit |
+| `--manual` | — | The manual, as the web pages of `docs/manual` carried in the binary. Serve it at this address (`:8080`, until Ctrl-C), or write its pages into this directory, then exit |
 | `--keep-temp` | — | Leave the work directory's files behind instead of deleting them |
-| `--restart` | — | Encode from the start, ignoring the video an interrupted run left — see [Resuming](#resuming-an-interrupted-conversion) |
+| `--restart` | — | Encode from the start, ignoring the video an interrupted run left. See [Resuming](#resuming-an-interrupted-conversion) |
 | `--quiet` | — | Only report errors |
-| `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux — see [What you can point it at](#what-you-can-point-it-at) |
-| `--output` | — | Destination `.mkv` (or `.m2ts`, `.ts` for a `--remux` keeping a 3D disc's MVC) |
+| `--input` | — | A `.iso`, a BDMV folder, a `.mpls` playlist, an `.m2ts`, or an MKV remux. See [What you can point it at](#what-you-can-point-it-at) |
+| `--output` | — | The destination `.mkv`. For a `--remux` that keeps a 3D disc's MVC, `.m2ts` or `.ts` |
 | `--playlist` | chosen from the playlists | The title to read from a disc image or folder, by playlist number (`00800` or `00800.mpls`) |
-| `--temp` | beside the output | Where the work directory goes: the audio and subtitle tracks and the encoded video, until they are muxed |
-| `--layout` | `full` | `full` (1080p per eye), `half` (960p per eye, roughly half the size), `ou` (1080p per eye over-under, the left on top), `half-ou` (540p per eye over-under), `mvc` (frame packed, for a player with an MVC decoder) — see [MVC output](#mvc-output) — or `mvhevc` (MV-HEVC in an .mp4 or .mov, for Apple devices and the Meta Quest) — see [MV-HEVC output](#mv-hevc-output) |
-| `--input-layout` | `auto` | how a 2D-coded source's frame holds a 3D pair: `auto` (as a Matroska file's stereo mode says), `2d` (one picture), `full` or `half` (side by side), `ou` or `half-ou` (over-under). A framed source converts like a disc's two views, to any 3D layout or, with `--2d`, to its left eye |
-| `--audio-transcode` | `ac3` | the codec an MP4 output's DTS and PCM tracks are coded in, here: `ac3` (640 kb/s for 5.1, 320 for stereo) or `aac` (96 kb/s a channel) |
-| `--burn-subs` | none | an MP4 or QuickTime output (MV-HEVC included), which carries no subtitle track: a subtitle track (its id, as `--list` shows it) drawn into both eyes at the disc's depth, as the file carries no subtitle track |
-| `--spatial-fov`, `--spatial-baseline`, `--spatial-disparity` | `90`, `63`, `0` | `--layout mvhevc`: what the file says of its stereo pair (degrees of horizontal field of view per eye; millimetres between the cameras; a shift of the views in -1..1 of the width). Apple's Photos marks a file spatial only with a field of view and a baseline or disparity |
-| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short; `x264` is still accepted for `software`), `builtin`: the encoders here, H.264 (8-bit, MVC included), HEVC (MV-HEVC included) and AV1 (no tools; for HEVC `--crf` N codes at QP N-5, which matched x265 medium's CRF N in size and PSNR; for AV1 at the quantiser index the GPU encoders and SVT-AV1 take for `--crf` N; the default when no GPU encoder works and x265 or SVT-AV1 is missing; the AV1 encoder is slow for now, about half a second a 1080p picture on 24 cores, within 6% of SVT-AV1 preset 4's size at the default speed (see `--preset`)), or `copy`: for `--layout mvc`, the source's left eye kept as it is and only the right eye coded |
-| `--codec` | `h265` | `h265`, `h264` or `av1` — see [Codec](#codec) |
+| `--temp` | beside the output | Where the work directory goes. It holds the audio and subtitle tracks and the encoded video until they are muxed |
+| `--layout` | `full` | `full` is 1080p per eye. `half` is 960p per eye, roughly half the size. `ou` is 1080p per eye over-under, the left on top. `half-ou` is 540p per eye over-under. `mvc` is frame packed, for a player with an MVC decoder; see [MVC output](#mvc-output). `mvhevc` is MV-HEVC in an .mp4 or .mov, for Apple devices and the Meta Quest; see [MV-HEVC output](#mv-hevc-output) |
+| `--input-layout` | `auto` | How a 2D-coded source's frame holds a 3D pair. `auto` goes by what a Matroska file's stereo mode says. `2d` is one picture. `full` or `half` is side by side, and `ou` or `half-ou` is over-under. A framed source converts like a disc's two views, to any 3D layout, or to its left eye with `--2d` |
+| `--audio-transcode` | `ac3` | The codec an MP4 output's DTS and PCM tracks are coded in here. `ac3` is 640 kb/s for 5.1 and 320 for stereo. `aac` is 96 kb/s a channel |
+| `--burn-subs` | none | For an MP4 or QuickTime output, MV-HEVC included, which carries no subtitle track. Names a subtitle track by its id, as `--list` shows it, and draws it into both eyes at the disc's depth |
+| `--spatial-fov`, `--spatial-baseline`, `--spatial-disparity` | `90`, `63`, `0` | With `--layout mvhevc`, what the file says of its stereo pair: the degrees of horizontal field of view per eye, the millimetres between the cameras, and a shift of the views in -1..1 of the width. Apple's Photos marks a file spatial only with a field of view and a baseline or disparity |
+| `--encoder` | `auto` | `auto`, `software`, `vaapi`, `videotoolbox`, `nvenc`, `mediafoundation` (Windows; `mf` for short), `builtin` or `copy`. `x264` is still accepted for `software`. `builtin` is the encoders here, which need no tools: H.264 (8-bit, MVC included), HEVC (MV-HEVC included) and AV1. For HEVC, `--crf` N codes at QP N-5, which matched x265 medium's CRF N in size and PSNR. For AV1, it codes at the quantiser index the GPU encoders and SVT-AV1 take for `--crf` N. It is the default when no GPU encoder works and x265 or SVT-AV1 is missing. The AV1 encoder is slow for now, about half a second a 1080p picture on 24 cores, and within 6% of SVT-AV1 preset 4's size at the default speed (see `--preset`). `copy` is for `--layout mvc`: the source's left eye is kept as it is, and only the right eye is coded |
+| `--codec` | `h265` | `h265`, `h264` or `av1`. See [Codec](#codec) |
 | `--swap-lr` | — | Exchange the eyes, for a disc whose base view is the right one |
-| `--list` | — | Print the source's tracks and exit — see [Choosing tracks](#choosing-tracks) |
-| `--json` | — | With `--list`: the tracks (names, forced and commentary flags, picture size) and the source's running time as JSON, for a script |
+| `--list` | — | Print the source's tracks and exit. See [Choosing tracks](#choosing-tracks) |
+| `--json` | — | With `--list`, print the tracks (names, forced and commentary flags, picture size) and the source's running time as JSON, for a script |
 | `--audio-lang` | — | Keep only audio in these languages, e.g. `eng` or `eng,fra` |
 | `--audio-codec` | — | Keep only audio matching these codecs, e.g. `truehd` or `dts,ac3` |
-| `--audio-best` | — | Of the audio that matches, keep only the highest-quality track, of each `--audio-lang` language |
-| `--no-commentary` | — | Leave out commentary audio and subtitles (flagged so, or with *comment* in their name) |
+| `--audio-best` | — | Of the audio that matches, keep only the highest-quality track of each `--audio-lang` language |
+| `--no-commentary` | — | Leave out commentary audio and subtitles, whether flagged so or with *comment* in their name |
 | `--default-audio` | first track | Make the first kept audio track in this language the default, e.g. `jpn` for a film watched in its own language |
-| `--default-subs` | none | Make the first full subtitle track in this language (not forced; SDH only when there is no other) the default, e.g. `eng` |
+| `--default-subs` | none | Make the first full subtitle track in this language the default, e.g. `eng`. A forced track does not count, and an SDH one only when there is no other |
 | `--subs-lang` | — | Keep only subtitles in these languages, e.g. `eng,pt-br`, or `none` |
 | `--subs-codec` | — | Keep only subtitles matching these codecs |
-| `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both` — see [3D subtitles](#3d-subtitles) |
-| `--subs-ocr` | — | Read each PGS subtitle track's pictures as text: an SRT track beside it in Matroska, a tx3g one in MP4 — see [Text subtitles](#text-subtitles) |
-| `--subs-file` | — | Add a subtitle file (SRT, ASS, SSA, WebVTT) as a track: `LANG:PATH`, or `PATH` with the language from its name (`film.en.srt`, `film.eng.forced.srt`); repeat for more — see [Text subtitles](#text-subtitles) |
+| `--subs-3d` | `both` (`off` with `--remux`) | `off`, `on` or `both`. See [3D subtitles](#3d-subtitles) |
+| `--subs-ocr` | — | Read each PGS subtitle track's pictures as text. The result is an SRT track beside it in Matroska, or a tx3g one in MP4. See [Text subtitles](#text-subtitles) |
+| `--subs-file` | — | Add a subtitle file (SRT, ASS, SSA, WebVTT) as a track, given as `LANG:PATH`, or as `PATH` with the language taken from its name (`film.en.srt`, `film.eng.forced.srt`). Repeat for more. See [Text subtitles](#text-subtitles) |
 | `--keep-fallback` | — | Keep the lossy core embedded in a lossless track instead of dropping it |
 | `--name-audio-codec` | — | Append the kept audio codec to the output filename |
-| `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename — see [Naming the output](#naming-the-output-after-the-audio) |
-| `--remux` | — | Copy the disc's MVC video out with no re-encoding — see [Remuxing](#remuxing-instead-of-converting) |
-| `--crf` | by the source: `20` 3D, `18` Ultra HD, `16` HD | Quality target, 0–51; lower is better. **Not comparable between codecs** — see [Defaults by source](#defaults-by-source) |
-| `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1` — see [10-bit](#10-bit) |
-| `--2d` | — | Convert as a 2D film: a 3D source's base view on its own — see [2D Blu-rays](#2d-blu-rays) |
-| `--to-3d` | — | Make a 2D source 3D, out in `--layout`'s form — see [2D to 3D](#2d-to-3d) |
-| `--3d-depth` | `1` | With `--to-3d`: the depth's strength, 1 the 3D discs' |
-| `--3d-screen` | `0` | With `--to-3d`: moves the depth nearer (positive) or farther, in percent of the width |
-| `--3d-curve` | `1` | With `--to-3d`: bends the depth within each shot's range, its nearness to this power; below 1 what lies between the shot's farthest and nearest comes forward (a crowd's rows the network stacks away behind each other), above 1 it goes back |
-| `--3d-refine` | the built-in weights | With `--to-3d`: the depth refinement's weights, which correct the depth's shape: `none`, or a file of `tools/depthtrain`'s — see [2D to 3D](#2d-to-3d) |
-| `--3d-grade` | — | With `--to-3d`: no conversion, but the film converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye (the same page over HTTPS on the next port enters VR in a headset's browser); the grade goes to `--output` as a `--3d-shots` file — see [docs/grading.md](../../docs/grading.md) |
-| `--3d-reference` | — | With `--3d-grade`: the film's own 3D, a side-by-side or over-under file, to switch to beside the conversion for comparison |
-| `--3d-fill` | none | With `--to-3d`: the hole filler's weights (`tools/inpainttrain`'s), a small network that paints what an eye saw nothing of behind a nearer thing's edge, in place of the renderer's carried edge |
-| `--3d-window` | `true` | With `--to-3d`: a floating window where something in front of the screen meets the picture's left or right edge |
-| `--depth-model` | `small` | With `--to-3d`: the depth network, `small`, `base` or `large` (Video Depth Anything's, downloaded once; `base` and `large` are licensed CC-BY-NC-4.0, for non-commercial use only), or a checkpoint (`.pth`) |
-| `--decoder` | `auto` | How a 2D source is decoded: `auto` (the GPU when one can, else the decoders here), `gpu`, or `cpu` (never the GPU) |
-| `--dv-fel` | `compose` | A Dolby Vision full enhancement layer in a conversion: `compose` it into the picture (profile 8.1); `keep` it as a layer, rebuilt for the encoded base layer, or `reencode` the source's (profile 7, `--codec h265`, `--encoder nvenc`, `software` or `builtin`); or `drop` it (the HDR10 base layer as it is) |
+| `--name-details` | — | Append the layout, resolution, codec, quality, encoder and main audio track to the output filename. See [Naming the output](#naming-the-output-after-the-audio) |
+| `--remux` | — | Copy the disc's MVC video out with no re-encoding. See [Remuxing](#remuxing-instead-of-converting) |
+| `--crf` | by the source: `20` 3D, `18` Ultra HD, `16` HD | Quality target, 0–51; lower is better. **Not comparable between codecs.** See [Defaults by source](#defaults-by-source) |
+| `--bit-depth` | `10` (`8` for `h264`) | `8`, or `10` for `h265` and `av1`. See [10-bit](#10-bit) |
+| `--2d` | — | Convert as a 2D film, from a 3D source's base view on its own. See [2D Blu-rays](#2d-blu-rays) |
+| `--to-3d` | — | Make a 2D source 3D, written in `--layout`'s form. See [2D to 3D](#2d-to-3d) |
+| `--3d-depth` | `1` | With `--to-3d`, the depth's strength. 1 is the 3D discs' |
+| `--3d-screen` | `0` | With `--to-3d`, moves the depth nearer (positive) or farther, in percent of the width |
+| `--3d-curve` | `1` | With `--to-3d`, bends the depth within each shot's range, by raising its nearness to this power. Below 1, what lies between the shot's farthest and nearest comes forward, such as a crowd's rows the network stacks away behind each other. Above 1, it goes back |
+| `--3d-refine` | the built-in weights | With `--to-3d`, the depth refinement's weights, which correct the depth's shape. `none`, or a file made by `tools/depthtrain`. See [2D to 3D](#2d-to-3d) |
+| `--3d-grade` | — | With `--to-3d`, no conversion. Instead the film is converted live as it plays and served as a 3D stream at this address (`:8420`), with a web page there to play, pause, step and seek it and to turn the depth and screen by eye. The same page over HTTPS on the next port enters VR in a headset's browser. The grade goes to `--output` as a `--3d-shots` file. See [docs/grading.md](../../docs/grading.md) |
+| `--3d-reference` | — | With `--3d-grade`, the film's own 3D, as a side-by-side or over-under file, to switch to beside the conversion for comparison |
+| `--3d-fill` | none | With `--to-3d`, the hole filler's weights, made by `tools/inpainttrain`. The hole filler is a small network that paints what an eye saw nothing of behind a nearer thing's edge, in place of the renderer's carried edge |
+| `--3d-window` | `true` | With `--to-3d`, a floating window where something in front of the screen meets the picture's left or right edge |
+| `--depth-model` | `small` | With `--to-3d`, the depth network: `small`, `base` or `large`, which are Video Depth Anything's and are downloaded once, or a checkpoint (`.pth`). `base` and `large` are licensed CC-BY-NC-4.0, for non-commercial use only |
+| `--decoder` | `auto` | How a 2D source is decoded. `auto` is the GPU when one can, else the decoders here. `gpu` insists on the GPU, and `cpu` never uses it |
+| `--dv-fel` | `compose` | What to do with a Dolby Vision full enhancement layer in a conversion. `compose` composes it into the picture (profile 8.1). `keep` keeps it as a layer, rebuilt for the encoded base layer, and `reencode` re-encodes the source's; both give profile 7 and need `--codec h265` with `--encoder nvenc`, `software` or `builtin`. `drop` leaves the HDR10 base layer as it is |
 | `--dv-el-crf` | `--crf` + 12 | The enhancement layer's quality with `--dv-fel keep` or `reencode` |
-| `--compare` | — | Compare this output with `--input`, its source, and stop: PSNR, SSIM and VMAF measured here — see [Measuring a conversion](#measuring-a-conversion); `--compare-skip`, `--compare-every`, `--compare-csv` |
-| `--watch`, `--ext` | — | With `--input` a directory (a batch): go on converting what arrives in it; the outputs' kind (`mkv`, `mp4`, `mov`) — see [Batches](#batches) |
-| `--video-size` | — | The video's size to aim at (`4.5G`, `700M`, `3GiB`): the CRF is found for it first — see [A target size](#a-target-size) |
-| `--for` | — | A player's settings where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro` — see [Device presets](#device-presets) |
-| `--start`, `--end`, `--duration` | — | Convert part of the title or file: from `--start`, up to `--end` or for `--duration` (`[[H:]M:]S`, or `1h2m3s`); the sound, subtitles and chapters cut with the picture |
-| `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`; `auto` finds the black bars |
-| `--tonemap` | — | Make an HDR picture (HDR10, HLG, Dolby Vision, HDR10+) SDR, BT.709 — see [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping) |
-| `--scale` | `none` | Fit a 2D conversion's picture in a box, its shape kept and never enlarged: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
-| `--preset` | `slow` | Software encoder speed/efficiency trade-off (x264 and x265 take the same names; SVT-AV1 a preset number by them; the built-in AV1 encoder searches every tool to `slow`, 1.5 times faster and 2.4% larger at `medium`, 2.2 times faster and 3.7% larger from `fast`) |
+| `--compare` | — | Compare this output with `--input`, its source, and stop. PSNR, SSIM and VMAF are measured here. See [Measuring a conversion](#measuring-a-conversion), which also covers `--compare-skip`, `--compare-every` and `--compare-csv` |
+| `--watch`, `--ext` | — | With `--input` a directory, a batch. `--watch` goes on converting what arrives in it. `--ext` is the outputs' kind (`mkv`, `mp4`, `mov`). See [Batches](#batches) |
+| `--video-size` | — | The video's size to aim at (`4.5G`, `700M`, `3GiB`). The CRF is found for it first. See [A target size](#a-target-size) |
+| `--for` | — | A player's settings, where the command line gives none: `appletv`, `coreelec`, `kodi`, `plex`, `quest`, `visionpro`. See [Device presets](#device-presets) |
+| `--start`, `--end`, `--duration` | — | Convert part of the title or file, from `--start` up to `--end` or for `--duration` (`[[H:]M:]S`, or `1h2m3s`). The sound, subtitles and chapters are cut with the picture |
+| `--crop` | `none` | Take `TOP:BOTTOM:LEFT:RIGHT` samples (even numbers) off a 2D conversion's picture, black bars say, before any `--scale`. `auto` finds the black bars |
+| `--tonemap` | — | Make an HDR picture (HDR10, HLG, Dolby Vision, HDR10+) SDR, BT.709. See [Cropping, scaling and tone mapping](#cropping-scaling-and-tone-mapping) |
+| `--scale` | `none` | Fit a 2D conversion's picture in a box, keeping its shape and never enlarging it: `2160p`, `1440p`, `1080p`, `720p`, `576p`, `480p` or `WIDTHxHEIGHT` |
+| `--preset` | `slow` | The software encoder's trade of speed against efficiency. x264 and x265 take the same names, and SVT-AV1 a preset number mapped from them. The built-in AV1 encoder searches every tool up to `slow`; `medium` is 1.5 times faster and 2.4% larger, and `fast` and faster are 2.2 times faster and 3.7% larger |
 | `--decode-threads` | all CPUs | Pictures the decoder works on at once |
-| `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process (ffmpeg when the library is missing); `ffmpeg` always goes through ffmpeg — see [Hardware encoding](#hardware-encoding) |
+| `--gpu-api` | `builtin` | `builtin` drives a GPU encoder through its system library, in process, or through ffmpeg when the library is missing. `ffmpeg` always goes through ffmpeg. See [Hardware encoding](#hardware-encoding) |
 | `--vaapi-device` | `/dev/dri/renderD128` | The render node VAAPI encodes on |
 
-`--layout full` is almost always what a 3D library wants: it is the only layout
-that keeps the disc's resolution, and it is what the decoder emits natively, so
-it costs no resample.
+`--layout full` is almost always what a 3D library wants. It is the only
+layout that keeps the disc's resolution, and it is what the decoder emits
+natively, so it costs no resample.
 
-`--swap-lr` costs nothing: the decoder stacks the eyes the other way round as
-it decodes. `--layout half` is a filter on the stacked frame, and neither x264
-nor x265 can filter. Asking for it with `--encoder software` therefore runs the
-encode through **ffmpeg's `libx264` or `libx265`** instead of the standalone
-binary: the same encoder library, reached by a route that can filter, with
-`--crf` and `--preset` passed straight through. Unfiltered software encoding
-still uses the standalone binary, which is fewer moving parts and works on a
+`--swap-lr` costs nothing. The decoder stacks the eyes the other way round
+as it decodes. `--layout half` is different. It is a filter on the stacked
+frame, and neither x264 nor x265 can filter. Asking for it with
+`--encoder software` therefore runs the encode through **ffmpeg's
+`libx264` or `libx265`** instead of the standalone binary. That is the
+same encoder library, reached by a route that can filter, with `--crf` and
+`--preset` passed straight through. Unfiltered software encoding still
+uses the standalone binary. That is fewer moving parts, and it works on a
 machine that has x264 but no ffmpeg.
 
 ### MV-HEVC output
 
-`--layout mvhevc` writes the film as MV-HEVC in an MP4 (or QuickTime, with
-a `.mov` output): the left eye as an HEVC base layer any player shows in
-2D, the right eye as a second layer predicted from it, with the stereo
-signalling Apple's players and the Meta Quest read (`vexu` and `hfov` in
-the sample entry, the layered configuration `lhvC` beside `hvcC`, both
-layers in every sample, as Apple's HEVC Stereo Video profile asks). NVENC
-codes it in process when it works here (an NVIDIA GPU of the RTX 50
-series), and the HEVC encoder in this program otherwise
-(`--encoder builtin`, which works anywhere). `--crf` is NVENC's constant
-quality as for the other layouts; the encoder here codes at QP `--crf`-5,
-about six times slower than NVENC but much smaller: its right eye costs
-under half of the left, against nearly as much for NVENC's. The output is 8-bit unless
-`--bit-depth 10` asks for Main 10: Apple devices take either, but the
-Quest's players decode 10-bit MV-HEVC slowly or not at all, and iPhone
-recordings are 8-bit.
-The audio tracks go in as AC-3 or E-AC-3: a TrueHD track contributes its
-AC-3 core, and a PCM or DTS track (a DTS-HD one's core) is coded as AC-3
-here (5.1 at most, 640 kb/s; 7.1 folded down, 96 and 192 kHz brought to
-48), in step with the picture as the disc has it. The file carries no
-subtitle track, as its players show text and a Blu-ray's are pictures:
-`--burn-subs ID` draws one subtitle track into both eyes, at the depth
-the disc gives it. The file states the disc's colour signalling, and BT.709 (a
-Blu-ray's HD colour) for an HD disc whose stream states none, in the
-stream and in a `colr` box, as Apple's players go by what the file says.
-Verify a file with `ffmpeg -view_ids 1 -i file.mp4 ...` (ffmpeg
-7.1 and later decode the second view). On the Quest, SKYBOX plays these
-files from its 2.0.2 beta (set its 3D mode to side by side); the
-headset's own player shows only the base layer of a local MV-HEVC file,
-and 4XVR's own MV-HEVC decoder plays iPhone recordings only (see
-[docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md)).
+`--layout mvhevc` writes the film as MV-HEVC in an MP4, or in QuickTime
+with a `.mov` output. The left eye is an HEVC base layer that any player
+shows in 2D. The right eye is a second layer predicted from it. The file
+carries the stereo signalling that Apple's players and the Meta Quest
+read: `vexu` and `hfov` in the sample entry, the layered configuration
+`lhvC` beside `hvcC`, and both layers in every sample, as Apple's HEVC
+Stereo Video profile asks. NVENC codes it in process when it works here,
+which means an NVIDIA GPU of the RTX 50 series. Otherwise the HEVC
+encoder in this program codes it (`--encoder builtin`, which works
+anywhere). `--crf` is NVENC's constant quality, as for the other layouts.
+The encoder here codes at QP `--crf`-5. It is about six times slower than
+NVENC but much smaller: its right eye costs under half of the left, where
+NVENC's costs nearly as much.
+
+The output is 8-bit unless `--bit-depth 10` asks for Main 10. Apple
+devices take either, but the Quest's players decode 10-bit MV-HEVC slowly
+or not at all, and iPhone recordings are 8-bit.
+
+The audio tracks go in as AC-3 or E-AC-3. A TrueHD track contributes its
+AC-3 core. A PCM or DTS track, or a DTS-HD one's core, is coded as AC-3
+here, at 5.1 at most and 640 kb/s, with 7.1 folded down and 96 and 192
+kHz brought to 48. The sound stays in step with the picture as the disc
+has it. The file carries no subtitle track, because its players show text
+and a Blu-ray's subtitles are pictures. `--burn-subs ID` draws one
+subtitle track into both eyes, at the depth the disc gives it. The file
+states the disc's colour signalling in the stream and in a `colr` box,
+and BT.709 (a Blu-ray's HD colour) for an HD disc whose stream states
+none, because Apple's players go by what the file says.
+
+You can verify a file with `ffmpeg -view_ids 1 -i file.mp4 ...`. ffmpeg
+7.1 and later decode the second view. On the Quest, SKYBOX plays these
+files from its 2.0.2 beta. Set its 3D mode to side by side. The headset's
+own player shows only the base layer of a local MV-HEVC file, and 4XVR's
+own MV-HEVC decoder plays iPhone recordings only. See
+[docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md).
 
 ### 2D to 3D
 
 `--to-3d` makes a 2D film 3D. A video depth network gives each picture's
-depth: Video Depth Anything Small (Apache-2.0), run here from its
+depth. It is Video Depth Anything Small (Apache-2.0), run here from its
 published checkpoint, which is downloaded to the cache the first time (116
-MB). Each eye is the picture shifted by half its disparity, the nearer
-covering the farther; what an eye sees behind an edge is filled from the
-background side. The pair goes out as a 3D source's would, in any
-`--layout` (full or half side by side or over-under, MVC), with `--scale
-1080p` for a player that takes 1080p a view:
+MB). Each eye is the picture shifted by half its disparity, with the
+nearer covering the farther. What an eye sees behind an edge is filled
+from the background side. The pair goes out as a 3D source's would, in
+any `--layout`: full or half side by side, over-under, or MVC. Add
+`--scale 1080p` for a player that takes 1080p a view:
 
 ```sh
 bdtools --input "Film (2020).mkv" --output "Film (2020) 3D FSBS.mkv" --to-3d
 bdtools --input "Film (2020).mkv" --output "Film (2020) 3D.mkv" --to-3d --layout mvc
 ```
 
-The depth is the 3D discs' by default (measured on native and
-studio-converted ones: the farthest about 0.75% of the width behind the
-screen, the nearest up to about 1% in front); `--3d-depth` scales it,
-`--3d-screen` moves it nearer or farther. Where something in front of the screen meets the
-picture's left or right edge, a floating window (a black strip down that
-side of one eye, as wide as its disparity) puts the edge in front of it
-(`--3d-window=false` leaves it out). With `--subs-3d` (or
-`--burn-subs`) the subtitles sit just in front of the picture beneath them,
-nearer at once when it comes nearer, farther slowly. Letterbox
-bars stay at the screen; each cut starts the depth afresh; an HDR source is
-tone mapped (the 3D is 8-bit). The depth network runs on an NVIDIA GPU
-when there is one (CUDA, through the driver alone: a 1080p film converts
-at about 35 pictures a second on an RTX 5090, 43 with `--3d-refine none`), else
-on the CPU (about a second a picture on 24 cores). Hair,
+The depth is the 3D discs' by default. We measured it on native and
+studio-converted discs: the farthest point is about 0.75% of the width
+behind the screen, and the nearest up to about 1% in front. `--3d-depth`
+scales it, and `--3d-screen` moves it nearer or farther. Where something
+in front of the screen meets the picture's left or right edge, a floating
+window puts the edge in front of it. The window is a black strip down that
+side of one eye, as wide as its disparity. `--3d-window=false` leaves it
+out. With `--subs-3d` or `--burn-subs`, the subtitles sit just in front
+of the picture beneath them. They come nearer at once when the picture
+comes nearer, and go farther slowly. Letterbox bars stay at the screen.
+Each cut starts the depth afresh. An HDR source is tone mapped, because
+the 3D is 8-bit. The depth network runs on an NVIDIA GPU when there is
+one, through CUDA and the driver alone. A 1080p film converts at about 35
+pictures a second on an RTX 5090, or 43 with `--3d-refine none`. Without
+a GPU it runs on the CPU, at about a second a picture on 24 cores. Hair,
 glass, smoke and reflections, and things on screens in the picture, get
-one depth where they would need two: see [docs/2d-to-3d.md](../../docs/2d-to-3d.md).
+one depth where they would need two. See
+[docs/2d-to-3d.md](../../docs/2d-to-3d.md).
 
-The depth is refined by a small network learnt from real 3D pairs (27
-native and studio-converted films): on 3D discs it was not trained on,
-the made right eye comes 0.5 to 1 dB nearer the disc's (VMAF 26 to 30,
-and 27 to 33 on glass and reflections). `--3d-refine none` leaves the
-depth as the depth network gives it; `--3d-refine weights.bin` uses
-weights of your own, learnt from 3D films you have, in full side by side
-(made by bdtools from your discs), with the tools in this repository:
+The depth is refined by a small network learnt from real 3D pairs, from
+27 native and studio-converted films. On 3D discs it was not trained on,
+the made right eye comes 0.5 to 1 dB nearer the disc's, and its VMAF
+goes from 26 to 30, or from 27 to 33 on glass and reflections. `--3d-refine none`
+leaves the depth as the depth network gives it. `--3d-refine weights.bin`
+uses weights of your own, learnt from 3D films you have, in full side by
+side as bdtools makes them from your discs, with the tools in this
+repository:
 
 ```sh
 go build -o stereobench ./tools/stereobench
@@ -506,37 +529,41 @@ stereobench -every 4 -samples val "Film Z 3D FSBS.mkv@15m+4s,45m+4s"
 depthtrain -train samples -val val -out refine.bin -epochs 12 -batch 8
 ```
 
-About 7,400 pictures from 53 films, 5 hours on 24 cores (on an NVIDIA
-GPU, which `depthtrain` uses when there is one, about 45 minutes), made the
-built-in weights; `depthtrain` reports the depth's error on the
-validation pictures (a film it did not train on) each pass.
+About 7,400 pictures from 53 films made the built-in weights. That took 5
+hours on 24 cores, or about 45 minutes on an NVIDIA GPU, which
+`depthtrain` uses when there is one. Each pass, `depthtrain` reports the
+depth's error on the validation pictures, which come from a film it did
+not train on.
 
 ### MVC output
 
 `--layout mvc` keeps the disc's own kind of 3D: two views, the right one
-coded from the left, in an MKV that carries the dependent view in a
-`mvcC` BlockAddition (what CoreELEC's Kodi plays frame packed on an
-Amlogic box). Both eyes are re-encoded, with H.264 at 8 bits (MVC has no
-other form): the left as an ordinary High profile stream, the right from
-the left and from its own neighbouring pictures, by the encoder in this
-program (`--encoder builtin`, the default for this layout), or the left by
-x264 (`--encoder software`) and the right here. A GPU encoder is refused:
-players' MVC decoders stall on an NVENC-coded left eye, however it is
-configured. `--crf` is the left eye's quantiser (the right eye's is 3
-higher); no rate control beyond that yet. The encoder writes one slice
-per picture, because those decoders stutter on more, and codes several
-pictures at once instead. The findings behind these choices are in
+coded from the left. They go in an MKV that carries the dependent view in
+a `mvcC` BlockAddition, which is what CoreELEC's Kodi plays frame packed
+on an Amlogic box. Both eyes are re-encoded, with H.264 at 8 bits,
+because MVC has no other form. The left is an ordinary High profile
+stream. The right is coded from the left and from its own neighbouring
+pictures, by the encoder in this program (`--encoder builtin`, the
+default for this layout). Or the left can be coded by x264 (`--encoder
+software`), with the right still coded here. A GPU encoder is refused,
+because players' MVC decoders stall on an NVENC-coded left eye, however
+it is configured. `--crf` is the left eye's quantiser, and the right
+eye's is 3 higher. There is no rate control beyond that yet. The encoder
+writes one slice per picture, because those decoders stutter on more,
+and codes several pictures at once instead. The findings behind these
+choices are in
 [docs/mvc-player-compatibility.md](../../docs/mvc-player-compatibility.md).
 
-`--check` follows the same rule, so it looks for ffmpeg when the filter is
-asked for rather than reporting x265 missing on a machine that never needs it. Having
-ffmpeg is not the same as having libx265, which a build may omit, so that case
-gets a one-frame trial encode too — the alternative is finding out at the
-encode step, hours into a conversion.
+`--check` follows the same rule as `--layout half` above. It looks for
+ffmpeg when the filter is asked for, rather than reporting x265 missing
+on a machine that never needs it. Having ffmpeg is not the same as having
+libx265, which a build may omit, so that case gets a one-frame trial
+encode too. The alternative is finding out at the encode step, hours into
+a conversion.
 
 ## Defaults by source
 
-With no `--crf`, the quality is chosen for the kind of source, and the run
+With no `--crf`, the quality is chosen for the kind of source. The run
 says what it chose, and for what:
 
 ```
@@ -546,22 +573,24 @@ bdtools: video: --codec h265, --bit-depth 10, --crf 20, --layout full, --subs-3d
 
 | Source | `--crf` | Why |
 |---|---|---|
-| 3D Blu-ray | 20 | seen through glasses, at 1080p per eye; 18 costs 45–60% more for about +0.6 VMAF |
-| Ultra HD: Dolby Vision, HDR10, HDR10+ or SDR | 18 | near the disc on every film measured, at 8–38% of its size |
-| HD (1080p and below) | 16 | small already; the HD model of VMAF is the stricter |
+| 3D Blu-ray | 20 | It is seen through glasses, at 1080p per eye. 18 costs 45–60% more for about +0.6 VMAF |
+| Ultra HD: Dolby Vision, HDR10, HDR10+ or SDR | 18 | Near the disc on every film measured, at 8–38% of its size |
+| HD (1080p and below) | 16 | Small already, and the HD model of VMAF is the stricter |
 
-Anything given (`--crf`, `--codec`, `--bit-depth`) is kept, and listed as
-given. Everything else defaults alike for every source: HEVC (`--codec
-h265`), 10 bits, Dolby Vision's full enhancement layer composed into a
-profile 8.1 picture (`--dv-fel compose`, the nearest the disc for the size),
-and for 3D full side by side with both flat and 3D subtitles.
+Anything you give is kept and listed as given, whether `--crf`, `--codec`
+or `--bit-depth`. Everything else defaults alike for every source: HEVC
+(`--codec h265`), 10 bits, and Dolby Vision's full enhancement layer
+composed into a profile 8.1 picture (`--dv-fel compose`), which is the
+nearest to the disc for the size. For 3D, the default is full side by
+side with both flat and 3D subtitles.
 
 The numbers come from minute-long clips of each kind of film, encoded on
-NVENC at each `--crf` and measured against the source with `tools/qcmp`: VMAF
-(100 is the source; 95 and above is hard to tell from it at a normal
-distance; the 4K model for Ultra HD, the stricter HD one for HD and for 3D's
-3840x1080 frame), its mean and its 1st percentile, the worst pictures, where
-an encode's faults show. A Dolby Vision FEL source is measured against the
+NVENC at each `--crf` and measured against the source with `tools/qcmp`.
+The measure is VMAF. 100 is the source, and 95 and above is hard to tell
+from it at a normal distance. The 4K model is used for Ultra HD, and the
+stricter HD one for HD and for 3D's 3840x1080 frame. We take its mean and
+its 1st percentile. The 1st percentile is the worst pictures, where an
+encode's faults show. A Dolby Vision FEL source is measured against the
 picture its layers compose to. At the defaults:
 
 | Source | Clip | `--crf` | MB a minute | of the source | VMAF | worst 1% |
@@ -575,67 +604,69 @@ picture its layers compose to. At the defaults:
 | HD, H.264 | Solo | 16 | 25 | 11% | 96.9 | 93.2 |
 | HD, VC-1, grain | There Will Be Blood | 16 | 87 | 37% | 97.7 | 92.4 |
 
-Grain is what costs: a grainy film takes several times the bits of a clean
-one at the same `--crf`, and is the one to give a lower `--crf` to when its
-worst pictures matter (Michael, the hardest, needs `--crf` 12 and most of the
-disc's size to bring them to 94). On the same clips, x265 (`--encoder
-software`, `medium`) at the same size as NVENC at a constant QP had the same
-mean VMAF and a worst 1% about 0.7 higher, which NVENC's constant quality
-(below) makes up; its slowest preset, adaptive quantisation, lookahead and
-two passes moved neither (VMAF scores adaptive quantisation
-down, which says little about how it looks).
+Grain is what costs. A grainy film takes several times the bits of a
+clean one at the same `--crf`, and it is the one to give a lower `--crf`
+to when its worst pictures matter. Michael, the hardest, needs `--crf` 12
+and most of the disc's size to bring them to 94. On the same clips, x265
+(`--encoder software`, `medium`) at the same size as NVENC at a constant
+QP had the same mean VMAF and a worst 1% about 0.7 higher. NVENC's
+constant quality, described below, makes that up. x265's slowest preset,
+adaptive quantisation, lookahead and two passes moved neither number.
+VMAF scores adaptive quantisation down, which says little about how it
+looks.
 
 NVENC encodes at a constant quality, not a constant QP (see
-[Hardware encoding](#hardware-encoding)). Measured against the constant QP
-of the same `--crf`, interpolated to the same size, it is ahead on every
-clip: +0.1 to +1.0 VMAF on the mean, +0.2 to +2.3 on the worst 1%. Its size
-follows the picture rather than the number: a clean film comes out about
-the size it did (−4% to +16%), a grainy one 13–58% smaller, at a lower
-score on the grainiest (There Will Be Blood at 16: 97.7 and 92.4, from
-99.5 and 95.3 at 2.4 times the size).
+[Hardware encoding](#hardware-encoding)). Measured against the constant
+QP of the same `--crf`, interpolated to the same size, it is ahead on
+every clip: +0.1 to +1.0 VMAF on the mean, and +0.2 to +2.3 on the worst
+1%. Its size follows the picture rather than the number. A clean film
+comes out about the size it did, from −4% to +16%. A grainy one comes out
+13–58% smaller, at a lower score on the grainiest. There Will Be Blood at
+16 scores 97.7 and 92.4, down from 99.5 and 95.3 at 2.4 times the size.
 
 ## Codec
 
-`--codec h265` (the default) is materially smaller than H.264 at the same
-quality, carries HDR10, HDR10+ and Dolby Vision, and is what home theatre
-players, TVs and streaming boxes decode: a full-SBS frame is double width —
-3840x1080 from a 1080p disc — which is exactly the case HEVC's larger coding
-units were designed for.
+`--codec h265` is the default. It is materially smaller than H.264 at the
+same quality, it carries HDR10, HDR10+ and Dolby Vision, and it is what
+home theatre players, TVs and streaming boxes decode. A full-SBS frame is
+double width, 3840x1080 from a 1080p disc, which is exactly the case
+HEVC's larger coding units were designed for.
 
-`--codec h264` plays on anything, including hardware too old to decode HEVC
-at all, and a client that has to *transcode* a 3840x1080 HEVC stream is worse
-off than one direct-playing H.264. If the library is served to such clients,
-H.264 is the safer choice (8 bits, and no HDR).
+`--codec h264` plays on anything, including hardware too old to decode
+HEVC at all. A client that has to *transcode* a 3840x1080 HEVC stream is
+worse off than one direct-playing H.264. If the library is served to such
+clients, H.264 is the safer choice. It is 8 bits, and carries no HDR.
 
-`--crf` means something different to each codec: x265 at a given CRF is roughly a
-step *higher* quality — and larger — than x264 at the same number. Nothing here
-adjusts it for you, because silently re-interpreting a number you typed is worse
-than saying what it means. If you want HEVC's saving rather than its extra
-quality, raise the CRF by two or three.
+`--crf` means something different to each codec. x265 at a given CRF is
+roughly a step *higher* in quality, and larger, than x264 at the same
+number. Nothing here adjusts it for you, because silently re-interpreting
+a number you typed is worse than saying what it means. If you want HEVC's
+saving rather than its extra quality, raise the CRF by two or three.
 
-The codec is independent of the encoder: every encoder produces H.264 and
-HEVC; AV1 is below.
+The codec is independent of the encoder. Every encoder produces H.264 and
+HEVC. AV1 is described below.
 
 ### AV1
 
-`--codec av1` is smaller again, but the newest to decode in hardware (Intel
-Arc and 11th-gen Core onwards, NVIDIA RTX 30, AMD RX 6000, recent Android TV
-devices and Apple M3/A17 onwards), so check what plays it first. It is encoded
-by:
+`--codec av1` is smaller again, but it is the newest codec to decode in
+hardware. Intel Arc and 11th-gen Core onwards, NVIDIA RTX 30, AMD RX
+6000, recent Android TV devices and Apple M3/A17 onwards decode it, so
+check what plays it first. It is encoded by:
 
 | Encoder | AV1 | Notes |
 |---|---|---|
-| NVENC | RTX 40 and later | in process, or `av1_nvenc` through ffmpeg; B-frames as for HEVC |
-| VAAPI | Intel Arc / Core Ultra, AMD RX 7000 | in process, or `av1_vaapi` through ffmpeg; I and P frames only, so it is larger than NVENC's at the same `--crf` |
-| software | everywhere | `SvtAv1EncApp` when installed, else ffmpeg's `libsvtav1`; slow at this frame size |
-| VideoToolbox | no | Apple has no AV1 encoder: refused up front |
+| NVENC | RTX 40 and later | In process, or `av1_nvenc` through ffmpeg. B-frames as for HEVC |
+| VAAPI | Intel Arc / Core Ultra, AMD RX 7000 | In process, or `av1_vaapi` through ffmpeg. I and P frames only, so it is larger than NVENC's at the same `--crf` |
+| software | everywhere | `SvtAv1EncApp` when installed, else ffmpeg's `libsvtav1`. Slow at this frame size |
+| VideoToolbox | no | Apple has no AV1 encoder, so it is refused up front |
 
-`--crf` keeps its 0–51 scale and means about the same picture quality as the
-same number in HEVC: it is mapped onto AV1's 0–255 quantiser index by a line
-measured on NVENC over a Blu-ray 3D, the AV1 index giving the same luma PSNR as
-HEVC at QP 14, 18, 24 and 30 (index ≈ 7.1 × crf − 76). At equal PSNR the AV1
-encodes were 11–15% smaller than HEVC's. SVT-AV1's CRF (0–63) is a quarter of
-that index, and `--preset` maps onto SVT's numbered presets:
+`--crf` keeps its 0–51 scale and means about the same picture quality as
+the same number in HEVC. It is mapped onto AV1's 0–255 quantiser index by
+a line measured on NVENC over a Blu-ray 3D. That line gives the AV1 index
+with the same luma PSNR as HEVC at QP 14, 18, 24 and 30 (index ≈ 7.1 ×
+crf − 76). At equal PSNR the AV1 encodes were 11–15% smaller than HEVC's.
+SVT-AV1's CRF (0–63) is a quarter of that index. `--preset` maps onto
+SVT's numbered presets:
 
 | `--preset` | ultrafast | superfast | veryfast | faster | fast | medium | slow | slower | veryslow | placebo |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -643,157 +674,168 @@ that index, and `--preset` maps onto SVT's numbered presets:
 
 ### 10-bit
 
-`--bit-depth 10` encodes HEVC Main 10 or 10-bit AV1. A Blu-ray is 8-bit, so
-the picture going in is the same, each sample at four times its value; what
-changes is the encoder, which predicts and quantises at finer precision. That
-shows as less banding in smooth gradients (skies, dark scenes, fades), and
-in fewer bits: on NVENC HEVC over 300 frames of a Blu-ray 3D, QP 20 at 10
-bits was 1.4% smaller than at 8 bits and 0.1 dB better (luma PSNR against
-the source, rounded back to 8 bits), about 4% smaller at equal quality. It
-costs no speed. Every HEVC and AV1 decoder plays it, since 10-bit is what
-HDR is.
+`--bit-depth 10` encodes HEVC Main 10 or 10-bit AV1. A Blu-ray is 8-bit,
+so the picture going in is the same, with each sample at four times its
+value. What changes is the encoder, which predicts and quantises at finer
+precision. That shows as less banding in smooth gradients, such as skies,
+dark scenes and fades, and as fewer bits. On NVENC HEVC over 300 frames
+of a Blu-ray 3D, QP 20 at 10 bits was 1.4% smaller than at 8 bits and 0.1
+dB better in luma PSNR against the source, rounded back to 8 bits. That
+is about 4% smaller at equal quality. It costs no speed. Every HEVC and
+AV1 decoder plays it, since 10-bit is what HDR is.
 
-NVENC, VAAPI and VideoToolbox encode it in process (and through ffmpeg),
-x265 with `--output-depth 10` (a build with 10-bit support, which the
-common packages are), SVT-AV1 from 10-bit Y4M. H.264 is refused: High 10
-plays on almost nothing. So is Media Foundation, whose 10-bit path is
-untested; `--encoder nvenc` or `software` instead. `--name-details` adds
-`10bit` after the codec.
+NVENC, VAAPI and VideoToolbox encode it in process, and through ffmpeg.
+x265 encodes it with `--output-depth 10`, which needs a build with 10-bit
+support. The common packages have it. SVT-AV1 encodes it from 10-bit Y4M.
+H.264 is refused, because High 10 plays on almost nothing. Media
+Foundation is refused too, because its 10-bit path is untested. Use
+`--encoder nvenc` or `software` instead. `--name-details` adds `10bit`
+after the codec.
 
 ## 2D Blu-rays
 
-A source with no MVC dependent view — a 2D Blu-ray, an Ultra HD one, a 2D
-Matroska remux — is converted as a 2D film: the picture as it is, with the
-same choice of codec, quality, encoder and tracks, the same resuming, and no
-stereo mode in the output. `--2d` converts a 3D source so too, from its base
-view alone.
+A source with no MVC dependent view is converted as a 2D film. That is a
+2D Blu-ray, an Ultra HD one, or a 2D Matroska remux. The picture is
+converted as it is, with the same choice of codec, quality, encoder and
+tracks, the same resuming, and no stereo mode in the output. `--2d`
+converts a 3D source the same way, from its base view alone.
 
-The video is decoded on the GPU when one can: NVIDIA's NVDEC, driven in
-process through its system library like the encoders, decodes H.264, HEVC
-(Ultra HD's, 10-bit), VC-1 and MPEG-2, at hundreds of frames a second even
-at 4K (580 fps for 10-bit HEVC on an RTX 5090, copied back for the encoder).
-Its H.264 and HEVC pictures are bit-identical to ffmpeg's software
-decoders'; MPEG-2's within the tolerance its inverse transform allows (that
-standard is not bit-exact between decoders). On Linux, Intel's and AMD's
-GPUs decode HEVC through VAAPI: VAAPI has no parser of its own, so the HEVC
-decoder here parses the stream, keeps the reference pictures and their
-order, and hands the GPU each picture's slices (byte-identical to ffmpeg on
-all 152 conformance streams on an Intel Arrow Lake GPU; 95 fps for a disc's
-4K stream there, with about one CPU core). MPEG-2 and progressive H.264 go
-to VAAPI the same way, the decoders here parsing (MPEG-2's interlaced
-frames deinterlaced here). Interlaced H.264 (1080i discs) goes to NVDEC or
-VideoToolbox, or else to ffmpeg: the H.264 decoder here decodes
-progressive pictures only. Without a GPU decoder, every
-codec goes to the decoders here (Go), and HEVC of a profile they do not
-decode (the format range extensions, never on a disc) to ffmpeg (see
-[What works where](#what-works-where)). `--decoder` overrides the choice.
+The video is decoded on the GPU when one can. NVIDIA's NVDEC is driven in
+process through its system library, like the encoders. It decodes H.264,
+HEVC (Ultra HD's, 10-bit), VC-1 and MPEG-2 at hundreds of frames a second
+even at 4K: 580 fps for 10-bit HEVC on an RTX 5090, copied back for the
+encoder. Its H.264 and HEVC pictures are bit-identical to ffmpeg's
+software decoders'. Its MPEG-2 pictures are within the tolerance the
+inverse transform allows, because that standard is not bit-exact between
+decoders. On Linux, Intel's and AMD's GPUs decode HEVC through VAAPI.
+VAAPI has no parser of its own, so the HEVC decoder here parses the
+stream, keeps the reference pictures and their order, and hands the GPU
+each picture's slices. That is byte-identical to ffmpeg on all 152
+conformance streams on an Intel Arrow Lake GPU, and it runs at 95 fps for
+a disc's 4K stream there, with about one CPU core. MPEG-2 and progressive
+H.264 go to VAAPI the same way, with the decoders here parsing, and
+MPEG-2's interlaced frames are deinterlaced here. Interlaced H.264, which
+1080i discs have, goes to NVDEC or VideoToolbox, or else to ffmpeg,
+because the H.264 decoder here decodes progressive pictures only. Without
+a GPU decoder, every codec goes to the decoders here, in Go. HEVC of a
+profile they do not decode, the format range extensions, goes to ffmpeg.
+That profile is never on a disc. See
+[What works where](#what-works-where). `--decoder` overrides the choice.
 
-The output is 10-bit unless `--bit-depth` says otherwise (with HEVC or AV1;
-H.264 takes 8): an Ultra HD picture keeps its 10 bits, and a Blu-ray's 8
-gain the encoder's finer precision (see [10-bit](#10-bit)). A stream that states no frame rate takes the
-container's: the playlist's on a disc, the frame duration or the spacing of
-the first frames in Matroska.
+The output is 10-bit unless `--bit-depth` says otherwise, with HEVC or
+AV1. H.264 takes 8. An Ultra HD picture keeps its 10 bits, and a Blu-ray's
+8 gain the encoder's finer precision (see [10-bit](#10-bit)). A stream
+that states no frame rate takes the container's. On a disc that is the
+playlist's. In Matroska it is the frame duration, or the spacing of the
+first frames.
 
 ### HDR10 and HDR10+
 
-An HDR source stays HDR. Its colour signalling (BT.2020, PQ or HLG) is
-stated by every encoder — in the stream's own header (NVENC's and
+An HDR source stays HDR. Its colour signalling, whether BT.2020, PQ or
+HLG, is stated by every encoder, both in the stream's own header and in
+Matroska's Colour element. In the stream it goes through NVENC's and
 VideoToolbox's settings, the headers written for VAAPI, x265's and
-SVT-AV1's options, ffmpeg's frame parameters) and in Matroska's Colour
-element. Its metadata is read from the source's SEI as it is decoded and
-put into the encode by the muxer, on the frame it belongs to whatever order
-the encoder put the frames in:
+SVT-AV1's options, or ffmpeg's frame parameters. The metadata is read
+from the source's SEI as it is decoded and put into the encode by the
+muxer, on the frame it belongs to, whatever order the encoder put the
+frames in:
 
-- HDR10's static metadata — the mastering display and the content light
-  level (MaxCLL, MaxFALL) — on every keyframe, and in the Colour element;
-- HDR10+'s dynamic metadata on every frame that carried it.
+- HDR10's static metadata, which is the mastering display and the content
+  light level (MaxCLL, MaxFALL), goes on every keyframe, and in the Colour
+  element.
+- HDR10+'s dynamic metadata goes on every frame that carried it.
 
-HEVC carries them as SEI messages, AV1 as metadata OBUs (converted to AV1's
-units). Checked with every encoder here (NVENC and VAAPI, HEVC and AV1,
-x265): the output states BT.2020/PQ and the source's exact mastering display
-and light levels, and on a 50-second HDR10+ sample every one of the 1,200
-frames carries the source's metadata. An HDR source encoded at 8 bits (or
-in H.264, which carries none of this here) gets a warning.
+HEVC carries them as SEI messages, and AV1 as metadata OBUs, converted to
+AV1's units. We checked this with every encoder here: NVENC and VAAPI, for
+HEVC and AV1, and x265. The output states BT.2020/PQ and the source's
+exact mastering display and light levels, and on a 50-second HDR10+
+sample every one of the 1,200 frames carries the source's metadata. An
+HDR source encoded at 8 bits, or in H.264, which carries none of this
+here, gets a warning.
 
-A remux keeps all of it untouched in the stream; its Matroska Colour
+A remux keeps all of it untouched in the stream. Its Matroska Colour
 element is not written yet.
 
 ### Dolby Vision
 
-An Ultra HD disc's Dolby Vision is profile 7: the HDR10 picture (the base
-layer, PID 0x1011), and beside it on PID 0x1015 an enhancement layer — the
-full one (FEL) or the minimal one (MEL) — with the RPU, the per-frame
-metadata that says how to combine them. `--list` shows that stream as
-`video (DV layer)`.
+An Ultra HD disc's Dolby Vision is profile 7. The HDR10 picture is the
+base layer, on PID 0x1011. Beside it on PID 0x1015 is an enhancement
+layer, either the full one (FEL) or the minimal one (MEL), with the RPU,
+the per-frame metadata that says how to combine them. `--list` shows that
+stream as `video (DV layer)`.
 
 `--remux` into a `.mkv` keeps all of it, the way players expect it in
-Matroska: one HEVC track whose every picture carries the base layer, then
-the enhancement layer's NAL units, then the RPU, with the Dolby Vision
-configuration (profile 7, its level worked out from the picture size and
-frame rate, compatible with HDR10) in the track header. Players that know
-Dolby Vision play it as such; others play the HDR10 base layer. A Matroska
-source that has Dolby Vision keeps it in a remux too, and a `.m2ts` remux
-keeps the enhancement layer's stream as it is.
+Matroska. There is one HEVC track, and every picture in it carries the
+base layer, then the enhancement layer's NAL units, then the RPU. The
+track header holds the Dolby Vision configuration: profile 7, with its
+level worked out from the picture size and frame rate, compatible with
+HDR10. Players that know Dolby Vision play it as such. Others play the
+HDR10 base layer. A Matroska source that has Dolby Vision keeps it in a
+remux too, and a `.m2ts` remux keeps the enhancement layer's stream as it
+is.
 
-On a Dolby Vision test clip (4K, FEL), the MKV remux carried every picture
-through unchanged, and ffprobe reads the result as profile 7, level 6, with
-the enhancement layer and RPU present.
+On a Dolby Vision test clip (4K, FEL), the MKV remux carried every
+picture through unchanged, and ffprobe reads the result as profile 7,
+level 6, with the enhancement layer and RPU present.
 
-A conversion (with `--codec h265`) carries Dolby Vision as profile 8.1: it
+A conversion with `--codec h265` carries Dolby Vision as profile 8.1. It
 encodes the HDR10 base layer, and each frame ends with its own picture's
-RPU, rewritten for the base layer alone the way dovi_tool's mode 2 does it
-(the enhancement layer's quantisation dropped; with a full enhancement
-layer, the mapping made the identity; profile 8.1's colour matrices). The
-track gets the profile 8.1 configuration record. Players that know Dolby
-Vision tone map the picture with its RPUs; others play it as HDR10. The
-RPUs are read and written here, in Go: on the test clips' 11,574 RPUs,
-writing each back gives the same bytes, and each converted one is
-byte-identical to dovi_tool's. In a 30-second 4K FEL encode, every frame
-carried its own picture's RPU. AV1 and H.264 output keep the HDR10 picture
-without Dolby Vision, with a warning.
+RPU, rewritten for the base layer alone the way dovi_tool's mode 2 does
+it. The enhancement layer's quantisation is dropped, with a full
+enhancement layer the mapping is made the identity, and the colour
+matrices are profile 8.1's. The track gets the profile 8.1 configuration
+record. Players that know Dolby Vision tone map the picture with its
+RPUs. Others play it as HDR10. The RPUs are read and written here, in Go.
+On the test clips' 11,574 RPUs, writing each back gives the same bytes,
+and each converted one is byte-identical to dovi_tool's. In a 30-second
+4K FEL encode, every frame carried its own picture's RPU. AV1 and H.264
+output keep the HDR10 picture without Dolby Vision, with a warning.
 
 A full enhancement layer (FEL) is composed into the picture, which is
-what a profile 7 FEL disc is for: the base layer goes through each frame's
-RPU mapping, and the enhancement layer — decoded on the GPU beside it,
-upsampled from 1080p — adds its residual. The result is the picture the
-disc's Dolby Vision signal describes, coded like the HDR10 base layer, so
-it is encoded as HDR10 and the profile 8.1 RPU carries the identity
-mapping that makes it that picture. The composition is Go with AVX2
-kernels: 400 fps for 4K on 24 cores alone, and run beside the decoders
-and NVENC it costs a few percent (137 fps against 143 for the base layer
-alone on a 4K test clip). `--dv-fel drop` leaves the enhancement layer
-out and encodes the base layer as it is; a minimal enhancement layer (MEL)
-adds nothing, and its mapping is kept in the RPU.
+what a profile 7 FEL disc is for. The base layer goes through each
+frame's RPU mapping, and the enhancement layer adds its residual. The
+enhancement layer is decoded on the GPU beside the base layer, and
+upsampled from 1080p. The result is the picture the disc's Dolby Vision
+signal describes, coded like the HDR10 base layer. So it is encoded as
+HDR10, and the profile 8.1 RPU carries the identity mapping that makes it
+that picture. The composition is Go with AVX2 kernels. Alone, it runs at
+400 fps for 4K on 24 cores. Run beside the decoders and NVENC it costs a
+few percent: 137 fps against 143 for the base layer alone on a 4K test
+clip. `--dv-fel drop` leaves the enhancement layer out and encodes the
+base layer as it is. A minimal enhancement layer (MEL) adds nothing, and
+its mapping is kept in the RPU.
 
 #### Keeping the enhancement layer as a layer
 
-A conversion can also keep profile 7 — the HDR10 base layer and the full
-enhancement layer apart, with the disc's RPUs unchanged — for players that
-compose FEL themselves (most play profile 7 as its base layer). Two
-methods, with `--codec h265` and `--encoder nvenc` or `software` (x265):
+A conversion can also keep profile 7. That is the HDR10 base layer and
+the full enhancement layer apart, with the disc's RPUs unchanged, for
+players that compose FEL themselves. Most players play profile 7 as its
+base layer. There are two methods, both with `--codec h265` and
+`--encoder nvenc` or `software` (x265):
 
 - `--dv-fel keep` rebuilds the enhancement layer for the base layer as it
   was encoded, the way Dolby's encoder makes one. The base layer's
-  bitstream is decoded again as NVENC writes it, and each picture's
-  enhancement layer is the source's residual plus what our base layer,
-  through the RPU's mapping, falls short of the source's: so the
+  bitstream is decoded again as NVENC writes it. Each picture's
+  enhancement layer is then the source's residual plus what our base
+  layer, through the RPU's mapping, falls short of the source's. So the
   composition makes up for the base layer's encoding error, as far as an
   enhancement layer half its size and quantised by the RPU can.
 - `--dv-fel reencode` re-encodes the source's enhancement layer as it is.
-  It was made for the disc's base layer, so our base layer's encoding error
-  passes through the composition uncorrected; it is the faster one.
+  It was made for the disc's base layer, so our base layer's encoding
+  error passes through the composition uncorrected. It is the faster one.
 
 The enhancement layer is encoded on a second encoder set up like the
 first, so that the two streams' pictures are coded in the same order with
-the same types, as Dolby Vision requires; the mux checks it. With x265 both
-run in process (raw pictures in, the bitstream back through a pipe), set
-up to code every stream alike: no scene cut keyframes, no adaptive
-B-frames, a fixed keyframe interval, closed GOPs, and each picture's type
-given (x265 shortens a run of B-frames where flat pictures meet detail even
-so). Its quality is `--dv-el-crf`, by default `--crf` plus 12: a finer
-enhancement layer brings the composition nearer the source, but a byte
-spent there buys less than in the base layer (below). `--remux` keeps the
-disc's layers as they are.
+the same types, as Dolby Vision requires. The mux checks it. With x265
+both run in process, with raw pictures in and the bitstream back through
+a pipe. They are set up to code every stream alike: no scene cut
+keyframes, no adaptive B-frames, a fixed keyframe interval, closed GOPs,
+and each picture's type given. Even so, x265 shortens a run of B-frames
+where flat pictures meet detail. The enhancement layer's quality is
+`--dv-el-crf`, by default `--crf` plus 12. A finer enhancement layer
+brings the composition nearer the source, but a byte spent there buys
+less than in the base layer, as the numbers below show. `--remux` keeps
+the disc's layers as they are.
 
 On a 30-second 4K FEL clip (`--crf 18`), measured by composing each
 output's layers and comparing with the source's composition (luma PSNR,
@@ -806,14 +848,15 @@ three frames):
 | `reencode`, `--dv-el-crf 12` | 55.9–58.7 dB | 5 + 6 MB | 135 fps |
 | `keep`, `--dv-el-crf 6` | 58.6–60.9 dB | 5 + 19 MB | |
 
-Two layers are not cheaper than one for the same picture: what profile 7
+Two layers are not cheaper than one for the same picture. What profile 7
 keeps is the enhancement layer for a player to compose itself, at its 12
-bits. Rebuilt, the enhancement layer is consistently about a dB nearer the
-source than re-encoded.
+bits. Rebuilt, the enhancement layer is consistently about a dB nearer
+the source than re-encoded.
 
-On a feature (two one-minute stretches of a 4K FEL film, NVENC, luma
-PSNR against the source's composition over every frame, as `tools/felrd`
-measures it; the source's video is about 650 MB a minute):
+The next table is from a feature: two one-minute stretches of a 4K FEL
+film, encoded on NVENC, with luma PSNR against the source's composition
+over every frame, as `tools/felrd` measures it. The source's video is
+about 650 MB a minute.
 
 | `--dv-fel`, `--crf`, `--dv-el-crf` | composition | video a minute |
 |---|---|---|
@@ -828,33 +871,35 @@ measures it; the source's video is about 650 MB a minute):
 | `reencode`, 16, 28 | 48.5–49.1 dB | 219–307 MB |
 | `drop`, 16 (the base layer, as it plays) | 45.9–46.5 dB | 219–307 MB |
 
-At any size, `compose` is as near the source as `keep` or nearer: a
+At any size, `compose` is as near the source as `keep`, or nearer. A
 finer enhancement layer is a dearer way to the same picture than a lower
 `--crf`. With the enhancement layer at its default, `keep` and `reencode`
-come out the size of `compose` and as near the source, in profile 7: for
-players that compose FEL themselves, and an HDR10 base layer that is the
-disc's own grade for those that play only HDR10. To keep a film near the
-disc at a fraction of its size, `compose` (the default) is the one to use;
-`--crf` sets the trade.
+come out the size of `compose` and as near the source, in profile 7. That
+gives players that compose FEL themselves what they want, and it gives
+players that play only HDR10 a base layer that is the disc's own grade.
+To keep a film near the disc at a fraction of its size, `compose`, the
+default, is the one to use. `--crf` sets the trade.
 
 The arithmetic follows libplacebo's reshaping and FEL composition and
-vs-nlq's dequantisation (the residual agrees with vs-nlq's to 1/65536 over
-every code). How the enhancement layer is upsampled no reference states:
-here it is a Catmull-Rom filter, co-sited across and centred down, the
-siting libplacebo found on discs; on a FEL test clip, co-sited across
-gave visibly fewer edge artefacts than centred, and down the two were
-alike. Encoded, a composed 4K frame was within 55.6 dB of the composition
-made from ffmpeg's decodes of the two layers, and 28 dB from the base
-layer alone (that clip's enhancement layer brightens its credits).
+vs-nlq's dequantisation. The residual agrees with vs-nlq's to 1/65536
+over every code. No reference states how the enhancement layer is
+upsampled. Here it is a Catmull-Rom filter, co-sited across and centred
+down, which is the siting libplacebo found on discs. On a FEL test clip,
+co-sited across gave visibly fewer edge artefacts than centred, and down
+the two were alike. Encoded, a composed 4K frame was within 55.6 dB of
+the composition made from ffmpeg's decodes of the two layers, and 28 dB
+from the base layer alone. That clip's enhancement layer brightens its
+credits.
 
 ## Measuring a conversion
 
 `--compare` measures an output against its source, picture by picture,
-with no other tool: both decoded by the decoders a conversion uses (a
-Dolby Vision film's layers composed), the luma at the deeper of the two
-depths, the output scaled up to the source's size if it is smaller, and
-measured as Netflix's libvmaf measures: VMAF (its v0.6.1 model, the 4K one
-above 1080 lines), PSNR and SSIM, the same numbers its `vmaf` tool prints.
+with no other tool. Both are decoded by the decoders a conversion uses,
+with a Dolby Vision film's layers composed. The luma is taken at the
+deeper of the two depths, and the output is scaled up to the source's
+size if it is smaller. The measures are those of Netflix's libvmaf: VMAF
+(its v0.6.1 model, the 4K one above 1080 lines), PSNR and SSIM, the same
+numbers its `vmaf` tool prints.
 
 ```sh
 bdtools --input disc.iso --compare film.mkv
@@ -862,59 +907,61 @@ bdtools --input disc.iso --compare film.mkv --compare-every 10 --compare-csv fil
 ```
 
 It prints each measure's mean, harmonic mean (VMAF's usual single
-number), 1st percentile and worst picture; `--compare-csv` writes every
-picture's. The pictures are compared from the start; `--compare-skip`
-drops source pictures before the output's first (an output trimmed with
-`--start`).
+number), 1st percentile and worst picture. `--compare-csv` writes every
+picture's. The pictures are compared from the start. `--compare-skip`
+drops source pictures before the output's first, for an output trimmed
+with `--start`.
 
 ## Batches
 
-An `--input` that is a directory (not a disc's own BDMV folder) is a
-batch: every source in it, at any depth (disc images, BDMV folders,
-Matroska, MP4 and QuickTime files, transport streams), is converted with
-the same settings into `--output`, a directory, under the same path:
+An `--input` that is a directory, and not a disc's own BDMV folder, is a
+batch. Every source in it, at any depth, is converted with the same
+settings into `--output`, a directory, under the same path. A source here
+is a disc image, a BDMV folder, a Matroska, MP4 or QuickTime file, or a
+transport stream:
 
 ```sh
 bdtools --input /media/inbox --output /media/films --for plex
 bdtools --input /media/inbox --output /media/films --for plex --watch
 ```
 
-What is done is noted in the output directory (`.bdtools-batch.json`),
-so running it again converts only what is new; a source that fails is
-reported and the rest go on. `--watch` keeps looking, every minute, and
-takes a source once nothing in it has changed for a minute (a copy still
-arriving is left until it is done). The outputs are Matroska unless
+What is done is noted in the output directory, in `.bdtools-batch.json`,
+so running it again converts only what is new. A source that fails is
+reported, and the rest go on. `--watch` keeps looking, every minute. It
+takes a source once nothing in it has changed for a minute, so a copy
+still arriving is left until it is done. The outputs are Matroska unless
 `--ext` or the `--for` device says otherwise.
 
 ## A target size
 
-`--video-size` finds the CRF that brings the video to about a size, by
-encoding two seconds at ten places of the film with the conversion's own
-encoder and settings at a few CRFs before it starts (a minute or so on a
-GPU), and counting a GOP's IDR picture apart from the others as the film
-has them. The CRF is the next whole one that the places put at or under
-the size; the film comes within about a tenth of it, often under:
+`--video-size` finds the CRF that brings the video to about a size.
+Before the conversion starts, it encodes two seconds at ten places of the
+film, with the conversion's own encoder and settings, at a few CRFs. That
+takes a minute or so on a GPU. It counts a GOP's IDR picture apart from
+the others, as the film has them. The CRF chosen is the next whole one
+that the places put at or under the size. The film comes within about a
+tenth of it, often under:
 
 ```sh
 bdtools --input disc.iso --output film.mkv --video-size 8G
 ```
 
-The sound and subtitles come on top. Not with `--codec av1` or
-`--dv-fel keep` yet.
+The sound and subtitles come on top. This does not work with `--codec
+av1` or `--dv-fel keep` yet.
 
 ## Device presets
 
-`--for` gives a player's settings, each only where the command line does
-not give its own:
+`--for` gives a player's settings. Each applies only where the command
+line does not give its own:
 
 | `--for` | File | Settings |
 |---|---|---|
-| `coreelec` | .mkv | HEVC 10-bit, Dolby Vision profile 7 with the full enhancement layer kept (`--dv-fel keep`), 3D side by side; `--layout mvc` for MVC |
+| `coreelec` | .mkv | HEVC 10-bit, Dolby Vision profile 7 with the full enhancement layer kept (`--dv-fel keep`), 3D side by side. Add `--layout mvc` for MVC |
 | `kodi` | .mkv | HEVC 10-bit, Dolby Vision 8.1 (the layer composed in), 3D side by side |
-| `plex` | .mkv | HEVC 10-bit, Dolby Vision 8.1, PGS read as text (`--subs-ocr`: clients transcode PGS), 3D half side by side |
-| `appletv` | .mp4 | HEVC 10-bit, the sound AC-3 where MP4 cannot carry the source's, subtitles as text |
+| `plex` | .mkv | HEVC 10-bit, Dolby Vision 8.1, PGS read as text with `--subs-ocr` because its clients transcode PGS, 3D half side by side |
+| `appletv` | .mp4 | HEVC 10-bit, the sound as AC-3 where MP4 cannot carry the source's, subtitles as text |
 | `visionpro` | .mov | MV-HEVC, subtitles as text |
-| `quest` | .mp4 | MV-HEVC (burn subtitles in with `--burn-subs`) |
+| `quest` | .mp4 | MV-HEVC. Burn subtitles in with `--burn-subs` |
 
 ```sh
 bdtools --for plex --input disc.iso --output film.mkv
@@ -923,24 +970,25 @@ bdtools --for appletv --crf 20 --input disc.iso --output film.mp4   # its CRF, t
 
 ## Cropping, scaling and tone mapping
 
-A UHD film made 1080p, its black bars cut off
-(a 2.39:1 film on a 3840x2160 disc has 280 rows above and below; a
-1.85:1 one 42):
+These commands make a UHD film 1080p with its black bars cut off. A
+2.39:1 film on a 3840x2160 disc has 280 rows above and below, and a
+1.85:1 one has 42:
 
 ```sh
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
 bdtools --input uhd.iso --output film.mkv --crop 280:280:0:0 --scale 1080p
 ```
 
-`--crop auto` looks at the film in twelve places before the conversion
-(a few seconds: the decoder decodes three pictures at each) and crops what
-is black in all of them that show anything, so a film whose shape changes
-(IMAX scenes) keeps its largest picture. The picture is cropped first,
-then fitted in the box with a Lanczos filter, never enlarged (3840x1600 becomes 1920x800). The subtitle tracks
-are cut with the picture, a line the disc put in a black bar moved up into
-it, and a Dolby Vision film's active area (its RPUs' level 5) follows. For
-2D conversions; not with `--dv-fel keep` or `reencode`, `--burn-subs` or a
-remux.
+`--crop auto` looks at the film in twelve places before the conversion.
+That takes a few seconds, as the decoder decodes three pictures at each.
+It crops what is black in all of the places that show anything, so a film
+whose shape changes, as one with IMAX scenes does, keeps its largest
+picture. The picture is cropped first, then fitted in the box with a
+Lanczos filter, and never enlarged, so 3840x1600 becomes 1920x800. The
+subtitle tracks are cut with the picture, and a line the disc put in a
+black bar is moved up into it. A Dolby Vision film's active area, its
+RPUs' level 5, follows. This is for 2D conversions. It does not work with
+`--dv-fel keep` or `reencode`, `--burn-subs` or a remux.
 
 `--tonemap` makes an HDR film SDR (BT.709), for a screen or player that
 shows HDR wrongly or not at all:
@@ -949,25 +997,27 @@ shows HDR wrongly or not at all:
 bdtools --input uhd.iso --output film.mkv --tonemap --scale 1080p --crop auto
 ```
 
-Each pixel's brightest component goes through BT.2390's curve, its colour
-kept: the midtones as they were, the highlights bent down to SDR's white
-(HDR's reference white, 203 cd/m²). The curve bends from the brightest the
-picture gets: shot by shot from a Dolby Vision film's metadata, scene by
-scene from HDR10+'s, else the film's MaxCLL or mastering peak. BT.2020's
-colours outside BT.709 move toward grey, their hue kept. HLG is taken at a
-1000 cd/m² display. The output states BT.709 and carries no HDR metadata.
+Each pixel's brightest component goes through BT.2390's curve, and its
+colour is kept. The midtones stay as they were, and the highlights are
+bent down to SDR's white, which is HDR's reference white of 203 cd/m².
+The curve bends from the brightest the picture gets: shot by shot from a
+Dolby Vision film's metadata, scene by scene from HDR10+'s, and otherwise
+from the film's MaxCLL or mastering peak. BT.2020's colours outside
+BT.709 move toward grey, with their hue kept. HLG is taken at a 1000
+cd/m² display. The output states BT.709 and carries no HDR metadata.
 
 ## Choosing tracks
 
-By default every audio and subtitle track the disc carries is passed through
-untouched, each tagged with the language the disc gives it, so a player
-can tell them apart.
+By default, every audio and subtitle track the disc carries is passed
+through untouched. Each is tagged with the language the disc gives it, so
+a player can tell them apart.
 
-That default is often not what you want, because **lossless audio dominates the
-output**. A well-compressed conversion of a clean CG feature can come out with
-2.5 GB of video and 10 GB of audio: the single TrueHD Atmos track alone was
-more than twice the video on one measured disc. Dropping the tracks you will
-never play is the largest saving available that costs no picture quality.
+That default is often not what you want, because **lossless audio
+dominates the output**. A well-compressed conversion of a clean CG
+feature can come out with 2.5 GB of video and 10 GB of audio. On one
+measured disc, the single TrueHD Atmos track alone was more than twice
+the video. Dropping the tracks you will never play is the largest saving
+available that costs no picture quality.
 
 Start by seeing what is there:
 
@@ -989,41 +1039,41 @@ track kind               lang  codec                info
   4610  subtitle           spa   PGS                  Presentation Graphic Stream #2
 ```
 
-Then narrow it. Language and codec are **both** required when both are given,
-so the pair names one track rather than the union of two sets:
+Then narrow it. When you give both a language and a codec, **both** are
+required, so the pair names one track rather than the union of two sets:
 
 ```sh
 bdtools --input disc.iso --output out.mkv \
         --audio-lang eng --audio-codec truehd --subs-lang eng
 ```
 
-Notes on the matching:
+Some notes on the matching:
 
-- A codec is matched as a **substring**, case-insensitively, against both the
-  stream ID and the human type. `truehd` finds `A_TRUEHD`, and `dts` finds both
-  `A_DTS` and `DTS-HD Master Audio`, so you need not know which spelling the
-  disc used.
-- A language is an ISO-639 code as the disc states it. **`und` matches a track
-  the disc gave no language for**, which is how a commentary track with no tag
-  is selected — and it means an English filter will not sweep untagged tracks
-  in.
-- A filter that matches **nothing is an error**, reported before any work is
-  done, listing what the disc actually has. Carrying every track on would
-  defeat the request, and dropping all audio would produce a film nobody can
-  watch, discovered hours later.
-- Filtering happens **before the demux**, so a narrowed selection means fewer
+- A codec is matched as a **substring**, case-insensitively, against both
+  the stream ID and the human type. `truehd` finds `A_TRUEHD`, and `dts`
+  finds both `A_DTS` and `DTS-HD Master Audio`, so you need not know which
+  spelling the disc used.
+- A language is an ISO-639 code as the disc states it. **`und` matches a
+  track the disc gave no language for.** That is how a commentary track
+  with no tag is selected, and it means an English filter will not sweep
+  untagged tracks in.
+- A filter that matches **nothing is an error**. It is reported before any
+  work is done, with a list of what the disc actually has. Carrying every
+  track on would defeat the request, and dropping all audio would produce
+  a film nobody can watch, discovered hours later.
+- Filtering happens **before the demux**. A narrowed selection means fewer
   tracks written and less scratch space, not merely a smaller output.
 
 `--list` reads the playlists and the first few megabytes of the feature's
-stream, wherever they are, so it is instant even on an image over a network
-share.
+stream, wherever they are. So it is instant, even on an image over a
+network share.
 
 ### The best track, rather than a named one
 
-Naming a codec means knowing what the disc has. `--audio-best` instead keeps the
-single highest-quality track of those matching, and it composes with the
-language filter — this is "the best English track", not "the best track, if it
-happens to be English":
+Naming a codec means knowing what the disc has. `--audio-best` instead
+keeps the single highest-quality track of those matching. It composes
+with the language filter, so this is "the best English track", not "the
+best track, if it happens to be English":
 
 ```sh
 bdtools --input disc.iso --output out.mkv \
@@ -1032,105 +1082,107 @@ bdtools --input disc.iso --output out.mkv \
 
 The ranking is, in order:
 
-1. **Lossless beats lossy.** TrueHD, DTS-HD Master Audio, LPCM and FLAC rank
-   above DTS-HD High Resolution and E-AC-3, which rank above AC-3, DTS and AAC.
-   No bitrate of a lossy codec puts back what it discarded.
+1. **Lossless beats lossy.** TrueHD, DTS-HD Master Audio, LPCM and FLAC
+   rank above DTS-HD High Resolution and E-AC-3, which rank above AC-3,
+   DTS and AAC. No bitrate of a lossy codec puts back what it discarded.
 2. **Then channels.** A 7.1 track is what a 7.1 system is for, and a
    higher-bitrate 5.1 mix cannot supply the two channels it does not have.
-3. **Then bitrate**, where the disc states one. Lossless tracks often do not,
-   which is why it is only ever a tie-breaker.
-4. **Then the disc's own order**, so the choice is deterministic and one disc
-   always gives one answer.
+3. **Then bitrate**, where the disc states one. Lossless tracks often do
+   not, which is why it is only ever a tie-breaker.
+4. **Then the disc's own order.** That makes the choice deterministic, so
+   one disc always gives one answer.
 
-The chosen track is logged, because a decision made on your behalf should be
-visible rather than inferred from the finished file hours later:
+The chosen track is logged. A decision made on your behalf should be
+visible, rather than inferred from the finished file hours later:
 
 ```
 bdtools: audio: TRUE-HD 8ch (eng) 9612kbps lossless
 ```
 
-`--audio-best` does not apply to subtitles. Several are routinely wanted at
-once, and ranking PGS streams against each other would mean nothing.
+`--audio-best` does not apply to subtitles. Several are routinely wanted
+at once, and ranking PGS streams against each other would mean nothing.
 
 ### Languages, and what a disc actually calls them
 
 Several languages at once is just a list: `--subs-lang eng,pt-br`.
 
-A Blu-ray has no way to say *Brazilian* Portuguese in ISO-639-2 — there is only
-`por` — so authoring tools variously emit `por`, or the non-standard `pob` or
-`ptb`. Asking for `pt-br` matches whichever the disc chose, so you need not
-know which. The same goes for the pairs where ISO-639-2 has both a
-bibliographic and a terminological code and sources disagree about which to
-use: `fra`/`fre`, `deu`/`ger` and `zho`/`chi` each match either spelling. A code
-with no alias entry matches itself, so nothing is lost by not being listed.
+A Blu-ray has no way to say *Brazilian* Portuguese in ISO-639-2. There is
+only `por`, so authoring tools variously emit `por`, or the non-standard
+`pob` or `ptb`. Asking for `pt-br` matches whichever the disc chose, so
+you need not know which. The same goes for the pairs where ISO-639-2 has
+both a bibliographic and a terminological code and sources disagree about
+which to use. `fra`/`fre`, `deu`/`ger` and `zho`/`chi` each match either
+spelling. A code with no alias entry matches itself, so nothing is lost by
+not being listed.
 
 ### 3D subtitles
 
-A Blu-ray 3D draws its subtitles once, and the player moves them apart in
-the two eyes so that they float in front of the picture, at a depth the
-disc sets frame by frame (the offset metadata in the MVC stream, one of up
-to 32 sequences, which the playlist assigns to each subtitle track). A
-side-by-side file has no such player.
+A Blu-ray 3D draws its subtitles once. The player moves them apart in the
+two eyes so that they float in front of the picture, at a depth the disc
+sets frame by frame. That depth is the offset metadata in the MVC stream,
+one of up to 32 sequences, and the playlist assigns one to each subtitle
+track. A side-by-side file has no such player.
 
-- `--subs-3d off` keeps the subtitles as the disc has them,
-  drawn once. That is right for a player that places subtitles in 3D itself
-  (Kodi in its 3D mode does), and wrong for one that shows the frame as it
-  is: a TV or headset in side-by-side mode stretches each half to the whole
-  screen, and a subtitle drawn across the middle of the frame ends up in
+- `--subs-3d off` keeps the subtitles as the disc has them, drawn once.
+  That is right for a player that places subtitles in 3D itself, as Kodi
+  does in its 3D mode. It is wrong for one that shows the frame as it is.
+  A TV or headset in side-by-side mode stretches each half to the whole
+  screen, so a subtitle drawn across the middle of the frame ends up in
   neither eye whole.
 - `--subs-3d on` draws each subtitle into both halves of the frame, moved
-  apart by the disc's offset (right in the left eye, left in the right one,
-  for the usual depth in front of the screen), as a 3D player would. With
-  `--layout half` it is squeezed to half width like the picture, keeping
-  thin strokes. The track is named "3D".
-- `--subs-3d both` (the default) keeps the flat track and adds the 3D one
-  after it, so the file suits either kind of player. The
-  first flat track is marked default, since a player that places subtitles
-  in 3D itself (Kodi playing frame packed) draws a 3D track squeezed into
-  one eye; pick the 3D one on a player that shows the frame as it is.
+  apart by the disc's offset, as a 3D player would. For the usual depth in
+  front of the screen, that is to the right in the left eye and to the
+  left in the right one. With `--layout half` it is squeezed to half width
+  like the picture, keeping thin strokes. The track is named "3D".
+- `--subs-3d both` is the default. It keeps the flat track and adds the 3D
+  one after it, so the file suits either kind of player. The first flat
+  track is marked default, because a player that places subtitles in 3D
+  itself, such as Kodi playing frame packed, draws a 3D track squeezed
+  into one eye. Pick the 3D one on a player that shows the frame as it is.
 
 In a 3D conversion, the flat tracks' wide subtitles are written as two
-pieces side by side, drawn exactly as the one they were. Kodi, playing a
-3D film, takes any subtitle wider than half its plane (960 pixels) for one
-drawn side by side for both eyes, and shows its left half on half the
-plane: larger, pushed to the right and cut off. A disc's two-line
-subtitles are often that wide; each piece is not. `tools/pgskodi` does the
-same to a `.sup` file, for films converted before (extract the flat
-tracks, rewrite them, mux them back with mkvmerge).
+pieces side by side, drawn exactly as the one they were. The reason is
+Kodi. Playing a 3D film, it takes any subtitle wider than half its plane
+(960 pixels) for one drawn side by side for both eyes, and shows its left
+half on half the plane: larger, pushed to the right and cut off. A disc's
+two-line subtitles are often that wide. Each piece is not. `tools/pgskodi`
+does the same to a `.sup` file, for films converted before. Extract the
+flat tracks, rewrite them, and mux them back with mkvmerge.
 
-A subtitle takes the depth the disc gives at its first frame; a disc that
+A subtitle takes the depth the disc gives at its first frame. A disc that
 moves it while it is up is followed from its next display set. A subtitle
 track the disc assigns no offset sequence sits at the screen plane. A
 Matroska source keeps the offset metadata but not which sequence a track
 follows, so its subtitles take the sequence nearest the viewer at each
-moment: never behind the picture, at most a little further forward than
-the disc meant. (On Avatar: Fire and Ash the subtitles follow other
-sequences than the first, which would have put them inside the scene.)
+moment. They are never behind the picture, and at most a little further
+forward than the disc meant. On Avatar: Fire and Ash the subtitles follow
+other sequences than the first, which would have put them inside the
+scene.
 
 ### Text subtitles
 
 A Matroska or MP4 source's text subtitles are carried like its other
-tracks: SRT, ASS and SSA, and WebVTT into Matroska as they are (MP4's
-timed text as SRT), and every one into an MP4 or MOV output as timed text
-(tx3g), which Apple's players, Plex and Kodi show; there the text is
-plain, its styling and placement left out. Subtitle files are added with
-`--subs-file`, after the source's tracks:
+tracks. SRT, ASS and SSA, and WebVTT go into Matroska as they are, and
+MP4's timed text goes in as SRT. Every one of them goes into an MP4 or
+MOV output as timed text (tx3g), which Apple's players, Plex and Kodi
+show. There the text is plain, with its styling and placement left out.
+Subtitle files are added with `--subs-file`, after the source's tracks:
 
 ```sh
 bdtools --input film.mkv --output film.mp4 --subs-file film.en.srt --subs-file pt:film.legendas.srt
 ```
 
 A file's language is the one given before a colon, else the one its name
-ends with (`film.en.srt`, `film.por.srt`); `forced` in its name marks it
+ends with (`film.en.srt`, `film.por.srt`). `forced` in its name marks it
 forced (`film.en.forced.srt`).
 
 A Blu-ray's subtitles are pictures (PGS), which an MP4 file cannot carry
 and some players cannot show. `--subs-ocr` reads them as text, by a
-network trained for it here (no Tesseract or other tool): each PGS track
-gets an SRT track beside it in Matroska, named after it with "(text)",
-and is the tx3g track an MP4 output carries. Italic lines are marked
-`<i>`. It reads the Latin letters of Western European languages; a track
-in another script is left as it is.
+network trained for it here, with no Tesseract or other tool. Each PGS
+track gets an SRT track beside it in Matroska, named after it with
+"(text)", and that is the tx3g track an MP4 output carries. Italic lines
+are marked `<i>`. It reads the Latin letters of Western European
+languages. A track in another script is left as it is.
 
 ```sh
 bdtools --input disc.iso --output film.mp4 --subs-ocr
@@ -1145,14 +1197,16 @@ Toy Story (1995) 3D FSBS.mkv  ->  Toy Story (1995) 3D FSBS.TrueHD-Atmos.mkv
 ```
 
 `--name-details` says everything that tells one conversion from another,
-as the run settled it (the defaults the source chose included): the layout,
-the resolution per eye, the high dynamic range the file carries (`DV` for
-Dolby Vision, `HDR10+`, `HDR10`, `HLG`; nothing for SDR, or for H.264,
-which keeps no HDR metadata), the codec (with `10bit` at 10 bits) and
-its quality setting, as the encoder took it (`CQ` for NVENC's constant
-quality, `--crf` plus 6; `QP` for the other GPUs and NVENC's AV1; `CRF` for
-x264, x265 and SVT-AV1; `Q` for VideoToolbox's quality), the encoder, and
-the main audio track with its channels:
+as the run settled it, with the defaults the source chose included. The
+name gets the layout, the resolution per eye, the high dynamic range the
+file carries, the codec with its quality setting, the encoder, and the
+main audio track with its channels. The high dynamic range is `DV` for
+Dolby Vision, `HDR10+`, `HDR10` or `HLG`. There is nothing for SDR, nor
+for H.264, which keeps no HDR metadata. The codec gets `10bit` at 10
+bits. The quality setting is as the encoder took it: `CQ` for NVENC's
+constant quality, which is `--crf` plus 6, `QP` for the other GPUs and
+NVENC's AV1, `CRF` for x264, x265 and SVT-AV1, and `Q` for VideoToolbox's
+quality:
 
 ```
 Moana (2016).mkv  ->  Moana (2016) 3D FSBS 1080p HEVC 10bit CQ26 NVENC TrueHD-Atmos 7.1.mkv
@@ -1163,40 +1217,42 @@ A name that already ends in `3D FSBS` does not get it twice. "3D FSBS" is
 also what Kodi and Jellyfin look for in a name to treat a file as
 side-by-side 3D.
 
-Useful with `--audio-best`, where the codec is whatever the disc turned out to
-offer. The rename happens after the conversion, because the codec is not known
-until the source has been probed, and probing a disc image twice to decide a
-filename would cost as much as the conversion's first stage. The final path is
-printed to stdout either way, so a script driving this need not guess at it.
+This is useful with `--audio-best`, where the codec is whatever the disc
+turned out to offer. The rename happens after the conversion, because the
+codec is not known until the source has been probed, and probing a disc
+image twice to decide a filename would cost as much as the conversion's
+first stage. The final path is printed to stdout either way, so a script
+driving this need not guess at it.
 
 ## Resuming an interrupted conversion
 
-A conversion that stops partway — Ctrl-C, a reboot, a network share that
-went away — continues where it left off when the same command is run
-again. The video is encoded in segments of 2,500 frames (ten keyframe
-intervals, under two minutes of film), each a complete stream from its own
-encoder run, into a work directory beside the output named after it
-(`.Film (2016).mkv.bdtools`, or under `--temp`). A manifest there lists
-the segments that finished.
+A conversion that stops partway, whether by Ctrl-C, a reboot or a network
+share that went away, continues where it left off when the same command
+is run again. The video is encoded in segments of 2,500 frames. That is
+ten keyframe intervals, under two minutes of film. Each segment is a
+complete stream from its own encoder run. They go into a work directory
+beside the output, named after it (`.Film (2016).mkv.bdtools`), or under
+`--temp`. A manifest there lists the segments that finished.
 
 Run again, bdtools decodes from the start, since a picture cannot be
-decoded without the ones before it, but encodes only from the first frame
-no segment holds; the decoder alone runs at several times an encoder's
-speed, so catching up an hour of film takes a minute or two. The audio and
-subtitles are demuxed again on the way, from the same read. The result is
-the file an uninterrupted run makes, frame for frame.
+decoded without the ones before it. But it encodes only from the first
+frame no segment holds. The decoder alone runs at several times an
+encoder's speed, so catching up an hour of film takes a minute or two.
+The audio and subtitles are demuxed again on the way, from the same read.
+The result is the file an uninterrupted run makes, frame for frame.
 
-What is kept is only ever whole segments: one cut short is discarded, so an
-interruption costs at most one segment of encoding (seconds on a GPU,
-minutes in software). The segments belong to the source and the settings
-that made them. A run with another source, codec, encoder, quality, layout,
-eye order, bit depth or title starts over, and says so; `--restart` starts
-over regardless. A run that succeeds removes the work directory; one that
-fails keeps only the segments, and says how many frames they hold.
+Only whole segments are kept. One cut short is discarded, so an
+interruption costs at most one segment of encoding: seconds on a GPU,
+minutes in software. The segments belong to the source and the settings
+that made them. A run with another source, codec, encoder, quality,
+layout, eye order, bit depth or title starts over, and says so.
+`--restart` starts over regardless. A run that succeeds removes the work
+directory. One that fails keeps only the segments, and says how many
+frames they hold.
 
 ## Remuxing instead of converting
 
-`--remux` keeps the disc's own MVC video, bit for bit, and drops only the
+`--remux` keeps the disc's own MVC video, bit for bit. It drops only the
 tracks the filters leave out:
 
 ```sh
@@ -1204,102 +1260,110 @@ bdtools --remux --input disc.iso --output "Film (2012) 3D.m2ts" \
          --audio-lang eng --audio-best --subs-lang eng
 ```
 
-The transport packets are copied untouched, arrival timestamps and all; only
-the program tables are rewritten to list what is kept (base view, dependent
-view, then the rest in the disc's order, each with its language). A pressed
-disc keeps the two views in separate clips interleaved in the SSIF, so their
-packets are merged back into arrival order — both clips run on one clock —
-giving one transport stream with both views, which is what a player that
-decodes MVC expects. Nothing is decoded or re-timed, so the result plays
-exactly as the disc does, and it needs no tools at all.
+The transport packets are copied untouched, arrival timestamps and all.
+Only the program tables are rewritten, to list what is kept: the base
+view, the dependent view, then the rest in the disc's order, each with
+its language. A pressed disc keeps the two views in separate clips
+interleaved in the SSIF, so their packets are merged back into arrival
+order. Both clips run on one clock. The result is one transport stream
+with both views, which is what a player that decodes MVC expects. Nothing
+is decoded or re-timed, so the result plays exactly as the disc does, and
+it needs no tools at all.
 
-A title made of several clips — a playlist of several play items, as
-seamless-branching and some long films are — is joined into one stream:
+A title made of several clips is joined into one stream. That is a
+playlist of several play items, as seamless-branching and some long films
+are:
 
-- Each clip is cut to its play item's window. A remux cannot re-encode, so a
-  clip starts at the picture that opens the GOP at or before its IN time
-  (the pictures before IN are a fraction of a second at most), and keeps
-  pictures while they decode before OUT, so none loses a picture it is
-  predicted from. Audio and subtitles are kept by their presentation time,
-  IN to OUT.
+- Each clip is cut to its play item's window. A remux cannot re-encode, so
+  a clip starts at the picture that opens the GOP at or before its IN
+  time. The pictures before IN are a fraction of a second at most. The
+  clip keeps pictures while they decode before OUT, so none loses a
+  picture it is predicted from. Audio and subtitles are kept by their
+  presentation time, IN to OUT.
 - Every later clip is moved onto the first one's timeline: its PTS, DTS,
-  clock references and arrival timestamps, so the result has one clock and
-  plays and seeks like a single clip, rather than marking a discontinuity
-  that many players handle badly. Where a clip's opening GOP would overlap
-  the end of the clip before it, it moves just far enough not to.
-- Continuity counters are renumbered across the cuts, and the clips must
-  carry the kept tracks on the same PIDs (discs do); if not, the remux says
-  so rather than guessing.
+  clock references and arrival timestamps. So the result has one clock,
+  and it plays and seeks like a single clip, rather than marking a
+  discontinuity that many players handle badly. Where a clip's opening GOP
+  would overlap the end of the clip before it, it moves just far enough
+  not to.
+- Continuity counters are renumbered across the cuts. The clips must carry
+  the kept tracks on the same PIDs, which discs do. If they do not, the
+  remux says so rather than guessing.
 
-The output must be `.m2ts` (or `.ts`, without the arrival timestamps): MVC
-has no home in Matroska that players agree on. Nothing about the picture can
-change, so `--layout half` and `--swap-lr` are refused.
+The output must be `.m2ts`, or `.ts` without the arrival timestamps. MVC
+has no home in Matroska that players agree on. Nothing about the picture
+can change, so `--layout half` and `--swap-lr` are refused.
 
 ### A 2D remux into Matroska
 
-A 2D source — a 2D disc, or a 3D one with `--2d` for its base view — can be
-remuxed into an MKV instead: the video untouched, with the audio and
-subtitles chosen, chapters, and the same timing a conversion has:
+A 2D source can be remuxed into an MKV instead. That is a 2D disc, or a
+3D one with `--2d` for its base view. The video is untouched, the audio
+and subtitles are chosen, the chapters are kept, and the timing is the
+same a conversion has:
 
 ```sh
 bdtools --remux --input disc.iso --output "Film (2012).mkv" \
          --audio-lang eng --audio-best --subs-lang eng
 ```
 
-The video's access units are copied as they are and the muxer times them
-from their picture order. A remux cannot cut inside a GOP, so it starts at
-the random access point at or before the playlist's IN time (a disc's
-feature normally starts on one). A Matroska source remuxes the same way,
+The video's access units are copied as they are, and the muxer times them
+from their picture order. A remux cannot cut inside a GOP, so it starts
+at the random access point at or before the playlist's IN time. A disc's
+feature normally starts on one. A Matroska source remuxes the same way,
 which is how to drop tracks from an MKV without re-encoding it. H.264 and
-HEVC are carried (with Dolby Vision, see [Dolby Vision](#dolby-vision)); VC-1 and MPEG-2 video are not yet (convert those, or
-remux to .m2ts). On Toy Story's 3D disc, `--2d --remux` copied all 116,642
-pictures in two minutes, from the image over the network, and the result
-decodes to exactly the disc's pictures.
+HEVC are carried, Dolby Vision included (see
+[Dolby Vision](#dolby-vision)). VC-1 and MPEG-2 video are not yet.
+Convert those, or remux to .m2ts. On Toy Story's 3D disc, `--2d --remux`
+copied all 116,642 pictures in two minutes, from the image over the
+network, and the result decodes to exactly the disc's pictures.
 
 ## What plays the result, and at what resolution
 
 The output declares its layout in the Matroska `StereoMode` element
-(`side_by_side_left_first`), so a player need not infer 3D from the filename or
-be told by hand. That flag is what decides whether the resolution this spent
-hours preserving survives to the screen.
+(`side_by_side_left_first`). A player need not infer 3D from the filename
+or be told by hand. That flag is what decides whether the resolution this
+spent hours preserving survives to the screen.
 
 | player | what it does | per eye |
 |---|---|---|
 | **Kodi / CoreELEC** | reads the flag, splits the frame, emits HDMI **frame-packed** 3D | **1920x1080** |
-| Plex | recognises only *half*-SBS and *half*-TAB, from the filename; treats this as flat 2D | 960x1080 at best |
+| Plex | recognises only *half*-SBS and *half*-TAB, from the filename, and treats this as flat 2D | 960x1080 at best |
 
-Full per-eye resolution needs **frame packing**, the HDMI 3D format that carries
-two complete 1920x1080 frames in one 1920x2205 transport. The side-by-side HDMI
-format cannot: it squeezes both eyes into a single 1920x1080 frame, so each eye
-is 960 columns stretched back to 1920, whatever the source file held.
+Full per-eye resolution needs **frame packing**. That is the HDMI 3D
+format that carries two complete 1920x1080 frames in one 1920x2205
+transport. The side-by-side HDMI format cannot do it. It squeezes both
+eyes into a single 1920x1080 frame, so each eye is 960 columns stretched
+back to 1920, whatever the source file held.
 
-So a full-SBS file is a 1:1 pixel map through a frame-packing player — each
-1920x1080 view lands on the panel untouched — and a waste through anything that
-only speaks half-SBS, which scales it down before the display ever sees it.
-That is also the ceiling worth chasing: MVC on a 3D Blu-ray is 1080p per eye,
-and consumer 3D displays present Full HD per eye, so 1920x1080 is both what the
-disc holds and what the screen can show.
+So a full-SBS file is a 1:1 pixel map through a frame-packing player,
+where each 1920x1080 view lands on the panel untouched. It is a waste
+through anything that only speaks half-SBS, which scales it down before
+the display ever sees it. That is also the ceiling worth chasing. MVC on
+a 3D Blu-ray is 1080p per eye, and consumer 3D displays present Full HD
+per eye, so 1920x1080 is both what the disc holds and what the screen can
+show.
 
-CoreELEC 21.1 and later handle `(F)SBS`, `(F)TAB` and MVC frame packing on
-devices using the hdmitx20 driver. Half-SBS (`--layout half`) exists for players
-that will only take that, and costs half the horizontal detail by definition.
+CoreELEC 21.1 and later handle `(F)SBS`, `(F)TAB` and MVC frame packing
+on devices using the hdmitx20 driver. Half-SBS (`--layout half`) exists
+for players that will only take that. It costs half the horizontal detail
+by definition.
 
 ## Tools, and why each is needed
 
-Usually at most one: the encoder. The demux, the decode and the mux are built
-in (libavcodec drops the MVC dependent view outright, so ffmpeg could not
-stand in for the first two), and a GPU encodes through its driver's own
-library, in process.
+Usually at most one tool is needed: the encoder. The demux, the decode
+and the mux are built in. ffmpeg could not stand in for the first two,
+because libavcodec drops the MVC dependent view outright. A GPU encodes
+through its driver's own library, in process.
 
 | Tool | What it does | Why nothing else will do |
 |---|---|---|
-| **x264** / **x265** / **SvtAv1EncApp** *or* **ffmpeg** | Re-encodes the picture when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264, x265 or SvtAv1EncApp follows `--codec`; ffmpeg instead for software half-SBS (its scaler), for AV1 without SvtAv1EncApp (its libsvtav1), or for a GPU whose library is missing or with `--gpu-api ffmpeg` |
-| **ffmpeg** (6.1 or later), rarely | Decodes 2D video the decoders here do not | Only interlaced H.264 (1080i discs) and HEVC's format range extensions (4:2:2, 4:4:4, which no disc uses), and only when no GPU decoder (NVDEC, VideoToolbox) takes them; asked for by name when needed |
+| **x264** / **x265** / **SvtAv1EncApp** *or* **ffmpeg** | Re-encodes the picture when no GPU does | Side-by-side is a new frame layout, so a re-encode is unavoidable. x264, x265 or SvtAv1EncApp follows `--codec`. ffmpeg is used instead for software half-SBS (its scaler), for AV1 without SvtAv1EncApp (its libsvtav1), for a GPU whose library is missing, or with `--gpu-api ffmpeg` |
+| **ffmpeg** (6.1 or later), rarely | Decodes 2D video the decoders here do not | Only interlaced H.264 (1080i discs) and HEVC's format range extensions (4:2:2, 4:4:4, which no disc uses), and only when no GPU decoder (NVDEC, VideoToolbox) takes them. It is asked for by name when needed |
 
 A `--remux` needs nothing at all.
 
-Installing them is left to you; `--check` says what is missing, what each one
-does, and where to start:
+Installing them is left to you. `--check` says what is missing, what each
+one does, and where to start:
 
 ```
 platform: linux   encoder: software   codec: h265
@@ -1311,89 +1375,97 @@ all 1 required tools present
 
 With a GPU that encodes in process it says so: `no external tools needed`.
 
-`--check` exits non-zero when anything is missing, so it works as a preflight.
-It answers for the options given, so `--check --layout half` looks for
-ffmpeg rather than x264.
+`--check` exits non-zero when anything is missing, so it works as a
+preflight. It answers for the options given, so `--check --layout half`
+looks for ffmpeg rather than x264.
 
 ### What the built-in demuxer handles
 
-It does what tsMuxeR, which it replaced, did with a Blu-ray where that matters
-— the audio and subtitle files it writes were checked **byte-identical to
-tsMuxeR's** on the discs tried (TrueHD with its AC-3 core, E-AC-3 7.1 with its
-AC-3 core, DTS, DTS-HD High Resolution and Master Audio, AC-3, PGS) — and
-handles the same disc layouts:
+The demuxer replaced tsMuxeR, and it does what tsMuxeR did with a Blu-ray
+where that matters. The audio and subtitle files it writes were checked
+**byte-identical to tsMuxeR's** on the discs tried: TrueHD with its AC-3
+core, E-AC-3 7.1 with its AC-3 core, DTS, DTS-HD High Resolution and
+Master Audio, AC-3, and PGS. It handles the same disc layouts:
 
-- **The SSIF** a pressed 3D disc interleaves its views in, or the two `.m2ts`
-  files of a folder rip without one, or one `.m2ts` holding both views (a
-  remux, an AVCHD recording).
-- **Playlists of several clips**, joined, with each clip's IN and OUT times.
-- **Multi-angle titles**: the first angle.
-- **Languages** from the playlist, or from the clip info when a loose stream
-  file is given; AVCHD's 8.3 names (`.MPL`, `.CPI`, `.MTS`).
-- **LPCM** is written as WAV (byte order and 7.1 channel order converted,
-  20-bit samples padded to 24), as tsMuxeR did.
+- **The SSIF** a pressed 3D disc interleaves its views in. Also the two
+  `.m2ts` files of a folder rip without one, or one `.m2ts` holding both
+  views, as a remux or an AVCHD recording has.
+- **Playlists of several clips**, joined, with each clip's IN and OUT
+  times.
+- **Multi-angle titles**, taking the first angle.
+- **Languages** from the playlist, or from the clip info when a loose
+  stream file is given. AVCHD's 8.3 names (`.MPL`, `.CPI`, `.MTS`) are
+  understood.
+- **LPCM** is written as WAV, as tsMuxeR did, with the byte order and 7.1
+  channel order converted and 20-bit samples padded to 24.
 - **Chapters** from the playlist marks, which tsMuxeR's demux left out.
 
-Where it deliberately differs, it is to play as the disc does: audio and
-subtitles **before the playlist's IN time** (or the first picture of a loose
-stream) and after its OUT time are not written, nor are pictures outside
-them. A disc whose sound starts before its picture — The Wild Robot's starts
-1.16 s early — otherwise comes out with the sound that much ahead, because a
-demuxed elementary stream has no timestamps left to say so.
+Where it deliberately differs, it is to play as the disc does. Audio and
+subtitles **before the playlist's IN time** (or the first picture of a
+loose stream) and after its OUT time are not written, nor are pictures
+outside them. Take a disc whose sound starts before its picture. The Wild
+Robot's starts 1.16 s early. Without this rule, it comes out with the
+sound that much ahead, because a demuxed elementary stream has no
+timestamps left to say so.
 
 ## What it does with the rest of the disc
 
-Audio and subtitle tracks are demuxed alongside the two views and muxed into the
-output in the order the source listed them, so the first audio track stays
-first, and the first audio track is the default one. One output track per disc
-track (and, with `--subs-3d both`, a 3D subtitle track after each flat one):
-a Blu-ray TrueHD stream carries an embedded AC-3 core for players that
-cannot decode TrueHD, and DTS-HD carries a plain DTS core the same way, and the
-demux writes each pair as a single file. The muxer takes the main stream and leaves the core out — it is the same audio,
-lossily, and an extra track the probe never reported would be a surprise —
-unless `--keep-fallback` asks for it as its own track. (A 7.1 E-AC-3 track's
-AC-3 part is not a separate core: it is half of every E-AC-3 frame, and
-stays.) A Matroska remux keeps a TrueHD track's AC-3 as a track of its own,
-which is an ordinary audio track here, chosen or not by the filters.
+Audio and subtitle tracks are demuxed alongside the two views and muxed
+into the output in the order the source listed them. The first audio
+track stays first, and it is the default one. There is one output track
+per disc track, plus, with `--subs-3d both`, a 3D subtitle track after
+each flat one. A Blu-ray TrueHD stream carries an embedded AC-3 core for
+players that cannot decode TrueHD, and DTS-HD carries a plain DTS core
+the same way. The demux writes each pair as a single file. The muxer
+takes the main stream and leaves the core out, unless `--keep-fallback`
+asks for it as its own track. The core is the same audio, lossily, and an
+extra track the probe never reported would be a surprise. A 7.1 E-AC-3
+track's AC-3 part is not a separate core. It is half of every E-AC-3
+frame, and stays. A Matroska remux keeps a TrueHD track's AC-3 as a track
+of its own, which is an ordinary audio track here, chosen or not by the
+filters.
 
-Each track is tagged with the language the disc gives it; a track the disc gave
-no language for is tagged `und`, undetermined, rather than guessed at — and
-rather than left untagged, which Matroska reads as English. Use
-[the track filters](#choosing-tracks) to carry fewer of them. A track the demux
-failed to produce is reported and skipped — that costs a language, not the
-film.
+Each track is tagged with the language the disc gives it. A track the
+disc gave no language for is tagged `und`, undetermined, rather than
+guessed at. It is not left untagged either, because Matroska reads an
+untagged track as English. Use [the track filters](#choosing-tracks) to
+carry fewer of them. A track the demux failed to produce is reported and
+skipped. That costs a language, not the film.
 
-The views are identified by **stream ID**, not by order or track number: a disc
-is not obliged to list them in any order, and taking the wrong one as the base
-gives a stream that cannot decode at all.
+The views are identified by **stream ID**, not by order or track number.
+A disc is not obliged to list them in any order, and taking the wrong one
+as the base gives a stream that cannot decode at all.
 
 A source that is not 3D is converted as a 2D film (see
-[2D Blu-rays](#2d-blu-rays)). An MVC remux of one (`--remux` to `.m2ts`
-expects both views) is refused by name rather than failing obscurely:
+[2D Blu-rays](#2d-blu-rays)). An MVC remux of one is refused by name
+rather than failing obscurely, because `--remux` to `.m2ts` expects both
+views:
 
 ```
 bdtools: no MVC track: this source is not 3D (found V_MPEG4/ISO/AVC (track 4113))
 ```
 
-So are two MVC tracks, an MVC track with no AVC base view, and an elementary
-stream handed in where a container was expected.
+So are two MVC tracks, an MVC track with no AVC base view, and an
+elementary stream handed in where a container was expected.
 
 ## Testing without a disc
 
-`testdata/bluray` is a synthetic Blu-ray 3D, as a folder and as a UDF image,
-muxed (once, by tsMuxeR) from the MVC fixtures below and generated audio. The
-demuxer is tested on it with no tools installed: the listing, the decoded
-pictures (identical to the combined stream's), the audio cut to the playlist,
-and the remux. A Matroska remux is built from the same fixtures on the fly;
-`TestRunnerConvertsADiscImage` and `TestRunnerConvertsAMatroskaSource`
-convert both and check the output is 1280×480 side by side with its tracks.
+`testdata/bluray` is a synthetic Blu-ray 3D, as a folder and as a UDF
+image. It was muxed once, by tsMuxeR, from the MVC fixtures below and
+generated audio. The demuxer is tested on it with no tools installed: the
+listing, the decoded pictures (identical to the combined stream's), the
+audio cut to the playlist, and the remux. A Matroska remux is built from
+the same fixtures on the fly. `TestRunnerConvertsADiscImage` and
+`TestRunnerConvertsAMatroskaSource` convert both and check that the
+output is 1280×480 side by side with its tracks.
 
 The MVC streams are
 [mvc-source](https://github.com/jens-duttke/mvc-source)'s `tests/fixtures`,
-committed under `testdata/mvc-source`: `mvc_base.264`, `mvc_dependent.mvc` and
-`mvc_combined.264` at 35, 23 and 57 KB — the exact shape a demux produces. The
-decode stage is tested on them directly; the end-to-end tests also need x264
-on `PATH` and skip without it, so CI stays green without the toolchain:
+committed under `testdata/mvc-source`: `mvc_base.264`, `mvc_dependent.mvc`
+and `mvc_combined.264` at 35, 23 and 57 KB. That is the exact shape a
+demux produces. The decode stage is tested on them directly. The
+end-to-end tests also need x264 on `PATH` and skip without it, so CI stays
+green without the toolchain:
 
 ```sh
 go test ./internal/convert/
@@ -1407,26 +1479,29 @@ go test ./internal/convert/
 | macOS | VideoToolbox (not AV1) | x264 / x265 / SVT-AV1 |
 | Windows | NVENC, Media Foundation (Intel, AMD; H.264 and HEVC) | x264 / x265 / SVT-AV1 |
 
-`auto` runs a **trial encode** for each candidate and takes the first that
-succeeds, falling back to software: in process first, then through ffmpeg.
-Merely finding ffmpeg or a driver library is not evidence a GPU is present — a stock build advertises `h264_nvenc` on a machine with no
-NVIDIA card — and discovering that at the encode step would waste the hours
-already spent decoding.
+`auto` runs a **trial encode** for each candidate and takes the first
+that succeeds. It tries in process first, then through ffmpeg, and falls
+back to software. Merely finding ffmpeg or a driver library is not
+evidence that a GPU is present. A stock build advertises `h264_nvenc` on
+a machine with no NVIDIA card, and discovering that at the encode step
+would waste the hours already spent decoding.
 
 The trial is run for the codec being produced, not for the encoder in the
-abstract: a GPU generation can carry an H.264 encoder and no HEVC one, so
-`--codec h265` can fall back to x265 on the same machine where `--codec h264`
-picks NVENC.
+abstract. A GPU generation can carry an H.264 encoder and no HEVC one, so
+`--codec h265` can fall back to x265 on the same machine where `--codec
+h264` picks NVENC.
 
 ## What works where
 
-Everything that only reads and writes streams works everywhere: remuxing
-(Dolby Vision included), demuxing, the 3D conversion (its MVC decoder is
-this repository's, in Go with AVX2 kernels), and HDR10/HDR10+ metadata.
-A 2D source's video is decoded on the GPU where one decodes it — NVIDIA's
-NVDEC (Linux and Windows: H.264, HEVC, VC-1, MPEG-2), Apple's VideoToolbox
-(macOS: H.264, HEVC), VAAPI (Linux, Intel and AMD: HEVC, progressive H.264
-and MPEG-2, the parsers here driving it) — else by the decoders here, in Go:
+Everything that only reads and writes streams works everywhere. That is
+remuxing, Dolby Vision included, demuxing, the 3D conversion, and
+HDR10/HDR10+ metadata. The 3D conversion's MVC decoder is this
+repository's, in Go with AVX2 kernels. A 2D source's video is decoded on
+the GPU where one decodes it, and otherwise by the decoders here, in Go.
+The GPU decoders are NVIDIA's NVDEC (Linux and Windows: H.264, HEVC,
+VC-1, MPEG-2), Apple's VideoToolbox (macOS: H.264, HEVC) and VAAPI
+(Linux, Intel and AMD: HEVC, progressive H.264 and MPEG-2, with the
+parsers here driving it):
 
 | | NVIDIA (Linux, Windows), Mac (H.264, HEVC), VAAPI (HEVC, H.264, MPEG-2) | elsewhere |
 |---|---|---|
@@ -1437,8 +1512,9 @@ and MPEG-2, the parsers here driving it) — else by the decoders here, in Go:
 | HDR10, HDR10+, Dolby Vision 8.1, FEL composed | ✓ | ✓ |
 | Dolby Vision 7 kept as layers (`--dv-fel keep`, `reencode`) | ✓ (NVENC or x265) | ✓ (x265) |
 
-Which decoder takes what, in the order they are tried (`--decoder cpu`
-skips the GPUs, `--decoder gpu` refuses anything else):
+This table shows which decoder takes what, in the order they are tried.
+`--decoder cpu` skips the GPUs, and `--decoder gpu` refuses anything
+else:
 
 | Video | NVDEC | VideoToolbox | VAAPI | Here, in Go | ffmpeg |
 |---|---|---|---|---|---|
@@ -1454,60 +1530,61 @@ skips the GPUs, `--decoder gpu` refuses anything else):
 Interlaced MPEG-2, VC-1 and H.264 come out deinterlaced, one frame per
 frame, as NVDEC gives them.
 
-On Windows, NVDEC's structures are laid out as Windows lays them out (an
-`unsigned long` is 4 bytes there), generated from NVIDIA's headers like
-Linux's and checked by a test; it has not yet been run on a Windows machine
-with an NVIDIA GPU, and where it fails, ffmpeg takes over.
+On Windows, NVDEC's structures are laid out as Windows lays them out,
+where an `unsigned long` is 4 bytes. They are generated from NVIDIA's
+headers like Linux's and checked by a test. This has not yet been run on
+a Windows machine with an NVIDIA GPU. Where it fails, ffmpeg takes over.
 
-The MPEG-2 decoder here is Go (the standard's Main Profile: frame and
-field pictures, every prediction mode), its interlaced pictures
-deinterlaced in Go as yadif does it (within 68 dB of ffmpeg's yadif). On
-the ISO conformance streams and ffmpeg's test streams each picture is
-within the inverse transform's tolerance of ffmpeg's (64 dB and up;
-MPEG-2's transform is not bit-exact between decoders). Dual prime
+The MPEG-2 decoder here is Go. It does the standard's Main Profile: frame
+and field pictures, every prediction mode. Its interlaced pictures are
+deinterlaced in Go as yadif does it, within 68 dB of ffmpeg's yadif. On
+the ISO conformance streams and ffmpeg's test streams, each picture is
+within the inverse transform's tolerance of ffmpeg's, at 64 dB and up.
+MPEG-2's transform is not bit-exact between decoders. Dual prime
 prediction follows the standard, but no test stream had any. It is slower
-than the GPU: about 30 fps for 1080i, for now.
+than the GPU, at about 30 fps for 1080i, for now.
 
-The VC-1 decoder here is Go too: the Advanced Profile Blu-ray and HD DVD
-use, progressive, interlaced frame and field pictures (every macroblock
-type, intensity compensation, overlap smoothing, the loop filter),
-interlaced pictures deinterlaced as MPEG-2's are. VC-1's transform is
-exact, and its pictures are byte-identical to ffmpeg's: on the SMPTE
-conformance streams ffmpeg tests with, on a Blu-ray sample, and on four
-minutes of a VC-1 Blu-ray remux (5,755 pictures, fades included). About
-110 fps for 1080p on one core. A Matroska remux of a VC-1 Blu-ray (VFW
-FourCC `WVC1`, with its PCM in `A_MS/ACM`) converts like the disc.
+The VC-1 decoder here is Go too. It does the Advanced Profile that
+Blu-ray and HD DVD use: progressive, interlaced frame and field pictures,
+every macroblock type, intensity compensation, overlap smoothing and the
+loop filter. Interlaced pictures are deinterlaced as MPEG-2's are. VC-1's
+transform is exact, and its pictures are byte-identical to ffmpeg's on
+the SMPTE conformance streams ffmpeg tests with, on a Blu-ray sample, and
+on four minutes of a VC-1 Blu-ray remux (5,755 pictures, fades included).
+It runs at about 110 fps for 1080p on one core. A Matroska remux of a
+VC-1 Blu-ray, with the VFW FourCC `WVC1` and its PCM in `A_MS/ACM`,
+converts like the disc.
 
-The HEVC decoder here is Go as well: Main and Main 10, everything Ultra HD
-Blu-ray uses (and tiles, wavefronts, dependent slices, weighted
-prediction, scaling lists, PCM and lossless blocks besides). Its pictures
-are byte-identical to ffmpeg's on all 152 of the JCT-VC conformance
-streams for those profiles and on 4K HDR10 and Dolby Vision clips. It
-decodes several pictures at once, each CTB row loop filtered as soon as
-it and its neighbours are decoded so that the pictures predicting from it
-can go on, and within a picture its slices (discs cut each picture into
-several) and wavefront rows in parallel, with AVX2 kernels for motion
-compensation on amd64: about 250 fps for an Ultra HD disc's 4K stream on
-24 threads, as fast as ffmpeg (a 4K Dolby Vision FEL conversion, both
-layers decoded here and composed, encodes at 141 fps on NVENC, its video
-identical to NVDEC's). A
+The HEVC decoder here is Go as well. It does Main and Main 10, everything
+Ultra HD Blu-ray uses, and besides that tiles, wavefronts, dependent
+slices, weighted prediction, scaling lists, PCM and lossless blocks. Its
+pictures are byte-identical to ffmpeg's on all 152 of the JCT-VC
+conformance streams for those profiles and on 4K HDR10 and Dolby Vision
+clips. It decodes several pictures at once. Each CTB row is loop filtered
+as soon as it and its neighbours are decoded, so that the pictures
+predicting from it can go on. Within a picture, its slices and wavefront
+rows are decoded in parallel. Discs cut each picture into several slices.
+Motion compensation has AVX2 kernels on amd64. It runs at about 250 fps
+for an Ultra HD disc's 4K stream on 24 threads, as fast as ffmpeg. A 4K
+Dolby Vision FEL conversion, with both layers decoded here and composed,
+encodes at 141 fps on NVENC, and its video is identical to NVDEC's. A
 stream of the format range extensions (4:2:2, 4:4:4, never on a disc)
 goes to ffmpeg instead, converted to 4:2:0.
 
-Decoding through ffmpeg gives each picture its own timestamp (the stream
-goes to it as a transport stream with them, and `-stats_enc_pre` gives them
-back, so ffmpeg 6.1 or later), and the same pictures: a 4K FEL clip
-converted through it came out byte-identical to one decoded on NVDEC, and
-a Blu-ray's VC-1 decoded the same on both but for a cut-short last
-picture, which NVDEC conceals. Interlaced pictures are deinterlaced
-(bwdif), as NVDEC does. The Dolby Vision code itself (RPUs, composition)
-is Go, with AVX2 kernels on amd64 and the Go versions elsewhere (and with
-`-tags purego`).
+Decoding through ffmpeg gives each picture its own timestamp. The stream
+goes to ffmpeg as a transport stream with them, and `-stats_enc_pre`
+gives them back, which needs ffmpeg 6.1 or later. It gives the same
+pictures. A 4K FEL clip converted through it came out byte-identical to
+one decoded on NVDEC. A Blu-ray's VC-1 decoded the same on both but for a
+cut-short last picture, which NVDEC conceals. Interlaced pictures are
+deinterlaced with bwdif, as NVDEC does. The Dolby Vision code itself, the
+RPUs and the composition, is Go, with AVX2 kernels on amd64 and the Go
+versions elsewhere, and with `-tags purego`.
 
 ## Hardware encoding
 
-A GPU encoder is driven **in process, through its system library**, loaded
-at run time — no cgo, no ffmpeg, nothing to link:
+A GPU encoder is driven **in process, through its system library**,
+loaded at run time. There is no cgo, no ffmpeg and nothing to link:
 
 | Encoder | Library | Platforms |
 |---|---|---|
@@ -1517,31 +1594,39 @@ at run time — no cgo, no ffmpeg, nothing to link:
 | Media Foundation | the encoder MFT the GPU driver installs (Intel Quick Sync, AMD AMF), through `mfplat.dll` | Windows |
 
 The decoder's frames are drawn side by side straight into the encoder's
-input buffer, squeezed for half-SBS on the way, so nothing is piped and no
-filter runs. Each encoder makes an IDR every 250 frames (about 10 s, as x264
-and x265 do; 7% smaller than every 2 s at the same quality) with B-frames
-between references, at a constant quantiser: `--crf` is the P-picture QP,
-and I and B pictures get the offsets ffmpeg applies by default for that
-encoder, so a number means what it meant through ffmpeg's `-qp`. NVENC's
-H.264 and HEVC are the exception: they encode at a constant quality
-(ffmpeg's `-rc vbr -cq`, at `--crf` plus 6, which comes out about the size
-of a constant QP of `--crf`), letting the encoder move each picture's
-quantiser where it gains most: at the same size, the worst pictures come
-nearer the source (see [Defaults by source](#defaults-by-source)). The rate
-is held under 50 Mbit/s for HD and 100 Mbit/s above it, a Blu-ray's and an
-Ultra HD Blu-ray's ceilings: left to itself the driver holds a grainy 4K
-film near 20 Mbit/s whatever the quality asked, and a higher ceiling makes
-it declare a level (6.1 from 300 Mbit/s) players refuse; at these the
-stream declares level 4.1 and 5.0, as HD and Ultra HD HEVC are.
-VideoToolbox has no QP; `--crf` maps onto its quality scale, `0` the best
-and `51` the worst.
+input buffer, squeezed for half-SBS on the way. Nothing is piped and no
+filter runs. Each encoder makes an IDR every 250 frames, which is about
+10 s, as x264 and x265 do. That is 7% smaller than every 2 s at the same
+quality. It puts B-frames between references, at a constant quantiser.
+`--crf` is the P-picture QP, and I and B pictures get the offsets ffmpeg
+applies by default for that encoder, so a number means what it meant
+through ffmpeg's `-qp`. NVENC's H.264 and HEVC are the exception. They
+encode at a constant quality (ffmpeg's `-rc vbr -cq`) at `--crf` plus 6,
+which comes out about the size of a constant QP of `--crf`. That lets the
+encoder move each picture's quantiser where it gains most, so at the same
+size the worst pictures come nearer the source (see
+[Defaults by source](#defaults-by-source)). The rate is held under 50
+Mbit/s for HD and 100 Mbit/s above it, which are a Blu-ray's and an Ultra
+HD Blu-ray's ceilings. Left to itself, the driver holds a grainy 4K film
+near 20 Mbit/s whatever the quality asked, and a higher ceiling makes it
+declare a level that players refuse (6.1 from 300 Mbit/s). At these
+ceilings the stream declares level 4.1 and 5.0, as HD and Ultra HD HEVC
+are. VideoToolbox has no QP. `--crf` maps onto its quality scale, with
+`0` the best and `51` the worst.
 
-When the library is missing or its trial encode fails, the encoder is reached
-through ffmpeg as before; `--gpu-api ffmpeg` asks for that outright.
-On Windows, `auto` tries NVENC, then the Media Foundation encoder a driver installs, which is how Intel and AMD GPUs encode there. Microsoft's own software encoder MFT is never picked. `--encoder mediafoundation --gpu-api ffmpeg` uses ffmpeg's `h264_mf` / `hevc_mf` instead. Media Foundation takes a constant QP where the driver supports one, which Intel's and AMD's do, and otherwise its 0-100 quality, mapped from `--crf` as for VideoToolbox. This path is tested in CI with Microsoft's software encoder, not yet on an Intel or AMD GPU.
+When the library is missing or its trial encode fails, the encoder is
+reached through ffmpeg as before. `--gpu-api ffmpeg` asks for that
+outright. On Windows, `auto` tries NVENC, then the Media Foundation
+encoder a driver installs, which is how Intel and AMD GPUs encode there.
+Microsoft's own software encoder MFT is never picked. `--encoder mediafoundation --gpu-api ffmpeg` uses ffmpeg's `h264_mf` /
+`hevc_mf` instead. Media Foundation takes a constant QP where the driver supports
+one, which Intel's and AMD's do. Otherwise it takes its 0-100 quality,
+mapped from `--crf` as for VideoToolbox. This path is tested in CI with
+Microsoft's software encoder, and not yet on an Intel or AMD GPU.
 
-Decoding and encoding a minute of a Blu-ray to H.264 on a Core Ultra 9 285K
-(wall time for the whole conversion, then the decode-and-encode rate):
+This table shows decoding and encoding a minute of a Blu-ray to H.264 on
+a Core Ultra 9 285K. Each cell gives the wall time for the whole
+conversion, then the decode-and-encode rate:
 
 | Encoder | Full SBS | Half SBS |
 |---|---|---|
@@ -1550,13 +1635,14 @@ Decoding and encoding a minute of a Blu-ray to H.264 on a Core Ultra 9 285K
 | VAAPI (Arrow Lake iGPU), in process | 7.8 s, 239 fps | 6.8 s, 270 fps |
 | VAAPI through ffmpeg | 7.6 s | 7.4 s |
 
-The iGPU's encoder tops out near 270 fps at this size, so VAAPI is as fast
-either way; NVENC is not the limit, and in process it keeps up with the
-decoder.
+The iGPU's encoder tops out near 270 fps at this size, so VAAPI is as
+fast either way. NVENC is not the limit, and in process it keeps up with
+the decoder.
 
-A VAAPI driver that only decodes (NVIDIA's `nvidia-vaapi-driver`) has no
-encode entrypoint; the probe sees that and moves on. Intel's driver for
-recent GPUs is `intel-media-va-driver-non-free` on Debian and Ubuntu.
+A VAAPI driver that only decodes, such as NVIDIA's `nvidia-vaapi-driver`,
+has no encode entrypoint. The probe sees that and moves on. Intel's
+driver for recent GPUs is `intel-media-va-driver-non-free` on Debian and
+Ubuntu.
 
 ## Docker
 
@@ -1574,37 +1660,39 @@ docker build -f Dockerfile.bdtools -t bdtools .
 docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile.bdtools -t bdtools .
 ```
 
-The demuxer, decoder and muxer are part of the `bdtools` binary, with the
-decoder's assembly kernels chosen at run time by what the CPU supports; the
-image adds x264, x265, ffmpeg (with NVENC, VAAPI and libsvtav1, which
-software AV1 uses), libva, and the VAAPI drivers for Intel (non-free, amd64)
-and AMD.
+The demuxer, decoder and muxer are part of the `bdtools` binary, and the
+decoder's assembly kernels are chosen at run time by what the CPU
+supports. The image adds x264, x265, ffmpeg (with NVENC, VAAPI and
+libsvtav1, which software AV1 uses), libva, and the VAAPI drivers for
+Intel (non-free, amd64) and AMD.
 
-It is Debian, not Alpine, because a GPU's own libraries are built for glibc:
-NVIDIA's `libnvidia-encode` and `libcuda`, which the NVIDIA container toolkit
-mounts in, cannot be loaded by a musl system, and Alpine's ffmpeg has no
-NVENC either.
+It is Debian, not Alpine, because a GPU's own libraries are built for
+glibc. NVIDIA's `libnvidia-encode` and `libcuda`, which the NVIDIA
+container toolkit mounts in, cannot be loaded by a musl system, and
+Alpine's ffmpeg has no NVENC either.
 
 ### GPUs in the container
 
-- **NVIDIA:** install the NVIDIA container toolkit on the host and run with
-  `--gpus all`. The image sets `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`;
-  `video` is the capability that brings `libnvidia-encode` in, and without it
-  there is no NVENC.
-- **Intel / AMD (VAAPI):** pass the render node, `--device /dev/dri/renderD128`
-  (and `--vaapi-device` if it is another one). The drivers are in the image.
+- **NVIDIA:** install the NVIDIA container toolkit on the host and run
+  with `--gpus all`. The image sets
+  `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility`. `video` is the
+  capability that brings `libnvidia-encode` in, and without it there is
+  no NVENC.
+- **Intel / AMD (VAAPI):** pass the render node,
+  `--device /dev/dri/renderD128`, and `--vaapi-device` if it is another
+  one. The drivers are in the image.
 
-`--check` in the container tries a GPU reached through ffmpeg with a short
-encode, so an image or host that cannot drive the GPU says so before a
-conversion starts rather than at its encode.
+`--check` in the container tries a GPU reached through ffmpeg with a
+short encode. So an image or host that cannot drive the GPU says so
+before a conversion starts, rather than at its encode.
 
 ### Running the conversion out of the image
 
-bdtools knows nothing about Docker: it runs its tools from its own PATH, so
-inside the image it just works. That means you can skip installing the toolchain
-on the host and let a scheduler drive the image instead — pipeliner's `exec`
-sink takes an `args` list, so `docker` becomes the command and nothing needs
-quoting:
+bdtools knows nothing about Docker. It runs its tools from its own PATH,
+so inside the image it just works. That means you can skip installing the
+toolchain on the host and let a scheduler drive the image instead.
+pipeliner's `exec` sink takes an `args` list, so `docker` becomes the
+command and nothing needs quoting:
 
 ```python
 output("exec", upstream=once, command="docker",
@@ -1616,18 +1704,18 @@ output("exec", upstream=once, command="docker",
              "--output", "{sbs_path}", "--quiet"])
 ```
 
-Both forms behave identically to the pipeline: a non-zero exit fails the entry,
-so the conversion is retried rather than recorded as done. A retry resumes:
-the work directory sits beside the output, on the mounted volume, and
-`docker stop` sends the SIGTERM that stops a conversion cleanly. Hardware encoding
-needs the device passed through, which is the one thing the container cannot
-arrange for itself.
+Both forms behave identically to the pipeline. A non-zero exit fails the
+entry, so the conversion is retried rather than recorded as done. A retry
+resumes, because the work directory sits beside the output, on the
+mounted volume. `docker stop` sends the SIGTERM that stops a conversion
+cleanly. Hardware encoding needs the device passed through, which is the
+one thing the container cannot arrange for itself.
 
 ## Driving it from pipeliner
 
-Pair it with [pipeliner](https://github.com/brunoga/pipeliner)'s `exec` sink,
-whose `args` list passes each value as one argument, so paths with spaces need
-no quoting:
+Pair it with [pipeliner](https://github.com/brunoga/pipeliner)'s `exec`
+sink. Its `args` list passes each value as one argument, so paths with
+spaces need no quoting:
 
 ```python
 src  = input("filesystem", path="/media/3d-staging", recursive=True, mask="*.iso")
@@ -1639,5 +1727,5 @@ conv = output("exec", upstream=meta,
 pipeline("convert-3d", schedule="0 4 * * *")
 ```
 
-A non-zero exit fails the entry, so a failed conversion is not recorded as done
-and is retried next run.
+A non-zero exit fails the entry. So a failed conversion is not recorded
+as done, and it is retried next run.
