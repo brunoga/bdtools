@@ -121,15 +121,15 @@ func SelectTracks(tracks []Track) (Selection, error) {
 	}
 	switch {
 	case len(deps) == 0:
-		return Selection{}, fmt.Errorf("no MVC track: this source is not 3D "+
-			"(found %s)", describeVideo(tracks))
+		return Selection{}, fmt.Errorf("this source has no MVC track, so it is not 3D. "+
+			"It has %s", describeVideo(tracks))
 	case len(deps) > 1:
-		return Selection{}, fmt.Errorf("found %d MVC tracks; expected one", len(deps))
+		return Selection{}, fmt.Errorf("found %d MVC tracks, and expected one", len(deps))
 	case len(bases) == 0:
 		return Selection{}, fmt.Errorf("found an MVC dependent view but no AVC base " +
 			"view, which cannot be decoded on its own")
 	case len(bases) > 1:
-		return Selection{}, fmt.Errorf("found %d AVC tracks; cannot tell which is the "+
+		return Selection{}, fmt.Errorf("found %d AVC tracks, so cannot tell which is the "+
 			"base view of the MVC pair", len(bases))
 	}
 	sel.Base, sel.Dependent = bases[0], deps[0]

@@ -321,7 +321,7 @@ func (s *mvcSink) code(out io.Reader) (err error) {
 			}
 		} else {
 			if poc < 0 || poc%2 != 0 {
-				return nil, fmt.Errorf("the left eye's encoder numbered a picture %d: MVC needs its frames' order counts at twice their position", poc)
+				return nil, fmt.Errorf("the left eye's encoder numbered a picture %d, and MVC needs its frames' order counts at twice their position", poc)
 			}
 			i = cvsStart + int(poc/2)
 		}
@@ -485,7 +485,7 @@ func (s *mvcSink) finish() error {
 	case s.copy:
 		close(s.baseQ) // the source is done feeding
 		if s.dropped > 0 {
-			s.r.Report.Report("warning: the source's left eye starts %d pictures before its first IDR picture: those are left out", s.dropped)
+			s.r.Report.Report("warning: the source's left eye starts %d pictures before its first IDR picture, so those are left out", s.dropped)
 		}
 	case s.base != nil:
 		aus, err := s.base.Flush()

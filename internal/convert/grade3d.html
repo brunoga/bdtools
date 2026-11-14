@@ -56,9 +56,9 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
     <div class="name" style="font-size:40px">bdtools <span id="version2" class="version"></span></div>
     <div class="tagline" style="font-size:18px">Blu-ray tools in pure Go &middot; <em>Depth, graded by eye.</em></div>
   </div>
-  <button id="vrbig" class="primary" title="the picture on a screen in VR, the controls on a panel beside it; the right trigger presses, both grips leave">Enter VR</button>
+  <button id="vrbig" class="primary" title="Puts the picture on a screen in VR, with the controls on a panel beside it. The right trigger presses, and holding both grips leaves VR.">Enter VR</button>
   <span id="vrnote" class="dim"></span>
-  <a href="#" id="vrstay" class="dim" style="font-size:14px" title="grade on this page instead, with the preview and the controls here">stay on the page</a>
+  <a href="#" id="vrstay" class="dim" style="font-size:14px" title="Grade on this page instead, with the preview and the controls here.">stay on the page</a>
 </div>
 <header id="banner">
   <img src="/icon.svg" alt="">
@@ -69,90 +69,90 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 </header>
 <h1><span id="title">bdtools 3D grade</span></h1>
 <div class="row dim" style="font-size:13px">
-  <button id="vr" class="primary" hidden disabled title="the picture on a screen in VR, the controls on a panel beside it (a headset's browser)">Enter VR</button>
-  <span title="the graded picture as a stream, full side by side: open it in a 3D player (Kodi, a TV) to watch what you grade">stream: <a id="stream" href="/stream.ts">/stream.ts</a> (full side by side, 1080p an eye)</span>
-  <span id="clients" title="players connected to the stream">0 players</span>
-  <a href="/manual/grading.html" target="_blank" title="the grading manual: the process, the page and the headset, step by step">manual</a>
-  <span id="saved" title="whether the stretches are in the shots file; save (s) writes them"></span>
+  <button id="vr" class="primary" hidden disabled title="Puts the picture on a screen in VR, with the controls on a panel beside it. This needs a headset's browser.">Enter VR</button>
+  <span title="The graded picture as a live stream, full side by side. Open it in a 3D player, such as Kodi or a television, to watch what you grade.">stream: <a id="stream" href="/stream.ts">/stream.ts</a> (full side by side, 1080p an eye)</span>
+  <span id="clients" title="How many players are connected to the stream.">0 players</span>
+  <a href="/manual/grading.html" target="_blank" title="The grading manual. It explains the process, the page and the headset step by step.">manual</a>
+  <span id="saved" title="Whether the stretches are in the shots file. Save (s) writes them."></span>
   <span id="msg" class="warn"></span>
 </div>
 
 <div class="row dim" style="font-size:13px; margin-top:10px">
   <span>preview:</span>
-  <label title="the left eye alone: the plain picture, to follow the film"><input type="radio" name="pv" value="left" checked> left eye</label>
-  <label title="both eyes side by side: the parallax seen as the offset between them"><input type="radio" name="pv" value="both"> both</label>
-  <label title="a red-cyan anaglyph: the depth itself, with paper glasses"><input type="radio" name="pv" value="anaglyph"> red-cyan</label>
-  <label title="no preview, when a player shows the stream; saves this machine's work"><input type="radio" name="pv" value="off"> off</label>
-  <label style="margin-left:12px" title="the time, state and knobs written into the stream's picture; off for a clean picture"><input type="checkbox" id="hud" checked> readout in the stream</label>
-  <span id="lag" title="how far the preview runs behind the player"></span>
+  <label title="Shows the left eye alone, the plain picture, to follow the film."><input type="radio" name="pv" value="left" checked> left eye</label>
+  <label title="Shows both eyes side by side, so you can see the parallax as the offset between them."><input type="radio" name="pv" value="both"> both</label>
+  <label title="Shows a red-cyan anaglyph, which lets you see the depth with paper glasses."><input type="radio" name="pv" value="anaglyph"> red-cyan</label>
+  <label title="Shows no preview, for when a player shows the stream. It saves this machine some work."><input type="radio" name="pv" value="off"> off</label>
+  <label style="margin-left:12px" title="Writes the time, the state and the knobs into the stream's picture. Turn it off for a clean picture."><input type="checkbox" id="hud" checked> readout in the stream</label>
+  <span id="lag" title="How far the preview runs behind the player."></span>
 </div>
 <div id="preview"><video id="v" muted playsinline autoplay></video><canvas id="cv" hidden></canvas></div>
 
-<div id="bar" title="the film: stretches as bands, cuts as ticks, the playhead; click to seek"><div class="head" id="head"></div></div>
+<div id="bar" title="The film. Stretches are bands, cuts are ticks, and the orange line is the playhead. Click to seek."><div class="head" id="head"></div></div>
 
 <div class="row">
-  <span class="clock" id="clock" title="the time in the film">0:00:00.00</span>
-  <span class="dim" id="length" title="the film's length"></span>
-  <span class="stat dim" id="extremes" title="this picture's nearest and farthest, in percent of the width and in pixels; much past 1% in front strains the eyes"></span>
+  <span class="clock" id="clock" title="The time in the film.">0:00:00.00</span>
+  <span class="dim" id="length" title="The film's length."></span>
+  <span class="stat dim" id="extremes" title="Where this picture's nearest and farthest points land, in percent of the width and in pixels. Much past 1% in front strains the eyes."></span>
 </div>
 
 <div class="row" style="margin:12px 0">
-  <button data-op="step" data-n="-240" title="10 s back (Shift+←)">−10 s</button>
-  <button data-op="jump" data-dir="-1" title="to the cut before: a knob turned here grades from it ([)">⇤ cut</button>
-  <button data-op="step" data-n="-1" title="a picture back, to land on a frame (←)">−1</button>
-  <button data-op="toggle" id="play" class="primary" title="play or pause the film (Space)">Play</button>
-  <button data-op="step" data-n="1" title="a picture on (→)">+1</button>
-  <button data-op="jump" data-dir="1" title="to the next cut, where a stretch graded here ends (])">cut ⇥</button>
-  <button data-op="step" data-n="240" title="10 s on (Shift+→)">+10 s</button>
+  <button data-op="step" data-n="-240" title="Goes back 10 seconds (Shift+←).">−10 s</button>
+  <button data-op="jump" data-dir="-1" title="Goes to the cut before. A knob turned here grades from that cut ([).">⇤ cut</button>
+  <button data-op="step" data-n="-1" title="Goes back one picture, to land on a frame (←).">−1</button>
+  <button data-op="toggle" id="play" class="primary" title="Plays or pauses the film (Space).">Play</button>
+  <button data-op="step" data-n="1" title="Goes forward one picture (→).">+1</button>
+  <button data-op="jump" data-dir="1" title="Goes to the next cut, where a stretch graded here ends (]).">cut ⇥</button>
+  <button data-op="step" data-n="240" title="Goes forward 10 seconds (Shift+→).">+10 s</button>
 </div>
 
 <div class="panel">
   <div class="knob">
-    <label for="depth" title="how deep: the depth scaled by this, 1 the 3D discs'; more for a shot that looks flat, less when it strains (↑ ↓ ±0.05)">depth</label>
-    <input type="range" id="depth" min="0.2" max="4" step="0.02" title="how deep: the depth scaled by this, 1 the 3D discs'; more for a shot that looks flat, less when it strains (↑ ↓ ±0.05)">
-    <input type="number" id="depthN" min="0.05" max="5" step="0.05" title="how deep: the depth scaled by this, 1 the 3D discs'; more for a shot that looks flat, less when it strains (↑ ↓ ±0.05)">
+    <label for="depth" title="How deep the picture is. The depth is scaled by this, and 1 is what the 3D discs have. Turn it up for a shot that looks flat, down for one that strains. ↑ and ↓ change it by 0.05.">depth</label>
+    <input type="range" id="depth" min="0.2" max="4" step="0.02" title="How deep the picture is. The depth is scaled by this, and 1 is what the 3D discs have. Turn it up for a shot that looks flat, down for one that strains. ↑ and ↓ change it by 0.05.">
+    <input type="number" id="depthN" min="0.05" max="5" step="0.05" title="How deep the picture is. The depth is scaled by this, and 1 is what the 3D discs have. Turn it up for a shot that looks flat, down for one that strains. ↑ and ↓ change it by 0.05.">
   </div>
   <div class="knob">
-    <label for="screen" title="the whole depth moved nearer (+) or farther (−), in percent of the width; bring a shot out of the screen or set it back (PgUp PgDn ±0.1)">screen %</label>
-    <input type="range" id="screen" min="-3" max="3" step="0.02" title="the whole depth moved nearer (+) or farther (−), in percent of the width; bring a shot out of the screen or set it back (PgUp PgDn ±0.1)">
-    <input type="number" id="screenN" min="-5" max="5" step="0.05" title="the whole depth moved nearer (+) or farther (−), in percent of the width; bring a shot out of the screen or set it back (PgUp PgDn ±0.1)">
+    <label for="screen" title="Moves the whole depth nearer (positive) or farther (negative), in percent of the width. Use it to bring a shot out of the screen or set it back. PgUp and PgDn change it by 0.1.">screen %</label>
+    <input type="range" id="screen" min="-3" max="3" step="0.02" title="Moves the whole depth nearer (positive) or farther (negative), in percent of the width. Use it to bring a shot out of the screen or set it back. PgUp and PgDn change it by 0.1.">
+    <input type="number" id="screenN" min="-5" max="5" step="0.05" title="Moves the whole depth nearer (positive) or farther (negative), in percent of the width. Use it to bring a shot out of the screen or set it back. PgUp and PgDn change it by 0.1.">
   </div>
   <div class="knob">
-    <label for="curve" title="the depth bent within the shot's range, 1 as the network gives it; below 1 what sits between comes forward, for rows a network stacks away (crowds); above 1 it goes back (, . ±0.05)">curve</label>
-    <input type="range" id="curve" min="0.2" max="3" step="0.02" title="the depth bent within the shot's range, 1 as the network gives it; below 1 what sits between comes forward, for rows a network stacks away (crowds); above 1 it goes back (, . ±0.05)">
-    <input type="number" id="curveN" min="0.2" max="3" step="0.05" title="the depth bent within the shot's range, 1 as the network gives it; below 1 what sits between comes forward, for rows a network stacks away (crowds); above 1 it goes back (, . ±0.05)">
+    <label for="curve" title="Bends the depth within the shot's range. At 1 it is as the network gives it. Below 1, what sits between the farthest and the nearest comes forward, which fixes rows a network stacks away, such as a crowd. Above 1 it goes back. , and . change it by 0.05.">curve</label>
+    <input type="range" id="curve" min="0.2" max="3" step="0.02" title="Bends the depth within the shot's range. At 1 it is as the network gives it. Below 1, what sits between the farthest and the nearest comes forward, which fixes rows a network stacks away, such as a crowd. Above 1 it goes back. , and . change it by 0.05.">
+    <input type="number" id="curveN" min="0.2" max="3" step="0.05" title="Bends the depth within the shot's range. At 1 it is as the network gives it. Below 1, what sits between the farthest and the nearest comes forward, which fixes rows a network stacks away, such as a crowd. Above 1 it goes back. , and . change it by 0.05.">
   </div>
   <div class="row">
-    <label title="no depth: the picture on the screen, for titles, cards and 2D inserts (f)"><input type="checkbox" id="flat"> flat (on the screen)</label>
-    <button data-op="reset" title="this stretch's knobs back to the command's defaults">reset</button>
-    <span class="dim" id="stretch" title="the stretch the knobs grade: a turn makes one from the cut before (or from here, eased in over a second) to the next stretch"></span>
+    <label title="Removes the depth and puts the picture on the screen, for titles, cards and 2D inserts (f)."><input type="checkbox" id="flat"> flat (on the screen)</label>
+    <button data-op="reset" title="Puts this stretch's knobs back to the command's defaults.">reset</button>
+    <span class="dim" id="stretch" title="The stretch the knobs are grading. A turn of a knob makes one from the cut before, or from here eased in over a second, up to the next stretch."></span>
   </div>
 </div>
 
 <div class="panel" id="refpanel" hidden>
   <div class="row">
     <strong>the film's own 3D</strong>
-    <button id="v-ours" data-view="ours" title="our conversion in both eyes (o)">ours</button>
-    <button id="v-disc" data-view="disc" title="the film's own 3D instead, to compare against (d)">disc</button>
-    <button id="v-mix" data-view="mix" title="the right eye a blend of the disc's and ours: what agrees fuses, what differs doubles (m)">mix</button>
-    <button id="v-diff" data-view="diff" title="both eyes the difference of the two right eyes, grey where they agree: what shows is where we are off (x)">diff</button>
-    <button id="align" title="find where this picture is in the film's own 3D; press when the disc runs out of step">align</button>
-    <span class="dim" id="refinfo" title="the film's own 3D and how far ahead of ours it runs"></span>
+    <button id="v-ours" data-view="ours" title="Shows our conversion in both eyes (o).">ours</button>
+    <button id="v-disc" data-view="disc" title="Shows the film's own 3D instead, to compare against (d).">disc</button>
+    <button id="v-mix" data-view="mix" title="Shows the right eye as a blend of the disc's and ours. What agrees fuses, and what differs doubles (m).">mix</button>
+    <button id="v-diff" data-view="diff" title="Shows both eyes the difference of the two right eyes, grey where they agree. What shows is where we are off (x).">diff</button>
+    <button id="align" title="Finds where this picture is in the film's own 3D. Press it when the disc runs out of step.">align</button>
+    <span class="dim" id="refinfo" title="The film's own 3D, and how far ahead of ours it runs."></span>
   </div>
 </div>
 
 <div class="panel">
   <div class="row" style="justify-content:space-between">
     <strong>stretches</strong>
-    <span><button data-op="save" title="write the stretches to the shots file, what the conversion reads (s)">save</button> <span class="dim" id="file" title="the shots file"></span></span>
+    <span><button data-op="save" title="Writes the stretches to the shots file, which the conversion reads (s).">save</button> <span class="dim" id="file" title="The shots file."></span></span>
   </div>
-  <table id="shots"><thead><tr><th title="where the stretch starts in the film">start</th><th title="where it ends; the next stretch or the film's end">end</th><th title="its depth; – the default">depth</th><th title="its screen; – the default">screen</th><th title="its curve; – the default">curve</th><th title="on the screen, no depth">flat</th><th title="how its knobs come in: at a cut, or eased over seconds from the picture graded">ramp</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="shots"><thead><tr><th title="Where the stretch starts in the film.">start</th><th title="Where it ends, at the next stretch or the film's end.">end</th><th title="Its depth. A dash means the default.">depth</th><th title="Its screen. A dash means the default.">screen</th><th title="Its curve. A dash means the default.">curve</th><th title="On the screen, with no depth.">flat</th><th title="How its knobs come in, at a cut or eased in over some seconds from the picture graded.">ramp</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
 <p class="dim" style="font-size:13px">
-<kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> a picture · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> 10 s · <kbd>[</kbd> <kbd>]</kbd> cuts ·
-<kbd>↑</kbd> <kbd>↓</kbd> depth ±0.05 · <kbd>PgUp</kbd> <kbd>PgDn</kbd> screen ±0.1 · <kbd>,</kbd> <kbd>.</kbd> curve ±0.05 · <kbd>f</kbd> flat · <kbd>d</kbd> the film's own 3D, <kbd>m</kbd> mixed into the right eye, <kbd>x</kbd> the difference, <kbd>o</kbd> ours · <kbd>s</kbd> save.
-A turn of a knob grades the shot from its cut (or from this picture, when no cut is near, eased in over a second) to the next stretch.
+<kbd>Space</kbd> plays or pauses. <kbd>←</kbd> and <kbd>→</kbd> step a picture, and ten seconds with <kbd>Shift</kbd>. <kbd>[</kbd> and <kbd>]</kbd> jump between cuts.
+<kbd>↑</kbd> and <kbd>↓</kbd> change the depth by 0.05, <kbd>PgUp</kbd> and <kbd>PgDn</kbd> the screen by 0.1, and <kbd>,</kbd> and <kbd>.</kbd> the curve by 0.05. <kbd>f</kbd> makes the shot flat. <kbd>d</kbd> shows the film's own 3D, <kbd>m</kbd> mixes it into the right eye, <kbd>x</kbd> shows the difference, and <kbd>o</kbd> is back to ours. <kbd>s</kbd> saves.
+A turn of a knob grades the shot from its cut, or from this picture eased in over a second when no cut is near, up to the next stretch.
 </p>
 
 <script>
@@ -238,8 +238,8 @@ function render() {
   st.shots.forEach((s, i) => {
     const tr = document.createElement('tr'); if (i === st.stretch) tr.className = 'cur';
     const td = v => { const e = document.createElement('td'); e.textContent = v; return e; };
-    const go = document.createElement('button'); go.textContent = 'go'; go.title = 'seek to its start'; go.onclick = () => send({ op: 'seek', t: s.start });
-    const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove this stretch: the one before runs on over it, or the defaults do'; del.onclick = () => send({ op: 'delete', i });
+    const go = document.createElement('button'); go.textContent = 'go'; go.title = 'Seeks to its start.'; go.onclick = () => send({ op: 'seek', t: s.start });
+    const del = document.createElement('button'); del.textContent = '×'; del.title = 'Removes this stretch. The one before runs on over it, or the defaults do.'; del.onclick = () => send({ op: 'delete', i });
     tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
       td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.curve > 0 ? s.curve.toFixed(2) : '–'), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
@@ -535,13 +535,13 @@ const panel = (() => {
       text('near ' + st.near.toFixed(2) + '%   far ' + st.far.toFixed(2) + '%', 30, y, '26px sans-serif', '#9a9a9a');
       y += 50;
       const row = (bs, bh, gap) => { let x = 30; const bw = (w - 60 - gap * (bs.length - 1)) / bs.length; for (const b of bs) { button(x, y, bw, bh, b[0], b[1], b[2], b[3]); x += bw + gap; } y += bh + 18; };
-      row([['−10 s', () => send({ op: 'step', n: -240 }), 0, '10 s back (X)'],
-        ['⇤ cut', () => send({ op: 'jump', dir: -1 }), 0, 'to the cut before: a knob turned here grades from it (the left stick, left)'],
-        ['−1', () => send({ op: 'step', n: -1 }), 0, 'a picture back, to land on a frame (B)'],
-        [st.playing ? 'pause' : 'play', () => send({ op: 'toggle' }), true, 'play or pause the film (the trigger over nothing)'],
-        ['+1', () => send({ op: 'step', n: 1 }), 0, 'a picture on (A)'],
-        ['cut ⇥', () => send({ op: 'jump', dir: 1 }), 0, 'to the next cut, where a stretch graded here ends (the left stick, right)'],
-        ['+10 s', () => send({ op: 'step', n: 240 }), 0, '10 s on (Y)']], 64, 8);
+      row([['−10 s', () => send({ op: 'step', n: -240 }), 0, 'Goes back 10 seconds (X).'],
+        ['⇤ cut', () => send({ op: 'jump', dir: -1 }), 0, 'Goes to the cut before. A knob turned here grades from that cut (the left stick, left).'],
+        ['−1', () => send({ op: 'step', n: -1 }), 0, 'Goes back one picture, to land on a frame (B).'],
+        [st.playing ? 'pause' : 'play', () => send({ op: 'toggle' }), true, 'Plays or pauses the film. The trigger over nothing does the same.'],
+        ['+1', () => send({ op: 'step', n: 1 }), 0, 'Goes forward one picture (A).'],
+        ['cut ⇥', () => send({ op: 'jump', dir: 1 }), 0, 'Goes to the next cut, where a stretch graded here ends (the left stick, right).'],
+        ['+10 s', () => send({ op: 'step', n: 240 }), 0, 'Goes forward 10 seconds (Y).']], 64, 8);
       const k = st.knobs;
       // a slider: a bar whose press or drag sets the value from the cursor's place
       const slider = (lo, hi, val, set, tip) => {
@@ -555,35 +555,35 @@ const panel = (() => {
         y += bh + 14;
       };
       text('depth  ' + k.depth.toFixed(2), 30, y + 32, '600 34px sans-serif'); y += 70;
-      const DEPTH = "how deep: the depth scaled by this, 1 the 3D discs'; more for a shot that looks flat, less when it strains (the right stick, up and down)";
+      const DEPTH = "How deep the picture is. 1 is what the 3D discs have. Turn it up for a shot that looks flat, down for one that strains. The right stick, up and down, does the same.";
       slider(0.2, 4, k.depth, v => setKnobs(v, k.screen), DEPTH);
       row([['−0.25', () => nudgeKnobs(-0.25, 0), 0, DEPTH], ['−0.05', () => nudgeKnobs(-0.05, 0), 0, DEPTH], ['+0.05', () => nudgeKnobs(0.05, 0), 0, DEPTH], ['+0.25', () => nudgeKnobs(0.25, 0), 0, DEPTH]], 56, 10);
       text('screen  ' + (k.screen >= 0 ? '+' : '') + k.screen.toFixed(2) + '%', 30, y + 32, '600 34px sans-serif'); y += 70;
-      const SCREEN = 'the whole depth moved nearer (+) or farther (−), in percent of the width: a shot out of the screen or set back (the right stick, left and right)';
+      const SCREEN = 'Moves the whole depth nearer (+) or farther (−), in percent of the width. Use it to bring a shot out of the screen or set it back. The right stick, left and right, does the same.';
       slider(-3, 3, k.screen, v => setKnobs(k.depth, v), SCREEN);
       row([['−0.5', () => nudgeKnobs(0, -0.5), 0, SCREEN], ['−0.1', () => nudgeKnobs(0, -0.1), 0, SCREEN], ['+0.1', () => nudgeKnobs(0, 0.1), 0, SCREEN], ['+0.5', () => nudgeKnobs(0, 0.5), 0, SCREEN]], 56, 10);
       text('curve  ' + k.curve.toFixed(2), 30, y + 32, '600 34px sans-serif'); y += 70;
-      const CURVE = "the depth bent within the shot's range; below 1 what sits between comes forward (rows a network stacks away), above 1 it goes back; 1 leaves it";
+      const CURVE = "Bends the depth within the shot's range. Below 1, what sits between comes forward, which fixes rows a network stacks away. Above 1 it goes back, and 1 leaves it.";
       slider(0.2, 3, k.curve, v => setKnobs(k.depth, k.screen, v), CURVE);
       row([['−0.1', () => nudgeKnobs(0, 0, -0.1), 0, CURVE], ['−0.05', () => nudgeKnobs(0, 0, -0.05), 0, CURVE], ['+0.05', () => nudgeKnobs(0, 0, 0.05), 0, CURVE], ['+0.1', () => nudgeKnobs(0, 0, 0.1), 0, CURVE]], 56, 10);
-      row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat, 'no depth: the picture on the screen, for titles, cards and 2D inserts (the right grip)'],
-        ['reset', () => send({ op: 'reset' }), 0, "this stretch's knobs back to the command's defaults"],
-        ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud, "the time, state and knobs written into the stream's picture; off for a clean picture"],
-        ['save', () => send({ op: 'save' }), !st.saved, 'write the stretches to the shots file, what the conversion reads; lit while unsaved']], 64, 10);
+      row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat, 'Removes the depth and puts the picture on the screen, for titles, cards and 2D inserts (the right grip).'],
+        ['reset', () => send({ op: 'reset' }), 0, "Puts this stretch's knobs back to the command's defaults."],
+        ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud, "Writes the time, the state and the knobs into the stream's picture. Turn it off for a clean picture."],
+        ['save', () => send({ op: 'save' }), !st.saved, 'Writes the stretches to the shots file, which the conversion reads. It is lit while unsaved.']], 64, 10);
       if (st.ref) {
         const v = st.ref.view;
-        row([['ours', () => send({ op: 'ref', view: 'ours' }), v === 'ours', 'our conversion in both eyes'],
-          ['disc', () => send({ op: 'ref', view: 'disc' }), v === 'disc', "the film's own 3D instead, to compare against (the left trigger cycles ours, disc, mix)"],
-          ['mix', () => send({ op: 'ref', view: 'mix' }), v === 'mix', "the right eye a blend of the disc's and ours: what agrees fuses, what differs doubles"],
-          ['diff', () => send({ op: 'ref', view: 'diff' }), v === 'diff', 'both eyes the difference of the two right eyes, grey where they agree: what shows is where we are off'],
-          ['align', () => send({ op: 'align' }), 0, "find where this picture is in the film's own 3D; press when the disc runs out of step"]], 64, 10);
+        row([['ours', () => send({ op: 'ref', view: 'ours' }), v === 'ours', 'Shows our conversion in both eyes.'],
+          ['disc', () => send({ op: 'ref', view: 'disc' }), v === 'disc', "Shows the film's own 3D instead, to compare against. The left trigger cycles ours, disc and mix."],
+          ['mix', () => send({ op: 'ref', view: 'mix' }), v === 'mix', "Shows the right eye as a blend of the disc's and ours. What agrees fuses, and what differs doubles."],
+          ['diff', () => send({ op: 'ref', view: 'diff' }), v === 'diff', 'Shows both eyes the difference of the two right eyes, grey where they agree. What shows is where we are off.'],
+          ['align', () => send({ op: 'align' }), 0, "Finds where this picture is in the film's own 3D. Press it when the disc runs out of step."]], 64, 10);
       }
       text('screen size ' + (4 * screenScale).toFixed(1) + ' m (' + Math.round(2 * Math.atan(2 * screenScale / 3.5) * 180 / Math.PI) + '° of view)', 30, y + 20, '26px sans-serif', '#9a9a9a'); y += 46;
-      const SIZE = 'the screen in VR smaller or bigger: how much of your view the picture fills, as a seat nearer or farther; the depth is the same';
+      const SIZE = 'Makes the screen in VR smaller or bigger, which is how much of your view the picture fills. The depth does not change.';
       row([['smaller', () => { screenScale = Math.max(0.5, screenScale - 0.1); pl.draw(); }, 0, SIZE], ['bigger', () => { screenScale = Math.min(2.2, screenScale + 0.1); pl.draw(); }, 0, SIZE]], 56, 10);
       const stretch = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'no stretch here (the defaults)';
       text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
-      if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch }), 0, 'remove this stretch: the one before runs on over it, or the defaults do'); }
+      if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch }), 0, 'Removes this stretch. The one before runs on over it, or the defaults do.'); }
       y += 76;
       // the timeline: stretches as bands, cuts as ticks, the playhead; a press seeks
       const L = st.length > 0 ? st.length : Math.max(st.t, 1), bx = 30, bw = w - 60, bh = 70;
@@ -597,11 +597,11 @@ const panel = (() => {
       for (const cut of st.cuts) ctx.fillRect(bx + bw * cut / L, y + bh - 20, 2, 20);
       ctx.fillStyle = '#ffb050'; ctx.fillRect(bx + bw * st.t / L - 2, y, 4, bh);
       items.push({ x: bx, y, w: bw, h: bh, cmd: () => { if (cursor) send({ op: 'seek', t: L * (cursor[0] - bx) / bw }); },
-        tip: 'the film: stretches as bands, cuts as ticks, the playhead; press to seek' });
+        tip: 'The film. Stretches are bands, cuts are ticks, and the orange line is where you are. Press to seek.' });
       y += bh + 30;
       // the foot: what is under the cursor, or how the panel is worked
       const over = cursor && pl.itemAt(cursor);
-      hint(over && over.tip || 'trigger presses; both grips leave VR', 30, y, w - 60, over && over.tip ? '#c8ccd2' : '#6f7680');
+      hint(over && over.tip || 'The trigger presses. Hold both grips for a second to leave VR.', 30, y, w - 60, over && over.tip ? '#c8ccd2' : '#6f7680');
       cursorDot();
       pl.version++;
     },

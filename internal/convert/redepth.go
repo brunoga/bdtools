@@ -41,13 +41,13 @@ func (r *Runner) useRedepth() error {
 		return nil
 	}
 	if r.flat || r.to3D {
-		return errors.New("--3d-depth and --3d-screen change a 3D source's depth (or --to-3d's): this source is converted 2D")
+		return errors.New("--3d-depth and --3d-screen change the depth of a 3D source or of --to-3d's pictures. This source is converted 2D")
 	}
 	if r.Opts.Encoder == EncoderCopy {
-		return errors.New("--3d-depth and --3d-screen make new pictures: the video cannot be copied")
+		return errors.New("--3d-depth and --3d-screen make new pictures, so the video cannot be copied")
 	}
 	r.redepth = true
-	r.Report.Report("3D: the depth %g times the source's, moved %+g%% of the width (each pair's eyes made again from its measured disparity)",
+	r.Report.Report("3D: the depth is %g times the source's, moved %+g%% of the width. Each pair's eyes are made again from its measured disparity",
 		r.Opts.redepthK(), r.Opts.Screen3D)
 	return nil
 }
@@ -67,9 +67,9 @@ func (r *Runner) redepthPicture(p picture) picture {
 		r.redepthTried = true
 		if g, err := nn.NewGPU(); err == nil {
 			r.redepthGPU = g
-			r.Report.Report("3D: the disparity measured on the GPU (%s)", g.Name())
+			r.Report.Report("3D: the disparity is measured on the GPU (%s)", g.Name())
 		} else {
-			r.Report.Report("3D: the disparity measured on the CPU (slow: no CUDA GPU, %v)", err)
+			r.Report.Report("3D: the disparity is measured on the CPU, which is slow, because there is no CUDA GPU (%v)", err)
 		}
 	}
 	shift := r.Opts.Screen3D / 100 * float64(l.Width)

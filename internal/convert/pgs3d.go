@@ -98,7 +98,7 @@ func (p *pgs3D) Next() (mkv.Frame, error) {
 			// is better than a conversion lost hours in, at the mux.
 			p.dropped++
 			if p.report != nil && p.dropped <= 3 {
-				p.report.Report("warning: 3D subtitles: left out the display set at %s: %v", f.PTS, err)
+				p.report.Report("warning: left out the 3D subtitles' display set at %s: %v", f.PTS, err)
 			}
 			continue
 		}
@@ -580,12 +580,12 @@ func (r *Runner) subtitles3D(src mkv.Source, t Track) mkv.Source {
 	}
 	switch {
 	case r.to3D:
-		r.Report.Report("3D subtitles: track %d just in front of the made 3D picture beneath it", t.ID)
+		r.Report.Report("3D subtitles: track %d sits just in front of the made 3D picture beneath it", t.ID)
 	case r.depth == nil || len(r.depth.gops) == 0:
-		r.Report.Report("3D subtitles: track %d: the source carries no offset metadata, so they sit at the screen", t.ID)
+		r.Report.Report("3D subtitles: track %d sits at the screen, because the source carries no offset metadata", t.ID)
 	case seq == frontMost:
-		r.Report.Report("3D subtitles: track %d: the source does not say which offset sequence it follows; "+
-			"using the one nearest the viewer at each moment", t.ID)
+		r.Report.Report("3D subtitles: track %d follows the offset sequence nearest the viewer at each moment, "+
+			"because the source does not say which one it follows", t.ID)
 	case seq < 0:
 		r.Report.Report("3D subtitles: track %d follows no offset sequence, so it sits at the screen", t.ID)
 	default:

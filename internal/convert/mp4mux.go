@@ -68,7 +68,7 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		v.SetDisplaySize(t.Width, 2*t.Height)
 	}
 	if (r.dovi != nil || r.Opts.DVFEL.layered()) && (r.xform == nil || r.xform.tm == nil) {
-		r.Report.Report("warning: an MP4 file here carries no Dolby Vision: the HDR10 base layer alone")
+		r.Report.Report("warning: an MP4 file here carries no Dolby Vision, so the output is the HDR10 base layer alone")
 	}
 	r.carryHDR(v)
 	if r.videoDelay > 0 {
@@ -101,19 +101,19 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 		case mkv.AC3, mkv.AAC:
 		case mkv.TrueHD:
 			if !mkv.HasCore(f, format) {
-				r.Report.Report("leaving out %s track %d: no AC-3 core to carry", e.track.Type, e.track.ID)
+				r.Report.Report("leaving out the %s track %d, because it has no AC-3 core to carry", e.track.Type, e.track.ID)
 				continue
 			}
 			if f, err = open(e.path); err != nil { // HasCore read from the first
 				return err
 			}
 			core = true
-			r.Report.Report("carrying the AC-3 core of the %s track %d (the file format and the players take AC-3 and E-AC-3)", e.track.Type, e.track.ID)
+			r.Report.Report("carrying the AC-3 core of the %s track %d, because the file format and the players take AC-3 and E-AC-3", e.track.Type, e.track.ID)
 		default:
 			// DTS (DTS-HD's whole) and PCM: AC-3, coded by ffmpeg.
 			path, sync, coded, err := r.transcodeAudio(ctx, e, format, r.Opts.audioTranscode())
 			if err != nil {
-				r.Report.Report("leaving out %s track %d: an MV-HEVC file carries AC-3 and E-AC-3 here, and %v", e.track.Type, e.track.ID, err)
+				r.Report.Report("leaving out the %s track %d. An MV-HEVC file carries AC-3 and E-AC-3 here, and %v", e.track.Type, e.track.ID, err)
 				continue
 			}
 			if f, err = open(path); err != nil {
@@ -132,9 +132,9 @@ func (r *Runner) muxMP4(ctx context.Context, video []string, extras []extra) err
 	}
 	if subs > 0 {
 		if r.burn != nil {
-			r.Report.Report("leaving out %d subtitle track(s): an MP4 file carries none here (track %d is drawn into the picture)", subs, r.Opts.BurnSubs)
+			r.Report.Report("leaving out %d subtitle track(s), because an MP4 file carries none here. Track %d is drawn into the picture", subs, r.Opts.BurnSubs)
 		} else {
-			r.Report.Report("leaving out %d subtitle track(s): an MP4 file carries none here", subs)
+			r.Report.Report("leaving out %d subtitle track(s), because an MP4 file carries none here", subs)
 		}
 	}
 	r.Report.Report("muxing %s", r.Opts.Output)

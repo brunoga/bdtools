@@ -35,7 +35,10 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the reader addressed, an explanation after each example, in the voice
   of ripgrep's guide and the curl book, with each page kept to one kind
   of document (how-to, reference or explanation). The manual's pages
-  carry the bdtools icon in their header and as their favicon.
+  carry the bdtools icon in their header and as their favicon. The
+  command's help, its messages and errors, and the grading page's
+  labels, hints and key legend are written the same way, as plain
+  sentences that say what a thing does and when to use it.
 - Disc images are read by bdtools' own UDF reader (`internal/udf`,
   beside its writer), not golift.io/udf: a file's chain of allocation
   extent descriptors is followed however deep it runs (The Bad Guys'

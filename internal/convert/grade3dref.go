@@ -55,7 +55,7 @@ type refFrame struct {
 func (r *Runner) openReference(ctx context.Context, g *grader) (*gradeRef, error) {
 	file := r.Opts.Reference3D
 	if !isMatroska(file) {
-		return nil, fmt.Errorf("--3d-reference: %s: want a Matroska or MP4 file of the film's 3D (side by side or over-under)", file)
+		return nil, fmt.Errorf("--3d-reference %s is not a file this reads. It must be a Matroska or MP4 file of the film's 3D, side by side or over-under", file)
 	}
 	src, tracks, err := probeMatroska(ctx, file)
 	if err != nil {
@@ -69,7 +69,7 @@ func (r *Runner) openReference(ctx context.Context, g *grader) (*gradeRef, error
 	quiet.Report = nil
 	quiet.resolveFramed(sel.Base)
 	if quiet.framedIn == "" {
-		return nil, fmt.Errorf("--3d-reference: %s does not say its frame holds both eyes (no stereo mode)", file)
+		return nil, fmt.Errorf("--3d-reference %s does not say that its frame holds both eyes, because it has no stereo mode", file)
 	}
 	live, err := quiet.matroskaLive(src, sel)
 	if err != nil {
@@ -292,7 +292,7 @@ func (f *gradeRef) align(ctx context.Context, pic *mvc.Frame, t time.Duration) {
 	f.aligning = false
 	f.mu.Unlock()
 	if n > 0 {
-		f.g.r.Report.Report("--3d-reference: aligned at %s of the film: the reference runs %+.3f s ahead (%d pictures looked at)", clock(t), (bestAt - t).Seconds(), n)
+		f.g.r.Report.Report("--3d-reference: aligned at %s of the film. The reference runs %+.3f s ahead, from %d pictures looked at", clock(t), (bestAt - t).Seconds(), n)
 	} else {
 		f.g.r.Report.Report("--3d-reference: nothing to align with around %s", clock(t))
 	}

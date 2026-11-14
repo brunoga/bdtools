@@ -39,7 +39,7 @@ func TestRunnerTo3D(t *testing.T) {
 	if err := NewRunner(CurrentGOOS, o, report).Run(context.Background()); err != nil {
 		t.Fatalf("--to-3d: %v\n%s", err, strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(strings.Join(lines, "\n"), "made 3D (its depth estimated)") {
+	if !strings.Contains(strings.Join(lines, "\n"), "made 3D with its depth estimated") {
 		t.Errorf("no report of the conversion:\n%s", strings.Join(lines, "\n"))
 	}
 	f, err := os.Open(out) //nolint:gosec // test

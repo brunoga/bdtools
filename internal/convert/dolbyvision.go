@@ -54,7 +54,7 @@ func (r *Runner) keepRPU(n int64, nal []byte) {
 		case profile == 7:
 			layer = " (MEL)"
 		}
-		r.Report.Report("Dolby Vision profile %d%s: the RPUs go into the encode as profile 8.1", profile, layer)
+		r.Report.Report("the source is Dolby Vision profile %d%s, and its RPUs go into the encode as profile 8.1", profile, layer)
 	}
 	r.rpus[n] = u.NAL()
 }
@@ -74,7 +74,7 @@ func (r *Runner) carryDolbyVision(v *mkv.VideoSource, num, den int) error {
 		cfg = c
 	} else if cfg == nil && len(r.rpus) > 0 {
 		if r.Opts.Codec != CodecH265 {
-			r.Report.Report("warning: Dolby Vision is carried in HEVC output only (--codec h265); this keeps the HDR10 picture")
+			r.Report.Report("warning: Dolby Vision is carried in HEVC output only, with --codec h265. This output keeps the HDR10 picture")
 			return nil
 		}
 		c := dovi.Profile81()
@@ -114,7 +114,7 @@ func (r *Runner) carryLayers(v *mkv.VideoSource, num, den int) (*dovi.Config, er
 		return nil, err
 	}
 	if len(paths) == 0 {
-		return nil, errors.New("the enhancement layer's segments are missing: start over with --restart")
+		return nil, errors.New("the enhancement layer's segments are missing. Start over with --restart")
 	}
 	er, closeEL, err := openSegments(paths)
 	if err != nil {
@@ -132,7 +132,7 @@ func (r *Runner) carryLayers(v *mkv.VideoSource, num, den int) (*dovi.Config, er
 			return nil, fmt.Errorf("the enhancement layer ends before the base layer: %w", err)
 		}
 		if d := int64((f.PTS + frame/2) / frame); d != display {
-			return nil, fmt.Errorf("%w: picture %d of one is picture %d of the other", errLayersMisaligned, display, d)
+			return nil, fmt.Errorf("%w. Picture %d of one is picture %d of the other", errLayersMisaligned, display, d)
 		}
 		var out [][]byte
 		for b := f.Data; len(b) >= 4; {
@@ -148,7 +148,7 @@ func (r *Runner) carryLayers(v *mkv.VideoSource, num, den int) (*dovi.Config, er
 		}
 		return out, nil
 	})
-	r.Report.Report("carrying Dolby Vision profile 7: the full enhancement layer and the RPU on %d frames", len(r.rpus))
+	r.Report.Report("carrying Dolby Vision profile 7, the full enhancement layer and the RPU on %d frames", len(r.rpus))
 	c := dovi.UHDBluRay(0, 0, 0, 0)
 	return &c, nil
 }

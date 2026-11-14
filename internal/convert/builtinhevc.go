@@ -30,7 +30,7 @@ type builtinHEVC struct {
 
 func openBuiltinHEVC(cfg gpu.Config, w io.Writer) (gpu.Encoder, error) {
 	if cfg.Codec != gpu.HEVC {
-		return nil, fmt.Errorf("the built-in encoder codes HEVC (or MVC), not %v", cfg.Codec)
+		return nil, fmt.Errorf("the built-in encoder codes HEVC or MVC, not %v", cfg.Codec)
 	}
 	depth := max(cfg.BitDepth, 8)
 	o := hevc.EncoderOptions{Width: cfg.Width, Height: cfg.Height, BitDepth: depth, QP: builtinQP(cfg.QP),

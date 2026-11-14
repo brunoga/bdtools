@@ -26,7 +26,7 @@ func TestRunnerRedepth(t *testing.T) {
 	if err := NewRunner(CurrentGOOS, o, report).Run(context.Background()); err != nil {
 		t.Fatalf("%v\n%s", err, strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(strings.Join(lines, "\n"), "the depth 0.5 times the source's") {
+	if !strings.Contains(strings.Join(lines, "\n"), "the depth is 0.5 times the source's") {
 		t.Errorf("no report of the depth change:\n%s", strings.Join(lines, "\n"))
 	}
 	f, err := os.Open(out) //nolint:gosec // test

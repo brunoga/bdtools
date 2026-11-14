@@ -210,9 +210,9 @@ func (g *gpuPictures) run(each func(picture) error) error {
 					if g.fel, err = newFELComposer(g.open, g.report, g.passFEL); err != nil {
 						g.report.Report("warning: the Dolby Vision full enhancement layer cannot be decoded: %v", err)
 					} else if g.passFEL {
-						g.report.Report("Dolby Vision full enhancement layer: keeping it as a layer of its own")
+						g.report.Report("keeping the Dolby Vision full enhancement layer as a layer of its own")
 					} else {
-						g.report.Report("Dolby Vision full enhancement layer: composing it into the picture")
+						g.report.Report("composing the Dolby Vision full enhancement layer into the picture")
 					}
 				}
 			}
@@ -224,7 +224,7 @@ func (g *gpuPictures) run(each func(picture) error) error {
 				if len(el) > 0 {
 					if err := g.fel.dec.Decode(el, pts); err != nil {
 						// Go on with the base layer alone.
-						g.report.Report("warning: the enhancement layer stopped decoding (%v): the base layer goes on without it", err)
+						g.report.Report("warning: the enhancement layer stopped decoding (%v), so the base layer goes on without it", err)
 						if err := g.fel.finish(); err != nil {
 							return err
 						}

@@ -49,7 +49,7 @@ const (
 // muxBluray writes the disc image.
 func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, chapters []time.Duration) error {
 	if r.flat {
-		return errors.New("a Blu-ray disc image of a 2D film: not yet (a .iso is a Blu-ray 3D)")
+		return errors.New("a Blu-ray disc image of a 2D film cannot be written yet. A .iso output is a Blu-ray 3D")
 	}
 	num, den := r.fpsNum, r.fpsDen
 	if num <= 0 {
@@ -100,7 +100,7 @@ func (r *Runner) muxBluray(ctx context.Context, video []string, extras []extra, 
 	gops.count()
 	if r.depth != nil {
 		gops.rate, gops.seqs = rate, r.depth.sequences()
-		r.Report.Report("3D subtitles: the depth of %d offset sequence(s) in the dependent view, a GOP at a time", gops.seqs)
+		r.Report.Report("3D subtitles: the depth of %d offset sequence(s) goes into the dependent view, a GOP at a time", gops.seqs)
 	}
 	depVideo, _, _, err := r.discVideo(video, num, den, true, gops, &closers)
 	if err != nil {
@@ -181,7 +181,7 @@ func discVideoFormat(height, num, den int) (format, rate byte, err error) {
 	case height == 720 && (rate == 6 || rate == 7):
 		return 5, rate, nil
 	}
-	return 0, 0, fmt.Errorf("blu-ray 3D is 1080p at 23.976 or 24 fps, or 720p at 50 or 59.94: this film is %d lines at %d/%d (--scale changes the size)", height, num, den)
+	return 0, 0, fmt.Errorf("a Blu-ray 3D disc is 1080p at 23.976 or 24 fps, or 720p at 50 or 59.94. This film is %d lines at %d/%d, and --scale changes the size", height, num, den)
 }
 
 // muxClip writes a clip's file.
@@ -312,7 +312,7 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 		}
 		if e.track.Kind() == KindSubtitle {
 			if e.track.StreamID != "S_HDMV/PGS" {
-				r.Report.Report("leaving out %s subtitle track %d: a disc's subtitles are PGS", e.track.Type, e.track.ID)
+				r.Report.Report("leaving out the %s subtitle track %d, because a disc's subtitles are PGS", e.track.Type, e.track.ID)
 				continue
 			}
 			f, err := open(e.path)
@@ -329,7 +329,7 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 		}
 		format := audioFormat(e)
 		if format == mkv.WAV || format == mkv.AAC {
-			return nil, nil, nil, fmt.Errorf("blu-ray: audio track %d is %s, which a disc does not carry: --audio-transcode ac3", e.track.ID, e.track.Type)
+			return nil, nil, nil, fmt.Errorf("blu-ray: audio track %d is %s, which a disc does not carry. --audio-transcode ac3 converts it", e.track.ID, e.track.Type)
 		}
 		f, err := open(e.path)
 		if err != nil {
@@ -362,7 +362,7 @@ func (r *Runner) discExtras(extras []extra, closers *[]func()) (audio, pgs []*bd
 				}
 				core, err := mkv.NewAudioSource(cf2, format, true, lang)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("blu-ray: the AC-3 core of track %d: %w", e.track.ID, err)
+					return nil, nil, nil, fmt.Errorf("blu-ray: could not take the AC-3 core of track %d: %w", e.track.ID, err)
 				}
 				core.SetSyncPoints(e.sync)
 				next = interleaveFrames(audioFrames(core), next)

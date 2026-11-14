@@ -249,13 +249,13 @@ func subsFileTrack(f SubsFile, id int, dir string) (extra, error) {
 		}
 		t.private, cues, err = parseASS(text)
 	default:
-		return extra{}, fmt.Errorf("%s: want a .srt, .ass, .ssa or .vtt file", f.Path)
+		return extra{}, fmt.Errorf("%s is not a subtitle file this reads. It must be a .srt, .ass, .ssa or .vtt file", f.Path)
 	}
 	if err != nil {
 		return extra{}, fmt.Errorf("%s: %w", f.Path, err)
 	}
 	if len(cues) == 0 {
-		return extra{}, fmt.Errorf("%s: no subtitles in it", f.Path)
+		return extra{}, fmt.Errorf("%s has no subtitles in it", f.Path)
 	}
 	t.Type = textStreamIDs[t.StreamID].name
 	t.Info = fmt.Sprintf("%s text subtitles from %s", t.Type, filepath.Base(f.Path))

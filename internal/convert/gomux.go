@@ -120,7 +120,7 @@ func (r *Runner) muxBuiltin(ctx context.Context, video []string, extras []extra,
 		src := &ofmdSource{VideoSource: v, r: r, gops: gops, frame: r.depth.frame, seqs: r.depth.sequences(), rate: rate}
 		sources[0] = src
 		defer func() {
-			r.Report.Report("3D subtitles: their depth in the video's %d GOPs, as a disc carries it", src.placed)
+			r.Report.Report("3D subtitles: their depth is carried in the video's %d GOPs, as a disc carries it", src.placed)
 		}()
 	}
 	var timed []timedAudio
@@ -333,7 +333,7 @@ func (r *Runner) reportTimeline(sources []mkv.Source, spans []mkv.Span) {
 	if want := r.Opts.Trim.span(r.length); want > 0 && r.fpsNum > 0 {
 		frame := time.Duration(int64(time.Second) * int64(r.fpsDen) / int64(r.fpsNum))
 		if d := v.Last + frame - want; d > time.Second || d < -time.Second {
-			r.Report.Report("warning: the picture runs %.3f s but the source plays %.3f s; check it is in step with the sound",
+			r.Report.Report("warning: the picture runs %.3f s but the source plays %.3f s. Check that it is in step with the sound",
 				(v.Last + frame).Seconds(), want.Seconds())
 		}
 	}
@@ -352,7 +352,7 @@ func (r *Runner) carryHDR(v *mkv.VideoSource) {
 		r.carried.hlg = c.Transfer == 18
 	}
 	if r.Opts.Codec == CodecH264 && (!r.hdrStatic.Empty() || r.hdr10Plus != nil) {
-		r.Report.Report("warning: H.264 output: the source's HDR metadata is not carried (use --codec h265 or av1)")
+		r.Report.Report("warning: the source's HDR metadata is not carried in H.264 output. --codec h265 or av1 carries it")
 		return
 	}
 	av1 := r.Opts.Codec == CodecAV1

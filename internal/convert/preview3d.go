@@ -129,7 +129,7 @@ func (r *Runner) preview3D(video Track, feed func() (sampleFeed, func(), error))
 	if stills == 0 {
 		return errors.New("--3d-preview: no picture decoded at any place")
 	}
-	r.Report.Report("--3d-preview: %d places at depths %v in %s (NN-time-depthD: -sbs.jpg full side by side, -anaglyph.jpg red-cyan)",
+	r.Report.Report("--3d-preview: %d places at depths %v in %s. The files are named NN-time-depthD, with -sbs.jpg full side by side and -anaglyph.jpg red-cyan",
 		stills, depths, dir)
 	return nil
 }

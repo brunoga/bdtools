@@ -79,7 +79,7 @@ var ffCodecs = map[gpu.VideoCodec]byte{
 func openFFDecoder(bin string, cfg gpu.DecodeConfig, picture func(*gpu.DecodedPicture) error) (gpu.Decoder, error) {
 	st, ok := ffCodecs[cfg.Codec]
 	if !ok {
-		return nil, fmt.Errorf("ffmpeg decoding: codec %s", cfg.Codec)
+		return nil, fmt.Errorf("ffmpeg has no decoder set up here for %s", cfg.Codec)
 	}
 	d := &ffDecoder{picture: picture, streamType: st, last: math.MinInt64, fedPTS: map[int64]int64{}, clipFirst: map[int64]int64{},
 		clipStart: map[int64]int64{}, writes: make(chan []byte, 8), frames: make(chan *ffPicture, ffBuffers),
@@ -203,7 +203,7 @@ func ffTime(line string) (int64, error) {
 			return int64(math.Round(float64(pts) * float64(num) * 90000 / float64(den))), nil
 		}
 	}
-	return 0, fmt.Errorf("ffmpeg's picture time %q", line)
+	return 0, fmt.Errorf("ffmpeg gave a picture time this cannot read, %q", line)
 }
 
 // toSemiPlanar turns ffmpeg's planar 4:2:0 (low-aligned samples above 8

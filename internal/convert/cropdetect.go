@@ -84,7 +84,7 @@ func (r *Runner) detectCrop(video Track, feed sampleFeed) (Crop, error) {
 	}
 	r.Report = quiet
 	if seen < cropMinPictures {
-		r.Report.Report("--crop auto: %d pictures of %d places showed something, too few to trust: not cropped", seen, places)
+		r.Report.Report("--crop auto: %d pictures of %d places showed something, which is too few to trust, so the picture is not cropped", seen, places)
 		return Crop{}, nil
 	}
 	// Even (4:2:0 chroma goes in pairs), up: a column of the picture off
@@ -331,7 +331,7 @@ func (r *Runner) resolveCrop(video Track, feed sampleFeed, done func(), err erro
 		return nil
 	}
 	if err != nil {
-		r.Report.Report("--crop auto: %v: not cropped", err)
+		r.Report.Report("--crop auto: %v, so the picture is not cropped", err)
 		r.Opts.Crop = Crop{}
 		return nil
 	}

@@ -206,7 +206,7 @@ func (r *Runner) resolveFramed(v Track) {
 			swap = v.StereoMode == 2
 		}
 		if l != "" {
-			r.Report.Report("source: the file says its frame holds both eyes (%s); --input-layout 2d takes it as one picture", map[Layout]string{
+			r.Report.Report("source: the file says its frame holds both eyes (%s). --input-layout 2d takes it as one picture", map[Layout]string{
 				LayoutFullSBS: "side by side", LayoutHalfSBS: "half side by side", LayoutFullOU: "over-under", LayoutHalfOU: "half over-under"}[l])
 		}
 	}
