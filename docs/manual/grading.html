@@ -4,157 +4,159 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Grading a film&#39;s 3D by eye</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><a class="brand" href="index.html">bdtools manual</a><nav><a href="grading.html" class="cur">grading</a><a href="cookbook.html">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
+<header><a class="brand" href="index.html"><img src="icon.svg" alt="">bdtools manual</a><nav><a href="grading.html" class="cur">grading</a><a href="cookbook.html">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
 <div class="wrap">
-<aside><details open><summary>Contents</summary><ol><li><a href="#what-grading-is-and-when-a-film-needs-it">What grading is, and when a film needs it</a></li><li><a href="#what-you-need">What you need</a></li><li><a href="#starting">Starting</a></li><li><a href="#watching-it">Watching it</a></li><li><a href="#the-page">The page</a></li><li><a href="#how-a-turn-becomes-a-stretch">How a turn becomes a stretch</a></li><li><a href="#a-session-step-by-step">A session, step by step</a></li><li><a href="#in-the-headset">In the headset</a></li><li><a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a></li><li><a href="#the-shots-file">The shots file</a></li><li><a href="#the-conversion">The conversion</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
+<aside><details open><summary>Contents</summary><ol><li><a href="#why-grade-at-all">Why grade at all</a></li><li><a href="#what-you-need">What you need</a></li><li><a href="#starting-the-server">Starting the server</a></li><li><a href="#watching-the-stream">Watching the stream</a></li><li><a href="#the-page">The page</a></li><li><a href="#how-a-turn-becomes-a-stretch">How a turn becomes a stretch</a></li><li><a href="#a-session-step-by-step">A session, step by step</a></li><li><a href="#in-the-headset">In the headset</a></li><li><a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a></li><li><a href="#the-shots-file">The shots file</a></li><li><a href="#the-conversion">The conversion</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
 <main>
 <h1>Grading a film&#39;s 3D by eye</h1>
-<p>A manual for <code>--3d-grade</code>: the web page and the headset that drive a 2D-to-3D conversion live, shot by shot, and the conversion that applies what you set. What the conversion does with the depth, and how it was measured, is in <a href="https://github.com/brunoga/bdtools/blob/main/docs/2d-to-3d.md">2d-to-3d.md</a>; the flags are in the <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md#2d-to-3d">command&#39;s README</a>.</p>
-<h2 id="what-grading-is-and-when-a-film-needs-it">What grading is, and when a film needs it</h2>
-<p><code>--to-3d</code> gives every picture a depth and makes two eyes from it. Its defaults are the 3D discs&#39; own depth, measured over many films, and most of a film looks right at them. Some shots do not:</p>
+<p>This guide explains how to grade a 2D-to-3D conversion by eye with <code>--3d-grade</code>: how to start it, how to watch it, what each control does on the page and in the headset, and how what you set ends up in the finished film. It assumes you have run <code>--to-3d</code> at least once and that you have some way of seeing 3D, whether a television, a projector or a headset. If you want to know what the conversion does with the depth and how well it does it, that is in <a href="https://github.com/brunoga/bdtools/blob/main/docs/2d-to-3d.md">2d-to-3d.md</a>. The flags themselves are listed in the <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md#2d-to-3d">README</a>.</p>
+<h2 id="why-grade-at-all">Why grade at all</h2>
+<p><code>--to-3d</code> estimates the depth of every picture and makes a left and a right eye from it. The default depth was measured against real 3D Blu-rays, and for most of a film it is right. But no automatic depth gets every shot right. These are the cases we keep running into:</p>
 <ul>
-<li>A shot the depth network reads wrongly: rows of people or things seen from below, which it stacks away behind each other when the film has them side by side (the curve knob).</li>
-<li>A shot that comes too far out of the screen, or sits too deep behind it (depth and screen).</li>
-<li>A picture that belongs flat on the screen: a title card, a screen within the picture, a 2D insert, a map (flat). The end credits are found and made flat on their own.</li>
-<li>A whole film that wants a little more or less than the defaults.</li>
+<li>Sometimes the depth network reads a shot wrongly. The classic case is rows of people or things seen from below. The network stacks them away behind each other, when in the film they stand side by side. The curve knob is for this.</li>
+<li>A shot comes too far out of the screen, or sits too deep behind it. The depth and screen knobs fix that.</li>
+<li>Some pictures should have no depth at all: a title card, a screen within the picture, a map, a 2D insert. The flat knob puts them on the screen. (The end credits are found and flattened on their own.)</li>
+<li>A whole film may want a little more or less depth than the default.</li>
 </ul>
-<p>Grading sets the knobs for stretches of the film and writes them to a shots file, which the conversion proper reads. Nothing is converted while you grade: the film is converted live as it plays, as fast as it plays, and you watch it on a 3D screen or in a headset while you turn the knobs.</p>
+<p>Grading means setting the knobs for stretches of the film and saving them to a shots file, which the conversion proper reads. While you grade, nothing is written to a video file. Instead, the film is converted live as it plays, as fast as it plays, and you watch the result on a 3D screen or in a headset while you turn the knobs.</p>
 <h2 id="what-you-need">What you need</h2>
 <ul>
-<li>A machine with an NVIDIA GPU: the depth network runs on it faster than the film plays, and NVENC encodes the live stream.</li>
-<li>The film: an MKV, MP4 or MOV, or the disc image itself.</li>
-<li>Something that shows 3D: a 3D television or projector with a player that takes a live stream (Kodi, VLC), or a headset with a browser (the Meta Quest). A laptop and red-cyan glasses do for a rough check.</li>
-<li>Optionally the film&#39;s own 3D, where one exists, to compare against (<code>--3d-reference</code>).</li>
+<li>A machine with an NVIDIA GPU. The depth network runs on it faster than the film plays, and NVENC encodes the live stream. Without one there is no live stream.</li>
+<li>The film, as an MKV, MP4 or MOV, or the disc image itself.</li>
+<li>Something that shows 3D. A 3D television or projector works if its player can take a live stream (Kodi and VLC can). A Meta Quest works through its browser. If all you have is a laptop, red-cyan paper glasses are enough for a rough check.</li>
+<li>Optionally, the film&#39;s own 3D release, if there is one, to compare against. More on that in <a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a>.</li>
 </ul>
-<h2 id="starting">Starting</h2>
+<h2 id="starting-the-server">Starting the server</h2>
+<p>Let&#39;s start with the command:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output &#34;Film (2020).3d&#34; --to-3d --3d-grade :8420</code></pre>
-<p>The command prints where everything is:</p>
+<p>It prints where everything is:</p>
 <pre><code>bdtools: --3d-grade: the controls at http://192.168.1.87:8420/, the 3D stream at http://192.168.1.87:8420/stream.ts (full side by side); the grade goes to Film (2020).3d
 bdtools: --3d-grade: for a headset, https://192.168.1.87:8421/ (its certificate is this machine&#39;s own: accept it once), then Enter VR</code></pre>
-<p><code>--output</code> is the shots file the grade is written to, at every change. Give it a name you will pass to the conversion later. To start from a grade made earlier, or one written by hand, add <code>--3d-shots FILE</code> (the same file as <code>--output</code> is fine). <code>--start 1:02:00</code> opens the film there.</p>
-<p>Any flag of <code>--to-3d</code> goes on the grading command and becomes its defaults: <code>--3d-depth</code>, <code>--3d-screen</code>, <code>--3d-curve</code>, <code>--depth-model</code>, <code>--3d-refine</code>, <code>--3d-fill</code>, <code>--3d-screen-size</code>. The page shows the defaults as &#34;the command&#39;s defaults&#34; and every stretch is set against them, so <strong>the conversion proper must be run with the same flags</strong> (see <a href="#the-conversion">the conversion</a>).</p>
-<h2 id="watching-it">Watching it</h2>
-<p>The stream is full side by side, 1080p an eye, H.264 in a transport stream, at <code>http://HOST:8420/stream.ts</code>. Any way of playing that live works:</p>
+<p>So what did we ask for? <code>--to-3d</code> says this is a 2D-to-3D conversion. <code>--3d-grade :8420</code> says: don&#39;t convert to a file, serve the film live on port 8420 instead. And <code>--output</code> is not a video file here. It is the shots file your grade is written to, at every change. Give it a name you will remember, because you will pass it to the conversion later.</p>
+<p>A few things you may want to add:</p>
 <ul>
-<li><strong>Kodi</strong> on a box at the screen: a <code>.strm</code> file holding the address, named with the 3D tag your library uses, as the conversions are (<code>Film (2020) 3D FSBS.strm</code>), so Kodi picks the side-by-side mode and the television shows it in 3D. Kodi buffers a few seconds by default, which is the delay between a turn of a knob and the screen; its cache settings bring it under a second.</li>
-<li><strong>VLC</strong> (also on Android and a television): open the address as a network stream and set the 3D mode to side by side.</li>
-<li><strong>The headset&#39;s browser</strong>: see <a href="#in-the-headset">In the headset</a>. It needs no player.</li>
-<li><strong>The page&#39;s own preview</strong>, under the controls: the left eye alone, both eyes, or a red-cyan anaglyph for paper glasses. A tenth of a second behind the server, so it is the quickest check that a turn did what you meant.</li>
+<li><code>--3d-shots FILE</code> starts from a grade you made earlier, or wrote by hand. It can be the same file as <code>--output</code>.</li>
+<li><code>--start 1:02:00</code> opens the film at that time instead of the beginning.</li>
+<li>Any other <code>--to-3d</code> flag: <code>--3d-depth</code>, <code>--3d-screen</code>, <code>--3d-curve</code>, <code>--depth-model</code>, <code>--3d-refine</code>, <code>--3d-fill</code>, <code>--3d-screen-size</code>. These become what the page calls &#34;the command&#39;s defaults&#34;, and every stretch you grade is set relative to them. This matters later: the conversion proper must be run with the same flags, or your stretches land on different defaults. See <a href="#the-conversion">The conversion</a>.</li>
 </ul>
-<figure><img src="img/preview-anaglyph.jpg" alt="The preview as a red-cyan anaglyph: the depth seen on any screen with paper glasses; the readout along the bottom is in the stream itself" loading="lazy"><figcaption>The preview as a red-cyan anaglyph: the depth seen on any screen with paper glasses; the readout along the bottom is in the stream itself</figcaption></figure>
-<figure><img src="img/preview-both.jpg" alt="The preview as both eyes side by side, what the stream carries" loading="lazy"><figcaption>The preview as both eyes side by side, what the stream carries</figcaption></figure>
-<p>A readout is drawn into the bottom of both eyes of the stream, at the screen&#39;s depth: the time, the play state, the knobs, the stretch and the view. It is there so the screen tells you the state while your hands are on the page or the controllers; the &#34;readout in the stream&#34; box turns it off for clean viewing.</p>
+<h2 id="watching-the-stream">Watching the stream</h2>
+<p>The server serves the converted film as a live stream at <code>http://HOST:8420/stream.ts</code>. It is full side by side, 1080p per eye, H.264 in a transport stream, which is something most players can play live. You have a few ways to watch it.</p>
+<p><strong>Kodi</strong> on a box at the screen. Make a <code>.strm</code> file holding the address, and name it with the 3D tag your library uses, the same way the conversions are named, for example <code>Film (2020) 3D FSBS.strm</code>. Kodi then picks the side-by-side mode and the television shows it in 3D. One thing to know: Kodi buffers a few seconds by default, and that buffer is the delay between a turn of a knob and the screen. Its cache settings bring it under a second.</p>
+<p><strong>VLC</strong>, on a computer, a phone or a television. Open the address as a network stream and set the 3D mode to side by side.</p>
+<p><strong>A headset&#39;s browser.</strong> This needs no player at all. See <a href="#in-the-headset">In the headset</a>.</p>
+<p><strong>The page&#39;s own preview.</strong> The control page shows the stream itself, under the controls, as the left eye alone, as both eyes side by side, or as a red-cyan anaglyph for paper glasses. It runs a tenth of a second behind the server, so it is the quickest way to check that a turn did what you meant.</p>
+<figure><img src="img/preview-anaglyph.jpg" alt="The preview as a red-cyan anaglyph. With paper glasses you see the depth on any screen. The readout along the bottom is part of the stream itself." loading="lazy"><figcaption>The preview as a red-cyan anaglyph. With paper glasses you see the depth on any screen. The readout along the bottom is part of the stream itself.</figcaption></figure>
+<figure><img src="img/preview-both.jpg" alt="The preview as both eyes side by side, which is what the stream carries." loading="lazy"><figcaption>The preview as both eyes side by side, which is what the stream carries.</figcaption></figure>
+<p>There is also a readout drawn into the bottom of both eyes of the stream, at the screen&#39;s depth. It shows the time, whether the film is playing, the knobs, the current stretch and the view. It is there so that the screen tells you the state while your hands are on the page or the controllers. If you want a clean picture, the &#34;readout in the stream&#34; box turns it off.</p>
 <h2 id="the-page">The page</h2>
-<p>Every control says what it does and when to use it when hovered. From the top:</p>
-<figure><img src="img/page.jpg" alt="The page: the preview, the bar, the transport, the knobs, the film&#39;s own 3D and the stretches" loading="lazy"><figcaption>The page: the preview, the bar, the transport, the knobs, the film&#39;s own 3D and the stretches</figcaption></figure>
-<p><strong>Transport.</strong> Play or pause; a picture back or on; ten seconds either way; the cut before or after. A paused picture keeps its depth, so a knob turned on a paused picture shows at once (after the player&#39;s buffer).</p>
-<p><strong>The bar.</strong> The film, with the stretches as blue bands (the current one lighter), the cuts seen so far as ticks, and the playhead. Click to seek. Under it, the time, the film&#39;s length, and where this picture&#39;s nearest and farthest points come out, in percent of the width and in pixels: a near point much past 1% in front of the screen strains the eyes.</p>
-<p><strong>The knobs.</strong> Each a slider and a number; the keys turn them too.</p>
-<table>
-<tr><th>Knob</th><th>What it does</th><th>When to turn it</th></tr>
-<tr><td>depth</td><td>The depth scaled. 1 is the 3D discs&#39; own; the slider runs 0.2 to 4.</td><td>A shot that looks flat (more), or one whose depth strains (less).</td></tr>
-<tr><td>screen %</td><td>The whole depth moved nearer (positive) or farther, in percent of the width.</td><td>To bring a shot out of the screen or set it back without changing its depth.</td></tr>
-<tr><td>curve</td><td>The depth bent within the shot&#39;s range: 1 as the network gives it; below 1 what sits between the shot&#39;s farthest and nearest comes forward; above 1 it goes back.</td><td>Rows the network stacks away behind each other when the film has them side by side (a crowd or a line of things seen from below): 0.5 to 0.7 brings them to where a disc has them. Not as a default: on ordinary shots it measures worse.</td></tr>
-<tr><td>flat</td><td>No depth: the picture on the screen.</td><td>Title cards, screens within the picture, maps, 2D inserts.</td></tr>
-</table>
-<figure><img src="img/knobs.jpg" alt="The knobs: a slider and a number each, flat, reset, and which stretch they grade" loading="lazy"><figcaption>The knobs: a slider and a number each, flat, reset, and which stretch they grade</figcaption></figure>
-<p><strong>reset</strong> puts the stretch back to the command&#39;s defaults. The text beside it says which stretch the knobs grade, or that the picture is at the defaults.</p>
-<p><strong>The film&#39;s own 3D</strong>, when there is a reference (see <a href="#comparing-with-the-films-own-3d">Comparing</a>): ours, disc, mix, diff, align.</p>
-<p><strong>Stretches.</strong> The table of what is graded: start, end, the knobs, flat, and how each comes in (at a cut, or eased over seconds). <code>go</code> seeks to a stretch&#39;s start, <code>×</code> removes it: the stretch before runs on over what it covered, or the defaults do when there is none. <code>save</code> writes the file; it is written at every change anyway, and &#34;saved&#34; or &#34;unsaved&#34; at the top says which.</p>
-<figure><img src="img/stretches.jpg" alt="The stretches: each with its range, its knobs, flat, and how it comes in; go seeks to it, × removes it" loading="lazy"><figcaption>The stretches: each with its range, its knobs, flat, and how it comes in; go seeks to it, × removes it</figcaption></figure>
+<p>Open <code>http://HOST:8420/</code> in any browser, on a laptop or a phone. Every control explains itself when you hover over it, but here is the tour, from the top.</p>
+<figure><img src="img/page.jpg" alt="The page: the preview, the bar, the transport, the knobs, the film&#39;s own 3D and the stretches." loading="lazy"><figcaption>The page: the preview, the bar, the transport, the knobs, the film&#39;s own 3D and the stretches.</figcaption></figure>
+<p><strong>Transport.</strong> Play or pause, a picture back or forward, ten seconds either way, and a jump to the cut before or after. A paused picture keeps its depth, so if you turn a knob while paused, the change shows at once (or rather, after the player&#39;s buffer).</p>
+<p><strong>The bar.</strong> This is the whole film. The stretches you have graded are blue bands, the current one lighter; the cuts seen so far are ticks along the bottom; the orange line is where you are. Click anywhere on it to seek. Under the bar are the time, the film&#39;s length, and where this picture&#39;s nearest and farthest points land, as a percentage of the width and in pixels. Keep an eye on the near figure: anything much past 1% in front of the screen strains the eyes.</p>
+<p><strong>The knobs.</strong> There are three, each a slider and a number, plus a checkbox. You can turn them from the keyboard too.</p>
+<figure><img src="img/knobs.jpg" alt="The knobs. Each is a slider and a number. Below them, flat, reset, and which stretch they are grading." loading="lazy"><figcaption>The knobs. Each is a slider and a number. Below them, flat, reset, and which stretch they are grading.</figcaption></figure>
+<ul>
+<li><strong>depth</strong> scales the depth. 1 is what the 3D discs have, and the slider runs from 0.2 to 4. Turn it up for a shot that looks flat, down for one that strains.</li>
+<li><strong>screen %</strong> moves the whole depth nearer or farther, in percent of the picture&#39;s width. Positive is nearer. Use it to bring a shot out of the screen or set it back without changing how deep it is.</li>
+<li><strong>curve</strong> bends the depth within the shot&#39;s range. At 1 the depth is as the network gives it. Below 1, whatever sits between the shot&#39;s farthest and nearest points comes forward; above 1 it goes back. This is the knob for rows the network stacks away behind each other when the film has them side by side, such as a crowd or a line of things seen from below. Somewhere between 0.5 and 0.7 usually brings them to where a disc would have them. Don&#39;t make it a default, though. On ordinary shots it measures worse than 1.</li>
+<li><strong>flat</strong> removes the depth and puts the picture on the screen. Use it for title cards, screens within the picture, maps and 2D inserts.</li>
+</ul>
+<p><strong>reset</strong> puts the current stretch back to the command&#39;s defaults. The text beside it tells you which stretch the knobs are grading, or that this picture is at the defaults.</p>
+<p><strong>The film&#39;s own 3D</strong> appears only when there is a reference. The buttons are ours, disc, mix, diff and align, and they are explained in <a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a>.</p>
+<p><strong>Stretches.</strong> The table lists everything you have graded: where each stretch starts and ends, its knobs, whether it is flat, and how it comes in (at a cut, or eased in over some seconds). <code>go</code> seeks to a stretch&#39;s start. <code>×</code> removes it, and the stretch before then runs on over what it covered, or the defaults do if there is none. The <code>save</code> button writes the file, but you will rarely need it. The file is written at every change, and &#34;saved&#34; or &#34;unsaved&#34; at the top of the page tells you whether that worked.</p>
+<figure><img src="img/stretches.jpg" alt="The stretches. Each has its range, its knobs, whether it is flat, and how it comes in. go seeks to it, × removes it." loading="lazy"><figcaption>The stretches. Each has its range, its knobs, whether it is flat, and how it comes in. go seeks to it, × removes it.</figcaption></figure>
 <h3 id="keys">Keys</h3>
 <table>
-<tr><th>Key</th><th>Does</th></tr>
+<tr><th>Key</th><th>What it does</th></tr>
 <tr><td>Space</td><td>play or pause</td></tr>
-<tr><td>← →</td><td>a picture back or on</td></tr>
-<tr><td>Shift+← Shift+→</td><td>ten seconds</td></tr>
+<tr><td>← →</td><td>a picture back or forward</td></tr>
+<tr><td>Shift+← Shift+→</td><td>ten seconds back or forward</td></tr>
 <tr><td>[ ]</td><td>the cut before or after</td></tr>
-<tr><td>↑ ↓</td><td>depth ±0.05</td></tr>
-<tr><td>PgUp PgDn</td><td>screen ±0.1</td></tr>
-<tr><td>, .</td><td>curve ±0.05</td></tr>
-<tr><td>f</td><td>flat</td></tr>
+<tr><td>↑ ↓</td><td>depth up or down by 0.05</td></tr>
+<tr><td>PgUp PgDn</td><td>screen up or down by 0.1</td></tr>
+<tr><td>, .</td><td>curve down or up by 0.05</td></tr>
+<tr><td>f</td><td>flat on or off</td></tr>
 <tr><td>d, m, x, o</td><td>the disc&#39;s 3D, the mix, the difference, ours</td></tr>
 <tr><td>s</td><td>save</td></tr>
 </table>
 <h2 id="how-a-turn-becomes-a-stretch">How a turn becomes a stretch</h2>
-<p>You need not mark stretches first. Turn a knob and a stretch is made for it:</p>
+<p>You don&#39;t mark out stretches first and then grade them. You just turn a knob, and a stretch is made for it. Where it starts depends on where you are:</p>
 <ul>
-<li><strong>From the last cut</strong>, when one is within two seconds before the picture shown. A hand reacts to a shot a moment late, so the stretch starts where the shot did and the change is at the cut, where no eye sees it. The cuts are found as the film plays (a picture whose thumbnail differs enough from the one before), so the bar shows them for what has been played; a dissolve is not a cut.</li>
-<li><strong>From the picture shown</strong> otherwise, eased in over a second (<code>ramp=1</code> in the file), which the eye does not notice where a jump would show.</li>
+<li>If there is a cut within the two seconds before the current picture, the stretch starts at that cut. The idea is that you react to a shot a moment after it starts, so the stretch is snapped back to where the shot began, and the change happens at the cut, where no eye sees it.</li>
+<li>Otherwise the stretch starts at the current picture, and the change eases in over one second (<code>ramp=1</code> in the file). An eased change is invisible where a jump would show.</li>
 </ul>
-<p>The stretch runs to the next stretch&#39;s start, or to the end of the film. A turn within a stretch changes that stretch. So the pattern is: play, see a shot that is off, pause, turn until it is right, play on. To grade one shot only, play to its end and turn any knob back to the defaults there (or press reset), which starts the next stretch at the next cut.</p>
-<p>To grade a whole film a little differently, set <code>--3d-depth</code> and <code>--3d-screen</code> on the command instead, as its defaults, and grade only the shots that differ.</p>
+<p>The stretch runs until the next stretch starts, or to the end of the film. Turning a knob inside an existing stretch changes that stretch.</p>
+<p>So the pattern is simple: play, notice a shot that is off, pause, turn until it looks right, play on. If only that one shot needed grading, play to its end and press reset there (or turn the knob back). That starts a new stretch at the next cut, with the defaults.</p>
+<p>A word about the cuts. They are found while the film plays, by comparing each picture&#39;s thumbnail with the one before, so the bar only shows cuts for what has actually been played. Skipping ten seconds skips the cuts in between, and a dissolve is never a cut. And if you want a whole film a little deeper or shallower, don&#39;t make one huge stretch. Set <code>--3d-depth</code> and <code>--3d-screen</code> on the command instead, and grade only the shots that differ.</p>
 <h2 id="a-session-step-by-step">A session, step by step</h2>
 <ol>
-<li>Start the server, open the page on a laptop or phone, start the player at the screen (or enter VR).</li>
-<li>Play from the start. Watch the near and far readings and the picture. Most shots will be right; let them pass.</li>
-<li>At a shot that is off, pause (Space, or the trigger in VR). Step back with ← until the shot looks the same as what caught your eye, and turn the knob. Check at a second picture of the same shot (→ or play a moment).</li>
-<li>Play on. At the shot&#39;s end nothing more is needed: the stretch ends where the next one starts, or at the film&#39;s end, and the next shot&#39;s grade is whatever was set before. If the next shot should be at the defaults, press reset there.</li>
-<li>At the end, &#34;saved&#34; at the top says the file is current. Close the server with Ctrl-C.</li>
-<li>Run the conversion with the file (below). The grade can be resumed and refined any time: start the server again with <code>--3d-shots FILE</code>.</li>
+<li>Start the server. Open the page on a laptop or phone, and start the player at the screen, or put the headset on and press Enter VR.</li>
+<li>Play from the start. Watch the picture and the near and far figures. Most shots will be fine. Let them go by.</li>
+<li>When a shot is off, pause. Step back a picture or two with ← until you see what caught your eye, then turn the knob. Check a second picture of the same shot (→, or play for a moment).</li>
+<li>Play on. You don&#39;t have to do anything at the end of the shot. The stretch ends where the next one begins, or at the end of the film, and the following shots get whatever is set. If they should be back at the defaults, press reset there.</li>
+<li>At the end, check that the top of the page says &#34;saved&#34;, and stop the server with Ctrl-C.</li>
+<li>Run the conversion with the file, as described in <a href="#the-conversion">The conversion</a>. You can come back to the grade any time by starting the server again with <code>--3d-shots FILE</code>.</li>
 </ol>
-<p>The hover labels on the page and the foot of the VR panel repeat the essentials of this manual, control by control.</p>
 <h2 id="in-the-headset">In the headset</h2>
-<p>A headset&#39;s browser shows the same page over HTTPS, on the next port: <code>https://HOST:8421/</code>. The certificate is the machine&#39;s own, so the browser asks once; accept it. WebXR needs the secure page; a plain HTTP page on a LAN address has no Enter VR button.</p>
-<p>Enter VR puts the picture on a four-metre screen, each eye its own, with the page&#39;s controls on a panel to the right. The right controller&#39;s ray puts a cursor on the panel and the trigger presses what is under it; holding the trigger on a slider drags it. The foot of the panel says what the cursor is over and when to use it. The panel has, from the top: the time and the near and far readings, transport, the three knobs as sliders with step buttons, flat, reset, the readout and save, the views when there is a reference, the screen&#39;s size, the stretch and a button to remove it, and the timeline, pressed to seek.</p>
-<figure><img src="img/vr-panel.png" alt="The panel in VR, the cursor on the curve slider and its hint at the foot" loading="lazy"><figcaption>The panel in VR, the cursor on the curve slider and its hint at the foot</figcaption></figure>
-<p>The controllers work without the panel too:</p>
+<p>A headset&#39;s browser shows the same page, but over HTTPS and on the next port: <code>https://HOST:8421/</code>. The certificate is one the machine made for itself, so the browser will ask you about it once. Accept it. WebXR only works on a secure page, which is why the plain HTTP page has no Enter VR button.</p>
+<p>Press Enter VR and the picture is on a four-metre screen in front of you, each eye seeing its own, with the page&#39;s controls on a panel to the right. Point the right controller at the panel: its ray puts a cursor there, and the trigger presses whatever is under it. Hold the trigger on a slider to drag it. The foot of the panel tells you what the cursor is over and when you would use it. From the top, the panel has the time and the near and far figures, the transport, the three knobs as sliders with step buttons, flat, reset, the readout and save, the views when there is a reference, the screen&#39;s size, the current stretch with a button to remove it, and the timeline, which you press to seek.</p>
+<figure><img src="img/vr-panel.png" alt="The panel in VR. The cursor is on the curve slider and its hint is at the foot." loading="lazy"><figcaption>The panel in VR. The cursor is on the curve slider and its hint is at the foot.</figcaption></figure>
+<p>You can also work the controllers without looking at the panel:</p>
 <table>
-<tr><th>Controller</th><th>Does</th></tr>
+<tr><th>Controller</th><th>What it does</th></tr>
 <tr><td>right trigger</td><td>presses the panel; off the panel, play or pause</td></tr>
-<tr><td>right stick up and down</td><td>depth ±0.05</td></tr>
-<tr><td>right stick left and right</td><td>screen ±0.1</td></tr>
-<tr><td>right grip</td><td>flat</td></tr>
-<tr><td>A, B</td><td>a picture on, back</td></tr>
-<tr><td>left trigger</td><td>ours, the disc&#39;s 3D, the mix, round again</td></tr>
+<tr><td>right stick up and down</td><td>depth up or down by 0.05</td></tr>
+<tr><td>right stick left and right</td><td>screen up or down by 0.1</td></tr>
+<tr><td>right grip</td><td>flat on or off</td></tr>
+<tr><td>A, B</td><td>a picture forward, back</td></tr>
+<tr><td>left trigger</td><td>ours, the disc&#39;s 3D, the mix, and round again</td></tr>
 <tr><td>left stick left and right</td><td>the cut before, after</td></tr>
-<tr><td>X, Y</td><td>ten seconds back, on</td></tr>
-<tr><td>both grips, held a second</td><td>leave VR</td></tr>
+<tr><td>X, Y</td><td>ten seconds back, forward</td></tr>
+<tr><td>both grips, held for a second</td><td>leave VR</td></tr>
 </table>
-<p>&#34;smaller&#34; and &#34;bigger&#34; change the screen&#39;s size in VR, which is how much of your view it fills, as a seat nearer or farther; the depth does not change with it. The page decodes the stream itself in VR and asks the headset for a 72 Hz display, where 24 pictures a second sit evenly. The Quest&#39;s own browser was the one tried; what the page sees (the browser, each step into VR, errors, the frames shown) goes to the server&#39;s log.</p>
+<p>The &#34;smaller&#34; and &#34;bigger&#34; buttons change the size of the screen in VR, which is how much of your view the picture fills, like sitting nearer or farther. The depth itself does not change with it. In VR the page decodes the stream on its own and asks the headset for a 72 Hz display, where 24 pictures a second fit evenly. We tried this on the Quest&#39;s own browser. Whatever the page sees (which browser, each step into VR, any errors, how many frames it showed) goes to the server&#39;s log, which is the place to look if something does not work.</p>
 <h2 id="comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</h2>
-<p>Where a film has a 3D release of its own, the sharpest way to grade is against it. <code>--3d-reference FILE</code> takes it, a side-by-side or over-under file at the conversion&#39;s size (an MVC disc converted by bdtools, say):</p>
+<p>If the film has a 3D release of its own, the sharpest way to grade is against it. <code>--3d-reference FILE</code> takes that release as a side-by-side or over-under file at the conversion&#39;s size, for example an MVC disc that bdtools converted:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output &#34;Film (2020).3d&#34; --to-3d --3d-grade :8420 \
         --3d-reference &#34;Film (2020) 3D FSBS.mkv&#34;</code></pre>
-<p>The page gains a row of views:</p>
-<figure><img src="img/reference.jpg" alt="The film&#39;s own 3D: the views, and the reference&#39;s file, offset and alignment" loading="lazy"><figcaption>The film&#39;s own 3D: the views, and the reference&#39;s file, offset and alignment</figcaption></figure>
+<p>The page now has a row of views:</p>
+<figure><img src="img/reference.jpg" alt="The film&#39;s own 3D: the views, and which file the reference is, how far ahead it runs, and whether it is aligned." loading="lazy"><figcaption>The film&#39;s own 3D: the views, and which file the reference is, how far ahead it runs, and whether it is aligned.</figcaption></figure>
 <ul>
-<li><strong>ours</strong>: the conversion (the key <code>o</code>).</li>
-<li><strong>disc</strong>: the film&#39;s own 3D at the same moment (<code>d</code>). Switch back and forth to see what the stereographer did with the shot.</li>
-<li><strong>mix</strong> (<code>m</code>): the left eye kept, the right eye a blend of the disc&#39;s and ours. Where the two depths agree the picture fuses; where they differ it doubles by exactly the difference. Turn the knobs until the doubles merge.</li>
-<li><strong>diff</strong> (<code>x</code>): both eyes the difference of the two right eyes, mid grey where they agree, an embossed edge where they do not. The sharper tool for a small mismatch, and it shows at a glance whether the near or the far is off.</li>
+<li><strong>ours</strong> is the conversion (the key <code>o</code>).</li>
+<li><strong>disc</strong> is the film&#39;s own 3D at the same moment (<code>d</code>). Switch back and forth to see what the stereographer did with the shot.</li>
+<li><strong>mix</strong> (<code>m</code>) keeps the left eye and shows, as the right eye, a blend of the disc&#39;s and ours. Where the two depths agree the picture fuses. Where they differ it doubles, by exactly the difference. Turn the knobs until the doubles merge.</li>
+<li><strong>diff</strong> (<code>x</code>) shows both eyes the difference between the two right eyes: mid grey where they agree, an embossed edge where they do not. This is the sharper tool for a small mismatch, and it shows at a glance whether it is the near or the far that is off.</li>
 </ul>
-<figure><img src="img/view-mix.jpg" alt="mix: the right eye a blend of the disc&#39;s and ours, doubled where the two depths differ" loading="lazy"><figcaption>mix: the right eye a blend of the disc&#39;s and ours, doubled where the two depths differ</figcaption></figure>
-<figure><img src="img/view-diff.jpg" alt="diff: the difference of the two right eyes, grey where they agree, embossed where they do not" loading="lazy"><figcaption>diff: the difference of the two right eyes, grey where they agree, embossed where they do not</figcaption></figure>
+<figure><img src="img/view-mix.jpg" alt="mix: the right eye is a blend of the disc&#39;s and ours, and doubles where the two depths differ." loading="lazy"><figcaption>mix: the right eye is a blend of the disc&#39;s and ours, and doubles where the two depths differ.</figcaption></figure>
+<figure><img src="img/view-diff.jpg" alt="diff: the difference between the two right eyes, grey where they agree and embossed where they do not." loading="lazy"><figcaption>diff: the difference between the two right eyes, grey where they agree and embossed where they do not.</figcaption></figure>
 <ul>
-<li><strong>align</strong>: the two files&#39; clocks differ when their discs do. Press it on a paused picture and the server finds that picture in the reference, eight seconds either side, and keeps the offset. The text beside it says how far ahead the reference runs, whether it is aligned, and when the reference has no picture at a place.</li>
+<li><strong>align</strong> is for the clocks. The two files&#39; clocks differ when their discs do. Press align on a paused picture, and the server looks for that picture in the reference, eight seconds either side, and keeps the offset it finds. The text beside the buttons says how far ahead the reference runs, whether it is aligned, and whether the reference has a picture at this place at all.</li>
 </ul>
-<p>The simplest reference is the 3D file itself: give a side-by-side conversion of an MVC disc as the <code>--input</code> of <code>--3d-grade</code>, with no <code>--3d-reference</code>. Its left eye is converted and its own right eye is the reference, on one clock, so <code>disc</code> flips between the stereographer&#39;s right eye and ours made from the same left eye. The disc&#39;s right eye is a second camera and sees behind edges where ours cannot: judge the depth of the scene, not the edges.</p>
+<p>The simplest reference is the 3D file itself. Give a side-by-side conversion of an MVC disc as the <code>--input</code> of <code>--3d-grade</code>, with no <code>--3d-reference</code>. Its left eye is what gets converted, and its own right eye is the reference, on the same clock, so <code>disc</code> flips between the stereographer&#39;s right eye and ours made from the same left eye. Bear in mind that the disc&#39;s right eye is a second camera. It sees behind edges where ours cannot, so judge the depth of the scene, not the edges.</p>
 <h2 id="the-shots-file">The shots file</h2>
-<p>What the page writes is a text file you can read and edit, a line a stretch:</p>
+<p>What the page writes is a plain text file that you can read and edit. Each line is a stretch:</p>
 <pre><code># START [END] SETTINGS...
 0:12:30 0:13:05 depth=0.8 screen=0 curve=1
 1:02:10.5 1:02:40 flat
 1:30:00 screen=-1 ramp=1
 2:01:12 curve=0.6</code></pre>
-<p>Times are the film&#39;s as a player shows them. A line without an end runs to the next line&#39;s start, or to the end. <code>depth=</code>, <code>screen=</code> and <code>curve=</code> are the knobs; <code>flat</code> puts the stretch on the screen; <code>ramp=</code> is the seconds a stretch that begins within a shot eases in over. What a line does not set is the command&#39;s default; where lines overlap the later one wins. A <code>#</code> starts a comment. The same file is <code>--3d-shots</code>&#39;s, so a grade can be written by hand from notes, or a written one touched up.</p>
+<p>Times are the film&#39;s, as a player shows them. A line without an end runs to the next line&#39;s start, or to the end of the film. <code>depth=</code>, <code>screen=</code> and <code>curve=</code> are the knobs, <code>flat</code> puts the stretch on the screen, and <code>ramp=</code> is how many seconds a stretch that begins inside a shot eases in over. Anything a line does not set stays at the command&#39;s default, and where lines overlap, the later one wins. A <code>#</code> starts a comment. This is the same format <code>--3d-shots</code> reads, so you can write a grade by hand from notes, or touch up one the page wrote.</p>
 <h2 id="the-conversion">The conversion</h2>
-<p>The conversion proper reads the file with <code>--3d-shots</code>, with the same <code>--to-3d</code> flags the grading command had, so that &#34;the command&#39;s defaults&#34; are the same ones:</p>
+<p>The conversion proper reads the file through <code>--3d-shots</code>. Give it the same <code>--to-3d</code> flags the grading command had, so that &#34;the command&#39;s defaults&#34; are the same ones:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output &#34;Film (2020) 3D FSBS.mkv&#34; --to-3d \
         --3d-shots &#34;Film (2020).3d&#34;</code></pre>
-<p>Any output of <code>--to-3d</code> takes it: full or half side by side, over-under, MVC, MV-HEVC for a headset, a Blu-ray 3D disc image. The file is part of what an interrupted conversion must match to resume, so a changed grade starts the conversion over (it says so).</p>
+<p>Any output of <code>--to-3d</code> takes the file: full or half side by side, over-under, MVC, MV-HEVC for a headset, or a Blu-ray 3D disc image. The file is part of what an interrupted conversion has to match in order to resume, so if you change the grade, the conversion starts over (and says so).</p>
 <h2 id="when-something-is-off">When something is off</h2>
-<ul>
-<li><strong>No Enter VR button</strong>: the page is open over HTTP. Use the HTTPS address the command printed, and accept the certificate. If the command said &#34;no HTTPS&#34;, the next port was taken.</li>
-<li><strong>The preview says the browser cannot play the stream</strong>: the page&#39;s preview needs a browser that plays H.264 through Media Source Extensions (Chrome, Edge, Safari, the Quest&#39;s). The stream itself still plays in a player.</li>
-<li><strong>The screen lags the knobs by many seconds</strong>: the player&#39;s own buffer. Turn Kodi&#39;s cache down, or use the page&#39;s preview to see the turn and the screen to judge it.</li>
-<li><strong>A cut is missing from the bar</strong>: cuts are found as the film plays, so skipping over a stretch skips them; and a dissolve is not a cut. Turn the knob at the picture instead; the change eases in over a second.</li>
-<li><strong>The stream does not start</strong>: the live stream needs NVENC, an NVIDIA GPU. The command&#39;s log says what it could not open.</li>
-<li><strong>The file says &#34;unsaved&#34;</strong>: a write failed (the log says why); <code>s</code> or the save button tries again.</li>
-</ul>
+<p><strong>There is no Enter VR button.</strong> You opened the page over HTTP. Use the HTTPS address the command printed and accept the certificate. If the command said &#34;no HTTPS&#34;, the log says why.</p>
+<p><strong>The preview says the browser cannot play the stream.</strong> The preview needs a browser that plays H.264 through Media Source Extensions (Chrome, Edge, Safari and the Quest&#39;s browser all do). The stream itself still plays in a player.</p>
+<p><strong>The screen lags the knobs by many seconds.</strong> That is the player&#39;s own buffer. Turn Kodi&#39;s cache down, or use the page&#39;s preview to see the turn and the screen to judge it.</p>
+<p><strong>A cut is missing from the bar.</strong> Cuts are found as the film plays, so skipping over a stretch skips them, and a dissolve is never a cut. Turn the knob at the picture instead. The change eases in over a second.</p>
+<p><strong>The stream does not start.</strong> The live stream needs NVENC, which means an NVIDIA GPU. The command&#39;s log says what it could not open.</p>
+<p><strong>The page says &#34;unsaved&#34;.</strong> A write to the shots file failed, and the log says why. Press <code>s</code> or the save button to try again.</p>
 </main>
 </div>
 </body>

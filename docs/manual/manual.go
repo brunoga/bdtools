@@ -21,15 +21,22 @@ import (
 
 //go:generate go run ./gen
 
-// Files is the manual: index.html, a page per Pages entry, style.css and
-// img/.
+// Files is the manual: index.html, a page per Pages entry, style.css,
+// icon.svg (the command's, internal/convert's copy) and img/.
 //
-//go:embed *.html style.css img
+//go:embed *.html style.css icon.svg img
 var Files embed.FS
 
-// Pages are the manual's pages in its order, by the markdown in docs/
-// each is made from (its page is the same name with .html).
-var Pages = []string{"grading.md", "cookbook.md"}
+// Pages are the manual's pages in its order: the markdown in docs/ each
+// is made from (its page is the same name with .html) and a word on it
+// for the index.
+var Pages = []Page{
+	{"grading.md", "How to grade a 2D-to-3D conversion by eye, with the web page or a headset: from starting the server to converting the film with what you set."},
+	{"cookbook.md", "The things people most often do with bdtools, each with a complete command you can copy."},
+}
+
+// A Page is a page of the manual.
+type Page struct{ Source, About string }
 
 // Handler serves the manual: index.html at /, the pages and pictures by
 // name.
@@ -39,9 +46,10 @@ func Handler() http.Handler { return http.FileServer(http.FS(Files)) }
 // directory): the pages, by name, and index.html.
 func Build(docs fs.FS) (map[string][]byte, error) {
 	out := map[string][]byte{}
-	type entry struct{ name, title, lead string }
+	type entry struct{ name, title, about string }
 	var entries []entry
-	for _, src := range Pages {
+	for _, pg := range Pages {
+		src := pg.Source
 		md, err := fs.ReadFile(docs, src)
 		if err != nil {
 			return nil, err
@@ -52,15 +60,15 @@ func Build(docs fs.FS) (map[string][]byte, error) {
 			return nil, fmt.Errorf("%s: no title (a # heading)", src)
 		}
 		out[name] = page(d.title, name, d.toc, d.body)
-		entries = append(entries, entry{name, d.title, d.lead})
+		entries = append(entries, entry{name, d.title, pg.About})
 	}
 	var b strings.Builder
-	b.WriteString("<p class=\"lead\">What bdtools does and how to drive it, as pages: the same text as the documents in the repository, with the pictures.</p>\n<ul class=\"pages\">\n")
+	b.WriteString("<p class=\"lead\">This is the manual for bdtools. It has two parts.</p>\n<ul class=\"pages\">\n")
 	for _, e := range entries {
-		fmt.Fprintf(&b, "<li><a href=\"%s\">%s</a><p>%s</p></li>\n", e.name, html.EscapeString(e.title), e.lead)
+		fmt.Fprintf(&b, "<li><a href=\"%s\">%s</a><p>%s</p></li>\n", e.name, html.EscapeString(e.title), html.EscapeString(e.about))
 	}
-	b.WriteString("</ul>\n<p>The command's own reference, every flag and the choices behind the defaults, is <a href=\"" + repo + "/blob/main/cmd/bdtools/README.md\">bdtools' README</a>; the design and the measurements of the 2D-to-3D conversion are in <a href=\"" + repo + "/blob/main/docs/2d-to-3d.md\">2d-to-3d.md</a>.</p>\n")
-	b.WriteString("<p>This manual is in the binary too: <code>bdtools --manual :8080</code> serves it at that address, <code>bdtools --manual DIR</code> writes it into a directory, and the grading page links it.</p>\n")
+	b.WriteString("<p>These pages are built from the Markdown files in the repository's <code>docs</code> directory, so you can read the same text on GitHub. If you are after something the manual does not cover, the <a href=\"" + repo + "/blob/main/cmd/bdtools/README.md\">README of the command</a> explains every flag and why the defaults are what they are, and <a href=\"" + repo + "/blob/main/docs/2d-to-3d.md\">2d-to-3d.md</a> describes how the 2D-to-3D conversion works and how it was measured.</p>\n")
+	b.WriteString("<p>The manual also ships inside the bdtools binary. <code>bdtools --manual :8080</code> serves it at that address, <code>bdtools --manual DIR</code> writes the files into a directory, and the grading page has a link to it.</p>\n")
 	out["index.html"] = page("bdtools manual", "index.html", nil, b.String())
 	return out, nil
 }
@@ -81,9 +89,9 @@ func linker(src string) func(string) string {
 			u, frag = u[:i], u[i:]
 		}
 		p := path.Join("docs", path.Dir(src), u)
-		for _, s := range Pages {
-			if p == path.Join("docs", s) {
-				return strings.TrimSuffix(s, ".md") + ".html" + frag
+		for _, pg := range Pages {
+			if p == path.Join("docs", pg.Source) {
+				return strings.TrimSuffix(pg.Source, ".md") + ".html" + frag
 			}
 		}
 		if rest, ok := strings.CutPrefix(p, "docs/manual/"); ok {
@@ -97,15 +105,15 @@ func linker(src string) func(string) string {
 // (the second-level headings) and the body.
 func page(title, name string, toc []heading, body string) []byte {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>%s</title>\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n", html.EscapeString(title))
-	b.WriteString("<header><a class=\"brand\" href=\"index.html\">bdtools manual</a><nav>")
-	for _, s := range Pages {
-		n := strings.TrimSuffix(s, ".md") + ".html"
+	fmt.Fprintf(&b, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>%s</title>\n<link rel=\"icon\" href=\"icon.svg\" type=\"image/svg+xml\">\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n", html.EscapeString(title))
+	b.WriteString("<header><a class=\"brand\" href=\"index.html\"><img src=\"icon.svg\" alt=\"\">bdtools manual</a><nav>")
+	for _, pg := range Pages {
+		n := strings.TrimSuffix(pg.Source, ".md") + ".html"
 		cur := ""
 		if n == name {
 			cur = " class=\"cur\""
 		}
-		fmt.Fprintf(&b, "<a href=\"%s\"%s>%s</a>", n, cur, strings.TrimSuffix(s, ".md"))
+		fmt.Fprintf(&b, "<a href=\"%s\"%s>%s</a>", n, cur, strings.TrimSuffix(pg.Source, ".md"))
 	}
 	fmt.Fprintf(&b, "<a href=\"%s\">GitHub</a></nav></header>\n", repo)
 	if len(toc) > 0 {
@@ -125,8 +133,8 @@ func page(title, name string, toc []heading, body string) []byte {
 type heading struct{ id, text string }
 
 type doc struct {
-	title, lead, body string
-	toc               []heading
+	title, body string
+	toc         []heading
 }
 
 // convert turns the markdown this manual is written in (headings, paragraphs,
@@ -164,11 +172,7 @@ func convert(md string, link func(string) string) doc {
 				html.EscapeString(link(m[2])), html.EscapeString(m[1]), inline(m[1], link))
 			return
 		}
-		h := inline(text, link)
-		if d.lead == "" && d.title != "" {
-			d.lead = h
-		}
-		b.WriteString("<p>" + h + "</p>\n")
+		b.WriteString("<p>" + inline(text, link) + "</p>\n")
 	}
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]

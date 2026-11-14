@@ -45,6 +45,19 @@ func TestLinksResolve(t *testing.T) {
 	}
 }
 
+// The icon is the command's own (internal/convert's), copied here as embed
+// cannot reach it.
+func TestIconIsTheCommands(t *testing.T) {
+	want, err := os.ReadFile("../../internal/convert/icon.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := Files.ReadFile("icon.svg")
+	if !bytes.Equal(got, want) {
+		t.Error("docs/manual/icon.svg differs from internal/convert/icon.svg: copy it again")
+	}
+}
+
 func TestConvert(t *testing.T) {
 	md := "# Title\n\nFirst *para* with `code` and **bold** and [a link](other.md#x) and [out](../cmd/README.md).\n\n## Sec one\n\n- item one\n  goes on\n- item two\n\n1. first\n2. second\n\n| a | b |\n|---|---|\n| `x` | y |\n\n```sh\nbdtools --check <y>\n```\n\n![A picture](manual/img/p.png)\n"
 	d := convert(md, linker("grading.md"))

@@ -1,21 +1,26 @@
 # bdtools — Blu-ray tools in pure Go
 
-[`bdtools`](cmd/bdtools/README.md) turns Blu-rays into files any player
-handles: a **3D Blu-ray into a side-by-side MKV** (the MVC second eye that
-Plex and libavcodec cannot decode, stacked beside the first), a **2D or Ultra
-HD Blu-ray into an H.264, HEVC or AV1 MKV** keeping HDR10, HDR10+ and Dolby
-Vision, or a **remux** with only the tracks you want. It reads `.iso` images
-and BDMV folders in place (no mount, no extraction), playlists, `.m2ts`
-streams and Matroska remuxes, picks the feature itself, and resumes an
-interrupted conversion where it stopped.
+[`bdtools`](cmd/bdtools/README.md) is a command-line tool that turns a
+Blu-ray into a file any player handles. It converts a **3D Blu-ray into a
+side-by-side MKV**. The second eye of a 3D disc is coded as MVC, which Plex
+and libavcodec cannot decode, so bdtools decodes it and stacks it beside the
+first. It converts a **2D or Ultra HD Blu-ray into an H.264, HEVC or AV1
+MKV** and keeps HDR10, HDR10+ and Dolby Vision. Or it makes a **remux**
+with only the tracks you want.
 
-Everything between the disc and the encoder is Go, in this repository: the
-UDF and Blu-ray structure readers, the transport stream demuxer, four video
-decoders (H.264 with MVC, HEVC, MPEG-2, VC-1), a deinterlacer, the Dolby
-Vision RPU and enhancement-layer processing, and the Matroska muxer. GPUs
-(NVIDIA, Intel, AMD, Apple) are driven in process through their own system
-libraries, with no cgo: with one, a conversion runs no other program at all.
-Without one, x264, x265 or SVT-AV1 encode.
+bdtools reads `.iso` images and BDMV folders in place. Nothing is mounted
+and nothing is extracted. It also reads playlists, `.m2ts` streams and
+Matroska remuxes. It picks the feature itself, and when a conversion is
+interrupted it resumes where it stopped.
+
+Everything between the disc and the encoder is Go, and all of it is in this
+repository. That means the UDF and Blu-ray structure readers, the transport
+stream demuxer, four video decoders (H.264 with MVC, HEVC, MPEG-2 and VC-1),
+a deinterlacer, the Dolby Vision RPU and enhancement-layer processing, and
+the Matroska muxer. GPUs from NVIDIA, Intel, AMD and Apple are driven in
+process through their own system libraries, without cgo. With a GPU, a
+conversion runs no other program at all. Without one, x264, x265 or SVT-AV1
+does the encoding.
 
 ```sh
 bdtools --check                                              # what is installed
@@ -27,27 +32,31 @@ bdtools --remux --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"       #
 bdtools --input "Furiosa (2024).mkv" --output "Furiosa (2024) 3D.iso" --to-3d    # a Blu-ray 3D made
 ```
 
-More in [the cookbook](docs/cookbook.md), common operations with a complete
-command each, and [bdtools' common tasks](cmd/bdtools/README.md#common-tasks);
-[grading](docs/grading.md) is the manual for grading a 2D-to-3D conversion
-by eye, on the web page or in a headset. Both are web pages as well, with
-the pictures, in [docs/manual](docs/manual/index.html), carried in the
-binary and in every release: `bdtools --manual :8080` serves them.
+There is more in [the cookbook](docs/cookbook.md), which gives a complete
+command for each common operation, and in
+[bdtools' common tasks](cmd/bdtools/README.md#common-tasks). The
+[grading manual](docs/grading.md) explains how to grade a 2D-to-3D
+conversion by eye, on the web page or in a headset. Both manuals are also
+web pages with the pictures, in [docs/manual](docs/manual/index.html). They
+are carried in the binary and in every release, and `bdtools --manual :8080`
+serves them.
 
-The decoders, each checked against its standard's conformance streams:
+These are the decoders. Each one is checked against the conformance streams
+of its standard.
 
 | Decoder | Package | What it decodes | Checked against | Speed (Core Ultra 9 285K) |
 |---|---|---|---|---|
-| H.264 / MVC | [`mvc`](mvc) | Baseline, Main, High; Stereo and Multiview High (two views); progressive | the JVT conformance streams and a whole 3D Blu-ray, byte-identical to edge264 | ~1100 stereo pairs/s, 113 on one core |
-| HEVC | `internal/hevc` | Main, Main 10: everything Ultra HD Blu-ray uses | all 152 JCT-VC conformance streams of those profiles, byte-identical to ffmpeg | ~250 fps for a disc's 4K stream |
-| MPEG-2 | `internal/mpeg2` | Main Profile, frame and field pictures | the ISO conformance streams, within the transform's tolerance of ffmpeg (64 dB and up) | ~30 fps for 1080i |
-| VC-1 | `internal/vc1` | Advanced Profile, progressive and interlaced | the SMPTE conformance streams and a VC-1 Blu-ray, byte-identical to ffmpeg | ~110 fps for 1080p on one core |
+| H.264 / MVC | [`mvc`](mvc) | Baseline, Main and High; Stereo High and Multiview High with two views; progressive pictures | the JVT conformance streams, and a whole 3D Blu-ray byte for byte against edge264 | ~1100 stereo pairs/s, 113 on one core |
+| HEVC | `internal/hevc` | Main and Main 10, which is everything Ultra HD Blu-ray uses | all 152 JCT-VC conformance streams of those profiles, byte for byte against ffmpeg | ~250 fps for a disc's 4K stream |
+| MPEG-2 | `internal/mpeg2` | Main Profile, frame and field pictures | the ISO conformance streams, within the transform's tolerance of ffmpeg, 64 dB and up | ~30 fps for 1080i |
+| VC-1 | `internal/vc1` | Advanced Profile, progressive and interlaced | the SMPTE conformance streams, and a VC-1 Blu-ray byte for byte against ffmpeg | ~110 fps for 1080p on one core |
 
-The HEVC, MPEG-2 and H.264 parsers also drive VAAPI (Intel and AMD GPUs on
-Linux), which has no parser of its own; NVDEC and VideoToolbox decode on
-their own. See [what works where](cmd/bdtools/README.md#what-works-where).
+The HEVC, MPEG-2 and H.264 parsers also drive VAAPI, which Intel and AMD
+GPUs use on Linux, because VAAPI has no parser of its own. NVDEC and
+VideoToolbox decode on their own. See
+[what works where](cmd/bdtools/README.md#what-works-where).
 
-The H.264/MVC decoder is usable on its own as a library (below), and
+The H.264/MVC decoder can be used on its own as a library, as shown below.
 `mvcdec` decodes a stream to raw YUV or Y4M. [`probe`](probe) identifies a
 disc image, an MKV or an MP4 from a pre-download sample.
 
@@ -57,18 +66,19 @@ disc image, an MKV or an MP4 from a pre-download sample.
 go build ./cmd/mvcdec ./cmd/bdtools
 ```
 
-On amd64 the hot paths are hand-written Go assembly (`*_amd64.s`, assembled
-by the Go toolchain, no cgo): the CABAC residual, motion vector difference
-and coded block pattern decoders, motion compensation (6-tap luma, bilinear
-chroma, averaging and weighted prediction), the inverse transforms, the
-deblocking filters and the per-macroblock bookkeeping. They are used when
-the CPU has AVX2, BMI2 and LZCNT (checked with CPUID at startup); other
-CPUs and architectures use the equivalent Go code, which can also be forced
-with `-tags purego`. Every assembly routine has a randomized test against
-its Go counterpart (`TestCabac*Asm`, `TestSIMD*`).
+On amd64 the hot paths are hand-written Go assembly. The files are
+`*_amd64.s`, the Go toolchain assembles them, and no cgo is involved. The
+assembly covers the CABAC residual, motion vector difference and coded block
+pattern decoders, motion compensation (6-tap luma, bilinear chroma,
+averaging and weighted prediction), the inverse transforms, the deblocking
+filters and the per-macroblock bookkeeping. It is used when the CPU has
+AVX2, BMI2 and LZCNT, which is checked with CPUID at startup. Other CPUs and
+other architectures use the equivalent Go code. You can force the Go code on
+any CPU with `-tags purego`. Every assembly routine has a randomized test
+against its Go counterpart, in `TestCabac*Asm` and `TestSIMD*`.
 
-Releases are built with `CGO_ENABLED=0` for Linux, macOS
-and Windows on amd64, arm64 and arm/v7 (see `.goreleaser.yml`).
+Releases are built with `CGO_ENABLED=0` for Linux, macOS and Windows, on
+amd64, arm64 and arm/v7. See `.goreleaser.yml`.
 
 ## The H.264/MVC decoder as a library
 
@@ -98,9 +108,9 @@ for {
 dec.Flush()                                 // then drain NextFrame again
 ```
 
-Or let the decoder drive the loop for a whole stream — a transport stream,
-an interleaved Annex B stream, or the demuxed pair tsMuxeR writes — and write
-it out as Y4M:
+You can also let the decoder drive the loop over a whole stream and write
+the result out as Y4M. The stream can be a transport stream, an interleaved
+Annex B stream, or the demuxed pair that tsMuxeR writes:
 
 ```go
 dec := mvc.NewDecoder(mvc.Options{})
@@ -115,21 +125,23 @@ stats, err := dec.DecodeStream(src, mvc.DecodeOptions{}, func(sf *mvc.StereoFram
 err = y4m.Flush()
 ```
 
-Other inputs:
+There are other ways to feed the decoder:
 
 - `dec.Decode(chunk)` accepts an Annex B byte stream split at arbitrary
-  boundaries (MVC NAL units interleaved, as in the JVT conformance streams).
-- `mvc.NewAUReader(r)` splits an Annex B stream into access units; use two of
-  them to pair a base `.264` with a separate dependent `.mvc` stream (the
-  files tsMuxeR writes).
-- `dec.DecodeNAL(nal)` decodes one NAL unit without start code.
+  boundaries. The MVC NAL units are interleaved in it, as they are in the
+  JVT conformance streams.
+- `mvc.NewAUReader(r)` splits an Annex B stream into access units. Use two
+  of them to pair a base `.264` with a separate dependent `.mvc` stream,
+  which are the files tsMuxeR writes.
+- `dec.DecodeNAL(nal)` decodes one NAL unit without its start code.
 
-Frames are returned in display order once fully decoded. `NextFrame` never
-blocks; `WaitFrame` blocks until the next frame is ready. Frame planes stay
-valid until `Release`; buffers that are not released are not reused (the
-decoder allocates new ones), so release frames promptly or copy them.
-A `Decoder` must be used from one goroutine; decoding work is spread over
-`Options.Threads` worker goroutines internally.
+Frames come back in display order once they are fully decoded. `NextFrame`
+never blocks. `WaitFrame` blocks until the next frame is ready. A frame's
+planes stay valid until you call `Release`. A buffer that is not released is
+not reused, and the decoder allocates a new one instead, so release frames
+promptly or copy them. A `Decoder` must be used from one goroutine.
+Internally, the decoding work is spread over `Options.Threads` worker
+goroutines.
 
 ## mvcdec
 
@@ -145,9 +157,10 @@ mvcdec -y4m - -layout sbs movie.m2ts | x264 --demuxer y4m --frame-packing 3 -o s
 mvcdec -base left.yuv -dep right.yuv movie.m2ts
 ```
 
-`-layout` is `sbs` (3840x1080 for 1080p), `tab`, `base` or `dep`; `-swap`
-exchanges the views. The Y4M frame rate comes from the stream's VUI timing
-(`-fps num:den` overrides it).
+`-layout` is one of `sbs`, `tab`, `base` or `dep`. Side by side makes a
+3840x1080 picture from a 1080p stream. `-swap` exchanges the views. The Y4M
+frame rate comes from the stream's VUI timing, and `-fps num:den` overrides
+it.
 
 ## bdtools
 
@@ -158,34 +171,36 @@ bdtools --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv" --codec h265
 bdtools --remux --input disc.iso --output film.m2ts --audio-lang eng --audio-best
 ```
 
-Converts a Blu-ray — a disc image, BDMV folder, playlist or m2ts, or a
-Matroska remux of one — into an MKV with the audio and subtitles you choose:
-a 3D one side by side (full or half width, subtitles flat or drawn in 3D),
-a 2D or Ultra HD one as it is, in H.264, HEVC or AV1 at 8 or 10 bits, HDR10,
-HDR10+ and Dolby Vision kept (profile 8.1, its full enhancement layer
-composed in, or profile 7 with the layers apart). Or it remuxes, with no
-re-encoding: a 3D disc's MVC into one `.m2ts`, a 2D or Ultra HD disc (Dolby
-Vision included) or an MKV into an MKV.
+bdtools converts a Blu-ray into an MKV with the audio and subtitles you
+choose. The source can be a disc image, a BDMV folder, a playlist or an
+m2ts, or a Matroska remux of one. A 3D disc comes out side by side, at full
+or half width, with the subtitles flat or drawn in 3D. A 2D or Ultra HD disc
+comes out as it is, in H.264, HEVC or AV1 at 8 or 10 bits. HDR10, HDR10+ and
+Dolby Vision are kept. Dolby Vision can be written as profile 8.1, with its
+full enhancement layer composed in, or as profile 7, with the layers kept
+apart. bdtools can also remux, with no re-encoding. A 3D disc's MVC goes
+into one `.m2ts`. A 2D or Ultra HD disc, Dolby Vision included, or an MKV
+goes into an MKV.
 
-The disc is read once and in place — an image is not extracted, nothing is
-demuxed to disk but the audio and subtitles — and decoded and muxed in
-process. A GPU decodes and encodes in process as well, through its own system
-library, so with one the conversion needs no tools at all; otherwise the only
-external tool is x264, x265 or SvtAv1EncApp (or ffmpeg, for software
-half-SBS and the rare interlaced H.264 without a GPU decoder), and a remux
-needs none. A container with the whole toolchain is published as
-`ghcr.io/brunoga/bdtools` for amd64 and arm64. See
-[cmd/bdtools](cmd/bdtools/README.md), which starts with
+The disc is read once and in place. An image is not extracted, and nothing
+is demuxed to disk except the audio and subtitles. Decoding and muxing
+happen in process. A GPU decodes and encodes in process as well, through its
+own system library, so with a GPU the conversion needs no external tools at
+all. Without one, the only external tool is x264, x265 or SvtAv1EncApp.
+ffmpeg takes over for software half-SBS, and for the rare interlaced H.264
+disc when there is no GPU decoder. A remux needs no tools. A container with
+the whole toolchain is published as `ghcr.io/brunoga/bdtools` for amd64 and
+arm64. See [cmd/bdtools](cmd/bdtools/README.md), which starts with
 [examples of common tasks](cmd/bdtools/README.md#common-tasks).
 
 ## Probing a source before downloading it
 
-[`probe`](probe) identifies a Blu-ray image, a Matroska file or an MP4 or
-QuickTime file from the little a pre-download sample holds — for a torrent, a
-piece or two — and reports what the container states: 2D or 3D and how (MVC,
-MV-HEVC, side by side, top-bottom), the
-feature's length, and its video, audio and subtitle tracks. It reads no
-video and pulls in nothing of the decoder.
+[`probe`](probe) identifies a Blu-ray image, a Matroska file, or an MP4 or
+QuickTime file from the little that a pre-download sample holds. For a
+torrent, that is a piece or two. It reports what the container states:
+whether the film is 2D or 3D, and if 3D, how it is laid out (MVC, MV-HEVC,
+side by side or top-bottom), the feature's length, and its video, audio and
+subtitle tracks. It reads no video and pulls in nothing of the decoder.
 
 ```go
 r, err := probe.Image(sample, imageSize, name) // an io.ReaderAt over the pieces you have
@@ -201,14 +216,16 @@ r, err = probe.MP4(sample, fileSize, name) // an io.ReaderAt: the movie box is a
 if r.Is3D && r.Layout == probe.LayoutMVHEVC { /* Apple spatial video */ }
 ```
 
-A disc image keeps its UDF directory at the front and its playlists and clip
-info at the end, so the first and last pieces of a torrent are usually enough:
-on ten Blu-ray 3D images, two 16 MiB pieces were, except one disc with 316
-playlists, which needed a third — the error says which bytes. A read the
-sample cannot satisfy is an error naming them, never a panic and never a
-plausible wrong answer. Fields a source does not state are left zero: a
-disc's "multi-channel" audio has no channel count until the probe can read
-the stream's first frames, which it does when the sample holds them.
+A disc image keeps its UDF directory at the front and its playlists and
+clip info at the end, so the first and last pieces of a torrent are usually
+enough. On ten Blu-ray 3D images, two 16 MiB pieces were enough for all but
+one. That disc had 316 playlists and needed a third piece, and the error
+said which bytes were missing. When the sample cannot satisfy a read, the
+result is an error that names the missing bytes. It is never a panic, and
+never a plausible wrong answer. Fields the source does not state are left
+zero. For example, a disc's "multi-channel" audio has no channel count until
+the probe can read the stream's first frames, which it does when the sample
+holds them.
 
 ## H.264/MVC decoder performance
 
@@ -220,41 +237,49 @@ Measured on an Intel Core Ultra 9 285K (24 cores), Go 1.27.1:
 | x264 1080p, 25 Mbit/s, B-pyramid, weighted pred, deblocking (frames/s) | 119 | ~1000 |
 | x264 1080p, crf 35 (1.5 Mbit/s, mostly skipped macroblocks) (frames/s) | 745 | |
 
-For comparison, edge264 (C, SSE/AVX2 intrinsics) decodes the same clips at
-126 stereo pairs/s, 127 and ~880 frames/s on one core. The CABAC residual
-decoding, motion compensation, intra prediction and deblocking are all
-assembly here (with pure-Go fallbacks, `-tags purego`); the remaining
-difference is per-macroblock bookkeeping that is still Go.
+For comparison, edge264, which is C with SSE/AVX2 intrinsics, decodes the
+same clips at 126 stereo pairs/s, 127 frames/s and ~880 frames/s on one
+core. Here the CABAC residual decoding, motion compensation, intra
+prediction and deblocking are all assembly, with pure-Go fallbacks under
+`-tags purego`. The remaining difference is the per-macroblock bookkeeping,
+which is still Go.
 
-Decoding from memory, one access unit at a time (`go test -bench File`);
-`mvcdec` with file I/O is somewhat slower. Real time for a 3D Blu-ray needs 24 stereo pairs/s, so a
-single core is over 3x real time.
+These numbers decode from memory, one access unit at a time, with
+`go test -bench File`. `mvcdec` with file I/O is somewhat slower. Real time
+for a 3D Blu-ray is 24 stereo pairs/s, so a single core is over 3x real
+time.
 
 ## H.264/MVC decoder features
 
-- Profiles: Baseline (no FMO/ASO), Main, High, Stereo High, Multiview High
-  (two views).
-- CAVLC and CABAC, I/P/B slices, 8x8 transform, scaling matrices, weighted
-  prediction (explicit and implicit), spatial and temporal direct, long-term
-  references and all MMCO operations, frame_num gaps, multiple slices,
-  POC types 0/1/2, reference list modification including inter-view
-  references, bumping/reordering via VUI `num_reorder_frames`.
-- MVC: prefix NAL units (14), subset SPS (15), coded slice extensions (20),
-  Blu-ray dependent view delimiters (24), dependent view NAL units arriving
-  before their base view, streams whose dependent view starts late.
+The decoder supports the following:
 
-Not supported (not used by 3D Blu-ray): interlaced coding (field pictures,
-PAFF, MBAFF), 4:2:2 / 4:4:4, bit depths above 8, FMO/ASO, SP/SI slices,
-more than two views. bdtools hands interlaced 2D H.264 (1080i discs) to
-NVDEC, VideoToolbox or ffmpeg instead.
+- The Baseline, Main, High, Stereo High and Multiview High profiles.
+  Baseline is supported without FMO and ASO. Multiview High is supported
+  with two views.
+- CAVLC and CABAC, I, P and B slices, the 8x8 transform, scaling matrices,
+  explicit and implicit weighted prediction, spatial and temporal direct
+  prediction, long-term references and all MMCO operations, frame_num gaps,
+  multiple slices, POC types 0, 1 and 2, and reference list modification
+  including inter-view references. Output is bumped and reordered through
+  the VUI's `num_reorder_frames`.
+- For MVC, prefix NAL units (type 14), the subset SPS (15), coded slice
+  extensions (20) and the Blu-ray dependent view delimiters (24). The
+  dependent view's NAL units may arrive before their base view, and the
+  dependent view may start late in the stream.
 
-With an accelerator (`Decoder.SetAccel`), the decoder parses a 2D
-progressive stream and keeps its reference pictures and output order, and
-hands each picture's slices to the GPU: this is how bdtools decodes H.264 on
-VAAPI.
+Some things are not supported, because 3D Blu-ray does not use them:
+interlaced coding (field pictures, PAFF and MBAFF), 4:2:2 and 4:4:4 chroma,
+bit depths above 8, FMO and ASO, SP and SI slices, and more than two views.
+Interlaced 2D H.264, which 1080i discs use, is handed by bdtools to NVDEC,
+VideoToolbox or ffmpeg instead.
 
-Malformed input never panics (errors are returned and lost macroblocks are
-concealed from the previous reference picture); decoding is fuzzed with
+The decoder can also work with an accelerator, set with `Decoder.SetAccel`.
+It then parses a 2D progressive stream, keeps track of its reference
+pictures and output order, and hands each picture's slices to the GPU. This
+is how bdtools decodes H.264 on VAAPI.
+
+Malformed input never panics. Errors are returned, and lost macroblocks are
+concealed from the previous reference picture. Decoding is fuzzed with
 `go test -fuzz FuzzDecode`.
 
 ## Testing
@@ -265,19 +290,20 @@ go test -tags purego ./...                     # the pure-Go decoder every other
 MVC_BENCH_FILE=clip.264 go test -bench File -run X
 ```
 
-`testdata/bluray` is a synthetic Blu-ray 3D (a folder and a UDF image) the
-built-in demuxer is tested on with no tools installed. The `bdtools`
-end-to-end tests convert it, and a Matroska remux built from the MVC
-fixtures, through x264; they skip when x264 is not on `PATH`.
+`testdata/bluray` is a synthetic Blu-ray 3D, as both a folder and a UDF
+image. The built-in demuxer is tested on it with no tools installed. The
+`bdtools` end-to-end tests convert it through x264, and also convert a
+Matroska remux built from the MVC fixtures. They skip when x264 is not on
+`PATH`.
 
-`testdata/conformance` holds the ITU-T/JVT conformance bitstreams with
-per-view output hashes (from edge264-mvc). `tools/refdump` is a small C
-program that dumps both views with edge264, used as the reference for real
-Blu-ray content where no other decoder outputs the dependent view.
+`testdata/conformance` holds the ITU-T/JVT conformance bitstreams, with
+per-view output hashes taken from edge264-mvc. `tools/refdump` is a small C
+program that dumps both views with edge264. It is the reference for real
+Blu-ray content, where no other decoder outputs the dependent view.
 
-The other decoders' conformance suites are large and not committed; point
-the tests at them (they skip otherwise, and compare against ffmpeg, which
-they need):
+The other decoders' conformance suites are large and are not committed.
+Point the tests at them with these variables. They skip when the suites are
+missing, and they compare against ffmpeg, so ffmpeg must be installed:
 
 ```sh
 BDTOOLS_HEVC_SAMPLES=~/hevc-conformance go test -run Conformance ./internal/hevc   # JCT-VC *.bit
@@ -287,8 +313,8 @@ BDTOOLS_HEVC_BENCH=uhd.hevc go test -bench Decode -run X ./internal/hevc
 ```
 
 The GPU tests run on whatever the machine has and skip what it lacks. On
-Linux, VAAPI's are pointed at a driver with libva's own variables, e.g.
-Intel's from a Flatpak runtime:
+Linux, the VAAPI tests are pointed at a driver with libva's own environment
+variables. This example uses Intel's driver from a Flatpak runtime:
 
 ```sh
 D=/var/lib/flatpak/runtime/org.freedesktop.Platform.VAAPI.Intel/x86_64/25.08/active/files
@@ -298,28 +324,28 @@ LIBVA_DRIVERS_PATH=$D LIBVA_DRIVER_NAME=iHD LD_LIBRARY_PATH=$D/lib \
 ```
 
 The GPU libraries' structures are mirrored in Go and checked against their
-C headers (`MVC_LIBVA_HEADERS`, `MVC_NVENC_HEADERS` and the like name where
-the headers are; `testdata/vaoff.c` generates `vaapi_layout.go`).
+C headers. Variables such as `MVC_LIBVA_HEADERS` and `MVC_NVENC_HEADERS` say
+where the headers are. `testdata/vaoff.c` generates `vaapi_layout.go`.
 
 ## Layout
 
 | file | contents |
 |---|---|
-| `mvc/decoder.go` | public API, NAL dispatch, picture/AU management, workers |
-| `mvc/params.go`, `mvc/slice.go` | SPS / subset SPS / PPS, slice headers |
-| `mvc/dpb.go` | POC, reference marking, reference lists, MVC inter-view refs |
-| `mvc/cabac*.go`, `cavlc.go`, `mb*.go`, `recon.go` | entropy decoding, macroblock layer |
+| `mvc/decoder.go` | the public API, NAL dispatch, picture and access unit management, and the workers |
+| `mvc/params.go`, `mvc/slice.go` | the SPS, subset SPS and PPS, and the slice headers |
+| `mvc/dpb.go` | POC, reference marking, reference lists and MVC inter-view references |
+| `mvc/cabac*.go`, `cavlc.go`, `mb*.go`, `recon.go` | entropy decoding and the macroblock layer |
 | `mvc/mvpred.go`, `inter.go`, `intra.go`, `transform.go`, `deblock.go` | prediction and reconstruction |
-| `mvc/*_amd64.s`, `*_amd64.go` | assembly kernels and their dispatch; `*_noasm.go`, `*_generic.go` the Go fallbacks |
-| `mvc/aureader.go`, `m2ts/` | access unit splitting, transport stream reading (PES, program tables) |
-| `mvc/stream.go`, `y4m.go` | whole-stream decoding loop, Y4M output |
+| `mvc/*_amd64.s`, `*_amd64.go` | the assembly kernels and their dispatch. `*_noasm.go` and `*_generic.go` are the Go fallbacks |
+| `mvc/aureader.go`, `m2ts/` | access unit splitting, and transport stream reading (PES and program tables) |
+| `mvc/stream.go`, `y4m.go` | the whole-stream decoding loop, and Y4M output |
 | `cmd/mvcdec`, `cmd/bdtools` | the commands |
-| `tools/pgskodi`, `tools/felrd`, `tools/qcmp`, `tools/refdump` | splitting wide PGS subtitles for Kodi in films converted before bdtools did; measuring Dolby Vision FEL encodes against the source's composition; measuring any encode against its source (PSNR, VMAF and CAMBI banding, Dolby Vision FEL and 3D sources included); the edge264 reference dumper |
-| `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools, with the built-in demuxer and remuxer, resumable segmented encoding, and 3D subtitles |
-| `internal/hevc`, `internal/mpeg2`, `internal/vc1`, `internal/deint` | HEVC, MPEG-2 and VC-1 decoders in Go (whose parsers also drive VAAPI), and a deinterlacer, for 2D sources |
-| `internal/dovi`, `internal/hdr` | Dolby Vision: RPU parsing and rewriting (profile 7 to 8.1), enhancement-layer composition; HDR10 and HDR10+ metadata |
-| `internal/gpu` | the GPU encoders and decoders, driven in process through their system libraries: NVENC and NVDEC, VAAPI, VideoToolbox, Media Foundation |
-| `internal/bdmv` | Blu-ray structure: playlists, clip info, folders and UDF images read in place |
-| `internal/esinfo` | audio and video stream headers, for track listings |
-| `internal/mkv` | the Matroska muxer: H.264/HEVC frame timing from picture order counts, AV1 temporal units, audio and PGS framing; and a streaming Matroska reader |
-| `probe` | identifying a disc image, a Matroska file or an MP4 or QuickTime file from a pre-download sample |
+| `tools/pgskodi`, `tools/felrd`, `tools/qcmp`, `tools/refdump` | `pgskodi` splits wide PGS subtitles for Kodi in films converted before bdtools did it. `felrd` measures Dolby Vision FEL encodes against the source's composition. `qcmp` measures any encode against its source in PSNR, VMAF and CAMBI banding, Dolby Vision FEL and 3D sources included. `refdump` is the edge264 reference dumper |
+| `internal/convert` | the Blu-ray 3D conversion pipeline behind bdtools. It holds the built-in demuxer and remuxer, resumable segmented encoding, and the 3D subtitles |
+| `internal/hevc`, `internal/mpeg2`, `internal/vc1`, `internal/deint` | the HEVC, MPEG-2 and VC-1 decoders in Go, whose parsers also drive VAAPI, and a deinterlacer. They are for 2D sources |
+| `internal/dovi`, `internal/hdr` | Dolby Vision, that is RPU parsing and rewriting from profile 7 to 8.1, and enhancement-layer composition. Also HDR10 and HDR10+ metadata |
+| `internal/gpu` | the GPU encoders and decoders, driven in process through their system libraries. NVENC and NVDEC, VAAPI, VideoToolbox and Media Foundation |
+| `internal/bdmv` | the Blu-ray structure. Playlists, clip info, and folders and UDF images read in place |
+| `internal/esinfo` | audio and video stream headers, for the track listings |
+| `internal/mkv` | the Matroska muxer. It takes H.264 and HEVC frame timing from picture order counts, and frames AV1 temporal units, audio and PGS. Also a streaming Matroska reader |
+| `probe` | identifies a disc image, a Matroska file, or an MP4 or QuickTime file from a pre-download sample |

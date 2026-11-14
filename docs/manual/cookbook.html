@@ -4,137 +4,138 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bdtools from the command line</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header><a class="brand" href="index.html">bdtools manual</a><nav><a href="grading.html">grading</a><a href="cookbook.html" class="cur">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
+<header><a class="brand" href="index.html"><img src="icon.svg" alt="">bdtools manual</a><nav><a href="grading.html">grading</a><a href="cookbook.html" class="cur">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
 <div class="wrap">
-<aside><details open><summary>Contents</summary><ol><li><a href="#before-anything">Before anything</a></li><li><a href="#3d-discs">3D discs</a></li><li><a href="#2d-and-ultra-hd-discs">2D and Ultra HD discs</a></li><li><a href="#2d-to-3d">2D to 3D</a></li><li><a href="#tracks">Tracks</a></li><li><a href="#size-and-quality">Size and quality</a></li><li><a href="#parts-batches-and-players">Parts, batches and players</a></li><li><a href="#remuxing-no-re-encoding">Remuxing, no re-encoding</a></li><li><a href="#interruptions-scratch-space-containers">Interruptions, scratch space, containers</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
+<aside><details open><summary>Contents</summary><ol><li><a href="#before-anything">Before anything</a></li><li><a href="#3d-discs">3D discs</a></li><li><a href="#2d-and-ultra-hd-discs">2D and Ultra HD discs</a></li><li><a href="#2d-to-3d">2D to 3D</a></li><li><a href="#tracks">Tracks</a></li><li><a href="#size-and-quality">Size and quality</a></li><li><a href="#parts-batches-and-players">Parts, batches and players</a></li><li><a href="#remuxing-with-no-re-encoding">Remuxing, with no re-encoding</a></li><li><a href="#interruptions-scratch-space-and-containers">Interruptions, scratch space and containers</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
 <main>
 <h1>bdtools from the command line</h1>
-<p>Common operations, each a complete command. Only the paths are yours. The <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md">command&#39;s README</a> explains every flag and the choices behind the defaults; <code>bdtools --help</code> lists the flags.</p>
+<p>This is a cookbook: the things people most often do with bdtools, each with a complete command you can copy and change the paths of. It does not explain every flag. For that, and for the reasoning behind the defaults, see the <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md">README</a>, or run <code>bdtools --help</code>.</p>
 <h2 id="before-anything">Before anything</h2>
-<p><strong>What is installed.</strong> The answer depends on the options, so pass the ones you will use:</p>
+<p><strong>See what is installed.</strong> The answer depends on which options you plan to use, so pass those:</p>
 <pre><code>bdtools --check
 bdtools --check --encoder software --codec h265</code></pre>
-<p><strong>What a disc holds.</strong> Instant, even over a network share: the playlists are read, the feature chosen, and the tracks listed with their ids, languages and codecs:</p>
+<p><strong>See what a disc holds.</strong> This is instant, even over a network share: bdtools reads the playlists, picks the feature, and lists the tracks with their ids, languages and codecs.</p>
 <pre><code>bdtools --list --input &#34;Avatar (2009) 3D.iso&#34;
 bdtools --list --json --input &#34;Avatar (2009) 3D.iso&#34;      # for a script</code></pre>
-<p><strong>The manual</strong>, these pages and the grading manual with their pictures, served from the binary at an address, or written out as files:</p>
-<pre><code>bdtools --manual :8080        # then http://localhost:8080/
+<p><strong>Read the manual</strong>, this page and the grading guide, with their pictures. It is built into the binary. You can serve it at an address or write it out as files:</p>
+<pre><code>bdtools --manual :8080        # then open http://localhost:8080/
 bdtools --manual ~/bdtools-manual</code></pre>
-<p><strong>What would run</strong>, without running it:</p>
+<p><strong>See what would run</strong>, without running anything:</p>
 <pre><code>bdtools --dry-run --input disc.iso --output film.mkv</code></pre>
-<p>A disc image needs no mounting: point at the <code>.iso</code>, a BDMV folder, a playlist, an <code>.m2ts</code>, or an MKV, MP4 or MOV. A disc&#39;s feature is chosen for you (<code>--playlist 00801</code> names another title).</p>
+<p>You never need to mount a disc image. Point <code>--input</code> at the <code>.iso</code>, at a BDMV folder, at a playlist, at an <code>.m2ts</code>, or at an MKV, MP4 or MOV. bdtools picks the feature for you; <code>--playlist 00801</code> names another title.</p>
 <h2 id="3d-discs">3D discs</h2>
-<p><strong>A 3D Blu-ray to a side-by-side MKV</strong>, full resolution (1080p an eye), HEVC at 10 bits on the GPU when there is one, every track kept:</p>
+<p><strong>A 3D Blu-ray to a side-by-side MKV.</strong> This is the plain conversion: full resolution (1080p per eye), HEVC at 10 bits, on the GPU if there is one, with every track kept.</p>
 <pre><code>bdtools --input &#34;Avatar (2009) 3D.iso&#34; --output &#34;Avatar (2009) 3D FSBS.mkv&#34;</code></pre>
-<p><strong>With only the tracks you will play.</strong> Lossless audio often outweighs the video, so this is the largest saving there is:</p>
+<p><strong>Keep only the tracks you will play.</strong> Lossless audio often weighs more than the video, so this is the biggest saving there is:</p>
 <pre><code>bdtools --input &#34;Avatar (2009) 3D.iso&#34; --output &#34;Avatar (2009) 3D FSBS.mkv&#34; \
         --audio-lang eng --audio-best --subs-lang eng</code></pre>
-<p><strong>Half side by side</strong> for a player that takes only that (Plex, most phones), the file named after what it holds:</p>
+<p><strong>Half side by side</strong>, for a player that only takes that (Plex, most phones). <code>--name-details</code> names the file after what it holds:</p>
 <pre><code>bdtools --input disc.iso --output &#34;Frozen (2013).mkv&#34; --layout half --name-details
 # -&gt; Frozen (2013) 3D HSBS 1080p HEVC 10bit CQ26 NVENC TrueHD 7.1.mkv</code></pre>
-<p><strong>Over-under</strong> (<code>ou</code> full, <code>half-ou</code> half), for a projector or television that prefers it:</p>
+<p><strong>Over-under</strong>, if your projector or television prefers it. <code>ou</code> is full resolution, <code>half-ou</code> half:</p>
 <pre><code>bdtools --input disc.iso --output &#34;Film (2012) 3D OU.mkv&#34; --layout ou</code></pre>
-<p><strong>MVC kept as MVC</strong>, an MKV CoreELEC&#39;s Kodi plays frame packed at full resolution; both eyes are re-encoded in H.264 by the encoder here:</p>
+<p><strong>MVC kept as MVC.</strong> This makes an MKV that CoreELEC&#39;s Kodi plays frame packed at full resolution. Both eyes are re-encoded in H.264 by the encoder built into bdtools:</p>
 <pre><code>bdtools --input disc.iso --output &#34;Film (2012) 3D.mkv&#34; --layout mvc --audio-lang eng --audio-best</code></pre>
-<p><strong>For a headset or an Apple device</strong>, MV-HEVC in an MP4 or MOV. These carry no subtitle track, so one is drawn in by its id from <code>--list</code>:</p>
+<p><strong>For a headset or an Apple device</strong>, which want MV-HEVC in an MP4 or MOV. These files carry no subtitle track, so if you want subtitles, draw one in with its id from <code>--list</code>:</p>
 <pre><code>bdtools --input disc.iso --output &#34;Film (2012).mp4&#34; --for quest --burn-subs 4608
 bdtools --input disc.iso --output &#34;Film (2012).mov&#34; --for visionpro</code></pre>
-<p><strong>A Blu-ray 3D disc image</strong>, to burn or to play from an ISO:</p>
+<p><strong>A Blu-ray 3D disc image</strong>, to burn or to play as an ISO:</p>
 <pre><code>bdtools --input disc.iso --output &#34;Film (2012) 3D.iso&#34; --audio-lang eng --audio-best</code></pre>
-<p><strong>The 3D disc as a 2D film</strong>, its base view alone:</p>
+<p><strong>The 3D disc as a 2D film</strong>, using its base view alone:</p>
 <pre><code>bdtools --input &#34;Avatar (2009) 3D.iso&#34; --output &#34;Avatar (2009).mkv&#34; --2d</code></pre>
-<p><strong>The eyes the wrong way round</strong> (rare; the disc&#39;s own marking is followed): <code>--swap-lr</code>.</p>
+<p>If the eyes come out the wrong way round, which is rare because the disc&#39;s own marking is followed, add <code>--swap-lr</code>.</p>
 <h2 id="2d-and-ultra-hd-discs">2D and Ultra HD discs</h2>
-<p><strong>An Ultra HD Blu-ray to HEVC</strong>, HDR10, HDR10+ and Dolby Vision kept, 10 bits, the quality chosen for the source:</p>
+<p><strong>An Ultra HD Blu-ray to HEVC.</strong> HDR10, HDR10+ and Dolby Vision are kept, the output is 10-bit, and the quality is chosen for the kind of source:</p>
 <pre><code>bdtools --input &#34;Dune (2021) UHD.iso&#34; --output &#34;Dune (2021).mkv&#34;</code></pre>
-<p><strong>Dolby Vision.</strong> The default composes the full enhancement layer into the picture, profile 8.1, which every Dolby Vision player plays. A player that composes the layers itself (CoreELEC) can keep profile 7; or leave Dolby Vision out:</p>
+<p><strong>Dolby Vision.</strong> By default the full enhancement layer is composed into the picture, which gives profile 8.1, the one every Dolby Vision player plays. A player that composes the layers itself (CoreELEC) can keep profile 7. Or you can leave Dolby Vision out altogether:</p>
 <pre><code>bdtools --input uhd.iso --output film.mkv                          # profile 8.1
 bdtools --input uhd.iso --output film.mkv --dv-fel keep --encoder nvenc   # profile 7
 bdtools --input uhd.iso --output film.mkv --dv-fel drop            # HDR10 only</code></pre>
-<p><strong>A 1080p copy of a UHD film</strong>, its black bars found and cut off, and made SDR for a screen that shows HDR wrongly:</p>
+<p><strong>A 1080p copy of a UHD film.</strong> <code>--crop auto</code> finds the black bars and cuts them off, <code>--scale 1080p</code> fits the rest in 1080p, and <code>--tonemap</code> makes it SDR for a screen that shows HDR wrongly:</p>
 <pre><code>bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p
 bdtools --input uhd.iso --output film.mkv --crop auto --scale 1080p --tonemap</code></pre>
-<p><strong>An HD Blu-ray</strong> (H.264, VC-1 or MPEG-2 on the disc) converts the same way; its default quality is a little higher since it is small already:</p>
+<p><strong>An HD Blu-ray</strong> (H.264, VC-1 or MPEG-2 on the disc) converts the same way. Its default quality is a little higher, since the file is small anyway:</p>
 <pre><code>bdtools --input &#34;Film (2007).iso&#34; --output &#34;Film (2007).mkv&#34; --audio-lang eng --audio-best</code></pre>
-<p><strong>H.264 for an old player</strong>, or <strong>AV1</strong> for a new one:</p>
+<p><strong>H.264 for an old player, or AV1 for a new one:</strong></p>
 <pre><code>bdtools --input disc.iso --output film.mkv --codec h264
 bdtools --input disc.iso --output film.mkv --codec av1 --crf 22</code></pre>
 <h2 id="2d-to-3d">2D to 3D</h2>
-<p><strong>A 2D film made 3D</strong>, side by side, the depth the 3D discs&#39; own:</p>
+<p><strong>Make a 2D film 3D.</strong> The output is side by side and the depth is what the 3D discs have:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output &#34;Film (2020) 3D FSBS.mkv&#34; --to-3d
 bdtools --input &#34;Film (2020) UHD.iso&#34; --output &#34;Film (2020) 3D FSBS.mkv&#34; --to-3d --scale 1080p</code></pre>
-<p>Any 3D output takes it: <code>--layout half</code>, <code>ou</code>, <code>mvc</code>, <code>mvhevc</code> (or <code>--for quest</code>), and a Blu-ray 3D image (<code>--output film.iso</code>). An HDR source is tone mapped on the way; the depth network runs on an NVIDIA GPU at about 35 pictures a second, on the CPU at about one a second.</p>
-<p><strong>Stills first</strong>, to choose a depth before hours of conversion: eight places through the film, each at a few depths, as side-by-side and red-cyan JPEGs:</p>
+<p>Any 3D output works here: <code>--layout half</code>, <code>ou</code>, <code>mvc</code>, <code>mvhevc</code> (or <code>--for quest</code>), and a Blu-ray 3D image with <code>--output film.iso</code>. An HDR source is tone mapped on the way. The depth network runs on an NVIDIA GPU at about 35 pictures a second, or on the CPU at about one a second.</p>
+<p><strong>Look at stills first</strong>, to choose a depth before you spend hours on a conversion. This writes eight places from the film, each at a few depths, as side-by-side and red-cyan JPEGs:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output previews/ --to-3d --3d-preview</code></pre>
 <p><strong>More or less depth, nearer or farther</strong>, for the whole film:</p>
 <pre><code>bdtools --input film.mkv --output film-3d.mkv --to-3d --3d-depth 1.3 --3d-screen 0.2</code></pre>
-<p><strong>For a large screen</strong>, the background kept short of the eyes&#39; separation (the screen&#39;s diagonal in inches):</p>
+<p><strong>For a large screen.</strong> Give the screen&#39;s diagonal in inches and the background is kept short of your eyes&#39; separation:</p>
 <pre><code>bdtools --input film.mkv --output film-3d.mkv --to-3d --3d-screen-size 120</code></pre>
-<p><strong>Shots graded by hand</strong>, from a file written by eye with <code>--3d-grade</code> (the <a href="grading.html">grading manual</a>) or by hand:</p>
+<p><strong>Grade the shots by eye.</strong> First grade with <code>--3d-grade</code> (the <a href="grading.html">grading guide</a> explains it), then convert with the file it wrote:</p>
 <pre><code>bdtools --input film.mkv --output film.3d --to-3d --3d-grade :8420        # grade, then
 bdtools --input film.mkv --output film-3d.mkv --to-3d --3d-shots film.3d  # convert</code></pre>
-<p><strong>The other networks and the options</strong>: a larger depth network (<code>--depth-model base</code> or <code>large</code>, non-commercial licences), the learnt hole filler (<code>--3d-fill weights.bin</code>), no refinement (<code>--3d-refine none</code>), no floating window (<code>--3d-window=false</code>).</p>
+<p>There are a few more options: a larger depth network (<code>--depth-model base</code> or <code>large</code>, both under a non-commercial licence), the learnt hole filler (<code>--3d-fill weights.bin</code>), no depth refinement (<code>--3d-refine none</code>), and no floating window (<code>--3d-window=false</code>).</p>
 <h2 id="tracks">Tracks</h2>
-<p><strong>See them</strong>, then narrow. A language and a codec together name one track; a filter that matches nothing stops before any work:</p>
+<p><strong>See them, then narrow them down.</strong> A language and a codec together name one track. A filter that matches nothing stops the run before any work is done:</p>
 <pre><code>bdtools --list --input disc.iso
 bdtools --input disc.iso --output film.mkv --audio-lang eng --audio-codec truehd --subs-lang eng,pt-br</code></pre>
-<p><strong>The best audio track of a language</strong>, rather than a named codec (lossless first, then channels, then bitrate):</p>
+<p><strong>The best audio track in a language</strong>, rather than a named codec. Lossless beats lossy, then more channels, then a higher bitrate:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --audio-lang eng --audio-best</code></pre>
-<p><strong>A foreign film</strong>: the original sound and the English subtitles as the defaults, the dub kept beside them:</p>
+<p><strong>A foreign film.</strong> The original sound and the English subtitles become the defaults, and the dub is kept beside them:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --audio-lang jpn,eng --audio-best \
         --default-audio jpn --subs-lang eng --default-subs eng</code></pre>
-<p><strong>No commentary</strong>, and <strong>the lossy core kept</strong> for a player that cannot decode the lossless track:</p>
+<p><strong>No commentary</strong>, or <strong>the lossy core kept</strong> for a player that cannot decode the lossless track:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --no-commentary
 bdtools --input disc.iso --output film.mkv --audio-best --keep-fallback</code></pre>
-<p><strong>Subtitles.</strong> A 3D conversion carries each subtitle track twice by default, flat and drawn into both eyes at the disc&#39;s depth (<code>--subs-3d both</code>); <code>on</code> or <code>off</code> keeps one kind. PGS subtitles can be read as text, and a subtitle file added as a track:</p>
+<p><strong>Subtitles.</strong> A 3D conversion carries each subtitle track twice by default, once flat and once drawn into both eyes at the disc&#39;s depth (<code>--subs-3d both</code>); <code>on</code> or <code>off</code> keeps just one kind. PGS subtitles can be read as text, and a subtitle file can be added as a track:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --subs-lang eng --subs-3d on
 bdtools --input disc.iso --output film.mkv --subs-ocr                  # an SRT track beside each PGS one
 bdtools --input disc.iso --output film.mkv --subs-file eng:film.srt --subs-file film.eng.forced.srt</code></pre>
 <h2 id="size-and-quality">Size and quality</h2>
-<p><strong>The quality</strong> is <code>--crf</code>, lower better, chosen by the source when not given: 20 for 3D, 18 for Ultra HD, 16 for HD. Grainy films are what cost bits; give those a lower number when their worst pictures matter:</p>
+<p><strong>The quality</strong> is <code>--crf</code>. Lower is better. If you don&#39;t give one, it is chosen by the source: 20 for 3D, 18 for Ultra HD, 16 for HD. Grainy films are what cost bits, so give those a lower number when their worst pictures matter to you:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --crf 14</code></pre>
-<p><strong>A target size</strong> for the video (the sound comes on top): the CRF is found by test encodes first:</p>
+<p><strong>A target size</strong> for the video (the sound comes on top). bdtools finds the CRF with a few test encodes first:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --video-size 8G</code></pre>
-<p><strong>Measure a conversion</strong> against its source, PSNR, SSIM and VMAF, with no other tool:</p>
+<p><strong>Measure a conversion</strong> against its source. PSNR, SSIM and VMAF, with no other tool installed:</p>
 <pre><code>bdtools --input disc.iso --compare film.mkv
 bdtools --input disc.iso --compare film.mkv --compare-every 10 --compare-csv film.csv</code></pre>
-<p><strong>No GPU</strong>, or a slower machine: software encoding at a faster preset:</p>
+<p><strong>No GPU</strong>, or a slower machine? Software encoding at a faster preset:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv --encoder software --preset medium</code></pre>
 <h2 id="parts-batches-and-players">Parts, batches and players</h2>
 <p><strong>A scene</strong>, to try settings on or to keep:</p>
 <pre><code>bdtools --input disc.iso --output scene.mkv --start 1:02:30 --duration 2m
 bdtools --input disc.iso --output scene.mkv --start 1:02:30 --end 1:04:30</code></pre>
-<p><strong>A folder of sources</strong>, converted with one set of settings into another folder; run again, it converts only what is new, and <code>--watch</code> keeps looking for arrivals:</p>
+<p><strong>A folder of sources</strong>, all converted with the same settings into another folder. Run it again and only the new ones are converted; <code>--watch</code> keeps looking for new arrivals:</p>
 <pre><code>bdtools --input /media/inbox --output /media/films --for plex
 bdtools --input /media/inbox --output /media/films --for plex --watch</code></pre>
-<p><strong>A player&#39;s settings</strong> in one word, each only where the command line gives none: <code>coreelec</code>, <code>kodi</code>, <code>plex</code>, <code>appletv</code>, <code>visionpro</code>, <code>quest</code>:</p>
+<p><strong>A player&#39;s settings in one word.</strong> <code>--for</code> sets what a player wants, but only where you have not said otherwise. The choices are <code>coreelec</code>, <code>kodi</code>, <code>plex</code>, <code>appletv</code>, <code>visionpro</code> and <code>quest</code>:</p>
 <pre><code>bdtools --for plex --input disc.iso --output film.mkv
 bdtools --for appletv --crf 20 --input disc.iso --output film.mp4</code></pre>
-<p><strong>Naming for a 3D library.</strong> Kodi and CoreELEC read the layout from the MKV itself; Plex and some players read it from the name, so the project&#39;s outputs carry it (<code>Film (2020) 3D FSBS.mkv</code>, <code>3D HSBS</code>, <code>3D OU</code>). <code>--name-details</code> appends the rest.</p>
-<h2 id="remuxing-no-re-encoding">Remuxing, no re-encoding</h2>
-<p><strong>A 3D disc&#39;s MVC to one <code>.m2ts</code></strong>, for a player that decodes MVC, the tracks chosen:</p>
+<p><strong>Naming for a 3D library.</strong> Kodi and CoreELEC read the layout from the MKV itself, but Plex and some other players read it from the name. That is why the outputs here carry it: <code>Film (2020) 3D FSBS.mkv</code>, <code>3D HSBS</code>, <code>3D OU</code>. <code>--name-details</code> appends the rest.</p>
+<h2 id="remuxing-with-no-re-encoding">Remuxing, with no re-encoding</h2>
+<p><strong>A 3D disc&#39;s MVC into one <code>.m2ts</code></strong>, for a player that decodes MVC, with just the tracks you want:</p>
 <pre><code>bdtools --remux --input &#34;Avatar (2009) 3D.iso&#34; --output &#34;Avatar (2009) 3D.m2ts&#34; --audio-lang eng --audio-best</code></pre>
-<p><strong>A 2D or Ultra HD disc to an MKV</strong>, the video untouched, Dolby Vision profile 7 kept whole:</p>
+<p><strong>A 2D or Ultra HD disc into an MKV.</strong> The video is untouched, and Dolby Vision profile 7 is kept whole:</p>
 <pre><code>bdtools --remux --input &#34;Dune (2021) UHD.iso&#34; --output &#34;Dune (2021).mkv&#34; --audio-lang eng --subs-lang eng</code></pre>
-<p><strong>Tracks dropped from an existing MKV</strong>:</p>
+<p><strong>Drop tracks from an existing MKV:</strong></p>
 <pre><code>bdtools --remux --input &#34;Film (2012).mkv&#34; --output &#34;Film (2012) eng.mkv&#34; --audio-lang eng --audio-best --subs-lang eng</code></pre>
-<h2 id="interruptions-scratch-space-containers">Interruptions, scratch space, containers</h2>
-<p><strong>Resume</strong>: run the same command again; it continues from the last finished segment (whole segments only, so an interruption costs at most one). <code>--restart</code> starts over:</p>
+<h2 id="interruptions-scratch-space-and-containers">Interruptions, scratch space and containers</h2>
+<p><strong>Resume.</strong> Just run the same command again. It picks up from the last finished segment, and since only whole segments are kept, an interruption costs you at most one. <code>--restart</code> starts over:</p>
 <pre><code>bdtools --input disc.iso --output film.mkv            # stopped at 40%...
 bdtools --input disc.iso --output film.mkv            # ...continues from there
 bdtools --input disc.iso --output film.mkv --restart  # from the beginning</code></pre>
-<p>A run with another source, codec, encoder, quality, layout or title starts over and says so.</p>
-<p><strong>Scratch space elsewhere</strong> (a fast local disk when the output is on a share), kept afterwards for a look:</p>
+<p>If you change the source, codec, encoder, quality, layout or title, the run starts over and tells you why.</p>
+<p><strong>Scratch space somewhere else</strong>, say a fast local disk when the output lives on a share. <code>--keep-temp</code> leaves the work files for you to look at:</p>
 <pre><code>bdtools --input /nas/disc.iso --output /nas/film.mkv --temp /scratch --keep-temp</code></pre>
-<p><strong>In Docker</strong>, with the whole toolchain (NVIDIA through the container toolkit; Intel and AMD through the render node):</p>
+<p><strong>In Docker</strong>, with the whole toolchain in the image. NVIDIA GPUs go through the container toolkit, Intel and AMD through the render node:</p>
 <pre><code>docker run --rm --gpus all -v /media:/media ghcr.io/brunoga/bdtools:latest \
   --input &#34;/media/discs/Film.iso&#34; --output &#34;/media/films/Film.mkv&#34;
 docker run --rm --device /dev/dri -v /media:/media ghcr.io/brunoga/bdtools:latest \
   --input &#34;/media/discs/Film.iso&#34; --output &#34;/media/films/Film.mkv&#34;</code></pre>
-<p><strong>A whole shelf</strong>, one disc after another, a failure noted and the rest going on (a failed one resumes when run again):</p>
+<p><strong>A whole shelf</strong>, one disc after another. A failure is noted and the rest carry on, and a failed one resumes the next time you run this:</p>
 <pre><code>for iso in /media/3d-staging/*.iso; do
   name=$(basename &#34;$iso&#34; .iso)
   bdtools --quiet --input &#34;$iso&#34; --output &#34;/media/3dmovies/$name.mkv&#34; --audio-best \
@@ -142,14 +143,14 @@ docker run --rm --device /dev/dri -v /media:/media ghcr.io/brunoga/bdtools:lates
 done</code></pre>
 <h2 id="when-something-is-off">When something is off</h2>
 <table>
-<tr><th>Symptom</th><th>Likely cause, what to do</th></tr>
-<tr><td><code>--check</code> reports an encoder missing</td><td>Only the ones the options need matter: a GPU encoder needs its driver&#39;s library, software needs x264, x265 or SVT-AV1 in the path, or <code>--encoder builtin</code> for the encoders here.</td></tr>
-<tr><td>A filter matched nothing</td><td>The run stops before any work and lists the disc&#39;s tracks; <code>--list</code> shows the ids, languages and codecs to match.</td></tr>
-<tr><td>The wrong title</td><td><code>--list</code> says which playlist was chosen of how many; <code>--playlist NNNNN</code> names another.</td></tr>
-<tr><td>3D plays flat, or half width</td><td>The player does not read the Matroska stereo flag: name the file with its layout, or use <code>--layout half</code> for players that take only that.</td></tr>
-<tr><td>The eyes feel reversed</td><td><code>--swap-lr</code>.</td></tr>
-<tr><td>The conversion restarted from the beginning</td><td>A setting changed since the interrupted run; the log names it.</td></tr>
-<tr><td>The output is huge</td><td>Lossless audio: <code>--audio-lang</code> and <code>--audio-best</code>. Grain: expected; a lower <code>--crf</code> costs more still.</td></tr>
+<tr><th>What you see</th><th>What is probably going on</th></tr>
+<tr><td><code>--check</code> says an encoder is missing</td><td>Only the ones your options need matter. A GPU encoder needs its driver&#39;s library, software encoding needs x264, x265 or SVT-AV1 on the path, and <code>--encoder builtin</code> uses the encoders inside bdtools.</td></tr>
+<tr><td>A filter matched nothing</td><td>The run stops before doing any work and lists the disc&#39;s tracks. <code>--list</code> shows the ids, languages and codecs you can match.</td></tr>
+<tr><td>The wrong title was chosen</td><td><code>--list</code> says which playlist was picked and how many there are. <code>--playlist NNNNN</code> names another.</td></tr>
+<tr><td>3D plays flat, or at half width</td><td>The player does not read the Matroska stereo flag. Put the layout in the file name, or use <code>--layout half</code> for players that only take that.</td></tr>
+<tr><td>The eyes feel reversed</td><td>Add <code>--swap-lr</code>.</td></tr>
+<tr><td>The conversion started from the beginning</td><td>A setting changed since the interrupted run. The log names it.</td></tr>
+<tr><td>The output is huge</td><td>Usually lossless audio: use <code>--audio-lang</code> and <code>--audio-best</code>. Grain is the other reason, and a lower <code>--crf</code> only costs more.</td></tr>
 </table>
 </main>
 </div>
