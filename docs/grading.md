@@ -84,6 +84,10 @@ works:
   behind the server, so it is the quickest check that a turn did what you
   meant.
 
+![The preview as a red-cyan anaglyph: the depth seen on any screen with paper glasses; the readout along the bottom is in the stream itself](manual/img/preview-anaglyph.jpg)
+
+![The preview as both eyes side by side, what the stream carries](manual/img/preview-both.jpg)
+
 A readout is drawn into the bottom of both eyes of the stream, at the
 screen's depth: the time, the play state, the knobs, the stretch and the
 view. It is there so the screen tells you the state while your hands are
@@ -94,6 +98,8 @@ off for clean viewing.
 
 Every control says what it does and when to use it when hovered. From
 the top:
+
+![The page: the preview, the bar, the transport, the knobs, the film's own 3D and the stretches](manual/img/page.jpg)
 
 **Transport.** Play or pause; a picture back or on; ten seconds either
 way; the cut before or after. A paused picture keeps its depth, so a knob
@@ -114,6 +120,8 @@ near point much past 1% in front of the screen strains the eyes.
 | curve | The depth bent within the shot's range: 1 as the network gives it; below 1 what sits between the shot's farthest and nearest comes forward; above 1 it goes back. | Rows the network stacks away behind each other when the film has them side by side (a crowd or a line of things seen from below): 0.5 to 0.7 brings them to where a disc has them. Not as a default: on ordinary shots it measures worse. |
 | flat | No depth: the picture on the screen. | Title cards, screens within the picture, maps, 2D inserts. |
 
+![The knobs: a slider and a number each, flat, reset, and which stretch they grade](manual/img/knobs.jpg)
+
 **reset** puts the stretch back to the command's defaults. The text
 beside it says which stretch the knobs grade, or that the picture is at
 the defaults.
@@ -127,6 +135,8 @@ and how each comes in (at a cut, or eased over seconds). `go` seeks to a
 stretch's start, `×` removes it: the stretch before runs on over what it
 covered, or the defaults do when there is none. `save` writes the file; it is written at every change anyway,
 and "saved" or "unsaved" at the top says which.
+
+![The stretches: each with its range, its knobs, flat, and how it comes in; go seeks to it, × removes it](manual/img/stretches.jpg)
 
 ### Keys
 
@@ -206,6 +216,8 @@ sliders with step buttons, flat, reset, the readout and save, the views
 when there is a reference, the screen's size, the stretch and a button
 to remove it, and the timeline, pressed to seek.
 
+![The panel in VR, the cursor on the curve slider and its hint at the foot](manual/img/vr-panel.png)
+
 The controllers work without the panel too:
 
 | Controller | Does |
@@ -240,6 +252,8 @@ bdtools --input "Film (2020).mkv" --output "Film (2020).3d" --to-3d --3d-grade :
 
 The page gains a row of views:
 
+![The film's own 3D: the views, and the reference's file, offset and alignment](manual/img/reference.jpg)
+
 - **ours**: the conversion (the key `o`).
 - **disc**: the film's own 3D at the same moment (`d`). Switch back and
   forth to see what the stereographer did with the shot.
@@ -251,6 +265,11 @@ The page gains a row of views:
   grey where they agree, an embossed edge where they do not. The sharper
   tool for a small mismatch, and it shows at a glance whether the near
   or the far is off.
+
+![mix: the right eye a blend of the disc's and ours, doubled where the two depths differ](manual/img/view-mix.jpg)
+
+![diff: the difference of the two right eyes, grey where they agree, embossed where they do not](manual/img/view-diff.jpg)
+
 - **align**: the two files' clocks differ when their discs do. Press it
   on a paused picture and the server finds that picture in the reference,
   eight seconds either side, and keeps the offset. The text beside it

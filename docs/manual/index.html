@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bdtools manual</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><a class="brand" href="index.html">bdtools manual</a><nav><a href="grading.html">grading</a><a href="cookbook.html">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
+<div class="wrap single">
+<main>
+<h1>bdtools manual</h1>
+<p class="lead">What bdtools does and how to drive it, as pages: the same text as the documents in the repository, with the pictures.</p>
+<ul class="pages">
+<li><a href="grading.html">Grading a film&#39;s 3D by eye</a><p>A manual for <code>--3d-grade</code>: the web page and the headset that drive a 2D-to-3D conversion live, shot by shot, and the conversion that applies what you set. What the conversion does with the depth, and how it was measured, is in <a href="https://github.com/brunoga/bdtools/blob/main/docs/2d-to-3d.md">2d-to-3d.md</a>; the flags are in the <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md#2d-to-3d">command&#39;s README</a>.</p></li>
+<li><a href="cookbook.html">bdtools from the command line</a><p>Common operations, each a complete command. Only the paths are yours. The <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md">command&#39;s README</a> explains every flag and the choices behind the defaults; <code>bdtools --help</code> lists the flags.</p></li>
+</ul>
+<p>The command's own reference, every flag and the choices behind the defaults, is <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md">bdtools' README</a>; the design and the measurements of the 2D-to-3D conversion are in <a href="https://github.com/brunoga/bdtools/blob/main/docs/2d-to-3d.md">2d-to-3d.md</a>.</p>
+<p>This manual is in the binary too: <code>bdtools --manual :8080</code> serves it at that address, <code>bdtools --manual DIR</code> writes it into a directory, and the grading page links it.</p>
+</main>
+</div>
+</body>
+</html>

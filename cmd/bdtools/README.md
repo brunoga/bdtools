@@ -54,7 +54,8 @@ arm64; Linux arm/v7 too):
 Each example is a complete command; only the paths are yours. `bdtools
 --help` lists every flag, and [Usage](#usage) explains each one;
 [docs/cookbook.md](../../docs/cookbook.md) has more operations, grouped by
-what you are doing.
+what you are doing. The manual is in the binary as web pages too:
+`bdtools --manual :8080` serves it, `bdtools --manual DIR` writes it out.
 
 **Check what is installed** (the answer depends on the options, so pass the
 ones you will use):
@@ -347,6 +348,7 @@ scheduler such as pipeliner retry it.
 | `--check` | — | Report which external tools are present and which are missing, then exit |
 | `--dry-run` | — | Print the commands that would run, without running them |
 | `--version` | — | Print the version and exit |
+| `--manual` | — | The manual (the web pages of `docs/manual`, carried in the binary): serve it at this address (`:8080`, until Ctrl-C) or write its pages into this directory, then exit |
 | `--keep-temp` | — | Leave the work directory's files behind instead of deleting them |
 | `--restart` | — | Encode from the start, ignoring the video an interrupted run left — see [Resuming](#resuming-an-interrupted-conversion) |
 | `--quiet` | — | Only report errors |

@@ -60,6 +60,15 @@ archives:
         dst: bdtools.md
         info:
           mode: 0644
+      - src: docs/manual/*.html
+        dst: manual
+        strip_parent: true
+      - src: docs/manual/style.css
+        dst: manual
+        strip_parent: true
+      - src: docs/manual/img/*
+        dst: manual/img
+        strip_parent: true
     format_overrides:
       - goos: windows
         formats: [zip]

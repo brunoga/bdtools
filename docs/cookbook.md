@@ -23,6 +23,14 @@ bdtools --list --input "Avatar (2009) 3D.iso"
 bdtools --list --json --input "Avatar (2009) 3D.iso"      # for a script
 ```
 
+**The manual**, these pages and the grading manual with their pictures,
+served from the binary at an address, or written out as files:
+
+```sh
+bdtools --manual :8080        # then http://localhost:8080/
+bdtools --manual ~/bdtools-manual
+```
+
 **What would run**, without running it:
 
 ```sh

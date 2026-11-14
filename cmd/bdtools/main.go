@@ -26,9 +26,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -39,6 +42,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/brunoga/bdtools/docs/manual"
 	"github.com/brunoga/bdtools/internal/convert"
 	pversion "github.com/brunoga/bdtools/internal/version"
 )
@@ -132,6 +136,7 @@ func run(argv []string, stdout, stderr *os.File) int {
 		restart  = fs.Bool("restart", false, "encode from the start, ignoring the video an interrupted run of the same command left to resume from")
 		quiet    = fs.Bool("quiet", false, "only report errors")
 		showVer  = fs.Bool("version", false, "print the version and exit")
+		manualTo = fs.String("manual", "", "the manual (the web pages of docs/manual, carried in the binary): serve it at this address (e.g. :8080, until Ctrl-C), or write its pages into this directory; then exit")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "bdtools %s — Blu-ray (or MKV, MP4, MOV) to MKV or MP4: 3D or 2D\n\n", pversion.Resolve(version))
@@ -187,6 +192,9 @@ func run(argv []string, stdout, stderr *os.File) int {
 	if *showVer {
 		fmt.Fprintf(stdout, "bdtools %s\n", pversion.Resolve(version))
 		return 0
+	}
+	if *manualTo != "" {
+		return showManual(*manualTo, stdout, stderr)
 	}
 
 	// A device preset: its settings where the command line has none.
@@ -568,4 +576,56 @@ func writeListJSON(stdout, stderr io.Writer, tracks []convert.Track, dur time.Du
 		return 1
 	}
 	return 0
+}
+
+// showManual serves the manual at an address (host:port, or :port) until
+// an interrupt, or writes its pages into a directory.
+func showManual(to string, stdout, stderr *os.File) int {
+	if _, _, err := net.SplitHostPort(to); err == nil {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", to)
+		if err != nil {
+			fmt.Fprintln(stderr, "bdtools: --manual:", err)
+			return 2
+		}
+		fmt.Fprintf(stdout, "bdtools: the manual at http://%s/ (Ctrl-C ends it)\n", reachable(ln.Addr().String()))
+		srv := &http.Server{Handler: manual.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() { <-ctx.Done(); _ = srv.Close() }()
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintln(stderr, "bdtools: --manual:", err)
+			return 2
+		}
+		return 0
+	}
+	for _, name := range manual.Names() {
+		b, _ := manual.Files.ReadFile(name)
+		p := filepath.Join(to, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			fmt.Fprintln(stderr, "bdtools: --manual:", err)
+			return 2
+		}
+		if err := os.WriteFile(p, b, 0o644); err != nil { //nolint:gosec // the manual's pages
+			fmt.Fprintln(stderr, "bdtools: --manual:", err)
+			return 2
+		}
+	}
+	fmt.Fprintf(stdout, "bdtools: the manual written to %s: open index.html\n", to)
+	return 0
+}
+
+// reachable is a listener's address with a wildcard host made this
+// machine's name, for a line someone will type elsewhere.
+func reachable(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		if h, err := os.Hostname(); err == nil {
+			return net.JoinHostPort(h, port)
+		}
+		return net.JoinHostPort("localhost", port)
+	}
+	return addr
 }
