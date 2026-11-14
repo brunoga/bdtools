@@ -27,7 +27,10 @@ bdtools --remux --input "Dune (2021) UHD.iso" --output "Dune (2021).mkv"       #
 bdtools --input "Furiosa (2024).mkv" --output "Furiosa (2024) 3D.iso" --to-3d    # a Blu-ray 3D made
 ```
 
-More in [bdtools' common tasks](cmd/bdtools/README.md#common-tasks).
+More in [the cookbook](docs/cookbook.md), common operations with a complete
+command each, and [bdtools' common tasks](cmd/bdtools/README.md#common-tasks);
+[grading](docs/grading.md) is the manual for grading a 2D-to-3D conversion
+by eye, on the web page or in a headset.
 
 The decoders, each checked against its standard's conformance streams:
 
