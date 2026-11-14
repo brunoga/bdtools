@@ -238,7 +238,7 @@ function render() {
     const tr = document.createElement('tr'); if (i === st.stretch) tr.className = 'cur';
     const td = v => { const e = document.createElement('td'); e.textContent = v; return e; };
     const go = document.createElement('button'); go.textContent = 'go'; go.title = 'seek to its start'; go.onclick = () => send({ op: 'seek', t: s.start });
-    const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove this stretch: what it covered goes back to the defaults'; del.onclick = () => send({ op: 'delete', i });
+    const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove this stretch: the one before runs on over it, or the defaults do'; del.onclick = () => send({ op: 'delete', i });
     tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
       td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.curve > 0 ? s.curve.toFixed(2) : '–'), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
@@ -582,7 +582,7 @@ const panel = (() => {
       row([['smaller', () => { screenScale = Math.max(0.5, screenScale - 0.1); pl.draw(); }, 0, SIZE], ['bigger', () => { screenScale = Math.min(2.2, screenScale + 0.1); pl.draw(); }, 0, SIZE]], 56, 10);
       const stretch = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'no stretch here (the defaults)';
       text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
-      if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch }), 0, 'remove this stretch: what it covered goes back to the defaults'); }
+      if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch }), 0, 'remove this stretch: the one before runs on over it, or the defaults do'); }
       y += 76;
       // the timeline: stretches as bands, cuts as ticks, the playhead; a press seeks
       const L = st.length > 0 ? st.length : Math.max(st.t, 1), bx = 30, bw = w - 60, bh = 70;
