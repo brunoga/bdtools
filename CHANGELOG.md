@@ -5,69 +5,76 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-14
+
 ### Added
 
-- `--3d-curve`, a knob for the shots a depth network stacks away: the
-  depth bent within each shot's range, its nearness to that power, so
-  a curve below 1 brings what lies between the shot's farthest and
-  nearest forward (Toy Story 2's rows of robots seen from below, side
-  by side on the disc, stepped back by every network tried: at 0.5 the
-  rows come to where the disc has them, the pair's error 3.3 to 2.6 px).
-  Also `curve=` in `--3d-shots` and a third knob (a slider, `,` `.`, the
-  VR panel) in `--3d-grade`; 1, the default, leaves the depth as it was.
-- Every control of `--3d-grade`'s page says what it does and when to use
-  it when hovered, the knobs, views, transport, preview modes, the
-  stretches table and the bar; in VR the panel's foot says it for what
-  the cursor is over.
-- Two manuals: `docs/grading.md`, grading a 2D-to-3D conversion by eye
-  from start to finish (the page, the headset, the shots file, the
-  conversion), and `docs/cookbook.md`, the command line's common
-  operations with a complete command each.
-- The manuals as web pages, with pictures of the grading page and the
-  VR panel: `docs/manual/` (generated from the markdown, kept current by
-  a test), carried in the binary and in the release archives;
+- `--3d-curve`, a knob for the shots a depth network stacks away. It
+  bends the depth within each shot's range by raising its nearness to
+  that power, so a curve below 1 brings forward what lies between the
+  shot's farthest and nearest points. The case that led to it is Toy
+  Story 2's rows of robots seen from below. The disc has them side by
+  side, and every network tried stepped them back. At 0.5 the rows come
+  to where the disc has them, and the pair's error falls from 3.3 to
+  2.6 pixels. The knob is also `curve=` in `--3d-shots` and a third
+  slider in `--3d-grade`, with the `,` and `.` keys and the VR panel.
+  The default is 1, which leaves the depth as it was.
+- A learnt hole filler for 2D-to-3D. `--3d-fill FILE` paints what an
+  eye saw nothing of behind a nearer thing's edge with a small network
+  (`stereo.InpaintWeights`), in place of the edge the renderer carries
+  across. `stereobench -holes DIR` records its training crops from 3D
+  discs, `tools/inpainttrain` learns it, and `stereobench -fill FILE`
+  scores it. It is an option for now, because the first weights gain
+  under a decibel in the holes of our render and cost a conversion half
+  its speed, even with its input and corrections made on the GPU beside
+  the network. See docs/2d-to-3d.md.
+- A manual, in two parts. `docs/grading.md` takes you through grading a
+  2D-to-3D conversion by eye, from the page and the headset to the
+  shots file and the conversion. `docs/cookbook.md` is the command
+  line's common operations, each with a complete command. Both are also
+  web pages with pictures of the grading page and the VR panel, in
+  `docs/manual/`, generated from the markdown and kept current by a
+  test. The binary carries them and so do the release archives.
   `--manual :8080` serves them, `--manual DIR` writes them out, and the
   grading page links them.
+- Every control of `--3d-grade`'s page says what it does and when to use
+  it when you hover over it. In VR, the panel's foot says it for what
+  the cursor is over.
+- An icon for bdtools, a disc seen by two eyes (`internal/convert/icon.svg`).
+  It is the grading page's favicon and header mark, served at
+  `/icon.svg`, and the manual's too.
+- `--3d-grade`'s page shows the stream itself above the knobs, as the
+  left eye, both eyes or a red-cyan anaglyph. The stream carries a
+  readout drawn into both eyes, with the time, the knobs, the stretch
+  and the view, for the projector and the headset. A box on the page
+  turns it off.
+- `--3d-grade` has one page. In a headset's browser over HTTPS, Enter VR
+  puts the picture on a screen in VR with the controls on a panel beside
+  it, which you point at with the right controller. `/quest` redirects
+  there. The server serves over HTTPS on the next port, with a
+  certificate of its own making kept in the cache, because a headset's
+  browser allows WebXR on a secure page only.
+- In VR the page decodes the stream itself (`/stream.raw`, WebCodecs)
+  and draws it through WebGL at the film's rate. It asks the headset for
+  a 72 Hz display, leaves VR when both grips are held, and reports what
+  it sees to the server's log (`POST /api/log`).
 
 ### Changed
 
-- The documentation is rewritten in plain prose: complete sentences,
+- The documentation is rewritten in plain prose. Complete sentences,
   the reader addressed, an explanation after each example, in the voice
   of ripgrep's guide and the curl book, with each page kept to one kind
-  of document (how-to, reference or explanation). The manual's pages
-  carry the bdtools icon in their header and as their favicon. The
-  command's help, its messages and errors, and the grading page's
-  labels, hints and key legend are written the same way, as plain
-  sentences that say what a thing does and when to use it.
+  of document. The command's help, its messages and errors, and the
+  grading page's labels, hints and key legend are written the same way.
 - Disc images are read by bdtools' own UDF reader (`internal/udf`,
-  beside its writer), not golift.io/udf: a file's chain of allocation
-  extent descriptors is followed however deep it runs (The Bad Guys'
-  feature, which the library refused as too deep), and the module has
-  one dependency fewer.
+  beside its writer), not golift.io/udf. A file's chain of allocation
+  extent descriptors is followed however deep it runs, which the library
+  refused for The Bad Guys' feature, and the module has one dependency
+  fewer.
 - `--3d-grade`'s panel in VR has sliders for the depth and the screen,
-  dragged with the trigger held; the picture is shown through mipmaps
-  at a higher render scale, and the stream's quantiser is 18 (was 20).
-
-### Added
-
-- An icon for bdtools (`internal/convert/icon.svg`: a disc seen by two
-  eyes), the live grading's pages' favicon and header mark, served at
-  `/icon.svg`.
-- `--3d-grade`'s page shows the stream itself above the knobs (the
-  left eye, both, or a red-cyan anaglyph), and the stream carries a
-  readout drawn into both eyes, time, knobs, stretch and view, for the
-  projector and the headset; a box on the page turns it off.
-- `--3d-grade` has one page: Enter VR on it, in a headset's browser
-  over HTTPS, puts the picture on a screen in VR with the controls on a
-  panel beside it, pointed at with the right controller (`/quest`
-  redirects there).
-- `--3d-grade`'s headset page decodes the stream itself in VR
-  (`/stream.raw`, WebCodecs) and draws it through WebGL at the film's
-  rate, asks the headset for a 72 Hz display, leaves VR on both grips,
-  and reports what it sees to the server's log (`POST /api/log`).
-- `--3d-grade` serves over HTTPS too, on the next port, with a
-  certificate of its own making kept in the cache: a headset's browser
-  allows WebXR on a secure page only, so `/quest` is opened there.
+  dragged with the trigger held. The picture is shown through mipmaps at
+  a higher render scale, and the stream's quantiser is 18, where it was
+  20.
 
 ## [0.20.0] - 2026-11-13
 
@@ -92,14 +99,6 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--3d-grade` takes a 3D file (side by side or over-under) as its
   input: its left eye is converted and its own pair is the reference,
   on one clock, for the sharpest comparison with the disc.
-- A learnt hole filler for 2D-to-3D: `--3d-fill FILE` paints what an
-  eye saw nothing of behind a nearer thing's edge by a small network
-  (`stereo.InpaintWeights`), in place of the renderer's carried edge;
-  `stereobench -holes DIR` records its training crops from 3D discs,
-  `tools/inpainttrain` learns it, `stereobench -fill FILE` scores it.
-  An option for now: the first weights gain under a decibel in the
-  holes of our render and cost a conversion half its speed, its input
-  and corrections on the GPU beside the network (docs/2d-to-3d.md).
 - `--3d-grade`'s reference has two more views: `mix`, the right eye a
   blend of the disc's and ours (what agrees fuses, what does not doubles
   by the difference), and `diff`, both eyes the difference of the two
@@ -1647,7 +1646,8 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps them, which put the sound ahead of the picture on discs whose audio
   starts early (1.16 s on The Wild Robot).
 
-[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/brunoga/bdtools/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/brunoga/bdtools/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/brunoga/bdtools/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/brunoga/bdtools/compare/v0.18.1...v0.19.0
 [0.18.1]: https://github.com/brunoga/bdtools/compare/v0.18.0...v0.18.1
