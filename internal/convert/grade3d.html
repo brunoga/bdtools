@@ -124,6 +124,7 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
   </div>
   <div class="row">
     <label title="Removes the depth and puts the picture on the screen, for titles, cards and 2D inserts (f)."><input type="checkbox" id="flat"> flat (on the screen)</label>
+    <label title="Lifts the titles, credits and logos laid over the picture in front of the scene, as the 3D discs do. auto does it in the film's first 5 minutes. on does it anywhere, for credits later in the film. off leaves the text at the depth of what it is written over. t cycles it.">titles <select id="text" title="Lifts the titles, credits and logos laid over the picture in front of the scene, as the 3D discs do. auto does it in the film's first 5 minutes. on does it anywhere, for credits later in the film. off leaves the text at the depth of what it is written over. t cycles it."><option value="auto">auto</option><option value="on">on</option><option value="off">off</option></select></label>
     <button data-op="reset" title="Puts this stretch's knobs back to the command's defaults.">reset</button>
     <span class="dim" id="stretch" title="The stretch the knobs are grading. A turn of a knob makes one from the cut before, or from here eased in over a second, up to the next stretch."></span>
   </div>
@@ -146,12 +147,12 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
     <strong>stretches</strong>
     <span><button data-op="save" title="Writes the stretches to the shots file, which the conversion reads (s).">save</button> <span class="dim" id="file" title="The shots file."></span></span>
   </div>
-  <table id="shots"><thead><tr><th title="Where the stretch starts in the film.">start</th><th title="Where it ends, at the next stretch or the film's end.">end</th><th title="Its depth. A dash means the default.">depth</th><th title="Its screen. A dash means the default.">screen</th><th title="Its curve. A dash means the default.">curve</th><th title="On the screen, with no depth.">flat</th><th title="How its knobs come in, at a cut or eased in over some seconds from the picture graded.">ramp</th><th></th></tr></thead><tbody></tbody></table>
+  <table id="shots"><thead><tr><th title="Where the stretch starts in the film.">start</th><th title="Where it ends, at the next stretch or the film's end.">end</th><th title="Its depth. A dash means the default.">depth</th><th title="Its screen. A dash means the default.">screen</th><th title="Its curve. A dash means the default.">curve</th><th title="Whether it lifts the text over the picture. A dash means the default.">titles</th><th title="On the screen, with no depth.">flat</th><th title="How its knobs come in, at a cut or eased in over some seconds from the picture graded.">ramp</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
 <p class="dim" style="font-size:13px">
 <kbd>Space</kbd> plays or pauses. <kbd>←</kbd> and <kbd>→</kbd> step a picture, and ten seconds with <kbd>Shift</kbd>. <kbd>[</kbd> and <kbd>]</kbd> jump between cuts.
-<kbd>↑</kbd> and <kbd>↓</kbd> change the depth by 0.05, <kbd>PgUp</kbd> and <kbd>PgDn</kbd> the screen by 0.1, and <kbd>,</kbd> and <kbd>.</kbd> the curve by 0.05. <kbd>f</kbd> makes the shot flat. <kbd>d</kbd> shows the film's own 3D, <kbd>m</kbd> mixes it into the right eye, <kbd>x</kbd> shows the difference, and <kbd>o</kbd> is back to ours. <kbd>s</kbd> saves.
+<kbd>↑</kbd> and <kbd>↓</kbd> change the depth by 0.05, <kbd>PgUp</kbd> and <kbd>PgDn</kbd> the screen by 0.1, and <kbd>,</kbd> and <kbd>.</kbd> the curve by 0.05. <kbd>f</kbd> makes the shot flat, and <kbd>t</kbd> cycles the titles knob through auto, on and off. <kbd>d</kbd> shows the film's own 3D, <kbd>m</kbd> mixes it into the right eye, <kbd>x</kbd> shows the difference, and <kbd>o</kbd> is back to ours. <kbd>s</kbd> saves.
 A turn of a knob grades the shot from its cut, or from this picture eased in over a second when no cut is near, up to the next stretch.
 </p>
 
@@ -172,7 +173,7 @@ async function send(cmd) {
 }
 
 function knobs() {
-  return { depth: +$('depthN').value, screen: +$('screenN').value, curve: +$('curveN').value, flat: $('flat').checked };
+  return { depth: +$('depthN').value, screen: +$('screenN').value, curve: +$('curveN').value, text: $('text').value, flat: $('flat').checked };
 }
 
 // knob changes go out at most every 60 ms; the player keeps only the last
@@ -195,6 +196,7 @@ function setKnobUI(k) {
   $('screen').value = k.screen; $('screenN').value = k.screen.toFixed(2);
   $('curve').value = k.curve; $('curveN').value = k.curve.toFixed(2);
   $('flat').checked = k.flat;
+  $('text').value = k.text || 'auto';
 }
 
 function render() {
@@ -241,7 +243,7 @@ function render() {
     const go = document.createElement('button'); go.textContent = 'go'; go.title = 'Seeks to its start.'; go.onclick = () => send({ op: 'seek', t: s.start });
     const del = document.createElement('button'); del.textContent = '×'; del.title = 'Removes this stretch. The one before runs on over it, or the defaults do.'; del.onclick = () => send({ op: 'delete', i });
     tr.append(td(fmt(s.start)), td(s.end > 0 ? fmt(s.end) : 'end'), td(s.depth > 0 ? s.depth.toFixed(2) : '–'),
-      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.curve > 0 ? s.curve.toFixed(2) : '–'), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
+      td(s.screen == null ? '–' : s.screen.toFixed(2)), td(s.curve > 0 ? s.curve.toFixed(2) : '–'), td(s.text || '–'), td(s.flat ? 'flat' : ''), td(s.ramp > 0 ? s.ramp + ' s' : 'at a cut'));
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
     tb.appendChild(tr);
   });
@@ -346,6 +348,7 @@ for (const [range, num] of [['depth', 'depthN'], ['screen', 'screenN'], ['curve'
   $(num).onchange = () => { $(range).value = $(num).value; sendKnobs(); };
 }
 $('flat').onchange = sendKnobs;
+$('text').onchange = sendKnobs;
 document.querySelectorAll('button[data-view]').forEach(b => b.onclick = () => send({ op: 'ref', view: b.dataset.view }));
 $('align').onclick = () => send({ op: 'align' });
 function toggleView(v) { send({ op: 'ref', view: st && st.ref && st.ref.view === v ? 'ours' : v }); }
@@ -368,6 +371,7 @@ document.addEventListener('keydown', e => {
   else if (k === ',') nudge('curve', -0.05);
   else if (k === '.') nudge('curve', 0.05);
   else if (k === 'f') { $('flat').checked = !$('flat').checked; sendKnobs(); }
+  else if (k === 't') { $('text').value = { auto: 'on', on: 'off', off: 'auto' }[$('text').value]; sendKnobs(); }
   else if (k === 's') send({ op: 'save' });
   else if (k === 'd') toggleView('disc');
   else if (k === 'm') toggleView('mix');
@@ -566,6 +570,11 @@ const panel = (() => {
       const CURVE = "Bends the depth within the shot's range. Below 1, what sits between comes forward, which fixes rows a network stacks away. Above 1 it goes back, and 1 leaves it.";
       slider(0.2, 3, k.curve, v => setKnobs(k.depth, k.screen, v), CURVE);
       row([['−0.1', () => nudgeKnobs(0, 0, -0.1), 0, CURVE], ['−0.05', () => nudgeKnobs(0, 0, -0.05), 0, CURVE], ['+0.05', () => nudgeKnobs(0, 0, 0.05), 0, CURVE], ['+0.1', () => nudgeKnobs(0, 0, 0.1), 0, CURVE]], 56, 10);
+      const TEXT = "Lifts the titles, credits and logos laid over the picture in front of the scene, as the 3D discs do. auto does it in the film's first 5 minutes, on anywhere, and off leaves the text where it is written.";
+      text('titles', 30, y + 32, '600 34px sans-serif'); y += 50;
+      row([['auto', () => send({ op: 'knobs', knobs: { ...k, text: 'auto' } }), k.text === 'auto', TEXT],
+        ['on', () => send({ op: 'knobs', knobs: { ...k, text: 'on' } }), k.text === 'on', TEXT],
+        ['off', () => send({ op: 'knobs', knobs: { ...k, text: 'off' } }), k.text === 'off', TEXT]], 56, 10);
       row([['flat', () => send({ op: 'knobs', knobs: { ...k, flat: !k.flat } }), k.flat, 'Removes the depth and puts the picture on the screen, for titles, cards and 2D inserts (the right grip).'],
         ['reset', () => send({ op: 'reset' }), 0, "Puts this stretch's knobs back to the command's defaults."],
         ['readout', () => send({ op: 'hud', n: st.hud ? 0 : 1 }), st.hud, "Writes the time, the state and the knobs into the stream's picture. Turn it off for a clean picture."],
@@ -684,7 +693,7 @@ function setKnobs(depth, screen, curve) {
   if (!st) return;
   if (curve === undefined) curve = st.knobs.curve;
   const k = { depth: +Math.min(Math.max(depth, 0.05), 5).toFixed(2), screen: +Math.min(Math.max(screen, -5), 5).toFixed(2),
-    curve: +Math.min(Math.max(curve, 0.2), 3).toFixed(2), flat: st.knobs.flat };
+    curve: +Math.min(Math.max(curve, 0.2), 3).toFixed(2), text: st.knobs.text, flat: st.knobs.flat };
   if (k.depth === st.knobs.depth && k.screen === st.knobs.screen && k.curve === st.knobs.curve) return;
   st.knobs = k; render(); panel.draw();
   send({ op: 'knobs', knobs: k });
@@ -692,7 +701,7 @@ function setKnobs(depth, screen, curve) {
 function nudgeKnobs(dd, ds, dc = 0) {
   if (!st) return;
   const k = { depth: +(st.knobs.depth + dd).toFixed(2), screen: +(st.knobs.screen + ds).toFixed(2),
-    curve: +Math.min(Math.max(st.knobs.curve + dc, 0.2), 3).toFixed(2), flat: st.knobs.flat };
+    curve: +Math.min(Math.max(st.knobs.curve + dc, 0.2), 3).toFixed(2), text: st.knobs.text, flat: st.knobs.flat };
   st.knobs = k; render();
   send({ op: 'knobs', knobs: k });
 }

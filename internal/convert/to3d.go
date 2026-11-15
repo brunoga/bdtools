@@ -135,6 +135,28 @@ func (o Options) curve3DKey() float64 {
 	return 0
 }
 
+// textMode is a --3d-text (or text=) value as a stereo.Shape's Text, -1
+// when it is none of them.
+func textMode(v string) int {
+	switch v {
+	case "", "auto":
+		return stereo.TextAuto
+	case "on":
+		return stereo.TextOn
+	case "off":
+		return stereo.TextOff
+	}
+	return -1
+}
+
+// textName is a stereo.Shape's Text as --3d-text names it.
+func textName(m int) string {
+	return [...]string{"auto", "on", "off"}[m]
+}
+
+// text3DKey is --3d-text as the resume key takes it, resolved.
+func (o Options) text3DKey() string { return textName(textMode(o.Text3D)) }
+
 // depth3D is the depth's strength asked for, DefaultDepth3D when not.
 func (o Options) depth3D() float64 {
 	if o.Depth3D > 0 {
@@ -215,6 +237,7 @@ func (o Options) shape3D(size string) stereo.Shape {
 	if o.ScreenSize3D > 0 {
 		s.Far = stereo.ScreenFar(o.ScreenSize3D)
 	}
+	s.Text = max(textMode(o.Text3D), 0)
 	return s
 }
 
@@ -287,6 +310,16 @@ func (r *Runner) newConverter3D(m *depth.Model, report bool) (*stereo.Converter,
 		}
 		c.Refine = w
 		say("--to-3d: the depth refined by %s", f)
+	}
+	if r.Opts.text3DWanted() {
+		t, err := r.textLift()
+		if err != nil {
+			return nil, err
+		}
+		c.Text = t
+		if textMode(r.Opts.Text3D) == stereo.TextAuto {
+			say("--to-3d: the text laid over the picture in the film's first %d minutes, its titles and logos, is lifted in front of the scene", int(stereo.DefaultOpening.Minutes()))
+		}
 	}
 	if f := r.Opts.Fill3D; f != "" && f != "none" {
 		w, err := stereo.ReadInpaint(f)

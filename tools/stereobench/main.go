@@ -41,12 +41,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brunoga/bdtools/internal/convert"
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
+	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/internal/vmaf"
 	"github.com/brunoga/bdtools/mvc"
 )
@@ -110,6 +112,7 @@ func main() {
 	tailPath := flag.String("tail", "", "the depth network's tail weights (tools/depthtrain -tail's, or builtin) in place of the checkpoint's, mapped by the tuned depth's shape (stereo.ShapeFor) unless -scale or -offset")
 	flag.StringVar(&depthDir, "depth-dir", "", "another network's depth of the clips' left eyes, iw3's export (DIR/CLIP/CLIP/depth/%08d.png), in place of ours in the depth's measures (see depthdir.go)")
 	flag.BoolVar(&keepCredits, "keep-credits", false, "give the credits (stereo.Credits) their depth, not flat")
+	flag.StringVar(&textModel, "text", "", "lift the text over the picture to its near end everywhere (stereo.TextLift, --3d-text on), the detector's ONNX model from this file")
 	creditsPath := flag.String("credit-features", "", "write each measured picture's credit features (stereo.Credits) to this CSV file")
 	flag.Parse()
 	if *fillPath != "" {
@@ -249,6 +252,31 @@ func main() {
 
 // creditsOut is -credit-features' file.
 var creditsOut io.Writer
+
+// textModel is -text's model file.
+var textModel string
+
+// textLift is -text's lift (the model read once, a detector a clip).
+func textLift() *stereo.TextLift {
+	textOnce.Do(func() {
+		b, err := os.ReadFile(textModel) //nolint:gosec // the operator's file
+		if err == nil {
+			var g *nn.Graph
+			if g, err = nn.LoadONNX(b); err == nil {
+				textNet, err = textdet.Compile(g)
+			}
+		}
+		if err != nil {
+			fail(fmt.Errorf("-text: %w", err))
+		}
+	})
+	return &stereo.TextLift{Det: &textdet.Detector{Net: textNet, Trees: textdet.OverlayTrees()}, Opening: stereo.DefaultOpening}
+}
+
+var (
+	textOnce sync.Once
+	textNet  *textdet.Net
+)
 
 // filler is -fill: the hole filler run on each made eye.
 var filler *stereo.Filler
@@ -454,6 +482,10 @@ func newClipBench(m *depth.Model, name string, every int) *clipBench {
 	c.conv.Guide = guide
 	c.conv.KeepCredits = keepCredits
 	c.conv.Refine = refine
+	if textModel != "" {
+		c.conv.Text = textLift()
+		c.conv.Shaper.Shape.Text = stereo.TextOn
+	}
 	c.sums.mse, c.sums.holeMSE, c.sums.holeN, c.sums.n = map[string]float64{}, map[string]float64{}, map[string]float64{}, map[string]float64{}
 	c.sums.unsureMSE, c.sums.unsureN = map[string]float64{}, map[string]float64{}
 	return c

@@ -65,6 +65,7 @@ type gradeKnobs struct {
 	Depth  float64 `json:"depth"`
 	Screen float64 `json:"screen"`
 	Curve  float64 `json:"curve"` // 0: the command's
+	Text   string  `json:"text"`  // auto, on or off: where the text over the picture is lifted (--3d-text)
 	Flat   bool    `json:"flat"`
 }
 
@@ -234,6 +235,9 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 	g := &grader{r: r, src: src, model: m, conv: c, wake: make(chan struct{}, 1),
 		clients: map[*gradeClient]struct{}{}, events: map[chan struct{}]struct{}{}, saved: true}
 	c.Shot = g.shotShape
+	if c.Text != nil {
+		c.Text.Clock = src.clock
+	}
 	switch {
 	case r.framedIn != "":
 		// a 3D file: its left eye is the picture converted, its pair the
@@ -660,6 +664,9 @@ func (g *grader) hudText() string {
 	if k.Curve != 0 && k.Curve != 1 {
 		text += fmt.Sprintf("  curve %.2f", k.Curve)
 	}
+	if k.Text != g.defaults().Text {
+		text += "  titles " + k.Text
+	}
 	if k.Flat {
 		text += "  flat"
 	}
@@ -724,13 +731,13 @@ func (g *grader) shotShape(pts int64) (stereo.Shape, bool) {
 // shape is the knobs as the conversion's shape.
 func (g *grader) shape(k gradeKnobs) stereo.Shape {
 	o := g.r.Opts
-	o.Depth3D, o.Screen3D, o.Curve3D = k.Depth, k.Screen, k.Curve
+	o.Depth3D, o.Screen3D, o.Curve3D, o.Text3D = k.Depth, k.Screen, k.Curve, k.Text
 	return o.shape3D(g.model.Size())
 }
 
 // defaults are the command's knobs, where no stretch says otherwise.
 func (g *grader) defaults() gradeKnobs {
-	return gradeKnobs{Depth: g.r.Opts.depth3D(), Screen: g.r.Opts.Screen3D, Curve: g.r.Opts.curve3D()}
+	return gradeKnobs{Depth: g.r.Opts.depth3D(), Screen: g.r.Opts.Screen3D, Curve: g.r.Opts.curve3D(), Text: g.r.Opts.text3DKey()}
 }
 
 // knobsAt is the grade at a time of the film.
@@ -752,6 +759,9 @@ func (g *grader) knobsAtLocked(t time.Duration) gradeKnobs {
 		}
 		if s.Curve > 0 {
 			k.Curve = s.Curve
+		}
+		if s.Text != "" {
+			k.Text = s.Text
 		}
 		k.Flat = s.Flat
 	}
@@ -827,6 +837,10 @@ func (g *grader) setKnobs(k gradeKnobs) {
 	}
 	screen := k.Screen
 	g.shots[i].Depth, g.shots[i].Screen, g.shots[i].Curve, g.shots[i].Flat = k.Depth, &screen, k.Curve, k.Flat
+	g.shots[i].Text = ""
+	if k.Text != g.defaults().Text {
+		g.shots[i].Text = k.Text
+	}
 	g.want.regrade = true
 	g.saved = false
 	g.wakeUp()
@@ -927,6 +941,7 @@ type gradeShot struct {
 	Depth  float64  `json:"depth"`
 	Screen *float64 `json:"screen"`
 	Curve  float64  `json:"curve"`
+	Text   string   `json:"text,omitempty"`
 	Flat   bool     `json:"flat"`
 	Ramp   float64  `json:"ramp"`
 }
@@ -939,7 +954,7 @@ func (g *grader) state() gradeState {
 		Near: g.near, Far: g.far, Saved: g.saved, File: g.r.Opts.Output, Title: g.r.Opts.Input, Width: g.width / 2, Secure: g.tlsAddr, HUD: !g.noHUD, Version: g.r.Version,
 		Shots: []gradeShot{}, Cuts: []float64{}}
 	for _, s := range g.shots {
-		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Curve: s.Curve, Flat: s.Flat, Ramp: s.Ramp})
+		st.Shots = append(st.Shots, gradeShot{Start: s.Start.Seconds(), End: s.End.Seconds(), Depth: s.Depth, Screen: s.Screen, Curve: s.Curve, Text: s.Text, Flat: s.Flat, Ramp: s.Ramp})
 	}
 	for _, c := range g.cuts {
 		st.Cuts = append(st.Cuts, c.Seconds())
@@ -1014,6 +1029,13 @@ func (g *grader) command(c gradeCommand) error {
 			return errors.New("no knobs given")
 		}
 		k := *c.Knobs
+		if k.Text == "" {
+			k.Text = g.knobsAtLocked(g.pos).Text // a page that does not know the knob keeps it
+		}
+		if textMode(k.Text) < 0 {
+			g.mu.Unlock()
+			return errors.New("the text knob must be auto, on or off")
+		}
 		if k.Depth <= 0 || k.Depth > 5 || k.Screen < -5 || k.Screen > 5 || k.Curve != 0 && (k.Curve < 0.2 || k.Curve > 3) {
 			g.mu.Unlock()
 			return errors.New("a knob is out of range. The depth must be above 0 and up to 5, the screen between -5 and 5, and the curve between 0.2 and 3")

@@ -47,6 +47,14 @@ type Backend interface {
 	// heads.
 	TemporalAttention(q, peQ, peK, peV *Tensor, ks, vs []*Tensor, heads int, scale float32) *Tensor
 
+	// The layers of mobile.go, each giving a new tensor.
+	DepthwiseConv2d(x, w, b *Tensor, stride, pad int) *Tensor
+	Activate(x *Tensor, a Act) *Tensor
+	GlobalAvgPool(x *Tensor) *Tensor
+	MulChannels(x, s *Tensor) *Tensor
+	Nearest(x *Tensor, f int) *Tensor
+	Concat(xs ...*Tensor) *Tensor
+
 	// Keep keeps a tensor past Release (the GPU's are otherwise reused).
 	Keep(t *Tensor)
 	// Free frees a kept tensor.
@@ -80,6 +88,14 @@ func (cpu) Keep(*Tensor)                           {}
 func (cpu) Free(*Tensor)                           {}
 func (cpu) Release()                               {}
 func (cpu) Bilinear(x *Tensor, oh, ow int) *Tensor { return Bilinear(x, oh, ow) }
+func (cpu) DepthwiseConv2d(x, w, b *Tensor, stride, pad int) *Tensor {
+	return DepthwiseConv2d(x, w, b, stride, pad)
+}
+func (cpu) Activate(x *Tensor, a Act) *Tensor { return Activate(x, a) }
+func (cpu) GlobalAvgPool(x *Tensor) *Tensor   { return GlobalAvgPool(x) }
+func (cpu) MulChannels(x, s *Tensor) *Tensor  { return MulChannels(x, s) }
+func (cpu) Nearest(x *Tensor, f int) *Tensor  { return Nearest(x, f) }
+func (cpu) Concat(xs ...*Tensor) *Tensor      { return Concat(xs...) }
 func (cpu) Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
 	return Attention(q, k, v, heads, scale)
 }

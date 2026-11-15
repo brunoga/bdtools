@@ -736,6 +736,66 @@ Here that does worse than flat: 23.6 against 30.8, 28.0 against 32.0,
 which is a matter for the depth, not for the credits. The benchmark's
 films and the glass clips are unchanged to the last decimal.
 
+## The titles
+
+Titles, credits over a scene and studio logos are text laid over the
+picture. The 3D discs usually put that text in front of the scene. The
+depth network does not know the text is laid over anything, so it gives
+the letters the depth of whatever they are written over. Toy Story 2
+shows the problem well. On the disc, the "Walt Disney" wordmark floats
+29 px in front of the castle. In our conversion it sank into the lake
+below the castle, and no knob could separate the two, because depth,
+screen and curve move the letters and the lake together.
+
+To find out what the discs do, we recorded the first 90 seconds of 98
+films with `stereobench -samples` and measured each line of text against
+the band around it. 1044 lines are more than 5 px in front of their
+surroundings, with a median of 15.9 px. That puts the text at the near
+end of the picture: in a survey of 32 of the films, the lifted letters
+sit a median 0.7 px behind the picture's 95th percentile of disparity.
+But 5832 lines are kept within 2 px of what is around them, and studios
+disagree on the same kind of text. Some lift a credit over a moving
+scene and some leave it. So whether a disc lifts a line cannot be
+learnt from the picture. We tried, and with all 98 films the classifier
+caught half the lifted lines while it lifted 8% of the kept ones.
+
+What can be learnt is whether text is laid over the picture or written
+on something in it. That is `internal/textdet`. PaddleOCR's PP-OCRv4
+text detector finds the lines of text. bdtools reads its ONNX model
+itself and runs it on the GPU, at about 960 pixels wide. A small
+gradient-boosted classifier then scores each line. It reads the line's
+size, place, strokes and how the line and the band around it changed
+over the last two seconds. It was trained on the openings' text against
+the text a minute ten minutes into the same films. Held out a film at a
+time, it catches 92% of the lines the discs lift, Toy Story 2's 26 out
+of 27, at a threshold of 0.5. But it also takes 20% of the text ten
+minutes in for overlay text, and on some films much more. TRON:
+Legacy's is 38 lines out of 120. That is why `--3d-text auto`, the default, lifts text only in
+the film's first 5 minutes, where the titles are. `on` lifts it
+everywhere and `off` nowhere, and a stretch's `text=` changes either
+for a part of the film.
+
+A line is followed from picture to picture. It is lifted once the
+classifier has been sure of it for half a second, which keeps out the
+detector's mistakes on clouds and sparks, because those come and go
+faster than that. Once lifted, a line stays lifted for as long as it is
+followed, and it eases in and out over 8 pictures. The letters are the
+pixels of the line's box that stand out from the mean around them on
+the letters' side, lighter or darker. Their disparity goes to the median
+of the band around the line plus 0.8% of the width, which is the discs'
+15.9 px at 1920, and never short of the picture's near end. The
+decision for a picture is made from the lines up to the picture before,
+so the detector runs on the GPU beside the depth network and nothing
+waits for it. On a 4K film the conversion went from 45 to 40 pictures a
+second with the lift on.
+
+Some things are still wrong. A swash capital outside the detector's
+band, such as the wordmark's W, is caught by letting the mask reach
+twice the line's height past each end of it. That also takes in bright
+things there, such as a row of lights on the horizon. Text on a sign in
+the opening can be lifted too. When that happens, `text=off` on that
+stretch puts it back.
+
 ## The screen's size
 
 What is behind the screen is shown with the right eye's picture to the

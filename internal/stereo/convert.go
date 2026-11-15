@@ -6,6 +6,7 @@ import (
 
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/nn"
+	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -38,7 +39,11 @@ type Converter struct {
 	// Fill, when not nil, fills the eyes' holes (what an eye saw nothing
 	// of) by the hole filler (inpaintnet.go) in place of the renderer's
 	// carried edge, on the depth model's backend.
-	Fill            *Filler
+	Fill *Filler
+	// Text, when not nil, lifts the text over the picture to its near
+	// end (text.go), where the shape's Text says, the detector on the
+	// depth model's backend.
+	Text            *TextLift
 	refineOn        *RefineWeights // Refine's weights on that backend
 	gpuRange        gpuRange       // the shot's depth range, for the GPU's curve
 	win             window
@@ -110,6 +115,7 @@ type Estimate struct {
 	factor      float32    // of the disparity: 0 flat (the credits), 1 as shaped
 	left, right *mvc.Frame // the eyes, when the GPU made them
 	samples     *Samples   // of the disparity they were made with
+	text        *text      // the text lift's part (nil: none)
 }
 
 // Estimate is the first half of Next: the picture's depth, by the
@@ -170,6 +176,9 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 			e.factor = 0
 		}
 	}
+	if c.Text != nil && e.factor != 0 {
+		e.text = c.Text.start(f, e.shape.Text)
+	}
 	if ah := bottom - top; ah >= 28 {
 		if g, ok := c.Model.Backend().(*nn.GPU); ok {
 			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes(e.shape))}
@@ -184,6 +193,15 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 			if e.d, err = c.refine(c.Model.Backend(), e.d, f, top, bottom); err != nil {
 				return &Pending{err: err}
 			}
+		}
+		if e.text != nil {
+			be := c.Model.Backend()
+			y := e.text.y
+			m, err := be.Download(c.Text.Det.Net.Run(be, be.Upload(textdet.Input(y.Pix, y.W, y.H, y.Stride))))
+			if err != nil {
+				return &Pending{err: err}
+			}
+			c.Text.observe(e.text, m)
 		}
 	}
 	return &Pending{e: e}
@@ -225,6 +243,9 @@ func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 			for i := range d {
 				d[i] *= e.factor
 			}
+		}
+		if e.text != nil && c.Text != nil {
+			c.Text.liftCPU(e.text, d, w, top, bottom, e.fresh)
 		}
 		copy(disparity[top*w:bottom*w], d)
 	}
@@ -301,11 +322,19 @@ func (c *Converter) uploadRefine(be nn.Backend) {
 func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error {
 	f, top, bottom := e.f, e.top, e.bottom
 	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
+	var lines, tmap *nn.Tensor
+	if e.text != nil {
+		if e.text.mask != nil && makeEyes {
+			// before the work below: the copy waits for it
+			lines = g.UploadBytes(nn.LiftLines(e.text.mask, e.text.ids, e.text.rings()))
+		}
+		tmap = c.Text.Det.Net.Run(g, g.TextInput(p, e.text.k))
+	}
 	d := c.Model.Infer(g.NetInput(p, top, bottom-top, c.netW, c.netH))
 	if c.Refine != nil {
 		d = c.refineGPU(g, p, d, top, bottom)
 	}
-	var eyes, mask, disp *nn.Tensor
+	var eyes, holes, disp *nn.Tensor
 	var clo, cspan, curve float32
 	var shot int
 	if makeEyes {
@@ -315,9 +344,20 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		far := float32(e.shape.Far * w)
 		clo, cspan, curve, shot = c.gpuRange.args(g, e, d)
 		disp = g.Disparity(g.Bilinear(d, bottom-top, f.Width), f.Width, f.Height, top, bottom, a, b, far, far*FarKnee, lim, clo, cspan, curve)
-		eyes, mask = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
-		if mask != nil {
-			c.Fill.FillGPU(g, eyes, mask, f.Width, f.Height, top, bottom)
+		if e.text != nil {
+			near := c.Text.nearState(g)
+			if e.fresh {
+				g.ResetNear(near)
+			}
+			g.NearEnd(disp, f.Width, top, bottom, textRange(f.Width), near)
+			if lines != nil {
+				g.LiftText(disp, f.Width, f.Height, top, bottom, lines, e.text.y.W, e.text.y.H, e.text.k, len(e.text.lines),
+					c.Text.liftPixels(f.Width), textRange(f.Width), near)
+			}
+		}
+		eyes, holes = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
+		if holes != nil {
+			c.Fill.FillGPU(g, eyes, holes, f.Width, f.Height, top, bottom)
 		}
 		disp = g.Samples(disp, f.Width, f.Height, top, bottom, sampleEdge(f.Width))
 	}
@@ -341,6 +381,12 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 			}
 			if err == nil && curve != 0 {
 				c.gpuRange.steady(out.Data, shot)
+			}
+		}
+		if err == nil && tmap != nil {
+			var m *nn.Tensor
+			if m, err = g.Download(tmap); err == nil {
+				c.Text.observe(e.text, m)
 			}
 		}
 		g.Release()
@@ -458,10 +504,13 @@ func (c *Converter) Depth(f *mvc.Frame) (*Estimate, error) { return c.estimate(f
 // picture on its own (its floating window not eased in from the pictures
 // before). The converter's own shape is left as it was.
 func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
-	keep, shape, fresh := c.Shaper, e.shape, e.fresh
+	keep, shape, fresh, txt := c.Shaper, e.shape, e.fresh, e.text
 	c.Shaper, e.shape, e.fresh = Shaper{Shape: s}, s, true
+	if txt != nil {
+		e.text = c.Text.still(txt, s.Text)
+	}
 	_, d := c.Shape(e)
-	c.Shaper, e.shape, e.fresh = keep, shape, fresh
+	c.Shaper, e.shape, e.fresh, e.text = keep, shape, fresh, txt
 	left, right = c.pair(e.f, d, e.top, e.bottom)
 	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
 	return left, right
@@ -472,13 +521,16 @@ func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
 // made of it: a hand's grading. It gives the disparity's samples too.
 // The Estimate's depth must be there (KeepDepth, or Depth's).
 func (c *Converter) Grade(e *Estimate, s Shape, flat bool) (left, right *mvc.Frame, samples *Samples) {
-	keep, shape, fresh, factor := c.Shaper, e.shape, e.fresh, e.factor
+	keep, shape, fresh, factor, txt := c.Shaper, e.shape, e.fresh, e.factor, e.text
 	c.Shaper, e.shape, e.fresh, e.factor = Shaper{Shape: s}, s, true, 1
 	if flat {
 		e.factor = 0
 	}
+	if txt != nil {
+		e.text = c.Text.still(txt, s.Text)
+	}
 	_, d := c.Shape(e)
-	c.Shaper, e.shape, e.fresh, e.factor = keep, shape, fresh, factor
+	c.Shaper, e.shape, e.fresh, e.factor, e.text = keep, shape, fresh, factor, txt
 	left, right = c.pair(e.f, d, e.top, e.bottom)
 	samples = SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
 	c.Window(left, right, samples)
