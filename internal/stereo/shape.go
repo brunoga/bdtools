@@ -31,6 +31,10 @@ type Shape struct {
 	// nearest, as the rows of a crowd a network stacks away behind each
 	// other; above 1 it goes back.
 	Curve float64
+	// Text is where the text over the picture (titles, credits, logos)
+	// is lifted to the picture's near end, as the discs do: TextAuto,
+	// TextOn or TextOff (text.go). It needs the Converter's Text.
+	Text int
 }
 
 // Curved is the nearness n (0 the farthest of a shot's range, 1 the

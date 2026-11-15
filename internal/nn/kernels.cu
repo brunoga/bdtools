@@ -557,6 +557,79 @@ extern "C" __global__ void convt(int c, int h, int w, int o, int k, const float 
 	}
 }
 
+// --- mobile.go's layers --------------------------------------------------
+
+// dwconv: each channel of x [c, h, w] by its own k x k kernel wt [c, 1, k,
+// k] (plus b[c], when b is set), zero beyond the edges, into y [c, ho, wo].
+extern "C" __global__ void dwconv(int c, int h, int w, int k, int stride, int pad, int ho, int wo,
+	const float *x, const float *wt, const float *b, float *y) {
+	EACH((long long)c * ho * wo) {
+		int ox = i % wo;
+		long long t = i / wo;
+		int oy = t % ho, ci = t / ho;
+		const float *p = x + (long long)ci * h * w;
+		const float *kw = wt + ci * k * k;
+		float s = b ? b[ci] : 0.f;
+		for (int ky = 0; ky < k; ky++) {
+			int iy = oy * stride - pad + ky;
+			if (iy < 0 || iy >= h) continue;
+			for (int kx = 0; kx < k; kx++) {
+				int ix = ox * stride - pad + kx;
+				if (ix < 0 || ix >= w) continue;
+				s += kw[ky * k + kx] * p[iy * w + ix];
+			}
+		}
+		y[i] = s;
+	}
+}
+
+// act: y = postS f(preS x + preT) + postT, f nn.Act's (0 none, 1 relu, 2
+// hard swish, 3 hard sigmoid with slope a and offset b, 4 sigmoid).
+extern "C" __global__ void act(long long n, int fn, float preS, float preT, float postS, float postT, float a, float b,
+	const float *x, float *y) {
+	EACH(n) {
+		float v = preS * x[i] + preT;
+		switch (fn) {
+		case 1: v = fmaxf(v, 0.f); break;
+		case 2: v = v * fminf(fmaxf(v + 3.f, 0.f), 6.f) / 6.f; break;
+		case 3: v = fminf(fmaxf(a * v + b, 0.f), 1.f); break;
+		case 4: v = 1.f / (1.f + expf(-v)); break;
+		}
+		y[i] = postS * v + postT;
+	}
+}
+
+// gap: the mean of each of x's channels of n, a block a channel.
+extern "C" __global__ void gap(int n, const float *x, float *y) {
+	__shared__ float part[256];
+	const float *p = x + (long long)blockIdx.x * n;
+	float s = 0.f;
+	for (int i = threadIdx.x; i < n; i += blockDim.x) s += p[i];
+	part[threadIdx.x] = s;
+	__syncthreads();
+	for (int m = blockDim.x / 2; m > 0; m /= 2) {
+		if (threadIdx.x < m) part[threadIdx.x] += part[threadIdx.x + m];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0) y[blockIdx.x] = part[0] / n;
+}
+
+// mulch: y = x times its channel's s, channels of hw.
+extern "C" __global__ void mulch(long long n, int hw, const float *x, const float *s, float *y) {
+	EACH(n) y[i] = x[i] * s[i / hw];
+}
+
+// nearest: x [c, h, w] f times larger, each element repeated.
+extern "C" __global__ void nearest(int c, int h, int w, int f, const float *x, float *y) {
+	int W = w * f, H = h * f;
+	EACH((long long)c * H * W) {
+		int X = i % W;
+		long long t = i / W;
+		int Y = t % H, ci = t / H;
+		y[i] = x[((long long)ci * h + Y / f) * w + X / f];
+	}
+}
+
 // temporal: a temporal attention at each of d positions (a block each, a
 // thread a channel of c, heads of hd): the query q[p] + peQ, over t
 // frames' keys fr.k[f][p] + peK[f] and values fr.v[f][p] + peV[f].
@@ -645,6 +718,128 @@ extern "C" __global__ void net_input(int w, int h, int top, int ah, int nw, int 
 			float t = fminf(fmaxf(rgb[c] / 255, 0), 1);
 			x[((long long)c * nh + oy) * nw + ox] = (t - mean[c]) / sd[c];
 		}
+	}
+}
+
+// text_input is a w x h picture's luma at 1/k of its size (k x k means,
+// rounded) as the text detector takes it: in each of 3 channels,
+// normalised by ImageNet's mean and deviation, zero (normalised) past it,
+// [3, H, W].
+extern "C" __global__ void text_input(int w, int h, const unsigned char *Y, int sy, int k, int W, int H, float *x) {
+	const float mean[3] = {0.485f, 0.456f, 0.406f}, sd[3] = {0.229f, 0.224f, 0.225f};
+	int hw = w / k, hh = h / k;
+	EACH((long long)W * H) {
+		int ox = i % W, oy = i / W;
+		bool in = ox < hw && oy < hh;
+		float v = 0.f;
+		if (in) {
+			const unsigned char *a = Y + (long long)k * oy * sy + k * ox;
+			int s = 0;
+			for (int j = 0; j < k; j++)
+				for (int i2 = 0; i2 < k; i2++) s += a[(long long)j * sy + i2];
+			v = (float)((s + k * k / 2) / (k * k)) / 255.f;
+		}
+		for (int c = 0; c < 3; c++) x[((long long)c * H + oy) * W + ox] = in ? (v - mean[c]) / sd[c] : 0.f;
+	}
+}
+
+// text_hist counts the disparity d (w wide) of every other pixel of every
+// other active row [top, bottom) into TEXT_BINS bins of bw from lo.
+#define TEXT_BINS 512
+extern "C" __global__ void text_hist(int w, int top, int bottom, const float *d, float lo, float bw, unsigned int *hist) {
+	int cols = (w + 1) / 2, rows = (bottom - top + 1) / 2;
+	EACH((long long)cols * rows) {
+		int x = 2 * (i % cols), y = top + 2 * (i / cols);
+		float v = d[(long long)y * w + x];
+		if (!isfinite(v)) continue;
+		int b = min(max((int)floorf((v - lo) / bw), 0), TEXT_BINS - 1);
+		atomicAdd(&hist[b], 1u);
+	}
+}
+
+// text_near takes the hist's q quantile (the near end of the picture's
+// disparity) into state[0], a share alpha of the way from where it was,
+// or all of it when state[1] is 0 (a new shot); one thread.
+extern "C" __global__ void text_near(const unsigned int *hist, float lo, float bw, float q, float alpha, float *state) {
+	unsigned long long n = 0;
+	for (int b = 0; b < TEXT_BINS; b++) n += hist[b];
+	if (n == 0) return;
+	unsigned long long want = (unsigned long long)(q * n), c = 0;
+	int b = 0;
+	for (; b < TEXT_BINS - 1; b++) {
+		c += hist[b];
+		if (c > want) break;
+	}
+	float v = lo + (b + 0.5f) * bw;
+	state[0] = state[1] == 0.f ? v : state[0] + alpha * (v - state[0]);
+	state[1] = 1.f;
+}
+
+// text_ring_hist counts, a block a line, the disparity d (w wide) of
+// every other pixel of every other row of each line's ring: boxes holds 8
+// ints a line, the ring's outside x0, y0, x1, y1 and the line's own box
+// inside it (full size), only rows [top, bottom) counted; into TEXT_BINS
+// bins of bw from lo a line.
+extern "C" __global__ void text_ring_hist(int w, int top, int bottom, const float *d, const int *boxes, float lo, float bw,
+	unsigned int *hist) {
+	const int *b = boxes + 8 * blockIdx.x;
+	int x0 = b[0], y0 = max(b[1], top), x1 = b[2], y1 = min(b[3], bottom);
+	int cols = (x1 - x0 + 1) / 2, rows = (y1 - y0 + 1) / 2;
+	unsigned int *hb = hist + TEXT_BINS * blockIdx.x;
+	for (int i = threadIdx.x; i < cols * rows; i += blockDim.x) {
+		int x = x0 + 2 * (i % cols), y = y0 + 2 * (i / cols);
+		if (x >= b[4] && x < b[6] && y >= b[5] && y < b[7]) continue;
+		float v = d[(long long)y * w + x];
+		if (!isfinite(v)) continue;
+		atomicAdd(&hb[min(max((int)floorf((v - lo) / bw), 0), TEXT_BINS - 1)], 1u);
+	}
+}
+
+// text_targets is each of n lines' disparity, a thread a line: the median
+// of its ring's (text_ring_hist's) plus lift, and at least the picture's
+// near end state[0] when it has one.
+extern "C" __global__ void text_targets(int n, const unsigned int *hist, float lo, float bw, float lift, const float *state,
+	float *targets) {
+	int l = threadIdx.x;
+	if (l >= n) return;
+	const unsigned int *h = hist + TEXT_BINS * l;
+	unsigned long long all = 0, c = 0;
+	for (int b = 0; b < TEXT_BINS; b++) all += h[b];
+	float t = state[1] != 0.f ? state[0] : -1e30f;
+	if (all > 0) {
+		int b = 0;
+		for (; b < TEXT_BINS - 1; b++) {
+			c += h[b];
+			if (2 * c > all) break;
+		}
+		t = fmaxf(t, lo + (b + 0.5f) * bw + lift);
+	}
+	targets[l] = t;
+}
+
+// text_lift brings the disparity d (w x h, rows [top, bottom)) of the
+// lifted letters towards their line's target, by their weight in the
+// mask m at 1/k of the picture's size (mw x mh, 0 to 255, sampled
+// bilinearly), the line ids's (1 on, at the nearest pixel; 0 none) target
+// in targets; never back.
+extern "C" __global__ void text_lift(int w, int h, int top, int bottom, float *d, const unsigned char *m,
+	const unsigned char *ids, int mw, int mh, int k, const float *targets) {
+	EACH((long long)w * (bottom - top)) {
+		int x = i % w, y = top + i / w;
+		float fx = fmaxf((x + 0.5f) / k - 0.5f, 0.f), fy = fmaxf((y + 0.5f) / k - 0.5f, 0.f);
+		int x0 = min((int)fx, mw - 1), y0 = min((int)fy, mh - 1);
+		int x1 = min(x0 + 1, mw - 1), y1 = min(y0 + 1, mh - 1);
+		float lx = fx - x0, ly = fy - y0;
+		float a = m[y0 * mw + x0] * (1 - lx) + m[y0 * mw + x1] * lx;
+		float b = m[y1 * mw + x0] * (1 - lx) + m[y1 * mw + x1] * lx;
+		float wt = (a * (1 - ly) + b * ly) / 255.f;
+		if (wt <= 0.f) continue;
+		int id = ids[min(y / k, mh - 1) * mw + min(x / k, mw - 1)];
+		if (id == 0) id = max(max(ids[y0 * mw + x0], ids[y0 * mw + x1]), max(ids[y1 * mw + x0], ids[y1 * mw + x1]));
+		if (id == 0) continue;
+		float t = targets[id - 1];
+		long long j = (long long)y * w + x;
+		if (t > d[j]) d[j] += wt * (t - d[j]);
 	}
 }
 

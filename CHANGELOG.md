@@ -5,6 +5,25 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `--3d-text`, which lifts the text laid over the picture in front of the
+  scene, as the 3D discs do. Titles, credits over a scene and studio
+  logos used to take the depth of whatever they were written over, so
+  Toy Story 2's "Walt Disney" sank into the lake below the castle and no
+  knob could pull it out. Now PaddleOCR's text detector finds the lines
+  of text, running on the GPU from its ONNX model, which is downloaded
+  once. A classifier trained on the openings of 98 films then tells
+  text laid over the picture from text written on things in it. The
+  letters of a line go to the depth around it plus 0.8% of the width,
+  which is the discs' median. `auto`, the default, does this in the
+  film's first 5 minutes, because the classifier also takes a fifth of
+  the text later in a film for titles. `on` does it everywhere and `off`
+  nowhere. It is also `text=` in `--3d-shots`, a titles menu with the
+  `t` key on the grading page, and three buttons on the VR panel. A 4K
+  conversion went from 45 to 40 pictures a second with it on. See
+  docs/2d-to-3d.md.
+
 ## [0.21.0] - 2026-11-14
 
 ### Added

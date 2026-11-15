@@ -25,6 +25,10 @@ every shot right. These are the cases we keep running into:
 - Some pictures should have no depth at all: a title card, a screen
   within the picture, a map, a 2D insert. The flat knob puts them on the
   screen. (The end credits are found and flattened on their own.)
+- Titles and logos laid over the picture should stand in front of the
+  scene. The conversion lifts them on its own in the film's first 5
+  minutes. The titles knob turns that on or off for a stretch, for
+  credits later in the film or for a sign it took for a title.
 - A whole film may want a little more or less depth than the default.
 
 Grading means setting the knobs for stretches of the film and saving
@@ -74,7 +78,7 @@ A few things you may want to add:
   hand. It can be the same file as `--output`.
 - `--start 1:02:00` opens the film at that time instead of the
   beginning.
-- Any other `--to-3d` flag: `--3d-depth`, `--3d-screen`, `--3d-curve`,
+- Any other `--to-3d` flag: `--3d-depth`, `--3d-screen`, `--3d-curve`, `--3d-text`,
   `--depth-model`, `--3d-refine`, `--3d-fill`, `--3d-screen-size`. These
   become what the page calls "the command's defaults", and every stretch
   you grade is set relative to them. This matters later: the conversion
@@ -141,7 +145,7 @@ and in pixels. Keep an eye on the near figure: anything much past 1% in
 front of the screen strains the eyes.
 
 **The knobs.** There are three, each a slider and a number, plus a
-checkbox. You can turn them from the keyboard too.
+checkbox and a menu. You can turn them from the keyboard too.
 
 ![The knobs. Each is a slider and a number. Below them, flat, reset, and which stretch they are grading.](manual/img/knobs.jpg)
 
@@ -161,6 +165,15 @@ checkbox. You can turn them from the keyboard too.
   ordinary shots it measures worse than 1.
 - **flat** removes the depth and puts the picture on the screen. Use it
   for title cards, screens within the picture, maps and 2D inserts.
+- **titles** says where the text laid over the picture, the titles,
+  credits and studio logos, is lifted in front of the scene. auto lifts
+  it in the film's first 5 minutes, on lifts it anywhere, and off leaves
+  it at the depth of what it is written over. Set on for a stretch of
+  credits over a scene later in the film, and off where a sign or a
+  screen in the film was taken for a title. A line of text is lifted
+  after the detector has been sure of it for half a second, so it rises
+  a moment after it appears. When you change the knob on a paused
+  picture, the lines the detector is sure of go up or down at once.
 
 **reset** puts the current stretch back to the command's defaults. The
 text beside it tells you which stretch the knobs are grading, or that
@@ -193,6 +206,7 @@ that worked.
 | PgUp PgDn | screen up or down by 0.1 |
 | , . | curve down or up by 0.05 |
 | f | flat on or off |
+| t | titles: auto, on, off, and round again |
 | d, m, x, o | the disc's 3D, the mix, the difference, ours |
 | s | save |
 
@@ -260,7 +274,7 @@ there, and the trigger presses whatever is under it. Hold the trigger on
 a slider to drag it. The foot of the panel tells you what the cursor is
 over and when you would use it. From the top, the panel has the time and
 the near and far figures, the transport, the three knobs as sliders with
-step buttons, flat, reset, the readout and save, the views when there is
+step buttons, the titles buttons auto, on and off, flat, reset, the readout and save, the views when there is
 a reference, the screen's size, the current stretch with a button to
 remove it, and the timeline, which you press to seek.
 
@@ -345,14 +359,15 @@ Each line is a stretch:
 # START [END] SETTINGS...
 0:12:30 0:13:05 depth=0.8 screen=0 curve=1
 1:02:10.5 1:02:40 flat
+1:58:00 text=on
 1:30:00 screen=-1 ramp=1
 2:01:12 curve=0.6
 ```
 
 Times are the film's, as a player shows them. A line without an end runs
 to the next line's start, or to the end of the film. `depth=`,
-`screen=` and `curve=` are the knobs, `flat` puts the stretch on the
-screen, and `ramp=` is how many seconds a stretch that begins inside a
+`screen=` and `curve=` are the knobs, `text=` is the titles knob (auto,
+on or off), `flat` puts the stretch on the screen, and `ramp=` is how many seconds a stretch that begins inside a
 shot eases in over. Anything a line does not set stays at the command's
 default, and where lines overlap, the later one wins. A `#` starts a
 comment. This is the same format `--3d-shots` reads, so you can write a

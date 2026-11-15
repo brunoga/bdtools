@@ -1,6 +1,10 @@
 package nn
 
-import "github.com/brunoga/bdtools/internal/cuda"
+import (
+	"encoding/binary"
+
+	"github.com/brunoga/bdtools/internal/cuda"
+)
 
 // The picture ops: a decoded picture made into the depth network's input
 // and its refinement's on the GPU (kernels.cu's net_input and
@@ -188,4 +192,88 @@ func (g *GPU) Samples(d *Tensor, w, h, top, bottom, edge int) *Tensor {
 	gr, bl := each(n)
 	g.launch("disp_samples", gr, bl, 0, w, h, top, bottom, edge, ptr(d), ptr(out))
 	return out
+}
+
+// TextInput is the picture's luma at 1/k of its size as the text
+// detector takes it (textdet.Input's): [3, H, W], H and W that size
+// rounded up to multiples of 32.
+func (g *GPU) TextInput(p *Picture, k int) *Tensor {
+	W, H := (p.w/k+31)/32*32, (p.h/k+31)/32*32
+	x := g.tensor(3, H, W)
+	gr, bl := each(W * H)
+	g.launch("text_input", gr, bl, 0, p.w, p.h, ptr(p.buf), p.strideY, k, W, H, ptr(x))
+	return x
+}
+
+// textBins is kernels.cu's TEXT_BINS.
+const textBins = 512
+
+// NearState is a kept tensor for NearEnd's smoothed near end: its value,
+// and whether it has one yet.
+func (g *GPU) NearState() *Tensor {
+	t := g.tensor(2)
+	g.fail(g.c.Zero(t.dev.a.buf))
+	g.Keep(t)
+	return t
+}
+
+// ResetNear forgets a NearState's value (a new shot).
+func (g *GPU) ResetNear(state *Tensor) { g.fail(g.c.Zero(state.dev.a.buf)) }
+
+// NearEnd takes the near end of a disparity d (w wide, active rows [top,
+// bottom); its 95th percentile, to lim either way) into state (NearState's),
+// a quarter of the way from where it stood.
+func (g *GPU) NearEnd(d *Tensor, w, top, bottom int, lim float32, state *Tensor) {
+	hist := g.tensor(textBins)
+	g.fail(g.c.Zero(hist.dev.a.buf))
+	lo, bw := -lim, 2*lim/textBins
+	gr, bl := each((w + 1) / 2 * ((bottom - top + 1) / 2))
+	g.launch("text_hist", gr, bl, 0, w, top, bottom, ptr(d), lo, bw, ptr(hist))
+	g.launch("text_near", cuda.Dim{X: 1}, cuda.Dim{X: 1}, 0, ptr(hist), lo, bw, float32(0.95), float32(0.25), ptr(state))
+}
+
+// UploadBytes is bytes on the GPU, for the kernels that read them
+// (LiftText's lines). Upload them before the work queued for a picture:
+// the copy waits for what is queued before it.
+func (g *GPU) UploadBytes(b []byte) *Tensor {
+	t := g.tensor((len(b) + 3) / 4)
+	g.fail(g.c.UploadBytes(t.dev.a.buf, 0, b))
+	return t
+}
+
+// LiftLines is the lines LiftText lifts, as UploadBytes takes them: a
+// small mask m of the letters' weights (mw x mh bytes, to 255), the
+// letters' lines' numbers (1 on, 0 none, as m), then each line's ring
+// (outside x0, y0, x1, y1, then its box inside it, at full size) as 8
+// little-endian int32s, 4-aligned.
+func LiftLines(m, ids []byte, rings [][8]int32) []byte {
+	n := (2*len(m) + 3) / 4 * 4
+	b := make([]byte, n+32*len(rings))
+	copy(b, m)
+	copy(b[len(m):], ids)
+	for i, r := range rings {
+		for j, v := range r {
+			binary.LittleEndian.PutUint32(b[n+32*i+4*j:], uint32(v))
+		}
+	}
+	return b
+}
+
+// LiftText brings the disparity d (w x h, active rows [top, bottom)) of
+// the letters of n lines (lines, LiftLines' of a mw x mh mask at 1/k of
+// the picture's size, uploaded)
+// towards their line's target: the median of the ring around it, plus
+// lift (pixels), and at least the near end in state; never back.
+func (g *GPU) LiftText(d *Tensor, w, h, top, bottom int, lines *Tensor, mw, mh, k, n int, lift, lim float32, state *Tensor) {
+	if n == 0 {
+		return
+	}
+	hist, targets := g.tensor(n*textBins), g.tensor(n)
+	g.fail(g.c.Zero(hist.dev.a.buf))
+	lo, bw := -lim, 2*lim/textBins
+	base := ptr(lines)
+	g.launch("text_ring_hist", cuda.Dim{X: n}, cuda.Dim{X: 256}, 0, w, top, bottom, ptr(d), base+uintptr((2*mw*mh+3)/4*4), lo, bw, ptr(hist))
+	g.launch("text_targets", cuda.Dim{X: 1}, cuda.Dim{X: 256}, 0, n, ptr(hist), lo, bw, lift, ptr(state), ptr(targets))
+	gr, bl := each(w * (bottom - top))
+	g.launch("text_lift", gr, bl, 0, w, h, top, bottom, ptr(d), base, base+uintptr(mw*mh), mw, mh, k, ptr(targets))
 }

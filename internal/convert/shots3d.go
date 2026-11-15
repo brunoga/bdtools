@@ -23,7 +23,8 @@ import (
 // START and END are times as a player shows the film (--start's clock);
 // without END a stretch runs to the next one's start (or the end). The
 // settings are --3d-depth's (depth=), --3d-screen's (screen=),
-// --3d-curve's (curve=) and flat (on the screen, as the credits are);
+// --3d-curve's (curve=), --3d-text's (text=) and flat (on the screen, as
+// the credits are);
 // what a stretch does not set is the command's. Where stretches overlap,
 // the later line's wins. A stretch that begins within a shot, not at a
 // cut, takes ramp=SECONDS: its depth, screen and curve eased in from the
@@ -36,6 +37,7 @@ type shot3D struct {
 	Screen     *float64      `json:",omitempty"` // nil: the command's
 	Curve      float64       `json:",omitempty"` // 0: the command's
 	Flat       bool          `json:",omitempty"`
+	Text       string        `json:",omitempty"` // "": the command's
 	Ramp       float64       `json:",omitempty"` // seconds the change eases in over
 }
 
@@ -80,7 +82,7 @@ func parseShots3D(text string) ([]shot3D, error) {
 			f = f[1:]
 		}
 		if len(f) == 0 {
-			return nil, bad("no settings (depth=, screen=, curve=, flat)")
+			return nil, bad("no settings (depth=, screen=, curve=, text=, flat)")
 		}
 		for _, kv := range f {
 			k, v, _ := strings.Cut(kv, "=")
@@ -108,6 +110,11 @@ func parseShots3D(text string) ([]shot3D, error) {
 					return nil, bad("curve=%s: 0.2 to 3, as --3d-curve", v)
 				}
 				s.Curve = d
+			case "text":
+				if v == "" || textMode(v) < 0 {
+					return nil, bad("text=%s: auto, on or off, as --3d-text", v)
+				}
+				s.Text = v
 			case "ramp":
 				d, err := strconv.ParseFloat(v, 64)
 				if err != nil || d < 0 || d > 10 {
@@ -115,7 +122,7 @@ func parseShots3D(text string) ([]shot3D, error) {
 				}
 				s.Ramp = d
 			default:
-				return nil, bad("%q: want depth=, screen=, curve=, flat or ramp=", kv)
+				return nil, bad("%q: want depth=, screen=, curve=, text=, flat or ramp=", kv)
 			}
 		}
 		shots = append(shots, s)
@@ -182,6 +189,9 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 		if s.Curve > 0 {
 			so.Curve3D = s.Curve
 		}
+		if s.Text != "" {
+			so.Text3D = s.Text
+		}
 		shapes[i] = so.shape3D(size)
 	}
 	return func(t time.Duration) (stereo.Shape, bool) {
@@ -215,7 +225,7 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 // temporary file beside it: a reader never sees half of one).
 func writeShots3D(file string, shots []shot3D) error {
 	var b strings.Builder
-	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P curve=C [flat] [ramp=S], as --3d-depth, --3d-screen and --3d-curve; ramp eases a change made within a shot in over S seconds\n")
+	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P curve=C text=auto|on|off [flat] [ramp=S], as --3d-depth, --3d-screen, --3d-curve and --3d-text; ramp eases a change made within a shot in over S seconds\n")
 	for _, s := range shots {
 		b.WriteString(clock(s.Start))
 		if s.End > 0 {
@@ -230,13 +240,16 @@ func writeShots3D(file string, shots []shot3D) error {
 		if s.Curve > 0 {
 			fmt.Fprintf(&b, " curve=%g", s.Curve)
 		}
+		if s.Text != "" {
+			b.WriteString(" text=" + s.Text)
+		}
 		if s.Flat {
 			b.WriteString(" flat")
 		}
 		if s.Ramp > 0 {
 			fmt.Fprintf(&b, " ramp=%g", s.Ramp)
 		}
-		if s.Depth <= 0 && s.Screen == nil && s.Curve <= 0 && !s.Flat {
+		if s.Depth <= 0 && s.Screen == nil && s.Curve <= 0 && s.Text == "" && !s.Flat {
 			b.WriteString(" depth=1")
 		}
 		b.WriteString("\n")

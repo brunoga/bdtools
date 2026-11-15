@@ -71,7 +71,8 @@ func NewGPU() (*GPU, error) {
 		"layernorm_back", "groupnorm_back", "geglu_back", "temporal_back", "temporal_pe_back",
 		"gelu_back", "softmax_back", "mul", "mulcols", "join3",
 		"sgm_half", "sgm_census", "sgm_cost", "sgm_rows", "sgm_down", "sgm_pick", "sgm_valid",
-		"scale_h", "scale_v", "tonemap"} {
+		"scale_h", "scale_v", "tonemap",
+		"dwconv", "act", "gap", "mulch", "nearest", "text_input", "text_hist", "text_near", "text_lift", "text_ring_hist", "text_targets"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -313,6 +314,62 @@ func (g *GPU) Add(a, b *Tensor) *Tensor {
 func (g *GPU) Clone(x *Tensor) *Tensor {
 	y := g.tensor(x.Shape...)
 	g.fail(g.c.Copy(y.dev.a.buf, 0, x.dev.a.buf, x.dev.off, 4*Numel(x.Shape)))
+	return y
+}
+
+func (g *GPU) DepthwiseConv2d(x, w, b *Tensor, stride, pad int) *Tensor {
+	c, h, wd := x.Dim(0), x.Dim(1), x.Dim(2)
+	k := w.Dim(2)
+	ho, wo := (h+2*pad-k)/stride+1, (wd+2*pad-k)/stride+1
+	y := g.tensor(c, ho, wo)
+	gr, bl := each(c * ho * wo)
+	g.launch("dwconv", gr, bl, 0, c, h, wd, k, stride, pad, ho, wo, ptr(x), ptr(w), ptr(b), ptr(y))
+	return y
+}
+
+func (g *GPU) Activate(x *Tensor, a Act) *Tensor {
+	n := Numel(x.Shape)
+	y := g.tensor(x.Shape...)
+	gr, bl := each(n)
+	g.launch("act", gr, bl, 0, int64(n), a.Fn, a.PreS, a.PreT, a.PostS, a.PostT, a.A, a.B, ptr(x), ptr(y))
+	return y
+}
+
+func (g *GPU) GlobalAvgPool(x *Tensor) *Tensor {
+	c := x.Dim(0)
+	y := g.tensor(c, 1, 1)
+	g.launch("gap", cuda.Dim{X: c}, cuda.Dim{X: 256}, 0, x.Dim(1)*x.Dim(2), ptr(x), ptr(y))
+	return y
+}
+
+func (g *GPU) MulChannels(x, s *Tensor) *Tensor {
+	n := Numel(x.Shape)
+	y := g.tensor(x.Shape...)
+	gr, bl := each(n)
+	g.launch("mulch", gr, bl, 0, int64(n), x.Dim(1)*x.Dim(2), ptr(x), ptr(s), ptr(y))
+	return y
+}
+
+func (g *GPU) Nearest(x *Tensor, f int) *Tensor {
+	c, h, w := x.Dim(0), x.Dim(1), x.Dim(2)
+	y := g.tensor(c, h*f, w*f)
+	gr, bl := each(c * h * f * w * f)
+	g.launch("nearest", gr, bl, 0, c, h, w, f, ptr(x), ptr(y))
+	return y
+}
+
+func (g *GPU) Concat(xs ...*Tensor) *Tensor {
+	c := 0
+	for _, x := range xs {
+		c += x.Dim(0)
+	}
+	y := g.tensor(c, xs[0].Dim(1), xs[0].Dim(2))
+	off := y.dev.off
+	for _, x := range xs {
+		n := 4 * Numel(x.Shape)
+		g.fail(g.c.Copy(y.dev.a.buf, off, x.dev.a.buf, x.dev.off, n))
+		off += n
+	}
 	return y
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brunoga/bdtools/internal/stereo"
 )
 
 func TestParseShots3D(t *testing.T) {
@@ -48,7 +50,7 @@ func TestParseShots3D(t *testing.T) {
 	}
 
 	for _, bad := range []string{
-		"0:10 depth=7", "0:10 screen=9", "0:10 curve=0.1", "0:10 curve=4", "0:10 0:09 flat", "0:10", "0:10 0:20", "x flat", "0:10 bright=2", "0:10 flat=1",
+		"0:10 depth=7", "0:10 screen=9", "0:10 curve=0.1", "0:10 curve=4", "0:10 0:09 flat", "0:10", "0:10 0:20", "x flat", "0:10 bright=2", "0:10 flat=1", "0:10 text=yes", "0:10 text=",
 	} {
 		if _, err := parseShots3D(bad); err == nil || !strings.Contains(err.Error(), "line 1") {
 			t.Errorf("%q: %v", bad, err)
@@ -79,6 +81,33 @@ func TestShotShapes(t *testing.T) {
 	s1.Screen3D = 1
 	if s, flat := shot(35); s != s1.shape3D("small") || !flat {
 		t.Errorf("screen=1 flat: %+v %v", s, flat)
+	}
+}
+
+// text= sets where a stretch lifts the text over the picture, as
+// --3d-text would; it goes back out as written.
+func TestShotText(t *testing.T) {
+	shots, err := parseShots3D("0:10 0:20 text=on\n0:30 0:40 text=off depth=2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := Options{To3D: true}
+	shot := o.shotShapes(shots, "small", func(pts int64) time.Duration { return time.Duration(pts) * time.Second })
+	for _, c := range []struct {
+		t    int64
+		want int
+	}{{5, stereo.TextAuto}, {15, stereo.TextOn}, {35, stereo.TextOff}} {
+		if s, _ := shot(c.t); s.Text != c.want {
+			t.Errorf("at %d s: text %d, want %d", c.t, s.Text, c.want)
+		}
+	}
+	file := filepath.Join(t.TempDir(), "shots.txt")
+	if err := writeShots3D(file, shots); err != nil {
+		t.Fatal(err)
+	}
+	back, err := readShots3D(file)
+	if err != nil || len(back) != 2 || back[0].Text != "on" || back[1].Text != "off" {
+		t.Errorf("read back: %+v, %v", back, err)
 	}
 }
 
