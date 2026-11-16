@@ -2297,3 +2297,19 @@ extern "C" __global__ void heads_merge(int n, int heads, int hd, const float *x,
 		y[i] = x[((b * heads + h) * n + tok) * hd + e];
 	}
 }
+
+// rope rotates the first n rows of x [rows, d] in place: each pair of
+// channels (2j, 2j+1) as a complex number times cos + i sin of row i % p
+// of cs [p, d] (cos, sin of pair j at 2j, 2j+1).
+extern "C" __global__ void rope(int n, int d, int p, float *x, const float *cs) {
+	int h = d / 2;
+	EACH((long long)n * h) {
+		long long r = i / h;
+		int j = i % h;
+		float *a = x + r * d + 2 * j;
+		const float *t = cs + (r % p) * d + 2 * j;
+		float re = a[0], im = a[1];
+		a[0] = re * t[0] - im * t[1];
+		a[1] = re * t[1] + im * t[0];
+	}
+}

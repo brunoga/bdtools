@@ -109,13 +109,12 @@ func TestAgainstReference(t *testing.T) {
 		for i := range 4 {
 			close(be+" stage", f.Stages[i], ref([]string{"trunk0", "trunk1", "trunk2", "trunk3"}[i]), 2e-3)
 		}
-		// the reference's without the decoder's no-mask embedding, which
-		// Embed has
+		// the reference's has no_mem_embed, which Vision has not
 		embed := ref("image_embed")
 		for i := range embed.Data {
-			embed.Data[i] += m.w["sam_prompt_encoder.no_mask_embed.weight"].Data[i/(grid*grid)]
+			embed.Data[i] -= m.w["no_mem_embed"].Data[i/(grid*grid)]
 		}
-		close(be+" embed", f.Embed, embed, 2e-3)
+		close(be+" vision", f.Vision, embed, 2e-3)
 		close(be+" high0", f.High0, ref("high_res0"), 2e-3)
 		close(be+" high1", f.High1, ref("high_res1"), 2e-3)
 		t.Logf("%s: encoded in %v", be, time.Since(start))

@@ -33,11 +33,41 @@ const MaskSide = maskSide
 // whole, and between), else its one. Object is the decoder's logit that
 // there is an object at all (at most 0: none, the masks empty).
 func (m *Model) Decode(f *Features, box *Box, points []Point, multi bool) (masks []Mask, object float32, err error) {
+	// a picture alone gets no_mem_embed in place of a memory
+	d, err := m.decode(m.be.Add(m.be.Clone(f.Vision), m.constMap("no_mem_embed")), f, m.tokens(box, points))
+	if err != nil {
+		return nil, 0, err
+	}
+	from, to := 0, 1
+	if multi {
+		from, to = 1, 4
+	}
+	for i := from; i < to; i++ {
+		masks = append(masks, Mask{Logits: d.logits[i], IoU: d.iou[i]})
+	}
+	return masks, d.object, nil
+}
+
+// decoded is all the decoder gives: its four masks' logits (the single
+// mask's, then the three of an ambiguous hint), their IoU estimates and
+// output tokens, and the object score's logit.
+type decoded struct {
+	logits [4][]float32
+	iou    [4]float32
+	tokens [4][]float32
+	object float32
+}
+
+// decode runs the decoder on the pixel features pix ([256, 64, 64], the
+// picture's own with no_mem_embed, or with its memory) and the finer
+// levels of f, for the tokens (tokens'). Where it sees no object the masks
+// are noObject.
+func (m *Model) decode(pix *nn.Tensor, f *Features, tokens *nn.Tensor) (*decoded, error) {
 	be := m.be
-	tokens := m.tokens(box, points)
 	tpe := be.Upload(tokens)
 	queries := be.Clone(tpe)
-	keys := be.Transpose(f.Embed.Reshape(dModel, grid*grid))
+	// no mask is given as a hint: its embedding goes on every feature
+	keys := be.Transpose(be.Add(be.Clone(pix), m.constMap("sam_prompt_encoder.no_mask_embed.weight")).Reshape(dModel, grid*grid))
 	kpe := m.keep("dense.pe", m.dense)
 	plus := func(a, b *nn.Tensor) *nn.Tensor { return be.Add(be.Clone(a), b) }
 	ln := func(x *nn.Tensor, name string) *nn.Tensor {
@@ -64,53 +94,57 @@ func (m *Model) Decode(f *Features, box *Box, points []Point, multi bool) (masks
 	queries = ln(queries, tr+"norm_final_attn")
 	hs, err := be.Download(queries)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	// the mask's features, upscaled with the finer levels' to 256 x 256
 	const up = "sam_mask_decoder.output_upscaling."
 	src := be.Transpose(keys).Reshape(dModel, grid, grid)
 	u := be.Add(be.ConvTranspose2dK(src, m.t(up+"0.weight"), m.t(up+"0.bias")), f.High1)
-	c1 := u.Dim(0)
-	// LayerNorm2d: over the channels, its eps 1e-6
-	u = be.LayerNorm(be.Transpose(u.Reshape(c1, 4*grid*grid)), m.t(up+"1.weight"), m.t(up+"1.bias"), 1e-6)
-	u = be.Transpose(u).Reshape(c1, 2*grid, 2*grid)
-	u = be.Add(be.ConvTranspose2dK(be.GELU(u), m.t(up+"3.weight"), m.t(up+"3.bias")), f.High0)
+	u = be.GELU(m.ln2d(u, up+"1"))
+	u = be.Add(be.ConvTranspose2dK(u, m.t(up+"3.weight"), m.t(up+"3.bias")), f.High0)
 	u = be.GELU(u)
 	c0 := u.Dim(0)
 	// each mask token's hypernetwork gives the weights of the features
+	var d decoded
 	hyper := nn.New(4, c0)
 	for i := range 4 {
-		o := m.mlp(hs.Data[(2+i)*dModel:(3+i)*dModel], fmt.Sprintf("sam_mask_decoder.output_hypernetworks_mlps.%d", i), 3)
+		d.tokens[i] = hs.Data[(2+i)*dModel : (3+i)*dModel]
+		o := m.mlp(d.tokens[i], fmt.Sprintf("sam_mask_decoder.output_hypernetworks_mlps.%d", i), 3)
 		copy(hyper.Data[i*c0:], o)
 	}
 	lg := be.Linear(be.Transpose(u.Reshape(c0, maskSide*maskSide)), be.Upload(hyper), nil)
 	all, err := be.Download(be.Transpose(lg))
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	iou := m.mlp(hs.Data[dModel:2*dModel], "sam_mask_decoder.iou_prediction_head", 3)
-	object = m.mlp(hs.Data[:dModel], "sam_mask_decoder.pred_obj_score_head", 3)[0]
-	from, to := 0, 1
-	if multi {
-		from, to = 1, 4
-	}
+	d.object = m.mlp(hs.Data[:dModel], "sam_mask_decoder.pred_obj_score_head", 3)[0]
 	n := maskSide * maskSide
-	for i := from; i < to; i++ {
-		lg := append([]float32(nil), all.Data[i*n:(i+1)*n]...)
-		if object <= 0 {
-			for j := range lg {
-				lg[j] = noObject
+	for i := range 4 {
+		d.logits[i] = append([]float32(nil), all.Data[i*n:(i+1)*n]...)
+		if d.object <= 0 {
+			for j := range d.logits[i] {
+				d.logits[i][j] = noObject
 			}
 		}
-		masks = append(masks, Mask{Logits: lg, IoU: float32(1 / (1 + math.Exp(-float64(iou[i]))))})
+		d.iou[i] = float32(1 / (1 + math.Exp(-float64(iou[i]))))
 	}
-	return masks, object, nil
+	return &d, nil
+}
+
+// ln2d is LayerNorm2d by a layer's name on x [C, H, W]: over the
+// channels at each place, its eps 1e-6.
+func (m *Model) ln2d(x *nn.Tensor, name string) *nn.Tensor {
+	be := m.be
+	c, h, w := x.Dim(0), x.Dim(1), x.Dim(2)
+	y := be.LayerNorm(be.Transpose(x.Reshape(c, h*w)), m.t(name+".weight"), m.t(name+".bias"), 1e-6)
+	return be.Transpose(y).Reshape(c, h, w)
 }
 
 // tokens are the decoder's tokens: its output tokens (the object score's,
 // the IoU's and the four masks'), then the hints' embeddings (the prompt
 // encoder's sparse embeddings): the box's corners first, then the points,
-// then a padding point.
+// then a padding point (two with no hints at all).
 func (m *Model) tokens(box *Box, points []Point) *nn.Tensor {
 	type hint struct {
 		x, y  float32
@@ -126,6 +160,9 @@ func (m *Model) tokens(box *Box, points []Point) *nn.Tensor {
 			l = 1
 		}
 		hs = append(hs, hint{p.X, p.Y, l})
+	}
+	if len(hs) == 0 {
+		hs = append(hs, hint{0, 0, -1}) // no hints: SAM 2 gives one "not a point"
 	}
 	hs = append(hs, hint{0, 0, -1}) // SAM 2 gives its box as points: always padded
 	const dec = "sam_mask_decoder."

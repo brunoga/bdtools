@@ -117,5 +117,21 @@ func TestGPUWindowLayers(t *testing.T) {
 	same("pool", WindowPool(p, ws), g.WindowPool(gp, ws))
 	b, n, d, heads := 9, 49, 96*2, 2
 	q, k, v := randTensor(r, b*n, d), randTensor(r, b*n, d), randTensor(r, b*n, d)
+	rx, cs := randTensor(r, 50, 8), randTensor(r, 7, 8)
+	grx := g.Upload(rx)
+	same("rope", Rope(rx.Clone(), cs, 45), g.Rope(grx, g.Upload(cs), 45))
 	same("attention", AttentionBatch(q, k, v, b, heads, 0.1), g.AttentionBatch(g.Upload(q), g.Upload(k), g.Upload(v), b, heads, 0.1))
+}
+
+// Rope multiplies each pair by its row's cos + i sin, repeating the table.
+func TestRope(t *testing.T) {
+	x := &Tensor{Shape: []int{3, 2}, Data: []float32{1, 2, 3, 4, 5, 6}}
+	cs := &Tensor{Shape: []int{2, 2}, Data: []float32{0, 1, 1, 0}} // i, then 1
+	Rope(x, cs, 3)
+	want := []float32{-2, 1, 3, 4, -6, 5}
+	for i, v := range want {
+		if x.Data[i] != v {
+			t.Fatalf("%v, want %v", x.Data, want)
+		}
+	}
 }
