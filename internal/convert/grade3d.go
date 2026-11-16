@@ -132,6 +132,9 @@ type grader struct {
 	// the pictures given to the text detector ahead (Converter.Ahead),
 	// waiting to be shown
 	ahead []gradeAhead
+
+	objects []object3D // the objects painted, by their lines in the shots file
+	masks   map[int]*maskTrack
 }
 
 // gradeAhead is a picture waiting in grader.ahead, and its time.
@@ -265,12 +268,20 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 		defer g.ref.src.close()
 		r.Report.Report("--3d-grade: the film's own 3D to compare with is %s (%s)", r.Opts.Reference3D, g.ref.layout)
 	}
+	g.masks = map[int]*maskTrack{}
 	if r.Opts.Shots3D != "" {
 		if g.shots, err = readShots3D(r.Opts.Shots3D); err != nil {
 			return err
 		}
-		r.Report.Report("--3d-grade: %d stretches to start from, %s", len(g.shots), r.Opts.Shots3D)
+		if g.objects, err = readObjects3D(r.Opts.Shots3D); err != nil {
+			return err
+		}
+		if g.masks, err = readMasks3D(masksFile(r.Opts.Shots3D)); err != nil {
+			return fmt.Errorf("--3d-shots: %w", err)
+		}
+		r.Report.Report("--3d-grade: %d stretches and %d objects to start from, %s", len(g.shots), len(g.objects), r.Opts.Shots3D)
 	}
+	c.Objects = g.objectsAt
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", r.Opts.Grade3D)
 	if err != nil {
 		return fmt.Errorf("--3d-grade: %w", err)
@@ -903,12 +914,26 @@ func (g *grader) saveLocked() error {
 	if g.saved {
 		return nil
 	}
-	if err := writeShots3D(g.r.Opts.Output, g.shots); err != nil {
+	if err := writeShots3D(g.r.Opts.Output, g.shots, g.objects); err != nil {
 		g.r.Report.Report("--3d-grade could not write %s: %v", g.r.Opts.Output, err)
 		return err
 	}
+	if len(g.objects) > 0 || len(g.masks) > 0 {
+		if err := writeMasks3D(masksFile(g.r.Opts.Output), g.masks); err != nil {
+			g.r.Report.Report("--3d-grade could not write %s: %v", masksFile(g.r.Opts.Output), err)
+			return err
+		}
+	}
 	g.saved = true
 	return nil
+}
+
+// objectsAt is the converter's Objects: the objects as they are graded
+// now, at a picture's time.
+func (g *grader) objectsAt(pts int64) []stereo.ObjectMask {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return objectsAt(g.objects, g.masks, g.src.clock, g.frameOr()/2)(pts)
 }
 
 // wakeUp has the player look at what is wanted; changed tells the pages.

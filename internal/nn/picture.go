@@ -2,6 +2,7 @@ package nn
 
 import (
 	"encoding/binary"
+	"math"
 
 	"github.com/brunoga/bdtools/internal/cuda"
 )
@@ -287,4 +288,35 @@ func (g *GPU) LiftText(d *Tensor, w, h, top, bottom int, lines *Tensor, mw, mh, 
 	g.launch("text_targets", cuda.Dim{X: 1}, cuda.Dim{X: 256}, 0, n, ptr(hist), lo, bw, lift, ptr(state), ptr(targets))
 	gr, bl := each(w * (bottom - top))
 	g.launch("text_lift", gr, bl, 0, w, h, top, bottom, ptr(d), base, base+uintptr(mw*mh), mw, mh, k, ptr(targets))
+}
+
+// ObjectsBytes is the objects PushObjects moves, as UploadBytes takes
+// them: their masks (s x s bytes each, 0 to 255), then their pushes in
+// pixels as little-endian float32s, 4-aligned.
+func ObjectsBytes(masks [][]byte, pushes []float32) []byte {
+	n := 0
+	for _, m := range masks {
+		n += len(m)
+	}
+	n = (n + 3) / 4 * 4
+	b := make([]byte, n+4*len(pushes))
+	off := 0
+	for _, m := range masks {
+		off += copy(b[off:], m)
+	}
+	for i, p := range pushes {
+		binary.LittleEndian.PutUint32(b[n+4*i:], math.Float32bits(p))
+	}
+	return b
+}
+
+// PushObjects moves the disparity d (w x h, active rows [top, bottom)) of
+// n objects by their pushes (objs, ObjectsBytes' uploaded, masks s x s).
+func (g *GPU) PushObjects(d *Tensor, w, h, top, bottom int, objs *Tensor, s, n int) {
+	if n == 0 {
+		return
+	}
+	base := ptr(objs)
+	gr, bl := each(w * (bottom - top))
+	g.launch("obj_push", gr, bl, 0, w, h, top, bottom, ptr(d), base, s, n, base+uintptr((n*s*s+3)/4*4))
 }

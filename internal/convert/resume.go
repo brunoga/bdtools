@@ -254,9 +254,10 @@ func (r *Runner) resumeKey() (string, error) {
 		Fill3D    string     `json:",omitempty"`
 		Curve3D   float64    `json:",omitempty"`
 		Text3D    string     `json:",omitempty"`
+		Objects3D string     `json:",omitempty"`
 	}{in, fi.Size(), fi.ModTime().UTC(), o.Playlist, o.Codec, o.Encoder, o.NativeGPU, o.CRF, o.Preset, o.Layout,
 		o.SwapLR, max(o.BitDepth, 8), segmentFrames, o.DVFEL, o.elCRF(), o.keyCQ(), o.Crop, o.Scale, o.ToneMap, o.Trim, o.VideoSize,
-		o.to3DKey(), o.refine3DKey(), o.depthModelKey(), o.tune3DKey(), o.redepthKey(), o.shots3DKey(), o.fill3DKey(), o.curve3DKey(), o.text3DKey()}) // as resolved: a default may change
+		o.to3DKey(), o.refine3DKey(), o.depthModelKey(), o.tune3DKey(), o.redepthKey(), o.shots3DKey(), o.fill3DKey(), o.curve3DKey(), o.text3DKey(), o.objects3DKey()}) // as resolved: a default may change
 	if err != nil {
 		return "", err
 	}

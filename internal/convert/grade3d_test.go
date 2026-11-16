@@ -18,7 +18,7 @@ func TestWriteShots3D(t *testing.T) {
 		{Start: 120 * time.Second, Flat: true},
 		{Start: 3*time.Hour + 2*time.Second + 500*time.Millisecond, End: 3*time.Hour + 10*time.Second, Depth: 2},
 	}
-	if err := writeShots3D(file, shots); err != nil {
+	if err := writeShots3D(file, shots, nil); err != nil {
 		t.Fatal(err)
 	}
 	back, err := readShots3D(file)
@@ -200,7 +200,7 @@ func TestShotRamp(t *testing.T) {
 	// the file carries it
 	file := filepath.Join(t.TempDir(), "r.3d")
 	shots[1].Ramp = 1.5
-	if err := writeShots3D(file, shots); err != nil {
+	if err := writeShots3D(file, shots, nil); err != nil {
 		t.Fatal(err)
 	}
 	back, err := readShots3D(file)

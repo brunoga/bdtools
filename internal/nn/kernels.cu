@@ -2313,3 +2313,25 @@ extern "C" __global__ void rope(int n, int d, int p, float *x, const float *cs) 
 		a[1] = re * t[1] + im * t[0];
 	}
 }
+
+// obj_push moves the disparity d (w x h, rows [top, bottom)) of n objects
+// by their pushes: each object's mask in m (s x s bytes, 0 to 255, over
+// the whole picture stretched to a square, sampled bilinearly) times its
+// push in pixels (pushes, after the masks).
+extern "C" __global__ void obj_push(int w, int h, int top, int bottom, float *d, const unsigned char *m, int s, int n,
+	const float *pushes) {
+	EACH((long long)w * (bottom - top)) {
+		int x = i % w, y = top + i / w;
+		float fx = fmaxf((x + 0.5f) * s / w - 0.5f, 0.f), fy = fmaxf((y + 0.5f) * s / h - 0.5f, 0.f);
+		int x0 = min((int)fx, s - 1), y0 = min((int)fy, s - 1);
+		int x1 = min(x0 + 1, s - 1), y1 = min(y0 + 1, s - 1);
+		float lx = fx - x0, ly = fy - y0, add = 0.f;
+		for (int o = 0; o < n; o++) {
+			const unsigned char *mo = m + (long long)o * s * s;
+			float a = mo[y0 * s + x0] * (1 - lx) + mo[y0 * s + x1] * lx;
+			float b = mo[y1 * s + x0] * (1 - lx) + mo[y1 * s + x1] * lx;
+			add += (a * (1 - ly) + b * ly) / 255.f * pushes[o];
+		}
+		d[(long long)y * w + x] += add;
+	}
+}

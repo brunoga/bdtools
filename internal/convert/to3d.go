@@ -285,8 +285,21 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 				return nil, err
 			}
 			start := r.Opts.Trim.Start
-			c.Shot = r.Opts.shotShapes(shots, m.Size(), func(pts int64) time.Duration { return r.timeline(pts) + start })
+			at := func(pts int64) time.Duration { return r.timeline(pts) + start }
+			c.Shot = r.Opts.shotShapes(shots, m.Size(), at)
 			r.Report.Report("--to-3d: %d stretches graded by %s", len(shots), r.Opts.Shots3D)
+			objs, err := readObjects3D(r.Opts.Shots3D)
+			if err != nil {
+				return nil, err
+			}
+			if len(objs) > 0 {
+				tracks, err := readMasks3D(masksFile(r.Opts.Shots3D))
+				if err != nil {
+					return nil, fmt.Errorf("--3d-shots: %w", err)
+				}
+				c.Objects = objectsAt(objs, tracks, at, 20*time.Millisecond)
+				r.Report.Report("--to-3d: %d objects graded by %s, their masks in %s", len(objs), r.Opts.Shots3D, masksFile(r.Opts.Shots3D))
+			}
 		}
 		r.conv = &to3DState{conv: c}
 		s := r.Opts.shape3D(m.Size())

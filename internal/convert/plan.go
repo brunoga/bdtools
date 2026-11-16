@@ -417,6 +417,9 @@ func (o Options) Validate(goos string) error {
 			if _, err := readShots3D(o.Shots3D); err != nil {
 				return err
 			}
+			if _, err := readObjects3D(o.Shots3D); err != nil {
+				return err
+			}
 		}
 	} else if o.ScreenSize3D != 0 {
 		return fmt.Errorf("--3d-screen-size applies to --to-3d only")
