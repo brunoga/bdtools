@@ -293,6 +293,7 @@ func (r *Runner) grade3D(ctx context.Context, src liveSource) error {
 		r.Report.Report("--3d-grade: %d stretches and %d objects to start from, %s", len(g.shots), len(g.objects), r.Opts.Shots3D)
 	}
 	c.Objects = g.objectsAt
+	c.Tint = func(pts int64) []byte { return g.overlay(g.src.clock(pts)) }
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", r.Opts.Grade3D)
 	if err != nil {
 		return fmt.Errorf("--3d-grade: %w", err)
@@ -566,10 +567,6 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	l, rr, s := g.conv.Eyes(e)
 	g.conv.Window(l, rr, s)
 	g.setPos(t, e)
-	if mask := g.overlay(t); mask != nil {
-		l, rr = copyFrame(l), copyFrame(rr)
-		tint(mask, l, rr)
-	}
 	ours := [2]*mvc.Frame{l, rr}
 	shown := g.refOrOurs(ctx, t, ours)
 	if err := g.emit(ctx, shown[0], shown[1]); err != nil {
@@ -604,7 +601,6 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 			}
 			k := g.knobsAt(t)
 			ours[0], ours[1], _ = g.conv.Grade(e, g.shape(k), k.Flat)
-			tint(g.overlay(t), ours[0], ours[1])
 			g.setPos(t, e)
 			shown = g.refOrOurs(ctx, t, ours)
 			if err := g.emit(ctx, shown[0], shown[1]); err != nil {
