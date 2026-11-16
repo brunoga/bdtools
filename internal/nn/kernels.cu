@@ -2228,3 +2228,72 @@ extern "C" __global__ void tonemap(int w, int h, const unsigned char *srcY, cons
 		pic_store(rowC, bps, x + 1, (int)fminf(fmaxf(__fadd_rn(__fadd_rn(cMid, __fmul_rn(cScale, ocr)), 0.5f), 0.f), top));
 	}
 }
+
+// win_part is the rows of an h x w grid (x [h w, c]) in windows of ws x
+// ws, the grid padded with zeros to pw wide and as high as its windows
+// need: y [windows ws ws, c], a window's rows in raster order, the
+// windows too.
+extern "C" __global__ void win_part(int h, int w, int c, int ws, int pw, const float *x, float *y, long long n) {
+	int nwx = pw / ws, ww = ws * ws;
+	EACH(n) {
+		int col = i % c;
+		long long r = i / c;
+		int t = r % ww, win = r / ww;
+		int Y = (win / nwx) * ws + t / ws, X = (win % nwx) * ws + t % ws;
+		y[i] = Y < h && X < w ? x[((long long)Y * w + X) * c + col] : 0.f;
+	}
+}
+
+// win_unpart is win_part undone: the h x w grid's rows (y [h w, c]) from
+// its windows x, the padding dropped.
+extern "C" __global__ void win_unpart(int h, int w, int c, int ws, int pw, const float *x, float *y) {
+	int nwx = pw / ws, ww = ws * ws;
+	EACH((long long)h * w * c) {
+		int col = i % c;
+		long long r = i / c;
+		int Y = r / w, X = r % w;
+		long long win = (Y / ws) * nwx + X / ws;
+		y[i] = x[(win * ww + (Y % ws) * ws + X % ws) * c + col];
+	}
+}
+
+// win_pool is the 2 x 2 maximum within each window of ws x ws rows (x
+// [windows ws ws, c]): y [windows (ws/2)^2, c].
+extern "C" __global__ void win_pool(int c, int ws, const float *x, float *y, long long n) {
+	int hs = ws / 2;
+	EACH(n) {
+		int col = i % c;
+		long long r = i / c;
+		int t = r % (hs * hs);
+		long long win = r / (hs * hs);
+		int Y = 2 * (t / hs), X = 2 * (t % hs);
+		const float *p = x + (win * ws * ws + (long long)Y * ws + X) * c + col;
+		y[i] = fmaxf(fmaxf(p[0], p[c]), fmaxf(p[(long long)ws * c], p[(long long)(ws + 1) * c]));
+	}
+}
+
+// heads_split is x [b n, heads hd] as [b, heads, n, hd]; heads_merge the
+// reverse (x [b, heads, n, hd] to y [b n, heads hd]).
+extern "C" __global__ void heads_split(int n, int heads, int hd, const float *x, float *y, long long total) {
+	EACH(total) {
+		int e = i % hd;
+		long long t = i / hd;
+		int tok = t % n;
+		t /= n;
+		int h = t % heads;
+		long long b = t / heads;
+		y[i] = x[((b * n + tok) * heads + h) * hd + e];
+	}
+}
+
+extern "C" __global__ void heads_merge(int n, int heads, int hd, const float *x, float *y, long long total) {
+	EACH(total) {
+		int e = i % hd;
+		long long t = i / hd;
+		int h = t % heads;
+		t /= heads;
+		int tok = t % n;
+		long long b = t / n;
+		y[i] = x[((b * heads + h) * n + tok) * hd + e];
+	}
+}
