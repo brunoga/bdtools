@@ -72,7 +72,8 @@ func NewGPU() (*GPU, error) {
 		"gelu_back", "softmax_back", "mul", "mulcols", "join3",
 		"sgm_half", "sgm_census", "sgm_cost", "sgm_rows", "sgm_down", "sgm_pick", "sgm_valid",
 		"scale_h", "scale_v", "tonemap",
-		"dwconv", "act", "gap", "mulch", "nearest", "text_input", "text_hist", "text_near", "text_lift", "text_ring_hist", "text_targets"} {
+		"dwconv", "act", "gap", "mulch", "nearest", "text_input", "text_hist", "text_near", "text_lift", "text_ring_hist", "text_targets",
+		"win_part", "win_unpart", "win_pool", "heads_split", "heads_merge"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err

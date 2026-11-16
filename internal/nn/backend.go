@@ -55,6 +55,12 @@ type Backend interface {
 	Nearest(x *Tensor, f int) *Tensor
 	Concat(xs ...*Tensor) *Tensor
 
+	// The windowed attention's layers (window.go).
+	WindowPartition(x *Tensor, h, w, ws int) *Tensor
+	WindowUnpartition(x *Tensor, h, w, ws int) *Tensor
+	WindowPool(x *Tensor, ws int) *Tensor
+	AttentionBatch(q, k, v *Tensor, b, heads int, scale float32) *Tensor
+
 	// Keep keeps a tensor past Release (the GPU's are otherwise reused).
 	Keep(t *Tensor)
 	// Free frees a kept tensor.
@@ -96,6 +102,16 @@ func (cpu) GlobalAvgPool(x *Tensor) *Tensor   { return GlobalAvgPool(x) }
 func (cpu) MulChannels(x, s *Tensor) *Tensor  { return MulChannels(x, s) }
 func (cpu) Nearest(x *Tensor, f int) *Tensor  { return Nearest(x, f) }
 func (cpu) Concat(xs ...*Tensor) *Tensor      { return Concat(xs...) }
+func (cpu) WindowPartition(x *Tensor, h, w, ws int) *Tensor {
+	return WindowPartition(x, h, w, ws)
+}
+func (cpu) WindowUnpartition(x *Tensor, h, w, ws int) *Tensor {
+	return WindowUnpartition(x, h, w, ws)
+}
+func (cpu) WindowPool(x *Tensor, ws int) *Tensor { return WindowPool(x, ws) }
+func (cpu) AttentionBatch(q, k, v *Tensor, b, heads int, scale float32) *Tensor {
+	return AttentionBatch(q, k, v, b, heads, scale)
+}
 func (cpu) Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
 	return Attention(q, k, v, heads, scale)
 }
