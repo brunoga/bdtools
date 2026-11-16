@@ -810,6 +810,91 @@ const panel = (() => {
   pl.draw();
   return pl;
 })();
+// The transport in VR: a console below the screen, tilted towards the
+// viewer, with the buttons that move through the film and a timeline
+// whose drag seeks; worked by the right controller's ray as the panel is.
+const transport = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200; canvas.height = 260;
+  const ctx = canvas.getContext('2d');
+  const W = 1.8, H = W * 260 / 1200; // metres
+  // in front of the screen's foot, at a seated hand's reach of the eye, its top tilted away
+  const tilt = 35 * Math.PI / 180, cx = 0, cy = 0.72, cz = -2.2;
+  const c = Math.cos(tilt), sn = Math.sin(tilt);
+  const up = [0, c, -sn], normal = [0, sn, c];
+  const model = new Float32Array([1, 0, 0, 0,  0, c, -sn, 0,  0, sn, c, 0,  cx, cy, cz, 1]);
+  const items = [];
+  let cursor = null, scrub = null, lastSeek = 0;
+  const tp = { canvas, W, H, model, version: 0,
+    hit(o, d) {
+      const dn = d[0] * normal[0] + d[1] * normal[1] + d[2] * normal[2];
+      if (Math.abs(dn) < 1e-4) return null;
+      const t = ((cx - o[0]) * normal[0] + (cy - o[1]) * normal[1] + (cz - o[2]) * normal[2]) / dn;
+      if (t < 0) return null;
+      const hx = o[0] + d[0] * t - cx, hy = o[1] + d[1] * t - cy, hz = o[2] + d[2] * t - cz;
+      const lx = hx, ly = hx * 0 + hy * up[1] + hz * up[2];
+      if (Math.abs(lx) > W / 2 || Math.abs(ly) > H / 2) return null;
+      return [(lx / W + 0.5) * canvas.width, (0.5 - ly / H) * canvas.height];
+    },
+    itemAt(at) { return items.find(i => at[0] >= i.x && at[0] < i.x + i.w && at[1] >= i.y && at[1] < i.y + i.h); },
+    press(at) { const it = tp.itemAt(at); if (it) it.cmd(); return !!it; },
+    setCursor(at) { if ((at && !cursor) || (!at && cursor) || (at && cursor && (Math.abs(at[0] - cursor[0]) > 2 || Math.abs(at[1] - cursor[1]) > 2))) { cursor = at; tp.draw(); } },
+    // the trigger let go: a seek dragged to ends where it was let go
+    release() { if (scrub !== null) { send({ op: 'seek', t: scrub }); scrub = null; tp.draw(); } },
+    draw() {
+      items.length = 0;
+      const w = canvas.width, h = canvas.height;
+      ctx.fillStyle = 'rgba(20,22,26,0.92)'; ctx.beginPath(); ctx.roundRect(0, 0, w, h, 24); ctx.fill();
+      ctx.textBaseline = 'middle';
+      if (!st) { tp.version++; return; }
+      // the buttons
+      const bs = [['⇤ cut', () => send({ op: 'jump', dir: -1 }), 'the cut before'], ['−1 min', () => send({ op: 'seek', t: Math.max(st.t - 60, 0) })], ['−10 s', () => send({ op: 'step', n: -240 })],
+        ['−1', () => send({ op: 'step', n: -1 })], [st.playing ? '❚❚' : '▶', () => send({ op: 'toggle' }), 'play'],
+        ['+1', () => send({ op: 'step', n: 1 })], ['+10 s', () => send({ op: 'step', n: 240 })], ['+1 min', () => send({ op: 'seek', t: st.t + 60 })], ['cut ⇥', () => send({ op: 'jump', dir: 1 })]];
+      const gap = 10, bw = (w - 40 - gap * (bs.length - 1)) / bs.length, bh = 96;
+      let x = 20;
+      for (const [label, cmd, kind] of bs) {
+        const on = kind === 'play';
+        ctx.fillStyle = on ? '#2d4f78' : '#262a31'; ctx.strokeStyle = '#3a3f48'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(x, 18, bw, bh, 14); ctx.fill(); ctx.stroke();
+        ctx.font = on ? '600 46px sans-serif' : '600 32px sans-serif'; ctx.fillStyle = '#eee'; ctx.textAlign = 'center';
+        ctx.fillText(label, x + bw / 2, 18 + bh / 2); ctx.textAlign = 'left';
+        items.push({ x, y: 18, w: bw, h: bh, cmd });
+        x += bw + gap;
+      }
+      // the timeline: stretches, objects, cuts, the playhead; a press or a drag seeks
+      const L = st.length > 0 ? st.length : Math.max(st.t, 1);
+      const tx = 190, tw = w - 380, ty = 150, th = 80;
+      const t = scrub !== null ? scrub : st.t;
+      ctx.font = '600 34px ui-monospace, monospace'; ctx.fillStyle = scrub !== null ? '#ffb050' : '#e8e8e8';
+      ctx.fillText(fmt(t).replace(/\.\d+$/, ''), 20, ty + th / 2);
+      ctx.fillStyle = '#9a9a9a'; ctx.textAlign = 'right'; ctx.fillText(fmt(L).replace(/\.\d+$/, ''), w - 20, ty + th / 2); ctx.textAlign = 'left';
+      ctx.fillStyle = '#1e2228'; ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 10); ctx.fill();
+      for (const sh of st.shots) {
+        ctx.fillStyle = '#2b4a6a';
+        const x0 = tx + tw * sh.start / L, x1 = tx + tw * (sh.end > 0 ? sh.end : L) / L;
+        ctx.fillRect(x0, ty, Math.max(x1 - x0, 2), th);
+      }
+      ctx.fillStyle = '#c0504d';
+      for (const o of st.objects || []) ctx.fillRect(tx + tw * o.start / L, ty + th - 12, Math.max(tw * (o.end - o.start) / L, 3), 12);
+      ctx.fillStyle = '#7a8290';
+      for (const cut of st.cuts) ctx.fillRect(tx + tw * cut / L, ty + th - 24, 2, 24);
+      ctx.fillStyle = '#5fb0ff'; ctx.fillRect(tx, ty + th / 2 - 3, tw * st.t / L, 6);
+      const hx = tx + tw * t / L;
+      ctx.fillStyle = '#ffb050'; ctx.fillRect(hx - 3, ty - 6, 6, th + 12);
+      ctx.beginPath(); ctx.arc(hx, ty + th / 2, 16, 0, 2 * Math.PI); ctx.fill();
+      const at = x => Math.min(Math.max((x - tx) / tw, 0), 1) * L;
+      items.push({ x: tx - 20, y: ty - 10, w: tw + 40, h: th + 20,
+        cmd: () => { if (cursor) { scrub = at(cursor[0]); tp.draw(); } },
+        // dragging: the time shown follows, and the film is sought now and then (a seek takes a moment)
+        drag: x => { scrub = at(x); const now = performance.now(); if (now - lastSeek > 350) { lastSeek = now; send({ op: 'seek', t: scrub }); } tp.draw(); } });
+      if (cursor) { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 11, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = '#5fb0ff'; ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 6, 0, 2 * Math.PI); ctx.fill(); }
+      tp.version++;
+    },
+  };
+  tp.draw();
+  return tp;
+})();
 let panelStateVer = -1;
 
 // the controllers: an action on a button's press, the sticks repeating
@@ -831,7 +916,7 @@ function controllers(session, xrFrame) {
     if (!gripsSince) gripsSince = performance.now();
     else if (performance.now() - gripsSince > 1000) { gripsSince = 0; session.end(); return; }
   } else gripsSince = 0;
-  if (st && st.ver !== panelStateVer) { panelStateVer = st.ver; panel.draw(); }
+  if (st && st.ver !== panelStateVer) { panelStateVer = st.ver; panel.draw(); transport.draw(); }
   for (const src of session.inputSources) {
     const gp = src.gamepad;
     if (!gp) continue;
@@ -839,24 +924,23 @@ function controllers(session, xrFrame) {
     const ax = gp.axes.length >= 4 ? [gp.axes[2], gp.axes[3]] : [gp.axes[0] || 0, gp.axes[1] || 0];
     const edge = (name, pressed, fn) => { if (pressed) fire(name, 1e9, fn); else held.delete(name); };
     if (src.handedness === 'right') {
-      // the ray on the panel
-      let at = null;
+      // the ray: on the panel, else on the transport, else (painting) on the screen
+      let ro = null, rd = null;
       const rp = src.targetRaySpace && xrFrame.getPose(src.targetRaySpace, panelSpace);
       if (rp) {
         const q = rp.transform.orientation, o = rp.transform.position;
         // the ray's direction: -z turned by the orientation
         const x = q.x, y = q.y, z = q.z, w = q.w;
-        const d = [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))];
-        at = panel.hit([o.x, o.y, o.z], d);
+        ro = [o.x, o.y, o.z];
+        rd = [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))];
       }
+      const at = ro ? panel.hit(ro, rd) : null;
       panel.setCursor(at);
-      // painting: the ray on the screen when it is off the panel
+      const tat = ro && !at ? transport.hit(ro, rd) : null;
+      transport.setCursor(tat);
+      if (!b(0)) transport.release();
       let on = null;
-      if (painting && !at && rp) {
-        const q = rp.transform.orientation, o = rp.transform.position;
-        const x = q.x, y = q.y, z = q.z, w = q.w;
-        on = screenPaint.hit([o.x, o.y, o.z], [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))]);
-      }
+      if (painting && ro && !at && !tat) on = screenPaint.hit(ro, rd);
       screenPaint.setCursor(on);
       if (painting && (on || trigDown)) {
         // the trigger: a press and release a point on the object, a drag a box around it
@@ -878,9 +962,10 @@ function controllers(session, xrFrame) {
         edge('rgrip', b(1) && !!on, () => { hints.points.push([on[0], on[1], 0]); screenPaint.draw(); render(); sendHints(); });
       } else {
         trigDown = false; screenPaint.drag = null;
-        const over = at && panel.itemAt(at);
-        if (b(0) && over && over.drag) fire('drag', 80, () => over.drag(at[0])); else held.delete('drag');
-        edge('rtrig', b(0), () => { if (over && over.drag) return; if (!(at && panel.press(at))) send({ op: 'toggle' }); });
+        const ui = at ? panel : tat ? transport : null, uat = at || tat;
+        const over = ui && ui.itemAt(uat);
+        if (b(0) && over && over.drag) fire('drag', 80, () => over.drag(uat[0])); else held.delete('drag');
+        edge('rtrig', b(0), () => { if (over && over.drag) return; if (!(ui && ui.press(uat))) send({ op: 'toggle' }); });
         edge('rgrip', b(1), () => { if (painting) return; if (st) send({ op: 'knobs', knobs: { ...st.knobs, flat: !st.knobs.flat } }); });
       }
       edge('A', b(4), () => send({ op: 'step', n: 1 }));
@@ -1021,6 +1106,13 @@ function webglScreen(session, space, W, H, Y, Z) {
   const panelTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, panelTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   let panelVersion = -1;
+  // the transport: its own quad and texture, below the screen
+  const tBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, tBuf);
+  const TW = transport.W, TH = transport.H;
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-TW/2, -TH/2, 0, 0,  TW/2, -TH/2, 1, 0,  -TW/2, TH/2, 0, 1,  TW/2, TH/2, 1, 1]), gl.STATIC_DRAW);
+  const tTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  let tVersion = -1;
   // the painting's overlay: the screen's quad again, a centimetre in front, blended
   const paintTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, paintTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -1063,6 +1155,11 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, panel.canvas);
         panelVersion = panel.version;
       }
+      if (transport.version !== tVersion) {
+        gl.bindTexture(gl.TEXTURE_2D, tTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, transport.canvas);
+        tVersion = transport.version;
+      }
       if (painting && screenPaint.version !== paintVersion) {
         gl.bindTexture(gl.TEXTURE_2D, paintTex);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, screenPaint.canvas);
@@ -1086,6 +1183,15 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.uniformMatrix4fv(uMVP, false, mul(pv, panel.model));
         gl.uniform1f(uHalf, 0); gl.uniform1f(uScale, 1);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // the transport (its corners see through)
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.bindTexture(gl.TEXTURE_2D, tTex);
+        gl.bindBuffer(gl.ARRAY_BUFFER, tBuf);
+        gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+        gl.uniformMatrix4fv(uMVP, false, mul(pv, transport.model));
+        gl.uniform1f(uHalf, 0); gl.uniform1f(uScale, 1);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        gl.disable(gl.BLEND);
         // the painting's hints and cursor
         if (painting) {
           gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
