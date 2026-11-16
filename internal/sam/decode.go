@@ -68,7 +68,7 @@ func (m *Model) decode(pix *nn.Tensor, f *Features, tokens *nn.Tensor) (*decoded
 	queries := be.Clone(tpe)
 	// no mask is given as a hint: its embedding goes on every feature
 	keys := be.Transpose(be.Add(be.Clone(pix), m.constMap("sam_prompt_encoder.no_mask_embed.weight")).Reshape(dModel, grid*grid))
-	kpe := m.keep("dense.pe", m.dense)
+	kpe := m.keep("dense.pe", func() *nn.Tensor { return m.dense })
 	plus := func(a, b *nn.Tensor) *nn.Tensor { return be.Add(be.Clone(a), b) }
 	ln := func(x *nn.Tensor, name string) *nn.Tensor {
 		return be.LayerNorm(x, m.t(name+".weight"), m.t(name+".bias"), 1e-5)

@@ -73,7 +73,7 @@ func NewGPU() (*GPU, error) {
 		"sgm_half", "sgm_census", "sgm_cost", "sgm_rows", "sgm_down", "sgm_pick", "sgm_valid",
 		"scale_h", "scale_v", "tonemap",
 		"dwconv", "act", "gap", "mulch", "nearest", "text_input", "text_hist", "text_near", "text_lift", "text_ring_hist", "text_targets",
-		"win_part", "win_unpart", "win_pool", "heads_split", "heads_merge", "rope", "obj_push"} {
+		"win_part", "win_unpart", "win_pool", "heads_split", "heads_merge", "rope", "obj_push", "attention_tc256", "attention_merge", "to_half"} {
 		if g.k[name], err = m.Kernel(name); err != nil {
 			c.Close()
 			return nil, err
@@ -382,6 +382,24 @@ func (g *GPU) Attention(q, k, v *Tensor, heads int, scale float32) *Tensor {
 		// in one pass on the tensor cores, the scores never stored
 		g.launch("attention_tc", cuda.Dim{X: (nq + 63) / 64, Y: heads}, cuda.Dim{X: 128}, 0,
 			nq, nk, d, ptr(q), ptr(k), ptr(v), ptr(out), scale)
+		return out
+	}
+	if g.Half && hd == 256 && (ptr(q)|ptr(k)|ptr(v))%8 == 0 {
+		// the same for heads of 256 (SAM 2's memory attention)
+		// the keys split so that the blocks fill the GPU (about 512 of them)
+		bx := (nq + 127) / 128
+		splits := max(1, min((512+bx*heads-1)/(bx*heads), (nk+255)/256))
+		chunk := ((nk+splits-1)/splits + 31) / 32 * 32
+		splits = (nk + chunk - 1) / chunk
+		part, ml := g.tensor(splits, nq, d), g.tensor(splits, heads, nq, 2)
+		kh, vh := g.tensor((nk*d+1)/2), g.tensor((nk*d+1)/2) // half precision, two to a float's room
+		gr, bl := each(nk * d)
+		g.launch("to_half", gr, bl, 0, int64(nk*d), ptr(k), ptr(kh))
+		g.launch("to_half", gr, bl, 0, int64(nk*d), ptr(v), ptr(vh))
+		g.launch("attention_tc256", cuda.Dim{X: bx, Y: heads, Z: splits}, cuda.Dim{X: 256}, 0,
+			nq, nk, d, ptr(q), ptr(kh), ptr(vh), ptr(part), ptr(ml), scale, chunk)
+		gr, bl = each(nq * d)
+		g.launch("attention_merge", gr, bl, 0, nq, d, hd, splits, ptr(part), ptr(ml), ptr(out))
 		return out
 	}
 	scores := g.tensor(heads, nq, nk)

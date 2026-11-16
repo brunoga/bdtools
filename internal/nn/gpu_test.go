@@ -96,6 +96,11 @@ func TestGPUHalfProducts(t *testing.T) {
 	// a vision transformer's: six heads of 64, many tiles of keys
 	q, k, v = rnd(333, 384), rnd(333, 384), rnd(333, 384)
 	check("attention of six heads", Attention(q, k, v, 6, 0.125), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 6, 0.125))
+	// SAM 2's memory attention: a head of 256, queries and keys off the tiles
+	q, k, v = rnd(130, 256), rnd(1000, 256), rnd(1000, 256)
+	check("attention of a head of 256", Attention(q, k, v, 1, 0.0625), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 1, 0.0625))
+	q, k, v = rnd(70, 512), rnd(45, 512), rnd(45, 512)
+	check("attention of two heads of 256", Attention(q, k, v, 2, 0.0625), g.Attention(g.Upload(q), g.Upload(k), g.Upload(v), 2, 0.0625))
 }
 
 func TestGPUTemporalAttention(t *testing.T) {

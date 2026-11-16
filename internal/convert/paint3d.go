@@ -377,7 +377,11 @@ func (g *grader) track(ctx context.Context) error {
 		g.note, g.noteAt = fmt.Sprintf("tracking: %d pictures", g.tracking.Done), time.Now()
 		g.mu.Unlock()
 		g.changed()
-		return g.emit(ctx, l, rr)
+		if err := g.emit(ctx, l, rr); err != nil {
+			return err
+		}
+		g.shown()
+		return nil
 	}
 	step := func(idx int, pic sam.Picture) ([]byte, error) {
 		f := m.Encode(be.Upload(pic.Tensor()))

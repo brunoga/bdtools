@@ -25,7 +25,7 @@ func (m *Model) Encode(x *nn.Tensor) *Features {
 	be := m.be
 	side := Size / 4
 	p := be.Conv2d(x, m.t("image_encoder.trunk.patch_embed.proj.weight"), m.t("image_encoder.trunk.patch_embed.proj.bias"), 4, 3)
-	t := be.Add(be.Transpose(p.Reshape(embedDim, side*side)), m.keep("trunk.pos", m.pos))
+	t := be.Add(be.Transpose(p.Reshape(embedDim, side*side)), m.keep("trunk.pos", func() *nn.Tensor { return m.pos }))
 	var f Features
 	stage := 0
 	for i, b := range blocks() {
@@ -131,10 +131,12 @@ func (p Picture) Tensor() *nn.Tensor {
 	x := nn.New(3, Size, Size)
 	mean := [3]float32{0.485, 0.456, 0.406}
 	sd := [3]float32{0.229, 0.224, 0.225}
-	for i, v := range p {
-		c := i / (Size * Size)
-		x.Data[i] = (float32(v)/255 - mean[c]) / sd[c]
-	}
+	bands(len(p), func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			c := i / (Size * Size)
+			x.Data[i] = (float32(p[i])/255 - mean[c]) / sd[c]
+		}
+	})
 	return x
 }
 

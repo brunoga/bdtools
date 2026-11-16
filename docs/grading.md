@@ -144,6 +144,15 @@ picture's nearest and farthest points land, as a percentage of the width
 and in pixels. Keep an eye on the near figure: anything much past 1% in
 front of the screen strains the eyes.
 
+Making a picture's 3D, or tracking an object, can take longer than the
+picture lasts on screen. A 4K film with everything on is one case. The
+grader then plays in slow motion and skips nothing. When that happens, a
+warning in orange next to the figures says how many pictures a second
+go out and what the film's own rate is, for example "slow: 18.2 of 24
+pictures a second". The same warning is on the VR panel and in the
+stream's readout, so you always know when you are not seeing the film
+at its real speed.
+
 **The knobs.** There are three, each a slider and a number, plus a
 checkbox and a menu. You can turn them from the keyboard too.
 
@@ -269,8 +278,10 @@ To paint an object:
    before and on to the cut after, at most 10 seconds back and 30 seconds
    on. It stops early once the object has been gone for 2 seconds, so a
    logo that fades out does not hold it up. The stream shows each
-   picture with its mask as it goes. On the Toy Story 2 castle it
-   followed the wordmark through 163 pictures in about 19 seconds.
+   picture with its mask as it goes, at about the film's own speed, and
+   the objects panel says how many pictures a second it tracks. On the
+   Toy Story 2 castle it followed the wordmark through 163 pictures in
+   about 13 seconds, which includes going back to the cut before.
 6. Set the object's push in the objects table. A push is a percent of
    the width, like the screen knob, and more brings the object nearer.
 
