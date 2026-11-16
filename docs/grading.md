@@ -209,6 +209,9 @@ that worked.
 | t | titles: auto, on, off, and round again |
 | d, m, x, o | the disc's 3D, the mix, the difference, ours |
 | s | save |
+| p | paint an object, or stop painting |
+| Enter | track the object painted |
+| Esc | drop the hints painted |
 
 ## How a turn becomes a stretch
 
@@ -239,6 +242,52 @@ in between, and a dissolve is never a cut. And if you want a whole film
 a little deeper or shallower, don't make one huge stretch. Set
 `--3d-depth` and `--3d-screen` on the command instead, and grade only the
 shots that differ.
+
+## Objects
+
+Some shots can't be put right with the knobs, because the knobs move the
+whole picture. The Disney castle at the start of Toy Story 2 is one. The
+"Walt Disney" wordmark gets the depth of the lake below the castle, so
+the depth and the screen move the letters and the lake together. An
+object is a part of the picture whose depth you move on its own. You
+paint it on one picture, the page follows it through its shot, and its
+push moves it nearer or farther than the scene around it.
+
+To paint an object:
+
+1. Pause on a picture where the object is plain to see.
+2. Press paint, or `p`. From now on the preview takes hints instead of
+   clicks.
+3. Drag a box around the object on the preview. A moment later the
+   object shows in red in the stream and in the preview. The first
+   time, the object finder is downloaded first, which takes a while.
+4. If the red misses part of the object, click on that part. That adds a
+   point on the object, drawn in green. If the red takes in something
+   that isn't the object, Shift-click on it. That adds a point off the
+   object, drawn in red. Every hint makes the mask again.
+5. Press track, or `Enter`. The page follows the object back to the cut
+   before and on to the cut after, at most 10 seconds back and 30 seconds
+   on. It stops early once the object has been gone for 2 seconds, so a
+   logo that fades out does not hold it up. The stream shows each
+   picture with its mask as it goes. On the Toy Story 2 castle it
+   followed the wordmark through 163 pictures in about 19 seconds.
+6. Set the object's push in the objects table. A push is a percent of
+   the width, like the screen knob, and more brings the object nearer.
+
+`Esc`, or cancel, drops the hints without making an object.
+
+The objects table lists each object with the first and the last picture
+it was found on, its push and how many pictures it has a mask on. `go`
+seeks to its start. `show` draws its mask in red over the picture while
+you play, so you can check that it was followed well, and `hide` stops
+that. `paint` paints it again on the paused picture, and tracking from
+there replaces its masks where it goes. `×` removes the object. The bar
+under the preview shows each object as a red strip.
+
+The object finder is SAM 2.1's tiny model, from Meta, under the Apache
+2.0 license. It is downloaded once, 156 MB, into the same cache as the
+depth network. It finds an object from a box better than from points
+alone, so start with a box.
 
 ## A session, step by step
 
@@ -372,6 +421,19 @@ shot eases in over. Anything a line does not set stays at the command's
 default, and where lines overlap, the later one wins. A `#` starts a
 comment. This is the same format `--3d-shots` reads, so you can write a
 grade by hand from notes, or touch up one the page wrote.
+
+An object has a line of its own, which starts with `object`:
+
+```
+object 1 0:00:25.067 0:00:31.865 push=1.5
+```
+
+The line gives the object's number, the first and the last picture it
+was found on, and its push. You can change the push by hand. The masks
+are in a second file beside the shots file, with `.masks` added to its
+name, one mask for each picture the object was followed through. Keep
+the two files together. The conversion reads the masks file when the
+shots file has objects.
 
 ## The conversion
 

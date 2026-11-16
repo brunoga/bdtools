@@ -7,6 +7,17 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Objects in `--3d-grade`. Some shots can't be put right with the depth
+  and screen knobs, because they move the whole picture. Toy Story 2's
+  "Walt Disney" sits at the depth of the lake below the castle. Now you
+  pause, press paint, drag a box around the thing on the preview, and
+  SAM 2.1's tiny model finds it. Points on it and off it correct the
+  mask. Track follows it through its shot, and its push moves it nearer
+  or farther than the scene around it. Objects are `object` lines in the
+  shots file, with their masks in a file beside it, and the conversion
+  applies them. SAM 2.1 runs in our own Go code on the GPU, and its
+  checkpoint (156 MB) is downloaded the first time you paint. See
+  docs/grading.md.
 - `--3d-text`, which lifts the text laid over the picture in front of the
   scene, as the 3D discs do. Titles, credits over a scene and studio
   logos used to take the depth of whatever they were written over, so

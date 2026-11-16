@@ -791,3 +791,11 @@ func (c *cutDetector) next(f *mvc.Frame) bool {
 	c.prev = thumb
 	return cut
 }
+
+// CutDetector says where a film's shots change, picture after picture, as
+// the converter does.
+type CutDetector struct{ c cutDetector }
+
+// Next reports whether f, the picture after the one before, starts a new
+// shot.
+func (d *CutDetector) Next(f *mvc.Frame) bool { return d.c.next(f) }
