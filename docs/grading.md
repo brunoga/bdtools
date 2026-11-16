@@ -325,7 +325,7 @@ over and when you would use it. From the top, the panel has the time and
 the near and far figures, the transport, the three knobs as sliders with
 step buttons, the titles buttons auto, on and off, flat, reset, the readout and save, the views when there is
 a reference, the screen's size, the current stretch with a button to
-remove it, and the timeline, which you press to seek.
+remove it, the objects, and the timeline, which you press to seek.
 
 ![The panel in VR. The cursor is on the curve slider and its hint is at the foot.](manual/img/vr-panel.png)
 
@@ -342,6 +342,20 @@ You can also work the controllers without looking at the panel:
 | left stick left and right | the cut before, after |
 | X, Y | ten seconds back, forward |
 | both grips, held for a second | leave VR |
+
+You can paint an object in VR too. Pause, and press paint on the panel.
+Then aim at the screen. A white cross shows where the ray meets it.
+Click the trigger to put a point on the object, or hold it and drag to
+draw a box around the object. Press the grip on the screen to put a
+point off the object. The mask shows in red on the screen a moment
+later, and track on the panel follows the object through its shot. Under
+the painting buttons the panel has the last three objects, each with
+buttons to push it nearer or farther and to show or hide its mask.
+While you paint, the grip does not turn flat on and off, and the
+trigger presses the panel only when you aim at the panel.
+The cross and the hints show only when the page draws the screen itself,
+which it does unless the address asks for the browser's media layer
+(`?layer=1`).
 
 The "smaller" and "bigger" buttons change the size of the screen in VR,
 which is how much of your view the picture fills, like sitting nearer or
