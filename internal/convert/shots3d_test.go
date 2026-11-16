@@ -102,7 +102,7 @@ func TestShotText(t *testing.T) {
 		}
 	}
 	file := filepath.Join(t.TempDir(), "shots.txt")
-	if err := writeShots3D(file, shots); err != nil {
+	if err := writeShots3D(file, shots, nil); err != nil {
 		t.Fatal(err)
 	}
 	back, err := readShots3D(file)

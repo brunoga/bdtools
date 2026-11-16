@@ -42,7 +42,10 @@ type Converter struct {
 	// Text, when not nil, lifts the text over the picture to its near
 	// end (text.go), where the shape's Text says, the detector on the
 	// depth model's backend.
-	Text            *TextLift
+	Text *TextLift
+	// Objects, when set, gives a picture's objects graded by hand (by its
+	// PTS): their disparity is moved by their pushes.
+	Objects         func(pts int64) []ObjectMask
 	ahead           []*text        // the pictures given ahead, oldest first
 	refineOn        *RefineWeights // Refine's weights on that backend
 	gpuRange        gpuRange       // the shot's depth range, for the GPU's curve
@@ -181,6 +184,7 @@ type Estimate struct {
 	left, right *mvc.Frame // the eyes, when the GPU made them
 	samples     *Samples   // of the disparity they were made with
 	text        *text      // the text lift's part (nil: none)
+	objects     []ObjectMask
 }
 
 // Estimate is the first half of Next: the picture's depth, by the
@@ -240,6 +244,9 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 		if e.shape, flat = c.Shot(f.PTS); flat {
 			e.factor = 0
 		}
+	}
+	if c.Objects != nil && e.factor != 0 {
+		e.objects = c.Objects(f.PTS)
 	}
 	g, onGPU := c.Model.Backend().(*nn.GPU)
 	onGPU = onGPU && bottom-top >= 28
@@ -328,6 +335,9 @@ func (c *Converter) Shape(e *Estimate) (depth, disparity []float32) {
 		if e.text != nil && c.Text != nil {
 			c.Text.liftCPU(e.text, d, w, top, bottom, e.fresh)
 		}
+		if e.factor != 0 {
+			pushObjects(e.objects, d, w, h, top, bottom)
+		}
 		copy(disparity[top*w:bottom*w], d)
 	}
 	return depth, disparity
@@ -406,7 +416,10 @@ func (c *Converter) uploadRefine(be nn.Backend) {
 func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool, look *text) func() error {
 	f, top, bottom := e.f, e.top, e.bottom
 	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
-	var lines, tmap *nn.Tensor
+	var lines, tmap, objs *nn.Tensor
+	if len(e.objects) > 0 && makeEyes {
+		objs = g.UploadBytes(objectBytes(e.objects, f.Width))
+	}
 	if e.text != nil && e.text.mask != nil && makeEyes {
 		// before the work below: the copy waits for it
 		lines = g.UploadBytes(nn.LiftLines(e.text.mask, e.text.ids, e.text.rings()))
@@ -442,6 +455,9 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool, look *text) 
 				g.LiftText(disp, f.Width, f.Height, top, bottom, lines, e.text.y.W, e.text.y.H, e.text.k, len(e.text.lines),
 					c.Text.liftPixels(f.Width), textRange(f.Width), near)
 			}
+		}
+		if objs != nil {
+			g.PushObjects(disp, f.Width, f.Height, top, bottom, objs, ObjectSide, len(e.objects))
 		}
 		eyes, holes = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
 		if holes != nil {
@@ -592,13 +608,16 @@ func (c *Converter) Depth(f *mvc.Frame) (*Estimate, error) { return c.estimate(f
 // picture on its own (its floating window not eased in from the pictures
 // before). The converter's own shape is left as it was.
 func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
-	keep, shape, fresh, txt := c.Shaper, e.shape, e.fresh, e.text
+	keep, shape, fresh, txt, objs := c.Shaper, e.shape, e.fresh, e.text, e.objects
 	c.Shaper, e.shape, e.fresh = Shaper{Shape: s}, s, true
 	if txt != nil {
 		e.text = c.Text.still(txt, s.Text)
 	}
+	if c.Objects != nil {
+		e.objects = c.Objects(e.f.PTS) // as they are now
+	}
 	_, d := c.Shape(e)
-	c.Shaper, e.shape, e.fresh, e.text = keep, shape, fresh, txt
+	c.Shaper, e.shape, e.fresh, e.text, e.objects = keep, shape, fresh, txt, objs
 	left, right = c.pair(e.f, d, e.top, e.bottom)
 	c.Window(left, right, SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom))
 	return left, right
@@ -609,7 +628,7 @@ func (c *Converter) Still(e *Estimate, s Shape) (left, right *mvc.Frame) {
 // made of it: a hand's grading. It gives the disparity's samples too.
 // The Estimate's depth must be there (KeepDepth, or Depth's).
 func (c *Converter) Grade(e *Estimate, s Shape, flat bool) (left, right *mvc.Frame, samples *Samples) {
-	keep, shape, fresh, factor, txt := c.Shaper, e.shape, e.fresh, e.factor, e.text
+	keep, shape, fresh, factor, txt, objs := c.Shaper, e.shape, e.fresh, e.factor, e.text, e.objects
 	c.Shaper, e.shape, e.fresh, e.factor = Shaper{Shape: s}, s, true, 1
 	if flat {
 		e.factor = 0
@@ -617,8 +636,11 @@ func (c *Converter) Grade(e *Estimate, s Shape, flat bool) (left, right *mvc.Fra
 	if txt != nil {
 		e.text = c.Text.still(txt, s.Text)
 	}
+	if c.Objects != nil {
+		e.objects = c.Objects(e.f.PTS) // as they are now: painting changes them
+	}
 	_, d := c.Shape(e)
-	c.Shaper, e.shape, e.fresh, e.factor, e.text = keep, shape, fresh, factor, txt
+	c.Shaper, e.shape, e.fresh, e.factor, e.text, e.objects = keep, shape, fresh, factor, txt, objs
 	left, right = c.pair(e.f, d, e.top, e.bottom)
 	samples = SamplesOf(d, e.f.Width, e.f.Height, e.top, e.bottom)
 	c.Window(left, right, samples)

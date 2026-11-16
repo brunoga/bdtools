@@ -28,7 +28,8 @@ import (
 // what a stretch does not set is the command's. Where stretches overlap,
 // the later line's wins. A stretch that begins within a shot, not at a
 // cut, takes ramp=SECONDS: its depth, screen and curve eased in from the
-// stretch before's over that long (flat is not eased).
+// stretch before's over that long (flat is not eased). Lines that start
+// with "object" are objects painted in --3d-grade (objects3d.go).
 
 // shot3D is a stretch of --3d-shots.
 type shot3D struct {
@@ -60,7 +61,7 @@ func parseShots3D(text string) ([]shot3D, error) {
 			line = line[:i]
 		}
 		f := strings.Fields(line)
-		if len(f) == 0 {
+		if len(f) == 0 || f[0] == "object" { // objects3d.go's
 			continue
 		}
 		bad := func(format string, a ...any) error {
@@ -221,9 +222,9 @@ func (o Options) shotShaper(shots []shot3D, size string) func(t time.Duration) (
 	}
 }
 
-// writeShots3D writes stretches as a --3d-shots file (through a
-// temporary file beside it: a reader never sees half of one).
-func writeShots3D(file string, shots []shot3D) error {
+// writeShots3D writes stretches and objects as a --3d-shots file (through
+// a temporary file beside it: a reader never sees half of one).
+func writeShots3D(file string, shots []shot3D, objs []object3D) error {
 	var b strings.Builder
 	b.WriteString("# bdtools --3d-shots: START [END] depth=K screen=P curve=C text=auto|on|off [flat] [ramp=S], as --3d-depth, --3d-screen, --3d-curve and --3d-text; ramp eases a change made within a shot in over S seconds\n")
 	for _, s := range shots {
@@ -253,6 +254,9 @@ func writeShots3D(file string, shots []shot3D) error {
 			b.WriteString(" depth=1")
 		}
 		b.WriteString("\n")
+	}
+	for _, o := range objs {
+		b.WriteString(objectLine(o) + "\n")
 	}
 	tmp := filepath.Join(filepath.Dir(file), "."+filepath.Base(file)+".tmp")
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
