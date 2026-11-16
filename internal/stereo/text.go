@@ -65,13 +65,34 @@ type text struct {
 	mask, ids []byte           // Detector.Mask's (nil: no line lifted)
 	lines     []textdet.Region // the lines lifted, by their number in ids
 	pts       time.Duration
+	// The picture given ahead (Converter.Ahead): it, and once the
+	// detector has looked at it, the lines it showed.
+	f        *mvc.Frame
+	observed bool
+	seen     []textdet.Sighting
 }
 
-// lift fills in the lines to lift, the detector's own (sure: those it is
-// sure of, all fully).
+// lift fills in the lines to lift (sure: those the detector is sure of,
+// all fully): for a picture given ahead, the lines it showed as the
+// detector knows them now (Sighting.Later), else the detector's own.
 func (x *text) lift(d *textdet.Detector, sure bool) {
 	m, ids := make([]byte, x.y.W*x.y.H), make([]byte, x.y.W*x.y.H)
-	x.mask, x.ids, x.lines = nil, nil, d.Mask(x.y, m, ids, sure)
+	if x.f == nil {
+		x.mask, x.ids, x.lines = nil, nil, d.Mask(x.y, m, ids, sure)
+	} else {
+		boxes, lifts := make([]textdet.Region, len(x.seen)), make([]float64, len(x.seen))
+		for i, s := range x.seen {
+			boxes[i] = s.Box
+			switch {
+			case !x.on:
+			case sure && s.Sure():
+				lifts[i] = 1
+			case !sure:
+				lifts[i] = s.Later()
+			}
+		}
+		x.mask, x.ids, x.lines = nil, nil, textdet.MaskLines(x.y, m, ids, boxes, lifts)
+	}
 	if len(x.lines) > 0 {
 		x.mask, x.ids = m, ids
 	}
@@ -107,6 +128,14 @@ func (t *TextLift) start(f *mvc.Frame, mode int) *text {
 	return x
 }
 
+// ahead is a picture's text part when it is given ahead, its shape's
+// Text setting mode: the detector has not looked at it yet.
+func (t *TextLift) ahead(f *mvc.Frame, mode int) *text {
+	at := t.clock(f.PTS)
+	k := textScale(f.Width)
+	return &text{y: smallGrey(f, k), k: k, pts: at, on: t.on(mode, at), f: f}
+}
+
 // on reports whether a shape's Text setting mode lifts the text at a
 // time of the film.
 func (t *TextLift) on(mode int, at time.Duration) bool {
@@ -128,8 +157,14 @@ func (t *TextLift) still(x *text, mode int) *text {
 // observe takes the detector's map of a picture (H x W, W its row
 // stride) into the lines it follows.
 func (t *TextLift) observe(x *text, m *nn.Tensor) {
-	t.Det.Observe(x.y, m.Data, m.Dim(2), x.pts, x.on)
+	seen := t.Det.Observe(x.y, m.Data, m.Dim(2), x.pts, x.on)
+	if x.f != nil {
+		x.seen, x.observed = seen, true
+	}
 }
+
+// input is the detector's input for a picture's text part, on the CPU.
+func (x *text) input() *nn.Tensor { return textdet.Input(x.y.Pix, x.y.W, x.y.H, x.y.Stride) }
 
 // textScale is the factor the detector's pictures are made smaller by,
 // for a picture w wide: about 960 wide, the size it was trained at (half

@@ -205,6 +205,17 @@ func (g *GPU) TextInput(p *Picture, k int) *Tensor {
 	return x
 }
 
+// TextInputGrey is TextInput for a grey picture w x h already at the
+// size the detector takes (its rows w bytes apart): only it is uploaded.
+func (g *GPU) TextInputGrey(y []byte, w, h int) *Tensor {
+	b := g.UploadBytes(y[:w*h])
+	W, H := (w+31)/32*32, (h+31)/32*32
+	x := g.tensor(3, H, W)
+	gr, bl := each(W * H)
+	g.launch("text_input", gr, bl, 0, w, h, ptr(b), w, 1, W, H, ptr(x))
+	return x
+}
+
 // textBins is kernels.cu's TEXT_BINS.
 const textBins = 512
 

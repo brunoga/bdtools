@@ -355,11 +355,16 @@ func (r *Runner) decodeAndEncode(ctx context.Context, src pictureSource, keep fu
 		return post(sf)
 	})
 	if stages != nil {
-		// the last picture's depth
-		if finish, err := r.wait3D(); decErr == nil {
-			if decErr = err; err == nil {
-				decErr = push3D(finish)
+		// the last pictures' depth
+		if decErr != nil {
+			_, _ = r.wait3D()
+		}
+		for decErr == nil {
+			finish, err := r.last3D()
+			if decErr = err; err != nil || finish == nil {
+				break
 			}
+			decErr = push3D(finish)
 		}
 		if err := stages.close(); decErr == nil {
 			decErr = err

@@ -19,9 +19,12 @@ on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   which is the discs' median. `auto`, the default, does this in the
   film's first 5 minutes, because the classifier also takes a fifth of
   the text later in a film for titles. `on` does it everywhere and `off`
-  nowhere. It is also `text=` in `--3d-shots`, a titles menu with the
+  nowhere. The detector looks two seconds ahead of the picture being
+  made, so a title rises as it appears instead of once the detector is
+  sure of it.
+  It is also `text=` in `--3d-shots`, a titles menu with the
   `t` key on the grading page, and three buttons on the VR panel. A 4K
-  conversion went from 45 to 40 pictures a second with it on. See
+  conversion went from 45 to 38 pictures a second with it on. See
   docs/2d-to-3d.md.
 
 ## [0.21.0] - 2026-11-14
