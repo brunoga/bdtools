@@ -307,11 +307,11 @@ function renderObjects() {
 function startPaint(id) {
   painting = true; paintObj = id; hints = { box: null, points: [] };
   if (st && st.playing) send({ op: 'pause' });
-  render();
+  render(); screenPaint.draw(); panel.draw();
 }
 function stopPaint() {
   painting = false; hints = { box: null, points: [] };
-  send({ op: 'unpaint' }); render();
+  send({ op: 'unpaint' }); render(); screenPaint.draw(); panel.draw();
 }
 function sendHints() {
   send({ op: 'paint', i: paintObj, box: hints.box, points: hints.points });
@@ -544,8 +544,7 @@ $('vr').onclick = async () => {
     try { controllers(session, xrFrame); } catch (e) { tele('controllers: ' + e.message); }
   });
   session.addEventListener('end', () => { session = null; vrHow = ''; say('left VR: ' + how + ' ' + rate + ' ' + glNote); tele('left VR: ' + how + ' ' + rate + ' ' + glNote); render(); });
-  // a 4 m wide, 16:9 screen, 3.5 m away, eye height
-  const W = 4, H = W * 9 / 16, Y = 1.7, Z = -3.5;
+  const { W, H, Y, Z } = SCREEN;
   if (mode === 'layer' && window.XRMediaBinding) {
     // the browser shows the video itself, each half to its eye, at the
     // video's own pixels
@@ -599,6 +598,51 @@ $('vr').onclick = async () => {
   }, 2000);
 };
 let vrHow = '';
+// the screen in VR: 4 m wide, 16:9, 3.5 m away, at eye height
+const SCREEN = { W: 4, H: 4 * 9 / 16, Y: 1.7, Z: -3.5 };
+
+// painting on the screen in VR: where the right controller's ray meets
+// the screen, and the hints, drawn on a transparent canvas laid just in
+// front of the picture
+const screenPaint = (() => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 960; canvas.height = 540;
+  const ctx = canvas.getContext('2d');
+  const sp = { canvas, version: 0, cursor: null, drag: null,
+    // hit: where a ray (origin o, direction d) meets the screen, 0 to 1 over the picture, or null
+    hit(o, d) {
+      if (d[2] > -1e-4) return null;
+      const t = (SCREEN.Z - o[2]) / d[2], k = screenScale;
+      const u = (o[0] + d[0] * t) / (SCREEN.W * k) + 0.5, v = 0.5 - (o[1] + d[1] * t - SCREEN.Y) / (SCREEN.H * k);
+      return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? [u, v] : null;
+    },
+    setCursor(at) {
+      const moved = !at !== !sp.cursor || (at && sp.cursor && (Math.abs(at[0] - sp.cursor[0]) > 0.002 || Math.abs(at[1] - sp.cursor[1]) > 0.002));
+      sp.cursor = at;
+      if (moved) sp.draw();
+    },
+    draw() {
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      if (painting) {
+        const box = sp.drag || hints.box;
+        if (box) { ctx.strokeStyle = '#ffb050'; ctx.lineWidth = 4; ctx.strokeRect(box[0] * w, box[1] * h, (box[2] - box[0]) * w, (box[3] - box[1]) * h); }
+        for (const [x, y, on] of hints.points) {
+          ctx.fillStyle = on ? '#7bd88f' : '#ff5f5f'; ctx.beginPath(); ctx.arc(x * w, y * h, 9, 0, 2 * Math.PI); ctx.fill();
+          ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.stroke();
+        }
+        if (sp.cursor) {
+          const [x, y] = [sp.cursor[0] * w, sp.cursor[1] * h];
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(x - 16, y); ctx.lineTo(x + 16, y); ctx.moveTo(x, y - 16); ctx.lineTo(x, y + 16); ctx.stroke();
+        }
+      }
+      sp.version++;
+    },
+  };
+  return sp;
+})();
+let trigDown = false; // the right trigger held on the screen while painting
 
 // The control panel in VR: a canvas drawn with the page's controls,
 // shown on a quad to the right of the screen, turned towards the
@@ -607,11 +651,11 @@ let vrHow = '';
 // (the page's hover labels, in short).
 const panel = (() => {
   const canvas = document.createElement('canvas');
-  canvas.width = 800; canvas.height = 1440;
+  canvas.width = 800; canvas.height = 1900;
   const ctx = canvas.getContext('2d');
-  const W = 1.2, H = 2.16; // metres (667 px/m)
+  const W = 1.2, H = 2.85; // metres (667 px/m)
   // placed to the right, 2.6 m away, turned 38 degrees towards the viewer
-  const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.55, cz = -2.4;
+  const ang = -38 * Math.PI / 180, cx = 2.45, cy = 1.65, cz = -2.4;
   const c = Math.cos(ang), sn = Math.sin(ang);
   const model = new Float32Array([c, 0, -sn, 0,  0, 1, 0, 0,  sn, 0, c, 0,  cx, cy, cz, 1]);
   const normal = [sn, 0, c]; // the quad's +z, rotated
@@ -708,6 +752,19 @@ const panel = (() => {
       text(stretch + (st.saved ? '' : '   unsaved'), 30, y + 20, '26px sans-serif', st.saved ? '#9a9a9a' : '#ffb050'); y += 50;
       if (st.stretch >= 0) { button(30, y, 220, 56, 'remove it', () => send({ op: 'delete', i: st.stretch }), 0, 'Removes this stretch. The one before runs on over it, or the defaults do.'); }
       y += 76;
+      // objects: painting on the screen, tracking, and each one's push
+      const PAINT = 'Paints an object on the paused picture. Aim at the screen: the trigger clicked puts a point on the object, the trigger dragged draws a box around it, and the grip puts a point off it. Its mask shows in red.';
+      text('objects' + (st.tracking ? '   tracking: ' + st.tracking.done + ' pictures' : painting ? (st.paint && st.paint.found ? '   found: track it, or add hints' : '   aim at the screen') : ''), 30, y + 20, '600 30px sans-serif'); y += 46;
+      row([[painting ? 'stop' : 'paint', () => painting ? stopPaint() : startPaint(0), painting, PAINT],
+        ['track', () => { if (st.paint && st.paint.found) send({ op: 'track' }); }, !!(st.paint && st.paint.found), 'Follows the object painted through its shot, back to the cut before and on to the cut after.'],
+        ['cancel', () => stopPaint(), 0, 'Drops the hints painted.']], 56, 10);
+      for (const o of (st.objects || []).slice(-3)) {
+        const PUSH = 'Moves object ' + o.id + "'s depth, in percent of the width. More is nearer.";
+        const setPush = v => send({ op: 'object', i: o.id, push: +Math.min(Math.max(v, -5), 5).toFixed(2) });
+        text('object ' + o.id + '   push ' + (o.push >= 0 ? '+' : '') + o.push.toFixed(2) + '%', 30, y + 18, '26px sans-serif', o.id === st.selected ? '#5fb0ff' : '#e8e8e8'); y += 40;
+        row([['−0.5', () => setPush(o.push - 0.5), 0, PUSH], ['−0.1', () => setPush(o.push - 0.1), 0, PUSH], ['+0.1', () => setPush(o.push + 0.1), 0, PUSH], ['+0.5', () => setPush(o.push + 0.5), 0, PUSH],
+          [o.id === st.selected ? 'hide' : 'show', () => send({ op: 'select', i: o.id === st.selected ? 0 : o.id }), o.id === st.selected, 'Shows its mask in red over the picture, or stops showing it.']], 52, 8);
+      }
       // the timeline: stretches as bands, cuts as ticks, the playhead; a press seeks
       const L = st.length > 0 ? st.length : Math.max(st.t, 1), bx = 30, bw = w - 60, bh = 70;
       ctx.fillStyle = '#1e2228'; ctx.fillRect(bx, y, bw, bh);
@@ -784,10 +841,39 @@ function controllers(session, xrFrame) {
         at = panel.hit([o.x, o.y, o.z], d);
       }
       panel.setCursor(at);
-      const over = at && panel.itemAt(at);
-      if (b(0) && over && over.drag) fire('drag', 80, () => over.drag(at[0])); else held.delete('drag');
-      edge('rtrig', b(0), () => { if (over && over.drag) return; if (!(at && panel.press(at))) send({ op: 'toggle' }); });
-      edge('rgrip', b(1), () => { if (st) send({ op: 'knobs', knobs: { ...st.knobs, flat: !st.knobs.flat } }); });
+      // painting: the ray on the screen when it is off the panel
+      let on = null;
+      if (painting && !at && rp) {
+        const q = rp.transform.orientation, o = rp.transform.position;
+        const x = q.x, y = q.y, z = q.z, w = q.w;
+        on = screenPaint.hit([o.x, o.y, o.z], [-(2 * (x * z + w * y)), -(2 * (y * z - w * x)), -(1 - 2 * (x * x + y * y))]);
+      }
+      screenPaint.setCursor(on);
+      if (painting && (on || trigDown)) {
+        // the trigger: a press and release a point on the object, a drag a box around it
+        if (b(0) && on) {
+          if (!trigDown) { trigDown = true; screenPaint.drag = [on[0], on[1], on[0], on[1]]; screenPaint.drag.from = on; }
+          const [u0, v0] = screenPaint.drag.from;
+          screenPaint.drag[0] = Math.min(u0, on[0]); screenPaint.drag[1] = Math.min(v0, on[1]);
+          screenPaint.drag[2] = Math.max(u0, on[0]); screenPaint.drag[3] = Math.max(v0, on[1]);
+          screenPaint.draw();
+        } else if (!b(0) && trigDown) {
+          trigDown = false;
+          const d = screenPaint.drag; screenPaint.drag = null;
+          if (d[2] - d[0] > 0.02 && d[3] - d[1] > 0.02) hints.box = [d[0], d[1], d[2], d[3]];
+          else hints.points.push([d.from[0], d.from[1], 1]);
+          screenPaint.draw(); render(); sendHints();
+        }
+        held.set('rtrig', 0);
+        // the grip on the screen: a point off the object
+        edge('rgrip', b(1) && !!on, () => { hints.points.push([on[0], on[1], 0]); screenPaint.draw(); render(); sendHints(); });
+      } else {
+        trigDown = false; screenPaint.drag = null;
+        const over = at && panel.itemAt(at);
+        if (b(0) && over && over.drag) fire('drag', 80, () => over.drag(at[0])); else held.delete('drag');
+        edge('rtrig', b(0), () => { if (over && over.drag) return; if (!(at && panel.press(at))) send({ op: 'toggle' }); });
+        edge('rgrip', b(1), () => { if (painting) return; if (st) send({ op: 'knobs', knobs: { ...st.knobs, flat: !st.knobs.flat } }); });
+      }
       edge('A', b(4), () => send({ op: 'step', n: 1 }));
       edge('B', b(5), () => send({ op: 'step', n: -1 }));
       if (ax[1] < -0.6) fire('depth+', 150, () => nudgeKnobs(0.05, 0)); else held.delete('depth+');
@@ -926,6 +1012,11 @@ function webglScreen(session, space, W, H, Y, Z) {
   const panelTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, panelTex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   let panelVersion = -1;
+  // the painting's overlay: the screen's quad again, a centimetre in front, blended
+  const paintTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, paintTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  let paintVersion = -1;
+  const paintModel = () => { const k = screenScale; return new Float32Array([k,0,0,0, 0,k,0,0, 0,0,1,0, 0,Y - Y * k,Z + 0.01,1]); };
   const mul = (a, b) => { const o = new Float32Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k*4+j] * b[i*4+k]; o[i*4+j] = s; } return o; };
   // the screen's size: scaled about its centre, at eye height, by screenScale
   const model = () => { const k = screenScale; return new Float32Array([k,0,0,0, 0,k,0,0, 0,0,1,0, 0,Y - Y * k,Z,1]); };
@@ -963,6 +1054,11 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, panel.canvas);
         panelVersion = panel.version;
       }
+      if (painting && screenPaint.version !== paintVersion) {
+        gl.bindTexture(gl.TEXTURE_2D, paintTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, screenPaint.canvas);
+        paintVersion = screenPaint.version;
+      }
       for (const view of pose.views) {
         const vp = layer.getViewport(view);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);
@@ -981,6 +1077,17 @@ function webglScreen(session, space, W, H, Y, Z) {
         gl.uniformMatrix4fv(uMVP, false, mul(pv, panel.model));
         gl.uniform1f(uHalf, 0); gl.uniform1f(uScale, 1);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        // the painting's hints and cursor
+        if (painting) {
+          gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bindTexture(gl.TEXTURE_2D, paintTex);
+          gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+          gl.vertexAttribPointer(p, 2, gl.FLOAT, false, 16, 0); gl.vertexAttribPointer(uv, 2, gl.FLOAT, false, 16, 8);
+          gl.uniformMatrix4fv(uMVP, false, mul(pv, paintModel()));
+          gl.uniform1f(uHalf, 0); gl.uniform1f(uScale, 1);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          gl.disable(gl.BLEND);
+        }
       }
     } catch (e) { glNote = 'views: ' + e.message; }
   });
