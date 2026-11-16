@@ -340,6 +340,16 @@ remove it, the objects, and the timeline, which you press to seek.
 
 ![The panel in VR. The cursor is on the curve slider and its hint is at the foot.](manual/img/vr-panel.png)
 
+Below the screen, tilted towards you, is the transport. It has the
+buttons that move through the film: the cut before, a minute back, ten
+seconds back, a picture back, play or pause, and the same forward. Under
+them is the film's timeline, with the time on the left and the length on
+the right. It shows the stretches as blue bands, the objects as red
+strips and the cuts as ticks. Aim at it and press the trigger to jump
+there. Hold the trigger and drag to move through the film. While you
+drag, the time shown follows the cursor and the film seeks every third
+of a second, and where you let go is where it stays.
+
 You can also work the controllers without looking at the panel:
 
 | Controller | What it does |
