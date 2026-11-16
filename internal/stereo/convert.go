@@ -45,7 +45,10 @@ type Converter struct {
 	Text *TextLift
 	// Objects, when set, gives a picture's objects graded by hand (by its
 	// PTS): their disparity is moved by their pushes.
-	Objects         func(pts int64) []ObjectMask
+	Objects func(pts int64) []ObjectMask
+	// Tint, when set, gives a mask to show over a picture's eyes (by its
+	// PTS, nil for none), at the depth of what it covers (objects.go).
+	Tint            func(pts int64) []byte
 	ahead           []*text        // the pictures given ahead, oldest first
 	refineOn        *RefineWeights // Refine's weights on that backend
 	gpuRange        gpuRange       // the shot's depth range, for the GPU's curve
@@ -459,7 +462,11 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool, look *text) 
 		if objs != nil {
 			g.PushObjects(disp, f.Width, f.Height, top, bottom, objs, ObjectSide, len(e.objects))
 		}
-		eyes, holes = g.EyesMask(p, disp, gapPixels, c.Fill != nil)
+		src := p
+		if tf := c.tinted(f); tf != f {
+			src = g.UploadPicture(tf.Y, tf.Cb, tf.Cr, tf.Width, tf.Height, tf.StrideY, tf.StrideC)
+		}
+		eyes, holes = g.EyesMask(src, disp, gapPixels, c.Fill != nil)
 		if holes != nil {
 			c.Fill.FillGPU(g, eyes, holes, f.Width, f.Height, top, bottom)
 		}
@@ -557,6 +564,7 @@ func (c *Converter) fillPair(left, right *mvc.Frame, hl, hr []bool, top, bottom 
 
 // pair is Pair with the holes filled by the filler, when there is one.
 func (c *Converter) pair(f *mvc.Frame, d []float32, top, bottom int) (left, right *mvc.Frame) {
+	f = c.tinted(f)
 	if c.Fill == nil {
 		return Pair(f, d)
 	}

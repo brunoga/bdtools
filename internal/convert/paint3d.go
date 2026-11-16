@@ -313,33 +313,10 @@ func absDur(d time.Duration) time.Duration {
 	return d
 }
 
-// tint shows a mask over a pair (in place): the object reddened and
-// lightened in both eyes.
+// tint shows a mask over pictures, in place (stereo.TintMask).
 func tint(mask []byte, frames ...*mvc.Frame) {
-	if mask == nil {
-		return
-	}
-	const s = stereo.ObjectSide
 	for _, f := range frames {
-		cw, ch := (f.Width+1)/2, (f.Height+1)/2
-		for y := range ch {
-			my := min(2*y*s/f.Height, s-1)
-			for x := range cw {
-				if mask[my*s+min(2*x*s/f.Width, s-1)] < 128 {
-					continue
-				}
-				f.Cr[y*f.StrideC+x] = byte((int(f.Cr[y*f.StrideC+x]) + 200) / 2)
-				f.Cb[y*f.StrideC+x] = byte((int(f.Cb[y*f.StrideC+x]) + 110) / 2)
-				for dy := range 2 {
-					for dx := range 2 {
-						if yy, xx := 2*y+dy, 2*x+dx; yy < f.Height && xx < f.Width {
-							v := &f.Y[yy*f.StrideY+xx]
-							*v = byte((int(*v)*3 + 180) / 4)
-						}
-					}
-				}
-			}
-		}
+		stereo.TintMask(mask, f)
 	}
 }
 
