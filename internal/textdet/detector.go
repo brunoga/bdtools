@@ -277,7 +277,104 @@ func MaskLines(y Grey, m, ids []byte, boxes []Region, lifts []float64) []Region 
 			}
 		}
 	}
+	if len(lines) > 0 {
+		feather(m, ids, y.W, y.H, featherRadius)
+	}
 	return lines
+}
+
+// featherRadius is how far the letters' mask is grown and then blurred,
+// in pixels of the detector's picture (about 960 wide).
+const featherRadius = 2
+
+// feather softens the letters' mask m (w x h) in place: grown by r (the
+// letters' glow going with them), then blurred by r, so that the letters
+// keep their whole lift and it falls to nothing over 2r beyond them. A
+// lift that stops at the stroke tears the picture there, as the eyes'
+// renderer stretches what is behind across the jump. ids is grown by 2r
+// to cover the falling edge. Only the box around the letters is worked.
+func feather(m, ids []byte, w, h, r int) {
+	x0, y0, x1, y1 := w, h, 0, 0
+	for y := range h {
+		for x, v := range m[y*w : (y+1)*w] {
+			if v != 0 {
+				x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x+1), max(y1, y+1)
+			}
+		}
+	}
+	if x1 <= x0 {
+		return
+	}
+	x0, y0, x1, y1 = max(x0-2*r, 0), max(y0-2*r, 0), min(x1+2*r, w), min(y1+2*r, h)
+	bw, bh := x1-x0, y1-y0
+	sub := make([]byte, bw*bh)
+	sid := make([]byte, bw*bh)
+	for y := range bh {
+		copy(sub[y*bw:(y+1)*bw], m[(y0+y)*w+x0:])
+		copy(sid[y*bw:(y+1)*bw], ids[(y0+y)*w+x0:])
+	}
+	tmp := make([]byte, len(sub))
+	// pass runs f along each row (across) or each column (down) of the box
+	pass := func(dst, src []byte, down bool, f func(dst, src []byte, n, stride, base int)) {
+		if down {
+			for x := range bw {
+				f(dst, src, bh, bw, x)
+			}
+			return
+		}
+		for y := range bh {
+			f(dst, src, bw, 1, y*bw)
+		}
+	}
+	grow := func(dst, src []byte, n, stride, base int) {
+		for i := range n {
+			var v byte
+			for j := max(i-r, 0); j <= min(i+r, n-1); j++ {
+				v = max(v, src[base+j*stride])
+			}
+			dst[base+i*stride] = v
+		}
+	}
+	blur := func(dst, src []byte, n, stride, base int) {
+		for i := range n {
+			var s, c int
+			for j := max(i-r, 0); j <= min(i+r, n-1); j++ {
+				s += int(src[base+j*stride])
+				c++
+			}
+			dst[base+i*stride] = byte((s + c/2) / c)
+		}
+	}
+	// the lines' numbers: each empty place takes the nearest line's within 2r
+	reach := func(dst, src []byte, n, stride, base int) {
+		for i := range n {
+			k := base + i*stride
+			dst[k] = src[k]
+			if src[k] != 0 {
+				continue
+			}
+			for d := 1; d <= 2*r; d++ {
+				if j := i - d; j >= 0 && src[base+j*stride] != 0 {
+					dst[k] = src[base+j*stride]
+					break
+				}
+				if j := i + d; j < n && src[base+j*stride] != 0 {
+					dst[k] = src[base+j*stride]
+					break
+				}
+			}
+		}
+	}
+	pass(tmp, sub, false, grow)
+	pass(sub, tmp, true, grow)
+	pass(tmp, sub, false, blur)
+	pass(sub, tmp, true, blur)
+	pass(tmp, sid, false, reach)
+	pass(sid, tmp, true, reach)
+	for y := range bh {
+		copy(m[(y0+y)*w+x0:(y0+y)*w+x1], sub[y*bw:(y+1)*bw])
+		copy(ids[(y0+y)*w+x0:(y0+y)*w+x1], sid[y*bw:(y+1)*bw])
+	}
 }
 
 // polarity is 1 when a box's letters are lighter than what is around
