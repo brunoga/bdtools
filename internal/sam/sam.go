@@ -166,10 +166,10 @@ func (m *Model) t(name string) *nn.Tensor {
 }
 
 // keep is a tensor of the model's own (not the checkpoint's) on the
-// backend, by name.
-func (m *Model) keep(name string, x *nn.Tensor) *nn.Tensor {
+// backend, by name: make's, called the first time only.
+func (m *Model) keep(name string, make func() *nn.Tensor) *nn.Tensor {
 	if _, ok := m.w[name]; !ok {
-		m.w[name] = x
+		m.w[name] = make()
 	}
 	return m.t(name)
 }

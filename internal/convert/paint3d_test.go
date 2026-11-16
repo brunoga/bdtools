@@ -64,3 +64,23 @@ func TestPaintCommands(t *testing.T) {
 		t.Fatalf("the shots file still has %+v", got)
 	}
 }
+
+// The rate pictures go out at is known after a few, and is 0 when paused.
+func TestShownRate(t *testing.T) {
+	g := &grader{frame: time.Second / 24}
+	g.want.playing = true
+	for range 10 {
+		g.shown()
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r := g.rateLocked(); r < 50 || r > 250 {
+		t.Errorf("rate %.1f, want about 200 (a picture each 5 ms)", r)
+	}
+	g.want.playing = false
+	if r := g.rateLocked(); r != 0 {
+		t.Errorf("paused: rate %.1f, want 0", r)
+	}
+	if f := g.filmRate(); f != 24 {
+		t.Errorf("film rate %.1f, want 24 until known", f)
+	}
+}

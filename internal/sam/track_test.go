@@ -45,6 +45,7 @@ func trackReference(t *testing.T, env string, from int) {
 		t.Fatal(err)
 	}
 	defer g.Close()
+	g.Half = os.Getenv("SAM_HALF") != ""
 	m.Use(g)
 	var shapes map[string][]int
 	b, err := os.ReadFile(filepath.Join(dir, "shapes.json"))
@@ -115,10 +116,30 @@ func trackReference(t *testing.T, env string, from int) {
 				wr[p*memDim+c] = wm.Data[c*grid*grid+p]
 			}
 		}
-		dm, dp, dr := rel(mk.Logits, ref(fmt.Sprintf("mask%d", i)).Data), rel(tr.out[i].ptr, ref(fmt.Sprintf("ptr%d", i)).Data), rel(mem.Data, wr)
+		wantMask := ref(fmt.Sprintf("mask%d", i)).Data
+		dm, dp, dr := rel(mk.Logits, wantMask), rel(tr.out[i].ptr, ref(fmt.Sprintf("ptr%d", i)).Data), rel(mem.Data, wr)
 		ws := ref(fmt.Sprintf("score%d", i)).Data[0]
-		t.Logf("picture %2d: mask %.2g, pointer %.2g, memory %.2g of their rms; object %.3f, want %.3f", i, dm, dp, dr, obj, ws)
-		if dm > 1e-2 || dp > 1e-2 || dr > 2e-2 || math.Abs(float64(obj-ws)) > 0.05*(1+math.Abs(float64(ws))) {
+		// the masks as one sees them: their overlap over their union
+		var both, either int
+		for j, v := range wantMask {
+			a, b := mk.Logits[j] > 0, v > 0
+			if a && b {
+				both++
+			}
+			if a || b {
+				either++
+			}
+		}
+		iou := 1.0
+		if either > 0 {
+			iou = float64(both) / float64(either)
+		}
+		t.Logf("picture %2d: mask %.2g, pointer %.2g, memory %.2g of their rms; IoU %.4f; object %.3f, want %.3f", i, dm, dp, dr, iou, obj, ws)
+		if g.Half {
+			if iou < 0.97 || math.Abs(float64(obj-ws)) > 0.1*(1+math.Abs(float64(ws))) {
+				t.Errorf("picture %d differs", i)
+			}
+		} else if dm > 1e-2 || dp > 1e-2 || dr > 2e-2 || math.Abs(float64(obj-ws)) > 0.05*(1+math.Abs(float64(ws))) {
 			t.Errorf("picture %d differs", i)
 		}
 		g.Release()

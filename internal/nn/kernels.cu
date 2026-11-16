@@ -2335,3 +2335,148 @@ extern "C" __global__ void obj_push(int w, int h, int top, int bottom, float *d,
 		d[(long long)y * w + x] += add;
 	}
 }
+
+// attention_tc256 is attention_tc for heads of 256 channels (SAM 2's
+// memory attention): a block 128 queries of a head, a warp 16 of them,
+// the keys and values (in half precision, to_half's) 32 at a time
+// through shared memory. The keys are split
+// among gridDim.z blocks of chunk keys each, so that a few queries keep
+// the whole GPU busy; each block leaves its rows' unnormalised output in
+// part ([z][nq][d]) and their running maximum and sum in ml ([z][heads][nq][2]),
+// and attention_merge puts them together.
+extern "C" __global__ void __launch_bounds__(256) attention_tc256(int nq, int nk, int d, const float *q, const __half *k,
+	const __half *v, float *part, float *ml, float scale, int chunk) {
+	__shared__ __align__(16) __half Ks[32][264]; // [key][channel]
+	__shared__ __align__(16) __half Vt[256][40]; // [channel][key]
+	const float L2E = 1.4426950408889634f;
+	int warp = threadIdx.x / 32, lane = threadIdx.x % 32, g = lane >> 2, c = lane & 3;
+	int col = blockIdx.y * 256, q0 = blockIdx.x * 128 + warp * 16;
+	int kb = blockIdx.z * chunk, ke = min(nk, kb + chunk);
+	auto pack = [](float a, float b) {
+		__half2 h = __floats2half2_rn(a, b);
+		return *(unsigned *)&h;
+	};
+	auto Q = [&](int r, int ch) { return r < nq ? q[(long long)r * d + col + ch] : 0.f; };
+	unsigned qa[16][4];
+#pragma unroll
+	for (int ks = 0; ks < 16; ks++) {
+		int k0 = ks * 16 + 2 * c;
+		qa[ks][0] = pack(Q(q0 + g, k0), Q(q0 + g, k0 + 1));
+		qa[ks][1] = pack(Q(q0 + g + 8, k0), Q(q0 + g + 8, k0 + 1));
+		qa[ks][2] = pack(Q(q0 + g, k0 + 8), Q(q0 + g, k0 + 9));
+		qa[ks][3] = pack(Q(q0 + g + 8, k0 + 8), Q(q0 + g + 8, k0 + 9));
+	}
+	float o[32][4] = {}, m[2] = {-INFINITY, -INFINITY}, l[2] = {0, 0};
+	float sl = scale * L2E;
+	for (int t0 = kb; t0 < ke; t0 += 32) {
+		__syncthreads();
+		for (int i = threadIdx.x; i < 32 * 32; i += 256) {
+			int key = i / 32, ch = 8 * (i % 32), kk = t0 + key;
+			uint4 kv = make_uint4(0, 0, 0, 0), vv = make_uint4(0, 0, 0, 0);
+			if (kk < ke) {
+				kv = *(const uint4 *)&k[(long long)kk * d + col + ch];
+				vv = *(const uint4 *)&v[(long long)kk * d + col + ch];
+			}
+			*(uint4 *)&Ks[key][ch] = kv;
+			const __half *vh = (const __half *)&vv;
+#pragma unroll
+			for (int e = 0; e < 8; e++) Vt[ch + e][key] = vh[e];
+		}
+		__syncthreads();
+		float s[4][4] = {};
+#pragma unroll
+		for (int nt = 0; nt < 4; nt++)
+#pragma unroll
+			for (int ks = 0; ks < 16; ks++) {
+				unsigned b[2] = {*(const unsigned *)&Ks[nt * 8 + g][ks * 16 + 2 * c],
+					*(const unsigned *)&Ks[nt * 8 + g][ks * 16 + 2 * c + 8]};
+				mma16816(s[nt], qa[ks], b);
+			}
+		float mx[2] = {-INFINITY, -INFINITY};
+#pragma unroll
+		for (int nt = 0; nt < 4; nt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) {
+				int key = t0 + nt * 8 + 2 * c + (e & 1);
+				s[nt][e] = key < ke ? s[nt][e] * sl : -INFINITY;
+				mx[e >> 1] = fmaxf(mx[e >> 1], s[nt][e]);
+			}
+		float corr[2];
+#pragma unroll
+		for (int r = 0; r < 2; r++) {
+			mx[r] = fmaxf(mx[r], __shfl_xor_sync(0xffffffff, mx[r], 1));
+			mx[r] = fmaxf(mx[r], __shfl_xor_sync(0xffffffff, mx[r], 2));
+			float mn = fmaxf(m[r], mx[r]);
+			corr[r] = mn == -INFINITY ? 1.f : exp2f(m[r] - mn);
+			m[r] = mn;
+			l[r] *= corr[r];
+		}
+#pragma unroll
+		for (int dt = 0; dt < 32; dt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) o[dt][e] *= corr[e >> 1];
+#pragma unroll
+		for (int nt = 0; nt < 4; nt++)
+#pragma unroll
+			for (int e = 0; e < 4; e++) {
+				s[nt][e] = m[e >> 1] == -INFINITY ? 0.f : exp2f(s[nt][e] - m[e >> 1]);
+				l[e >> 1] += s[nt][e];
+			}
+#pragma unroll
+		for (int j = 0; j < 2; j++) {
+			unsigned a[4] = {pack(s[2 * j][0], s[2 * j][1]), pack(s[2 * j][2], s[2 * j][3]),
+				pack(s[2 * j + 1][0], s[2 * j + 1][1]), pack(s[2 * j + 1][2], s[2 * j + 1][3])};
+#pragma unroll
+			for (int dt = 0; dt < 32; dt++) {
+				unsigned b[2] = {*(const unsigned *)&Vt[dt * 8 + g][j * 16 + 2 * c],
+					*(const unsigned *)&Vt[dt * 8 + g][j * 16 + 2 * c + 8]};
+				mma16816(o[dt], a, b);
+			}
+		}
+	}
+#pragma unroll
+	for (int r = 0; r < 2; r++) {
+		l[r] += __shfl_xor_sync(0xffffffff, l[r], 1);
+		l[r] += __shfl_xor_sync(0xffffffff, l[r], 2);
+	}
+	long long z = blockIdx.z;
+#pragma unroll
+	for (int r = 0; r < 2; r++) {
+		int row = q0 + g + 8 * r;
+		if (row >= nq) continue;
+#pragma unroll
+		for (int dt = 0; dt < 32; dt++)
+			*(float2 *)&part[(z * nq + row) * d + col + dt * 8 + 2 * c] = make_float2(o[dt][2 * r], o[dt][2 * r + 1]);
+		if (c == 0) {
+			float *p = ml + ((z * gridDim.y + blockIdx.y) * nq + row) * 2;
+			p[0] = m[r];
+			p[1] = l[r];
+		}
+	}
+}
+
+// attention_merge puts attention_tc256's splits together: each output
+// (nq x d, heads of hd) the splits' outputs weighted by 2^(their maximum
+// less the largest), over their sums so weighted.
+extern "C" __global__ void attention_merge(int nq, int d, int hd, int splits, const float *part, const float *ml, float *out) {
+	int heads = d / hd;
+	EACH((long long)nq * d) {
+		int row = i / d, ch = i % d, h = ch / hd;
+		float M = -INFINITY;
+		for (int z = 0; z < splits; z++) M = fmaxf(M, ml[(((long long)z * heads + h) * nq + row) * 2]);
+		float num = 0.f, den = 0.f;
+		for (int z = 0; z < splits; z++) {
+			const float *p = ml + (((long long)z * heads + h) * nq + row) * 2;
+			if (p[0] == -INFINITY) continue;
+			float w = exp2f(p[0] - M);
+			num += w * part[((long long)z * nq + row) * d + ch];
+			den += w * p[1];
+		}
+		out[i] = num / den;
+	}
+}
+
+// to_half is x in half precision.
+extern "C" __global__ void to_half(long long n, const float *x, __half *y) {
+	EACH(n) y[i] = __float2half_rn(x[i]);
+}

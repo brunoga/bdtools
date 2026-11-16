@@ -98,6 +98,7 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
   <span class="clock" id="clock" title="The time in the film.">0:00:00.00</span>
   <span class="dim" id="length" title="The film's length."></span>
   <span class="stat dim" id="extremes" title="Where this picture's nearest and farthest points land, in percent of the width and in pixels. Much past 1% in front strains the eyes."></span>
+  <span class="warn" id="slow" title="The film plays slower than its own rate here, because making its 3D, or tracking an object, takes longer than a picture lasts. Nothing is skipped: it plays in slow motion until the work is lighter."></span>
 </div>
 
 <div class="row" style="margin:12px 0">
@@ -216,6 +217,12 @@ function setKnobUI(k) {
   $('text').value = k.text || 'auto';
 }
 
+// slowText says when pictures go out slower than the film's rate
+function slowText() {
+  return st && st.rate > 0 && st.rate < 0.95 * st.filmRate ?
+    'slow: ' + st.rate.toFixed(1) + ' of ' + st.filmRate.toFixed(0) + ' pictures a second' + (st.tracking ? ' (tracking)' : '') : '';
+}
+
 function render() {
   if (!st) return;
   document.title = 'bdtools 3D grade';
@@ -233,6 +240,7 @@ function render() {
   $('extremes').textContent = st.knobs.flat ? 'flat' :
     'near ' + st.near.toFixed(2) + '% (' + Math.round(st.near / 100 * w) + ' px)  far ' + st.far.toFixed(2) + '% (' + Math.round(st.far / 100 * w) + ' px)';
   setKnobUI(st.knobs);
+  $('slow').textContent = slowText();
   $('stretch').textContent = st.stretch >= 0 ? 'stretch ' + (st.stretch + 1) + ' of ' + st.shots.length : 'the command\'s defaults (depth ' + st.defaults.depth + ', screen ' + st.defaults.screen + (st.defaults.curve !== 1 ? ', curve ' + st.defaults.curve : '') + ')';
   // the bar
   const bar = $('bar'); bar.querySelectorAll('.band,.cut').forEach(e => e.remove());
@@ -284,7 +292,7 @@ function renderObjects() {
   $('paint').className = painting ? 'primary' : '';
   $('track').disabled = !(p && p.found) || !!st.tracking;
   $('unpaint').disabled = !p && !painting;
-  $('paintinfo').textContent = st.tracking ? 'tracking: ' + st.tracking.done + ' pictures, at ' + fmt(st.tracking.at) :
+  $('paintinfo').textContent = st.tracking ? 'tracking: ' + st.tracking.done + ' pictures, at ' + fmt(st.tracking.at) + (st.rate > 0 ? ', ' + st.rate.toFixed(1) + ' a second' : '') :
     painting ? (p && p.found ? (paintObj ? 'object ' + paintObj : 'a new object') + ' found. Track it, or add hints.' : 'drag a box around the object, or click on it') : '';
   drawHints();
   const tb = $('objects').querySelector('tbody'); tb.innerHTML = '';
@@ -695,6 +703,7 @@ const panel = (() => {
       text(fmt(st.t) + (st.playing ? '  ▶' : '  ❚❚'), 30, y, '600 44px ui-monospace, monospace');
       y += 60;
       text('near ' + st.near.toFixed(2) + '%   far ' + st.far.toFixed(2) + '%', 30, y, '26px sans-serif', '#9a9a9a');
+      if (slowText()) text(slowText(), 420, y, '600 26px sans-serif', '#ffb050');
       y += 50;
       const row = (bs, bh, gap) => { let x = 30; const bw = (w - 60 - gap * (bs.length - 1)) / bs.length; for (const b of bs) { button(x, y, bw, bh, b[0], b[1], b[2], b[3]); x += bw + gap; } y += bh + 18; };
       row([['−10 s', () => send({ op: 'step', n: -240 }), 0, 'Goes back 10 seconds (X).'],

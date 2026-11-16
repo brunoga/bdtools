@@ -146,6 +146,11 @@ type grader struct {
 	sam          *sam.Model
 	paintFeats   *sam.Features // the held picture's, kept
 	paintFeatsAt time.Duration
+
+	// how fast new pictures go out: the times of the last ones, and their
+	// rate a second (0 until known)
+	shownAt []time.Time
+	rate    float64
 }
 
 // gradeAhead is a picture waiting in grader.ahead, and its time.
@@ -572,6 +577,7 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	if err := g.emit(ctx, shown[0], shown[1]); err != nil {
 		return err
 	}
+	g.shown()
 	for {
 		if g.ref != nil && g.ref.alignAsked() {
 			g.ref.align(ctx, f, t)
@@ -753,6 +759,9 @@ func (g *grader) hudText() string {
 		if v := g.ref.view(); v != viewOurs {
 			text += "  " + v
 		}
+	}
+	if r, f := g.rateLocked(), g.filmRate(); r > 0 && r < 0.95*f {
+		text += fmt.Sprintf("  SLOW %.0f of %.0f pictures/s", r, f)
 	}
 	if g.note != "" && time.Since(g.noteAt) < 6*time.Second {
 		text += "  [" + g.note + "]"
@@ -1018,6 +1027,10 @@ type gradeState struct {
 	Selected int            `json:"selected"`
 	Paint    *gradePaint    `json:"paint"`
 	Tracking *gradeTracking `json:"tracking"`
+	// Rate is how many pictures a second go out while playing or
+	// tracking (0 when paused or not known yet), FilmRate the film's.
+	Rate     float64 `json:"rate"`
+	FilmRate float64 `json:"filmRate"`
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -1064,6 +1077,7 @@ func (g *grader) state() gradeState {
 		st.Ref = g.ref.state()
 	}
 	st.Objects, st.Selected, st.Paint = g.objectsState(), g.selected, g.paint
+	st.Rate, st.FilmRate = g.rateLocked(), g.filmRate()
 	if g.tracking != nil {
 		tr := *g.tracking
 		st.Tracking = &tr
@@ -1418,4 +1432,41 @@ func (r *Runner) discLive(src *goSource, sel Selection) (liveSource, error) {
 	}
 	g := newGoDemux(src, sel, "", r.Report)
 	return liveSource{video: sel.Base, length: r.length, feed: feed, close: done, clock: g.timeline}, nil
+}
+
+// shown counts a new picture gone out, for the rate: the last 25 of a
+// run, a run broken by a second without one (a pause, a seek).
+func (g *grader) shown() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := time.Now()
+	if n := len(g.shownAt); n > 0 && now.Sub(g.shownAt[n-1]) > time.Second {
+		g.shownAt = g.shownAt[:0]
+	}
+	g.shownAt = append(g.shownAt, now)
+	if n := len(g.shownAt); n > 25 {
+		g.shownAt = append(g.shownAt[:0], g.shownAt[n-25:]...)
+	}
+	g.rate = 0
+	if n := len(g.shownAt); n >= 8 {
+		g.rate = float64(n-1) / g.shownAt[n-1].Sub(g.shownAt[0]).Seconds()
+	}
+}
+
+// rateLocked is the rate new pictures go out at, while playing or
+// tracking and while they still do (0 otherwise).
+func (g *grader) rateLocked() float64 {
+	n := len(g.shownAt)
+	if (!g.want.playing && g.tracking == nil) || n == 0 || time.Since(g.shownAt[n-1]) > time.Second {
+		return 0
+	}
+	return g.rate
+}
+
+// filmRate is the film's pictures a second (24 until known).
+func (g *grader) filmRate() float64 {
+	if g.num > 0 && g.den > 0 {
+		return float64(g.num) / float64(g.den)
+	}
+	return 24
 }

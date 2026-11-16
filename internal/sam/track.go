@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
+	"sync"
 
 	"github.com/brunoga/bdtools/internal/nn"
 )
@@ -154,16 +156,18 @@ func (t *Tracker) memory(f *Features, logits []float32, binary, object bool) (*n
 	m := t.m
 	be := m.be
 	hi := upsample4(logits, maskSide)
-	for i, v := range hi.Data {
-		p := float32(1 / (1 + math.Exp(-float64(v))))
-		if binary {
-			p = 0
-			if v > 0 {
+	bands(len(hi.Data), func(lo, hi2 int) {
+		for i, v := range hi.Data[lo:hi2] {
+			var p float32
+			switch {
+			case !binary:
+				p = float32(1 / (1 + math.Exp(-float64(v))))
+			case v > 0:
 				p = 1
 			}
+			hi.Data[lo+i] = 20*p - 10
 		}
-		hi.Data[i] = 20*p - 10
-	}
+	})
 	const enc = "memory_encoder."
 	x := be.Upload(hi)
 	for k := range 4 {
@@ -182,12 +186,15 @@ func (t *Tracker) memory(f *Features, logits []float32, binary, object bool) (*n
 		return nil, err
 	}
 	no := m.w["no_obj_embed_spatial"].Data
-	for i, v := range rows.Data {
-		if !object {
-			v += no[i%memDim]
+	bands(len(rows.Data), func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			v := rows.Data[i]
+			if !object {
+				v += no[i%memDim]
+			}
+			rows.Data[i] = bfloat16(v)
 		}
-		rows.Data[i] = bfloat16(v)
-	}
+	})
 	mem := be.Upload(rows)
 	be.Keep(mem)
 	return mem, nil
@@ -302,9 +309,9 @@ func (t *Tracker) withMemory(idx int, f *Features) *nn.Tensor {
 func (m *Model) memoryAttention(vision, memory, pos *nn.Tensor, nptr int) *nn.Tensor {
 	be := m.be
 	n := grid * grid
-	cs := m.keep("rope", ropeTable(dModel, grid))
+	cs := m.keep("rope", func() *nn.Tensor { return ropeTable(dModel, grid) })
 	x := be.Transpose(vision.Reshape(dModel, n))
-	x = be.AddScaled(x, m.keep("vision.pe", sinePE(dModel, grid)), m.keep("tenth", constVec(dModel, 0.1)))
+	x = be.AddScaled(x, m.keep("vision.pe", func() *nn.Tensor { return sinePE(dModel, grid) }), m.keep("tenth", func() *nn.Tensor { return constVec(dModel, 0.1) }))
 	kin := be.Add(be.Clone(memory), pos)
 	nk := memory.Dim(0)
 	ln := func(x *nn.Tensor, name string) *nn.Tensor {
@@ -419,15 +426,17 @@ func upsample4(x []float32, side int) *nn.Tensor {
 		a := min(int(f), side-1)
 		return a, min(a+1, side-1), f - float32(a)
 	}
-	for oy := range o {
-		y0, y1, ly := src(oy)
-		for ox := range o {
-			x0, x1, lx := src(ox)
-			top := x[y0*side+x0]*(1-lx) + x[y0*side+x1]*lx
-			bot := x[y1*side+x0]*(1-lx) + x[y1*side+x1]*lx
-			out.Data[oy*o+ox] = top*(1-ly) + bot*ly
+	bands(o, func(from, to int) {
+		for oy := from; oy < to; oy++ {
+			y0, y1, ly := src(oy)
+			for ox := range o {
+				x0, x1, lx := src(ox)
+				top := x[y0*side+x0]*(1-lx) + x[y0*side+x1]*lx
+				bot := x[y1*side+x0]*(1-lx) + x[y1*side+x1]*lx
+				out.Data[oy*o+ox] = top*(1-ly) + bot*ly
+			}
 		}
-	}
+	})
 	return out
 }
 
@@ -439,4 +448,14 @@ func bfloat16(v float32) float32 {
 	}
 	b += 0x7fff + (b>>16)&1
 	return math.Float32frombits(b &^ 0xffff)
+}
+
+// bands calls f on n split into a band for each CPU, at once.
+func bands(n int, f func(lo, hi int)) {
+	k := min(runtime.GOMAXPROCS(0), max(n/4096, 1))
+	var wg sync.WaitGroup
+	for b := range k {
+		wg.Go(func() { f(b*n/k, (b+1)*n/k) })
+	}
+	wg.Wait()
 }
