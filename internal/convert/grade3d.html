@@ -43,6 +43,10 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
 #preview video, #preview canvas { position:absolute; top:0; left:0; height:100%; width:100%; object-fit:fill; }
 #preview.left video { width:200%; }
 #preview.off { display:none; }
+#preview #hints { pointer-events:none; z-index:2; }
+#preview.painting #hints { pointer-events:auto; cursor:crosshair; }
+#bar .obj { position:absolute; bottom:0; height:6px; background:#c0504d; opacity:.85; }
+#objects input[type=number] { width:70px; background:#1e2228; color:var(--fg); border:1px solid #3a3f48; border-radius:6px; padding:4px; font:inherit; }
 #vrprompt { position:fixed; inset:0; z-index:20; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; }
 #vrprompt[hidden] { display:none; }
 #vrbig { font-size:40px; padding:28px 64px; border-radius:16px; }
@@ -86,7 +90,7 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
   <label style="margin-left:12px" title="Writes the time, the state and the knobs into the stream's picture. Turn it off for a clean picture."><input type="checkbox" id="hud" checked> readout in the stream</label>
   <span id="lag" title="How far the preview runs behind the player."></span>
 </div>
-<div id="preview"><video id="v" muted playsinline autoplay></video><canvas id="cv" hidden></canvas></div>
+<div id="preview"><video id="v" muted playsinline autoplay></video><canvas id="cv" hidden></canvas><canvas id="hints"></canvas></div>
 
 <div id="bar" title="The film. Stretches are bands, cuts are ticks, and the orange line is the playhead. Click to seek."><div class="head" id="head"></div></div>
 
@@ -150,9 +154,22 @@ kbd { background:#262a31; border:1px solid #3a3f48; border-radius:4px; padding:0
   <table id="shots"><thead><tr><th title="Where the stretch starts in the film.">start</th><th title="Where it ends, at the next stretch or the film's end.">end</th><th title="Its depth. A dash means the default.">depth</th><th title="Its screen. A dash means the default.">screen</th><th title="Its curve. A dash means the default.">curve</th><th title="Whether it lifts the text over the picture. A dash means the default.">titles</th><th title="On the screen, with no depth.">flat</th><th title="How its knobs come in, at a cut or eased in over some seconds from the picture graded.">ramp</th><th></th></tr></thead><tbody></tbody></table>
 </div>
 
+<div class="panel">
+  <div class="row" style="justify-content:space-between">
+    <strong title="Things in the picture whose depth you move by hand. You paint one on a paused picture, it is followed through its shot, and its push moves it nearer or farther than the scene around it.">objects</strong>
+    <span>
+      <button id="paint" title="Paints a new object on the paused picture. On the preview, drag a box around it, click on it to add a point on it, and Shift-click to add a point off it. Its mask shows in red in the stream (p).">paint</button>
+      <button id="track" class="primary" disabled title="Follows the object painted through its shot, back to the cut before and on to the cut after, and adds it to the objects (Enter).">track</button>
+      <button id="unpaint" disabled title="Drops the hints painted (Esc).">cancel</button>
+      <span class="dim" id="paintinfo"></span>
+    </span>
+  </div>
+  <table id="objects"><thead><tr><th title="The object's number.">object</th><th title="The first picture it was found on.">start</th><th title="Where it was last found.">end</th><th title="How far its depth is moved, in percent of the width. More is nearer.">push %</th><th title="How many pictures it has a mask on.">pictures</th><th></th></tr></thead><tbody></tbody></table>
+</div>
+
 <p class="dim" style="font-size:13px">
 <kbd>Space</kbd> plays or pauses. <kbd>←</kbd> and <kbd>→</kbd> step a picture, and ten seconds with <kbd>Shift</kbd>. <kbd>[</kbd> and <kbd>]</kbd> jump between cuts.
-<kbd>↑</kbd> and <kbd>↓</kbd> change the depth by 0.05, <kbd>PgUp</kbd> and <kbd>PgDn</kbd> the screen by 0.1, and <kbd>,</kbd> and <kbd>.</kbd> the curve by 0.05. <kbd>f</kbd> makes the shot flat, and <kbd>t</kbd> cycles the titles knob through auto, on and off. <kbd>d</kbd> shows the film's own 3D, <kbd>m</kbd> mixes it into the right eye, <kbd>x</kbd> shows the difference, and <kbd>o</kbd> is back to ours. <kbd>s</kbd> saves.
+<kbd>↑</kbd> and <kbd>↓</kbd> change the depth by 0.05, <kbd>PgUp</kbd> and <kbd>PgDn</kbd> the screen by 0.1, and <kbd>,</kbd> and <kbd>.</kbd> the curve by 0.05. <kbd>f</kbd> makes the shot flat, and <kbd>t</kbd> cycles the titles knob through auto, on and off. <kbd>d</kbd> shows the film's own 3D, <kbd>m</kbd> mixes it into the right eye, <kbd>x</kbd> shows the difference, and <kbd>o</kbd> is back to ours. <kbd>s</kbd> saves. <kbd>p</kbd> starts painting an object, <kbd>Enter</kbd> tracks it, and <kbd>Esc</kbd> drops the hints.
 A turn of a knob grades the shot from its cut, or from this picture eased in over a second when no cut is near, up to the next stretch.
 </p>
 
@@ -227,6 +244,11 @@ function render() {
     d.title = fmt(s.start) + ' – ' + (s.end > 0 ? fmt(s.end) : 'end'); bar.appendChild(d);
   });
   for (const c of st.cuts) { const d = document.createElement('div'); d.className = 'cut'; d.style.left = x(c); bar.appendChild(d); }
+  bar.querySelectorAll('.obj').forEach(e => e.remove());
+  for (const o of st.objects || []) {
+    const d = document.createElement('div'); d.className = 'obj'; d.style.left = x(o.start); d.style.width = (100 * (o.end - o.start) / L) + '%';
+    d.title = 'object ' + o.id + ': ' + fmt(o.start) + ' – ' + fmt(o.end); bar.appendChild(d);
+  }
   $('head').style.left = x(st.t);
   // the reference
   $('refpanel').hidden = !st.ref;
@@ -247,7 +269,96 @@ function render() {
     const act = document.createElement('td'); act.append(go, ' ', del); tr.appendChild(act);
     tb.appendChild(tr);
   });
+  renderObjects();
 }
+
+// objects: painted on the paused picture through the preview, followed
+// through their shot, and pushed nearer or farther
+let painting = false, paintObj = 0, hints = { box: null, points: [] }, drag = null, hadPaint = false;
+function renderObjects() {
+  const p = st.paint;
+  // the paint gone (tracked, or dropped elsewhere): painting ends
+  if (!p && hadPaint && painting && !st.tracking) { painting = false; hints = { box: null, points: [] }; }
+  hadPaint = !!p;
+  $('preview').classList.toggle('painting', painting);
+  $('paint').className = painting ? 'primary' : '';
+  $('track').disabled = !(p && p.found) || !!st.tracking;
+  $('unpaint').disabled = !p && !painting;
+  $('paintinfo').textContent = st.tracking ? 'tracking: ' + st.tracking.done + ' pictures, at ' + fmt(st.tracking.at) :
+    painting ? (p && p.found ? (paintObj ? 'object ' + paintObj : 'a new object') + ' found. Track it, or add hints.' : 'drag a box around the object, or click on it') : '';
+  drawHints();
+  const tb = $('objects').querySelector('tbody'); tb.innerHTML = '';
+  for (const o of st.objects || []) {
+    const tr = document.createElement('tr'); if (o.id === st.selected) tr.className = 'cur';
+    const td = v => { const e = document.createElement('td'); if (v instanceof Node) e.append(v); else e.textContent = v; return e; };
+    const push = document.createElement('input'); push.type = 'number'; push.min = -5; push.max = 5; push.step = 0.1; push.value = o.push.toFixed(2);
+    push.title = 'How far its depth is moved, in percent of the width. More is nearer.';
+    push.onchange = () => send({ op: 'object', i: o.id, push: +push.value });
+    const b = (label, title, fn) => { const e = document.createElement('button'); e.textContent = label; e.title = title; e.onclick = fn; return e; };
+    const act = document.createElement('td');
+    act.append(b('go', 'Seeks to where it starts.', () => send({ op: 'seek', t: o.start })), ' ',
+      b(o.id === st.selected ? 'hide' : 'show', 'Shows its mask in red over the picture, or stops showing it.', () => send({ op: 'select', i: o.id === st.selected ? 0 : o.id })), ' ',
+      b('paint', 'Paints it again on the paused picture, to correct its mask. Tracking then replaces its masks there.', () => startPaint(o.id)), ' ',
+      b('×', 'Removes the object and its masks.', () => send({ op: 'object', i: o.id, delete: true })));
+    tr.append(td(o.id), td(fmt(o.start)), td(fmt(o.end)), td(push), td(o.masks), act);
+    tb.appendChild(tr);
+  }
+}
+function startPaint(id) {
+  painting = true; paintObj = id; hints = { box: null, points: [] };
+  if (st && st.playing) send({ op: 'pause' });
+  render();
+}
+function stopPaint() {
+  painting = false; hints = { box: null, points: [] };
+  send({ op: 'unpaint' }); render();
+}
+function sendHints() {
+  send({ op: 'paint', i: paintObj, box: hints.box, points: hints.points });
+}
+// where an event is on the picture, 0 to 1 (the left eye's, in "both")
+function onPicture(e) {
+  const r = $('preview').getBoundingClientRect();
+  let u = (e.clientX - r.left) / r.width;
+  if (previewMode === 'both') u = Math.min(u * 2, 1);
+  return [Math.min(Math.max(u, 0), 1), Math.min(Math.max((e.clientY - r.top) / r.height, 0), 1)];
+}
+function drawHints() {
+  const c = $('hints'), r = c.getBoundingClientRect();
+  c.width = r.width; c.height = r.height;
+  const g = c.getContext('2d'); g.clearRect(0, 0, c.width, c.height);
+  if (!painting) return;
+  const W = previewMode === 'both' ? c.width / 2 : c.width, H = c.height;
+  const box = drag ? drag : hints.box;
+  if (box) { g.strokeStyle = '#ffb050'; g.lineWidth = 2; g.strokeRect(box[0] * W, box[1] * H, (box[2] - box[0]) * W, (box[3] - box[1]) * H); }
+  for (const [x, y, on] of hints.points) {
+    g.fillStyle = on ? '#7bd88f' : '#ff5f5f'; g.beginPath(); g.arc(x * W, y * H, 6, 0, 2 * Math.PI); g.fill();
+    g.strokeStyle = '#000'; g.lineWidth = 1.5; g.stroke();
+  }
+}
+$('hints').onpointerdown = e => {
+  if (!painting) return;
+  const [u, v] = onPicture(e); drag = [u, v, u, v]; drag.from = [u, v, e.shiftKey || e.button === 2];
+  $('hints').setPointerCapture(e.pointerId); e.preventDefault();
+};
+$('hints').onpointermove = e => {
+  if (!drag) return;
+  const [u, v] = onPicture(e), [u0, v0] = drag.from;
+  drag[0] = Math.min(u0, u); drag[1] = Math.min(v0, v); drag[2] = Math.max(u0, u); drag[3] = Math.max(v0, v);
+  drawHints();
+};
+$('hints').onpointerup = e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  const r = $('hints').getBoundingClientRect();
+  if ((d[2] - d[0]) * r.width > 6 && (d[3] - d[1]) * r.height > 6) hints.box = [d[0], d[1], d[2], d[3]];
+  else hints.points.push([d.from[0], d.from[1], d.from[2] ? 0 : 1]);
+  drawHints(); sendHints();
+};
+$('hints').oncontextmenu = e => { if (painting) e.preventDefault(); };
+$('paint').onclick = () => painting ? stopPaint() : startPaint(0);
+$('track').onclick = () => send({ op: 'track' });
+$('unpaint').onclick = stopPaint;
 
 // the live preview: the stream as a fragmented MP4 into a media source,
 // held at its live edge; the left eye alone (the video twice as wide,
@@ -377,6 +488,9 @@ document.addEventListener('keydown', e => {
   else if (k === 'm') toggleView('mix');
   else if (k === 'x') toggleView('diff');
   else if (k === 'o') send({ op: 'ref', view: 'ours' });
+  else if (k === 'p') painting ? stopPaint() : startPaint(0);
+  else if (k === 'Enter' && st && st.paint && st.paint.found) send({ op: 'track' });
+  else if (k === 'Escape' && painting) stopPaint();
   else return;
   e.preventDefault();
 });

@@ -10,7 +10,7 @@
 <body>
 <header><a class="brand" href="index.html"><img src="icon.svg" alt="">bdtools manual</a><nav><a href="grading.html" class="cur">grading</a><a href="cookbook.html">cookbook</a><a href="https://github.com/brunoga/bdtools">GitHub</a></nav></header>
 <div class="wrap">
-<aside><details open><summary>Contents</summary><ol><li><a href="#why-grade-at-all">Why grade at all</a></li><li><a href="#what-you-need">What you need</a></li><li><a href="#starting-the-server">Starting the server</a></li><li><a href="#watching-the-stream">Watching the stream</a></li><li><a href="#the-page">The page</a></li><li><a href="#how-a-turn-becomes-a-stretch">How a turn becomes a stretch</a></li><li><a href="#a-session-step-by-step">A session, step by step</a></li><li><a href="#in-the-headset">In the headset</a></li><li><a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a></li><li><a href="#the-shots-file">The shots file</a></li><li><a href="#the-conversion">The conversion</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
+<aside><details open><summary>Contents</summary><ol><li><a href="#why-grade-at-all">Why grade at all</a></li><li><a href="#what-you-need">What you need</a></li><li><a href="#starting-the-server">Starting the server</a></li><li><a href="#watching-the-stream">Watching the stream</a></li><li><a href="#the-page">The page</a></li><li><a href="#how-a-turn-becomes-a-stretch">How a turn becomes a stretch</a></li><li><a href="#objects">Objects</a></li><li><a href="#a-session-step-by-step">A session, step by step</a></li><li><a href="#in-the-headset">In the headset</a></li><li><a href="#comparing-with-the-films-own-3d">Comparing with the film&#39;s own 3D</a></li><li><a href="#the-shots-file">The shots file</a></li><li><a href="#the-conversion">The conversion</a></li><li><a href="#when-something-is-off">When something is off</a></li></ol></details></aside>
 <main>
 <h1>Grading a film&#39;s 3D by eye</h1>
 <p>This guide explains how to grade a 2D-to-3D conversion by eye with <code>--3d-grade</code>: how to start it, how to watch it, what each control does on the page and in the headset, and how what you set ends up in the finished film. It assumes you have run <code>--to-3d</code> at least once and that you have some way of seeing 3D, whether a television, a projector or a headset. If you want to know what the conversion does with the depth and how well it does it, that is in <a href="https://github.com/brunoga/bdtools/blob/main/docs/2d-to-3d.md">2d-to-3d.md</a>. The flags themselves are listed in the <a href="https://github.com/brunoga/bdtools/blob/main/cmd/bdtools/README.md#2d-to-3d">README</a>.</p>
@@ -85,6 +85,9 @@ bdtools: --3d-grade: for a headset, https://192.168.1.87:8421/ (its certificate 
 <tr><td>t</td><td>titles: auto, on, off, and round again</td></tr>
 <tr><td>d, m, x, o</td><td>the disc&#39;s 3D, the mix, the difference, ours</td></tr>
 <tr><td>s</td><td>save</td></tr>
+<tr><td>p</td><td>paint an object, or stop painting</td></tr>
+<tr><td>Enter</td><td>track the object painted</td></tr>
+<tr><td>Esc</td><td>drop the hints painted</td></tr>
 </table>
 <h2 id="how-a-turn-becomes-a-stretch">How a turn becomes a stretch</h2>
 <p>You don&#39;t mark out stretches first and then grade them. You just turn a knob, and a stretch is made for it. Where it starts depends on where you are:</p>
@@ -95,6 +98,20 @@ bdtools: --3d-grade: for a headset, https://192.168.1.87:8421/ (its certificate 
 <p>The stretch runs until the next stretch starts, or to the end of the film. Turning a knob inside an existing stretch changes that stretch.</p>
 <p>So the pattern is simple: play, notice a shot that is off, pause, turn until it looks right, play on. If only that one shot needed grading, play to its end and press reset there (or turn the knob back). That starts a new stretch at the next cut, with the defaults.</p>
 <p>A word about the cuts. They are found while the film plays, by comparing each picture&#39;s thumbnail with the one before, so the bar only shows cuts for what has actually been played. Skipping ten seconds skips the cuts in between, and a dissolve is never a cut. And if you want a whole film a little deeper or shallower, don&#39;t make one huge stretch. Set <code>--3d-depth</code> and <code>--3d-screen</code> on the command instead, and grade only the shots that differ.</p>
+<h2 id="objects">Objects</h2>
+<p>Some shots can&#39;t be put right with the knobs, because the knobs move the whole picture. The Disney castle at the start of Toy Story 2 is one. The &#34;Walt Disney&#34; wordmark gets the depth of the lake below the castle, so the depth and the screen move the letters and the lake together. An object is a part of the picture whose depth you move on its own. You paint it on one picture, the page follows it through its shot, and its push moves it nearer or farther than the scene around it.</p>
+<p>To paint an object:</p>
+<ol>
+<li>Pause on a picture where the object is plain to see.</li>
+<li>Press paint, or <code>p</code>. From now on the preview takes hints instead of clicks.</li>
+<li>Drag a box around the object on the preview. A moment later the object shows in red in the stream and in the preview. The first time, the object finder is downloaded first, which takes a while.</li>
+<li>If the red misses part of the object, click on that part. That adds a point on the object, drawn in green. If the red takes in something that isn&#39;t the object, Shift-click on it. That adds a point off the object, drawn in red. Every hint makes the mask again.</li>
+<li>Press track, or <code>Enter</code>. The page follows the object back to the cut before and on to the cut after, at most 10 seconds back and 30 seconds on. It stops early once the object has been gone for 2 seconds, so a logo that fades out does not hold it up. The stream shows each picture with its mask as it goes. On the Toy Story 2 castle it followed the wordmark through 163 pictures in about 19 seconds.</li>
+<li>Set the object&#39;s push in the objects table. A push is a percent of the width, like the screen knob, and more brings the object nearer.</li>
+</ol>
+<p><code>Esc</code>, or cancel, drops the hints without making an object.</p>
+<p>The objects table lists each object with the first and the last picture it was found on, its push and how many pictures it has a mask on. <code>go</code> seeks to its start. <code>show</code> draws its mask in red over the picture while you play, so you can check that it was followed well, and <code>hide</code> stops that. <code>paint</code> paints it again on the paused picture, and tracking from there replaces its masks where it goes. <code>×</code> removes the object. The bar under the preview shows each object as a red strip.</p>
+<p>The object finder is SAM 2.1&#39;s tiny model, from Meta, under the Apache 2.0 license. It is downloaded once, 156 MB, into the same cache as the depth network. It finds an object from a box better than from points alone, so start with a box.</p>
 <h2 id="a-session-step-by-step">A session, step by step</h2>
 <ol>
 <li>Start the server. Open the page on a laptop or phone, and start the player at the screen, or put the headset on and press Enter VR.</li>
@@ -149,6 +166,9 @@ bdtools: --3d-grade: for a headset, https://192.168.1.87:8421/ (its certificate 
 1:30:00 screen=-1 ramp=1
 2:01:12 curve=0.6</code></pre>
 <p>Times are the film&#39;s, as a player shows them. A line without an end runs to the next line&#39;s start, or to the end of the film. <code>depth=</code>, <code>screen=</code> and <code>curve=</code> are the knobs, <code>text=</code> is the titles knob (auto, on or off), <code>flat</code> puts the stretch on the screen, and <code>ramp=</code> is how many seconds a stretch that begins inside a shot eases in over. Anything a line does not set stays at the command&#39;s default, and where lines overlap, the later one wins. A <code>#</code> starts a comment. This is the same format <code>--3d-shots</code> reads, so you can write a grade by hand from notes, or touch up one the page wrote.</p>
+<p>An object has a line of its own, which starts with <code>object</code>:</p>
+<pre><code>object 1 0:00:25.067 0:00:31.865 push=1.5</code></pre>
+<p>The line gives the object&#39;s number, the first and the last picture it was found on, and its push. You can change the push by hand. The masks are in a second file beside the shots file, with <code>.masks</code> added to its name, one mask for each picture the object was followed through. Keep the two files together. The conversion reads the masks file when the shots file has objects.</p>
 <h2 id="the-conversion">The conversion</h2>
 <p>The conversion proper reads the file through <code>--3d-shots</code>. Give it the same <code>--to-3d</code> flags the grading command had, so that &#34;the command&#39;s defaults&#34; are the same ones:</p>
 <pre><code>bdtools --input &#34;Film (2020).mkv&#34; --output &#34;Film (2020) 3D FSBS.mkv&#34; --to-3d \

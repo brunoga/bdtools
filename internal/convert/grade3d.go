@@ -21,6 +21,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -32,6 +33,7 @@ import (
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/mp4"
+	"github.com/brunoga/bdtools/internal/sam"
 	"github.com/brunoga/bdtools/internal/stereo"
 	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/mvc"
@@ -77,6 +79,8 @@ type gradeWant struct {
 	seek    *time.Duration // a seek asked, nil when none
 	steps   int            // pictures to step through while paused
 	regrade bool           // the grade changed: the held picture made again
+	paint   bool           // the object painted's hints changed: its mask made again
+	track   bool           // the object painted to be tracked
 }
 
 // liveSource is a film read in places for a live grading.
@@ -135,6 +139,13 @@ type grader struct {
 
 	objects []object3D // the objects painted, by their lines in the shots file
 	masks   map[int]*maskTrack
+	// painting (paint3d.go)
+	paint        *gradePaint    // the object being painted, nil when none
+	selected     int            // the object shown over the picture, 0 none
+	tracking     *gradeTracking // a tracking under way, nil when none
+	sam          *sam.Model
+	paintFeats   *sam.Features // the held picture's, kept
+	paintFeatsAt time.Duration
 }
 
 // gradeAhead is a picture waiting in grader.ahead, and its time.
@@ -361,6 +372,21 @@ func (g *grader) play(ctx context.Context) error {
 			return nil
 		case errors.As(err, &sk):
 			pos = sk.to
+		case errors.As(err, &errTrack{}):
+			g.mu.Lock()
+			if g.paint != nil {
+				pos = g.paint.at
+			}
+			g.mu.Unlock()
+			if err := g.track(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				g.r.Report.Report("--3d-grade could not track the object: %v", err)
+				g.mu.Lock()
+				g.note, g.noteAt = "tracking failed: "+err.Error(), time.Now()
+				g.mu.Unlock()
+			}
 		case err == nil || errors.Is(err, io.EOF):
 			// the film's end (or nothing decodes there): hold until a seek
 			g.mu.Lock()
@@ -540,6 +566,10 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 	l, rr, s := g.conv.Eyes(e)
 	g.conv.Window(l, rr, s)
 	g.setPos(t, e)
+	if mask := g.overlay(t); mask != nil {
+		l, rr = copyFrame(l), copyFrame(rr)
+		tint(mask, l, rr)
+	}
 	ours := [2]*mvc.Frame{l, rr}
 	shown := g.refOrOurs(ctx, t, ours)
 	if err := g.emit(ctx, shown[0], shown[1]); err != nil {
@@ -552,7 +582,7 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 		}
 		g.mu.Lock()
 		w := g.want
-		g.want.regrade = false
+		g.want.regrade, g.want.paint = false, false
 		switch {
 		case w.seek != nil:
 			g.want.seek = nil
@@ -564,11 +594,17 @@ func (g *grader) show(ctx context.Context, f *mvc.Frame, t time.Duration) error 
 		switch {
 		case w.seek != nil:
 			return &errSeek{*w.seek}
+		case w.track:
+			return errTrack{}
 		case w.playing, w.steps > 0:
 			return nil
-		case w.regrade:
+		case w.regrade, w.paint:
+			if w.paint {
+				g.paintPreview(f, t)
+			}
 			k := g.knobsAt(t)
 			ours[0], ours[1], _ = g.conv.Grade(e, g.shape(k), k.Flat)
+			tint(g.overlay(t), ours[0], ours[1])
 			g.setPos(t, e)
 			shown = g.refOrOurs(ctx, t, ours)
 			if err := g.emit(ctx, shown[0], shown[1]); err != nil {
@@ -923,6 +959,8 @@ func (g *grader) saveLocked() error {
 			g.r.Report.Report("--3d-grade could not write %s: %v", masksFile(g.r.Opts.Output), err)
 			return err
 		}
+	} else if err := os.Remove(masksFile(g.r.Opts.Output)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		g.r.Report.Report("--3d-grade could not remove %s: %v", masksFile(g.r.Opts.Output), err)
 	}
 	g.saved = true
 	return nil
@@ -980,6 +1018,10 @@ type gradeState struct {
 	Secure   string         `json:"secure"` // the HTTPS side's address, for VR
 	Version  string         `json:"version"`
 	HUD      bool           `json:"hud"` // the readout drawn into the stream
+	Objects  []gradeObject  `json:"objects"`
+	Selected int            `json:"selected"`
+	Paint    *gradePaint    `json:"paint"`
+	Tracking *gradeTracking `json:"tracking"`
 }
 
 // gradeRefState is the reference's state as a page sees it.
@@ -1025,6 +1067,11 @@ func (g *grader) state() gradeState {
 	if g.ref != nil {
 		st.Ref = g.ref.state()
 	}
+	st.Objects, st.Selected, st.Paint = g.objectsState(), g.selected, g.paint
+	if g.tracking != nil {
+		tr := *g.tracking
+		st.Tracking = &tr
+	}
 	return st
 }
 
@@ -1045,6 +1092,11 @@ type gradeCommand struct {
 	Knobs *gradeKnobs `json:"knobs"`
 	View  string      `json:"view"`
 	Text  string      `json:"text"`
+	// painting (paint3d.go)
+	Box    []float64    `json:"box"`
+	Points [][3]float64 `json:"points"`
+	Push   *float64     `json:"push"`
+	Delete bool         `json:"delete"`
 }
 
 func (g *grader) command(c gradeCommand) error {
@@ -1153,8 +1205,12 @@ func (g *grader) command(c gradeCommand) error {
 		g.mu.Unlock()
 		return nil
 	default:
+		ok, err := g.paintCommand(c)
 		g.mu.Unlock()
-		return fmt.Errorf("op %q is unknown", c.Op)
+		if !ok {
+			return fmt.Errorf("op %q is unknown", c.Op)
+		}
+		return err
 	}
 	g.wakeUp()
 	g.mu.Unlock()

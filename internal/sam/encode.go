@@ -3,6 +3,7 @@ package sam
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/brunoga/bdtools/internal/nn"
 )
@@ -81,35 +82,64 @@ func (m *Model) block(t *nn.Tensor, i int, b block, side int) (*nn.Tensor, int) 
 	return be.Add(t, h), out
 }
 
-// Input is a picture as the network takes it: its planes (8-bit 4:2:0,
-// BT.709 limited range) as RGB, resized to 1024 x 1024 (stretched, as SAM
-// 2's predictor does), normalised by ImageNet's mean and deviation.
-func Input(y, cb, cr []byte, w, h, strideY, strideC int) *nn.Tensor {
+// Picture is a picture as the network takes it, before its
+// normalisation: its RGB planes, 1024 x 1024 bytes each, the picture
+// stretched to the square as SAM 2's predictor does. It is a quarter of
+// Input's size, for keeping many.
+type Picture []byte
+
+// NewPicture is a picture's planes (8-bit 4:2:0, BT.709 limited range)
+// as a Picture, resized bilinearly.
+func NewPicture(y, cb, cr []byte, w, h, strideY, strideC int) Picture {
+	p := make(Picture, 3*Size*Size)
+	var wg sync.WaitGroup
+	const band = 64
+	for b0 := 0; b0 < Size; b0 += band {
+		wg.Go(func() {
+			for oy := b0; oy < b0+band; oy++ {
+				fy := max((float32(oy)+0.5)*float32(h)/Size-0.5, 0)
+				y0 := min(int(fy), h-1)
+				y1 := min(y0+1, h-1)
+				ly := fy - float32(y0)
+				for ox := range Size {
+					fx := max((float32(ox)+0.5)*float32(w)/Size-0.5, 0)
+					x0 := min(int(fx), w-1)
+					x1 := min(x0+1, w-1)
+					lx := fx - float32(x0)
+					bil := func(pl []byte, s, div int) float32 {
+						at := func(yy, xx int) float32 { return float32(pl[yy/div*s+xx/div]) }
+						return (at(y0, x0)*(1-lx)+at(y0, x1)*lx)*(1-ly) + (at(y1, x0)*(1-lx)+at(y1, x1)*lx)*ly
+					}
+					Y := (bil(y, strideY, 1) - 16) * (255.0 / 219)
+					U := (bil(cb, strideC, 2) - 128) * (255.0 / 224)
+					V := (bil(cr, strideC, 2) - 128) * (255.0 / 224)
+					rgb := [3]float32{Y + 1.5748*V, Y - 0.1873*U - 0.4681*V, Y + 1.8556*U}
+					for c, v := range rgb {
+						p[(c*Size+oy)*Size+ox] = byte(min(max(v+0.5, 0), 255))
+					}
+				}
+			}
+		})
+	}
+	wg.Wait()
+	return p
+}
+
+// Tensor is the picture as the network takes it: [3, 1024, 1024],
+// normalised by ImageNet's mean and deviation.
+func (p Picture) Tensor() *nn.Tensor {
 	x := nn.New(3, Size, Size)
 	mean := [3]float32{0.485, 0.456, 0.406}
 	sd := [3]float32{0.229, 0.224, 0.225}
-	for oy := range Size {
-		fy := max((float32(oy)+0.5)*float32(h)/Size-0.5, 0)
-		y0 := min(int(fy), h-1)
-		y1 := min(y0+1, h-1)
-		ly := fy - float32(y0)
-		for ox := range Size {
-			fx := max((float32(ox)+0.5)*float32(w)/Size-0.5, 0)
-			x0 := min(int(fx), w-1)
-			x1 := min(x0+1, w-1)
-			lx := fx - float32(x0)
-			bil := func(p []byte, s, div int) float32 {
-				at := func(yy, xx int) float32 { return float32(p[yy/div*s+xx/div]) }
-				return (at(y0, x0)*(1-lx)+at(y0, x1)*lx)*(1-ly) + (at(y1, x0)*(1-lx)+at(y1, x1)*lx)*ly
-			}
-			Y := (bil(y, strideY, 1) - 16) * (255.0 / 219)
-			U := (bil(cb, strideC, 2) - 128) * (255.0 / 224)
-			V := (bil(cr, strideC, 2) - 128) * (255.0 / 224)
-			rgb := [3]float32{Y + 1.5748*V, Y - 0.1873*U - 0.4681*V, Y + 1.8556*U}
-			for c, v := range rgb {
-				x.Data[(c*Size+oy)*Size+ox] = (min(max(v/255, 0), 1) - mean[c]) / sd[c]
-			}
-		}
+	for i, v := range p {
+		c := i / (Size * Size)
+		x.Data[i] = (float32(v)/255 - mean[c]) / sd[c]
 	}
 	return x
+}
+
+// Input is a picture's planes as the network takes them (NewPicture's
+// Tensor).
+func Input(y, cb, cr []byte, w, h, strideY, strideC int) *nn.Tensor {
+	return NewPicture(y, cb, cr, w, h, strideY, strideC).Tensor()
 }
