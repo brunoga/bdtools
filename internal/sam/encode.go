@@ -7,12 +7,12 @@ import (
 	"github.com/brunoga/bdtools/internal/nn"
 )
 
-// Features are a picture's features as the decoder takes them, on the
-// model's backend: the image embedding [256, 64, 64] (its hints' no-mask
-// embedding added) and the two finer levels, already projected by the
-// decoder's convolutions ([32, 256, 256] and [64, 128, 128]).
+// Features are a picture's features, on the model's backend: the coarse
+// level the decoder and the memory take ([256, 64, 64]), and the two finer
+// levels, already projected by the decoder's convolutions ([32, 256, 256]
+// and [64, 128, 128]).
 type Features struct {
-	Embed, High0, High1 *nn.Tensor
+	Vision, High0, High1 *nn.Tensor
 	// Stages are the encoder's four stages' outputs ([C, H, W]), for the
 	// tests.
 	Stages [4]*nn.Tensor
@@ -35,18 +35,15 @@ func (m *Model) Encode(x *nn.Tensor) *Features {
 		}
 	}
 	n := "image_encoder.neck.convs.%d.conv."
-	lat := func(level int, x *nn.Tensor, bias string) *nn.Tensor {
+	lat := func(level int, x *nn.Tensor) *nn.Tensor {
 		c := fmt.Sprintf(n, 3-level)
-		if bias == "" {
-			bias = c + "bias"
-		}
-		return be.Conv2d(x, m.t(c+"weight"), m.t(bias), 1, 0)
+		return be.Conv2d(x, m.t(c+"weight"), m.t(c+"bias"), 1, 0)
 	}
 	// the coarsest level only goes into the next one down (the decoder
 	// does not take it)
-	f.Embed = be.Add(lat(2, f.Stages[2], "neck1.bias"), be.Nearest(lat(3, f.Stages[3], ""), 2))
-	f.High0 = be.Conv2d(lat(0, f.Stages[0], ""), m.t("sam_mask_decoder.conv_s0.weight"), m.t("sam_mask_decoder.conv_s0.bias"), 1, 0)
-	f.High1 = be.Conv2d(lat(1, f.Stages[1], ""), m.t("sam_mask_decoder.conv_s1.weight"), m.t("sam_mask_decoder.conv_s1.bias"), 1, 0)
+	f.Vision = be.Add(lat(2, f.Stages[2]), be.Nearest(lat(3, f.Stages[3]), 2))
+	f.High0 = be.Conv2d(lat(0, f.Stages[0]), m.t("sam_mask_decoder.conv_s0.weight"), m.t("sam_mask_decoder.conv_s0.bias"), 1, 0)
+	f.High1 = be.Conv2d(lat(1, f.Stages[1]), m.t("sam_mask_decoder.conv_s1.weight"), m.t("sam_mask_decoder.conv_s1.bias"), 1, 0)
 	return &f
 }
 

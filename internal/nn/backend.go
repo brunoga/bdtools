@@ -60,6 +60,8 @@ type Backend interface {
 	WindowUnpartition(x *Tensor, h, w, ws int) *Tensor
 	WindowPool(x *Tensor, ws int) *Tensor
 	AttentionBatch(q, k, v *Tensor, b, heads int, scale float32) *Tensor
+	// Rope rotates x's first n rows in place (rope.go).
+	Rope(x, cs *Tensor, n int) *Tensor
 
 	// Keep keeps a tensor past Release (the GPU's are otherwise reused).
 	Keep(t *Tensor)
@@ -109,6 +111,7 @@ func (cpu) WindowUnpartition(x *Tensor, h, w, ws int) *Tensor {
 	return WindowUnpartition(x, h, w, ws)
 }
 func (cpu) WindowPool(x *Tensor, ws int) *Tensor { return WindowPool(x, ws) }
+func (cpu) Rope(x, cs *Tensor, n int) *Tensor    { return Rope(x, cs, n) }
 func (cpu) AttentionBatch(q, k, v *Tensor, b, heads int, scale float32) *Tensor {
 	return AttentionBatch(q, k, v, b, heads, scale)
 }

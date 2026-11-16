@@ -79,6 +79,36 @@ type Model struct {
 	dense *nn.Tensor // the decoder's position encoding of the features [64 64, 256]
 }
 
+// channelMap is a per-channel vector v [C] spread over a side x side map:
+// [C, side, side].
+func channelMap(v []float32, side int) *nn.Tensor {
+	out := nn.New(len(v), side, side)
+	for c, x := range v {
+		row := out.Data[c*side*side : (c+1)*side*side]
+		for i := range row {
+			row[i] = x
+		}
+	}
+	return out
+}
+
+// constMap is a model's constant map by name, on the backend: the
+// checkpoint's vector by that name (or the sum of several) spread over
+// the features' grid.
+func (m *Model) constMap(names ...string) *nn.Tensor {
+	key := "map:" + fmt.Sprint(names)
+	if _, ok := m.w[key]; !ok {
+		v := make([]float32, len(m.w[names[0]].Data))
+		for _, n := range names {
+			for i, x := range m.w[n].Data {
+				v[i] += x
+			}
+		}
+		m.w[key] = channelMap(v, grid)
+	}
+	return m.t(key)
+}
+
 // Load reads a checkpoint (sam2.1_hiera_tiny.pt).
 func Load(file string) (*Model, error) {
 	w, err := nn.LoadPTH(file)
@@ -100,14 +130,6 @@ func New(w map[string]*nn.Tensor) (*Model, error) {
 		return nil, errors.New("sam: not SAM 2.1's tiny model")
 	}
 	m := &Model{w: w}
-	// the features' level the decoder takes gets no_mem_embed (the image
-	// predictor adds it to them) and the decoder's no_mask_embed (no mask
-	// is given as a hint): both into its lateral convolution's bias
-	b := w["image_encoder.neck.convs.1.conv.bias"].Clone()
-	for i := range b.Data {
-		b.Data[i] += w["no_mem_embed"].Data[i] + w["sam_prompt_encoder.no_mask_embed.weight"].Data[i]
-	}
-	w["neck1.bias"] = b
 	m.pos = trunkPos(w["image_encoder.trunk.pos_embed"], w["image_encoder.trunk.pos_embed_window"], Size/4)
 	m.dense = densePE(w["sam_prompt_encoder.pe_layer.positional_encoding_gaussian_matrix"], grid)
 	m.Use(nn.CPU)
