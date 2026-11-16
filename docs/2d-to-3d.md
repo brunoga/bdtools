@@ -779,15 +779,34 @@ A line is followed from picture to picture. It is lifted once the
 classifier has been sure of it for half a second, which keeps out the
 detector's mistakes on clouds and sparks, because those come and go
 faster than that. Once lifted, a line stays lifted for as long as it is
-followed, and it eases in and out over 8 pictures. The letters are the
-pixels of the line's box that stand out from the mean around them on
-the letters' side, lighter or darker. Their disparity goes to the median
-of the band around the line plus 0.8% of the width, which is the discs'
-15.9 px at 1920, and never short of the picture's near end. The
-decision for a picture is made from the lines up to the picture before,
-so the detector runs on the GPU beside the depth network and nothing
-waits for it. On a 4K film the conversion went from 45 to 40 pictures a
-second with the lift on.
+followed, and it eases in and out over 8 pictures.
+
+Waiting for the classifier to be sure would make every title rise half a
+second after it appears, and some titles take longer. Toy Story 2's
+wordmark is written in by a sparkle, and the classifier is sure of it
+only two and a half seconds after the detector first finds it. So the
+detector looks at each picture 48 pictures, two seconds, before the
+picture's depth is made. When it becomes sure of a line, the pictures
+that showed the line and are not made yet are still waiting. The line is
+lifted in them too, rising over 8 pictures from the first picture it was
+found in, but no earlier than two seconds before the detector was sure
+of it. In other words, the title comes forward as it appears. The
+wordmark is whole at 26.0 s. It used to come forward at 28.3 s, and it
+now comes forward at 26.3 s. The cost is two seconds of pictures held in
+memory, which is about 600 MB at 4K, and 2 pictures a second of a 4K
+conversion's speed.
+After a seek, the grader decodes the 48 pictures before it shows the
+first one, which took 0.65 s on a 1080p film. A title that fades in can
+still rise late, because the detector does not find its letters while
+they are faint.
+
+The letters are the pixels of the line's box that stand out from the
+mean around them on the letters' side, lighter or darker. Their
+disparity goes to the median of the band around the line plus 0.8% of
+the width, which is the discs' 15.9 px at 1920, and never short of the
+picture's near end. The detector runs on the GPU beside the depth
+network, so nothing waits for it. On a 4K film the conversion went from
+45 to 38 pictures a second with the lift on, look-ahead included.
 
 Some things are still wrong. A swash capital outside the detector's
 band, such as the wordmark's W, is caught by letting the mask reach

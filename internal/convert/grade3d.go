@@ -33,6 +33,7 @@ import (
 	"github.com/brunoga/bdtools/internal/gpu"
 	"github.com/brunoga/bdtools/internal/mp4"
 	"github.com/brunoga/bdtools/internal/stereo"
+	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -128,6 +129,15 @@ type grader struct {
 	last   [2]*mvc.Frame
 	target time.Duration
 	seeks  int
+	// the pictures given to the text detector ahead (Converter.Ahead),
+	// waiting to be shown
+	ahead []gradeAhead
+}
+
+// gradeAhead is a picture waiting in grader.ahead, and its time.
+type gradeAhead struct {
+	f *mvc.Frame
+	t time.Duration
 }
 
 // gradeClient is a player reading the stream: its frames go through
@@ -316,6 +326,7 @@ func (g *grader) play(ctx context.Context) error {
 			return nil
 		}
 		g.conv.Restart()
+		g.ahead = nil
 		next, done, err := g.seek(pos)
 		if err != nil {
 			return err
@@ -330,6 +341,9 @@ func (g *grader) play(ctx context.Context) error {
 			err = src.run(func(p picture) error { return g.picture(ctx, p, src) })
 		}
 		done()
+		if err == nil || errors.Is(err, io.EOF) {
+			err = g.showAhead(ctx, 0)
+		}
 		var sk *errSeek
 		switch {
 		case ctx.Err() != nil:
@@ -477,7 +491,26 @@ func (g *grader) picture(ctx context.Context, p picture, src pictureSource) erro
 		g.ref.setSelf(l, rr, t)
 		return g.show(ctx, l, t)
 	}
-	return g.show(ctx, pictureFrame8(p), t)
+	f := pictureFrame8(p)
+	if g.conv.Text == nil {
+		return g.show(ctx, f, t)
+	}
+	g.conv.Ahead(f)
+	g.ahead = append(g.ahead, gradeAhead{f, t})
+	return g.showAhead(ctx, textdet.Ahead)
+}
+
+// showAhead shows the pictures waiting for the text detector to have
+// looked ahead of them, until keep are left.
+func (g *grader) showAhead(ctx context.Context, keep int) error {
+	for len(g.ahead) > keep {
+		a := g.ahead[0]
+		g.ahead = g.ahead[1:]
+		if err := g.show(ctx, a.f, a.t); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // show makes a picture's pair at the grade of its time and sends it, then

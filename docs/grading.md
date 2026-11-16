@@ -170,10 +170,10 @@ checkbox and a menu. You can turn them from the keyboard too.
   it in the film's first 5 minutes, on lifts it anywhere, and off leaves
   it at the depth of what it is written over. Set on for a stretch of
   credits over a scene later in the film, and off where a sign or a
-  screen in the film was taken for a title. A line of text is lifted
-  after the detector has been sure of it for half a second, so it rises
-  a moment after it appears. When you change the knob on a paused
-  picture, the lines the detector is sure of go up or down at once.
+  screen in the film was taken for a title. The detector looks two
+  seconds ahead of the picture you see, so a line of text rises as it
+  appears. When you change the knob on a paused picture, the lines
+  the detector is sure of go up or down at once.
 
 **reset** puts the current stretch back to the command's defaults. The
 text beside it tells you which stretch the knobs are grading, or that

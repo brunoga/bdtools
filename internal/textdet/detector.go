@@ -15,7 +15,49 @@ type Overlay struct {
 	P, Lift float64
 	lost    int // pictures since the detector last saw it
 	sure    int // pictures in a row P has been over Threshold
+	first   int // the picture the detector first saw it in (Detector.n's)
+	sureAt  int // the picture it was first sure of in, -1 not yet
 }
+
+// A Sighting is a line as one picture showed it: the line, its box
+// there, its lift then, and whether the detector found it there (not
+// only followed it a few pictures on). Observe gives them, so that a
+// picture made after the pictures that follow it were looked at can lift
+// a line the detector became sure of only later (Later).
+type Sighting struct {
+	Line  *Overlay
+	Box   Region
+	Lift  float64
+	Found bool
+	at    int // the picture's number (Detector.n's)
+}
+
+// Ahead is how many pictures before a picture is made the detector
+// looks at it, when it is given them ahead: two seconds of film. The
+// classifier is sure of a title within half a second of finding it when
+// it appears whole, but Toy Story 2's wordmark, written in by a sparkle,
+// is found two and a half seconds before it is sure, and with one second
+// it rose a second after it was whole.
+const Ahead = 48
+
+// Later is how far a sighting's line is lifted in its picture, given
+// what the detector has seen since: its lift then, or, for a line found
+// there that the detector became sure of later, rising from the picture
+// it first appeared in (but no earlier than Ahead pictures before it was
+// sure, the pictures before those being made already), so that a title
+// comes forward as it appears and not half a second after.
+func (s Sighting) Later() float64 {
+	l := s.Line
+	if !s.Found || l.sureAt < 0 || s.at >= l.sureAt+int(1/liftStep) {
+		return s.Lift
+	}
+	from := max(l.first, l.sureAt-Ahead+2)
+	return math.Max(s.Lift, math.Min(1, float64(s.at-from+1)*liftStep))
+}
+
+// Sure reports whether the detector is sure of the sighting's line now,
+// and found it in the sighting's picture: a still picture lifts it fully.
+func (s Sighting) Sure() bool { return s.Found && s.Line.sureAt >= 0 }
 
 const (
 	// Threshold is the smoothed probability over which a line is lifted,
@@ -39,6 +81,7 @@ type Detector struct {
 	Trees *Trees
 	lines []*Overlay
 	hist  []past // the pictures of the last longAgo, oldest first
+	n     int    // the pictures observed
 }
 
 type past struct {
@@ -50,8 +93,11 @@ type past struct {
 // (the net's output, row stride ps): the lines found in it, matched with
 // those followed, and each one's probability and lift brought up to date.
 // On is false when nothing is to be lifted now (the grading turned it
-// off): the lines still followed, their lift falling.
-func (d *Detector) Observe(y Grey, p []float32, ps int, pts time.Duration, on bool) {
+// off): the lines still followed, their lift falling. It gives the
+// lines followed as the picture shows them.
+func (d *Detector) Observe(y Grey, p []float32, ps int, pts time.Duration, on bool) []Sighting {
+	at := d.n
+	d.n++
 	found := Regions(p, y.W, y.H, ps)
 	bef, long := d.at(pts-before), d.at(pts-longAgo)
 	seen := make([]bool, len(d.lines))
@@ -65,7 +111,7 @@ func (d *Detector) Observe(y Grey, p []float32, ps int, pts time.Duration, on bo
 			}
 		}
 		if best < minIoU {
-			d.lines = append(d.lines, &Overlay{Region: r, P: prob})
+			d.lines = append(d.lines, &Overlay{Region: r, P: prob, first: at, sureAt: -1})
 			seen = append(seen, true)
 			continue
 		}
@@ -85,6 +131,9 @@ func (d *Detector) Observe(y Grey, p []float32, ps int, pts time.Duration, on bo
 		case l.P < Release && l.Lift < 1:
 			l.sure = 0
 		}
+		if l.sure >= surePictures && l.sureAt < 0 {
+			l.sureAt = at
+		}
 		if l.Lift >= 1 && l.lost == 0 {
 			l.sure = max(l.sure, surePictures) // confirmed: a title stays one while it is followed
 		}
@@ -99,6 +148,11 @@ func (d *Detector) Observe(y Grey, p []float32, ps int, pts time.Duration, on bo
 	}
 	d.lines = kept
 	d.remember(y, pts)
+	out := make([]Sighting, len(kept))
+	for i, l := range kept {
+		out[i] = Sighting{Line: l, Box: l.Region, Lift: l.Lift, Found: l.lost == 0, at: at}
+	}
+	return out
 }
 
 // Lines are the lines followed now.
@@ -169,21 +223,30 @@ func iou(a, b Region) float64 {
 // are those the classifier is sure of now, all fully lifted (a still
 // picture, its grading changed). It gives the lines lifted, at most 255.
 func (d *Detector) Mask(y Grey, m, ids []byte, sure bool) []Region {
+	boxes, lifts := make([]Region, len(d.lines)), make([]float64, len(d.lines))
+	for i, l := range d.lines {
+		boxes[i], lifts[i] = l.Region, l.Lift
+		if sure {
+			lifts[i] = 0
+			if l.lost == 0 && l.sure >= surePictures {
+				lifts[i] = 1
+			}
+		}
+	}
+	return MaskLines(y, m, ids, boxes, lifts)
+}
+
+// MaskLines is Mask for lines given by their boxes and lifts (0 to 1):
+// those lifted at all are in m and ids, and given.
+func MaskLines(y Grey, m, ids []byte, boxes []Region, lifts []float64) []Region {
 	clear(m)
 	clear(ids)
 	var lines []Region
-	for _, l := range d.lines {
-		lift := l.Lift
-		if sure {
-			lift = 0
-			if l.lost == 0 && l.sure >= surePictures {
-				lift = 1
-			}
-		}
+	for i, r := range boxes {
+		lift := lifts[i]
 		if lift <= 0 || len(lines) == 255 {
 			continue
 		}
-		r := l.Region
 		lines = append(lines, r)
 		id := byte(len(lines))
 		r.X0, r.X1 = r.MX0, r.MX1 // the letters' reach

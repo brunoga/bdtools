@@ -22,6 +22,7 @@ import (
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/nn"
 	"github.com/brunoga/bdtools/internal/stereo"
+	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -54,6 +55,16 @@ type to3DState struct {
 	pend      *stereo.Pending
 	pendPic   picture
 	pendFrame *mvc.Frame
+	// the pictures given to the text detector ahead (Converter.Ahead),
+	// waiting for their depth
+	ahead []aheadPicture
+}
+
+// aheadPicture is a picture waiting in to3DState.ahead: its time and its
+// copy, all of it the pair needs.
+type aheadPicture struct {
+	pts int64
+	f   *mvc.Frame
 }
 
 // subsFall is how the subtitles' depth follows the picture's farther:
@@ -254,7 +265,10 @@ func hdrPicture(p picture) bool {
 // GPU, beside the next picture's decoding), the rest (the eyes) by a
 // function, which may run beside the next picture's depth. It gives the
 // picture before's function (nil for the first), once that one's depth is
-// made; wait3D gives the last's. The functions must be called in order.
+// made; last3D gives the rest. The functions must be called in order.
+// When the text is lifted, the text detector looks at each picture
+// textdet.Ahead pictures before its depth is begun, and the function
+// given is that much further back (nil until then).
 func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 	if r.conv == nil {
 		m, err := r.depthModel()
@@ -280,12 +294,45 @@ func (r *Runner) convert3D(p picture) (func() (picture, error), error) {
 			100*s.Scale, 100*s.Offset)
 	}
 	f := pictureFrame8(p)
+	if r.conv.conv.Text != nil {
+		r.conv.conv.Ahead(f)
+		r.conv.ahead = append(r.conv.ahead, aheadPicture{p.pts, f})
+		if len(r.conv.ahead) <= textdet.Ahead {
+			return nil, nil
+		}
+		return r.startAhead()
+	}
+	return r.start3D(p, f)
+}
+
+// start3D begins a picture's depth, and gives the rest of the picture
+// begun before it.
+func (r *Runner) start3D(p picture, f *mvc.Frame) (func() (picture, error), error) {
 	before, err := r.wait3D()
 	if err != nil {
 		return nil, err
 	}
 	r.conv.pend, r.conv.pendPic, r.conv.pendFrame = r.conv.conv.Start(f), p, f
 	return before, nil
+}
+
+// startAhead is start3D for the oldest picture waiting in to3DState.ahead.
+func (r *Runner) startAhead() (func() (picture, error), error) {
+	a := r.conv.ahead[0]
+	r.conv.ahead = r.conv.ahead[1:]
+	return r.start3D(picture{pts: a.pts}, a.f)
+}
+
+// last3D is the rest of the pictures convert3D was given and has not
+// given back, one at a time in order: nil when none is left.
+func (r *Runner) last3D() (func() (picture, error), error) {
+	for r.conv != nil && len(r.conv.ahead) > 0 {
+		// the first picture begun gives nothing back yet
+		if finish, err := r.startAhead(); finish != nil || err != nil {
+			return finish, err
+		}
+	}
+	return r.wait3D()
 }
 
 // newConverter3D is a converter of the depth model m as the options ask,

@@ -6,7 +6,6 @@ import (
 
 	"github.com/brunoga/bdtools/internal/depth"
 	"github.com/brunoga/bdtools/internal/nn"
-	"github.com/brunoga/bdtools/internal/textdet"
 	"github.com/brunoga/bdtools/mvc"
 )
 
@@ -44,6 +43,7 @@ type Converter struct {
 	// end (text.go), where the shape's Text says, the detector on the
 	// depth model's backend.
 	Text            *TextLift
+	ahead           []*text        // the pictures given ahead, oldest first
 	refineOn        *RefineWeights // Refine's weights on that backend
 	gpuRange        gpuRange       // the shot's depth range, for the GPU's curve
 	win             window
@@ -67,7 +67,72 @@ func (c *Converter) Cuts() int { return c.cutsHit }
 // Restart has the next picture start the network's and the shaping's
 // state afresh, as the first did, and not count as a cut: the film read
 // from somewhere else.
-func (c *Converter) Restart() { c.frames = 0 }
+func (c *Converter) Restart() {
+	c.frames = 0
+	c.ahead = nil
+	if c.Text != nil {
+		c.Text.Det.Reset()
+	}
+}
+
+// Ahead gives the converter a picture that Start will be given later,
+// so that the text detector looks at it first: the pictures given ahead
+// (textdet.Ahead of them, in order, each before the pictures after it
+// go to Start) let a line of text be lifted from the picture it appears
+// in, not from when the detector is sure of it. Nothing is done unless
+// the converter lifts the text.
+func (c *Converter) Ahead(f *mvc.Frame) {
+	if c.Text == nil {
+		return
+	}
+	s := c.Shaper.Shape
+	if c.Shot != nil {
+		s, _ = c.Shot(f.PTS)
+	}
+	c.ahead = append(c.ahead, c.Text.ahead(f, s.Text))
+}
+
+// takeAhead is the text part of a picture given ahead, nil if it was not,
+// the detector having looked at it and at those given before it (and at
+// all of them on a CPU); the picture given last it may leave for the
+// caller (look), to be looked at beside the picture's depth.
+func (c *Converter) takeAhead(f *mvc.Frame, async bool) (x, look *text, err error) {
+	n := len(c.ahead)
+	if n == 0 {
+		return nil, nil, nil
+	}
+	if async && !c.ahead[n-1].observed && c.ahead[n-1].f != f {
+		look, n = c.ahead[n-1], n-1
+	}
+	for _, a := range c.ahead[:n] {
+		if !a.observed {
+			if err := c.lookNow(a); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	for len(c.ahead) > 0 && x == nil {
+		if c.ahead[0].f == f {
+			x = c.ahead[0]
+		}
+		c.ahead = c.ahead[1:]
+	}
+	return x, look, nil
+}
+
+// lookNow has the detector look at a picture given ahead, and waits for it.
+func (c *Converter) lookNow(x *text) error {
+	be := c.Model.Backend()
+	m, err := be.Download(c.Text.Det.Net.Run(be, be.Upload(x.input())))
+	if g, ok := be.(*nn.GPU); ok {
+		g.Release()
+	}
+	if err != nil {
+		return err
+	}
+	c.Text.observe(x, m)
+	return nil
+}
 
 // Convert gives the pair for the next picture (8-bit 4:2:0).
 func (c *Converter) Convert(f *mvc.Frame) (left, right *mvc.Frame, err error) {
@@ -176,12 +241,29 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 			e.factor = 0
 		}
 	}
-	if c.Text != nil && e.factor != 0 {
-		e.text = c.Text.start(f, e.shape.Text)
+	g, onGPU := c.Model.Backend().(*nn.GPU)
+	onGPU = onGPU && bottom-top >= 28
+	var look *text // the text part the detector looks at beside the depth
+	if c.Text != nil {
+		x, ahead, err := c.takeAhead(f, onGPU)
+		switch {
+		case err != nil:
+			return &Pending{err: err}
+		case x != nil:
+			if e.factor != 0 {
+				x.on = c.Text.on(e.shape.Text, x.pts)
+				x.lift(c.Text.Det, false)
+				e.text = x
+			}
+			look = ahead
+		case e.factor != 0:
+			e.text = c.Text.start(f, e.shape.Text)
+			look = e.text
+		}
 	}
 	if ah := bottom - top; ah >= 28 {
-		if g, ok := c.Model.Backend().(*nn.GPU); ok {
-			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes(e.shape))}
+		if onGPU {
+			return &Pending{e: e, rest: c.startGPU(g, e, eyes && c.gpuEyes(e.shape), look)}
 		}
 		x := netInput(f, top, bottom, c.netW, c.netH)
 		dm, err := c.Model.FrameErr(x)
@@ -194,14 +276,13 @@ func (c *Converter) start(f *mvc.Frame, eyes bool) *Pending {
 				return &Pending{err: err}
 			}
 		}
-		if e.text != nil {
+		if look != nil && look.f == nil {
 			be := c.Model.Backend()
-			y := e.text.y
-			m, err := be.Download(c.Text.Det.Net.Run(be, be.Upload(textdet.Input(y.Pix, y.W, y.H, y.Stride))))
+			m, err := be.Download(c.Text.Det.Net.Run(be, be.Upload(look.input())))
 			if err != nil {
 				return &Pending{err: err}
 			}
-			c.Text.observe(e.text, m)
+			c.Text.observe(look, m)
 		}
 	}
 	return &Pending{e: e}
@@ -319,16 +400,23 @@ func (c *Converter) uploadRefine(be nn.Backend) {
 // of the pictures before (gpuEyes), the GPU makes them too, as Shape and
 // Pair would, when asked (makeEyes). The work is queued; the function it
 // gives waits for it and takes its results.
-func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error {
+//
+// The text detector looks at look (nil: nothing) beside it: the
+// picture's own text part, or a picture given ahead.
+func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool, look *text) func() error {
 	f, top, bottom := e.f, e.top, e.bottom
 	p := g.UploadPicture(f.Y, f.Cb, f.Cr, f.Width, f.Height, f.StrideY, f.StrideC)
 	var lines, tmap *nn.Tensor
-	if e.text != nil {
-		if e.text.mask != nil && makeEyes {
-			// before the work below: the copy waits for it
-			lines = g.UploadBytes(nn.LiftLines(e.text.mask, e.text.ids, e.text.rings()))
-		}
-		tmap = c.Text.Det.Net.Run(g, g.TextInput(p, e.text.k))
+	if e.text != nil && e.text.mask != nil && makeEyes {
+		// before the work below: the copy waits for it
+		lines = g.UploadBytes(nn.LiftLines(e.text.mask, e.text.ids, e.text.rings()))
+	}
+	switch {
+	case look == nil:
+	case look.f == nil:
+		tmap = c.Text.Det.Net.Run(g, g.TextInput(p, look.k))
+	default:
+		tmap = c.Text.Det.Net.Run(g, g.TextInputGrey(look.y.Pix, look.y.W, look.y.H))
 	}
 	d := c.Model.Infer(g.NetInput(p, top, bottom-top, c.netW, c.netH))
 	if c.Refine != nil {
@@ -386,7 +474,7 @@ func (c *Converter) startGPU(g *nn.GPU, e *Estimate, makeEyes bool) func() error
 		if err == nil && tmap != nil {
 			var m *nn.Tensor
 			if m, err = g.Download(tmap); err == nil {
-				c.Text.observe(e.text, m)
+				c.Text.observe(look, m)
 			}
 		}
 		g.Release()
